@@ -148,3 +148,32 @@ messages. Most common causes:
   `backend/src/services/facebookClient.js` (top of file).
 - **Bluesky 429 "RateLimitExceeded"** → check `blueskyCooldown` in the
   `/auto-errors` response. The circuit breaker auto-clears in 10 minutes.
+
+## Stock-photo backgrounds for branded cards (Pexels)
+
+The card renderer composites a tag-matched landscape photo behind the
+headline + branding, giving Facebook / IG / LinkedIn posts the visual
+weight of a real news publisher's social graphics. Free to use — no
+attribution required on the card itself (Pexels license is permissive).
+
+Setup (~60 seconds):
+
+1. Sign up at <https://www.pexels.com/api/> (email-only, no payment).
+2. Copy the API key from the dashboard.
+3. Add it to **the same persistent location** as the social credentials
+   above (Hostinger Environment Variables UI **or** `~/.scoopfeeds.env`):
+
+   ```
+   PEXELS_API_KEY=<your-key>
+   ```
+
+4. Restart the Node app. Next post-cycle the cards will be photo-backed.
+
+Free tier limit: 200 reqs/hour, 20,000 reqs/month. Auto-poster cadence is
+~30 posts/day across platforms → ~900/month → well under the limit. Photos
+are cached per-article in `data/stock-photos/` so re-posting / regenerating
+doesn't re-hit the API.
+
+**Without the key set**, the renderer falls back to the typographic-only
+design — still strong, just not photographic. So this is a "make-it-better"
+upgrade, not a critical dependency.

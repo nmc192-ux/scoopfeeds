@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "fs
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
+import { getStockPhotoForArticle, stockPhotoAsDataUri, isStockPhotoEnabled } from "./stockPhoto.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -446,7 +447,7 @@ function cachePath(articleId, preset, hash) {
 //     "here's what matters" signal — pulls the eye straight to the hero.
 //   - Footer divider hairline + small-caps source attribution + date
 //     reads as press-quality vs the old single-row attribution.
-function buildTree(article, preset) {
+function buildTree(article, preset, opts = {}) {
   if (preset.startsWith("carousel")) {
     const slide = parseInt(preset.replace("carousel", ""), 10);
     if (slide >= 1 && slide <= 3) return buildCarouselTree(article, slide);
@@ -458,6 +459,7 @@ function buildTree(article, preset) {
   const headline = truncate(article.title, headlineCap(preset));
   const source = article.source_name || "";
   const dateStr = formatShortDate(article.published_at);
+  const bgDataUri = opts.bgDataUri || null;
 
   // Per-preset visual scale.
   const isStory = preset === "story";
@@ -667,6 +669,102 @@ function buildTree(article, preset) {
     },
   };
 
+  // When we have a stock photo, composite three layers:
+  //   1. The full-bleed photo (absolute, behind everything)
+  //   2. A dark scrim — gradient + flat overlay — to guarantee headline
+  //      contrast on every photo (bright sky, busy crowd, white wall, etc.)
+  //   3. The category-color radial bloom (subtle, brings brand into the
+  //      top-right corner without dominating)
+  //   4. The existing accent bar + body, on top
+  //
+  // Without a photo, fall back to the original two-layer dark gradient —
+  // visually still strong but not photographic.
+  if (bgDataUri) {
+    return {
+      type: "div",
+      props: {
+        style: {
+          width: dims.width,
+          height: dims.height,
+          display: "flex",
+          flexDirection: "column",
+          position: "relative",
+          backgroundColor: "#0A0A0C",
+          color: "#F5F5F7",
+          fontFamily: "Inter",
+        },
+        children: [
+          // Layer 1: photo — absolutely positioned, behind everything.
+          {
+            type: "img",
+            props: {
+              src: bgDataUri,
+              width: dims.width,
+              height: dims.height,
+              style: {
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: dims.width,
+                height: dims.height,
+                objectFit: "cover",
+              },
+            },
+          },
+          // Layer 2: dark scrim — heavier at the top (where the pill +
+          // wordmark live) and at the bottom (where the footer + headline
+          // foot live). Keeps a slight reveal of the photo through the middle.
+          {
+            type: "div",
+            props: {
+              style: {
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: dims.width,
+                height: dims.height,
+                display: "flex",
+                backgroundImage:
+                  `linear-gradient(180deg, rgba(8,8,10,0.78) 0%, rgba(8,8,10,0.55) 35%, rgba(8,8,10,0.82) 75%, rgba(8,8,10,0.92) 100%)`,
+              },
+            },
+          },
+          // Layer 3: subtle category-color bloom in the top-right corner.
+          {
+            type: "div",
+            props: {
+              style: {
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: dims.width,
+                height: dims.height,
+                display: "flex",
+                backgroundImage:
+                  `radial-gradient(ellipse 60% 55% at 92% 0%, ${color}55 0%, ${color}22 35%, transparent 70%)`,
+              },
+            },
+          },
+          // Layer 4: the existing accent bar + body, in a relatively-positioned
+          // wrapper so they paint above the absolute layers above.
+          {
+            type: "div",
+            props: {
+              style: {
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                width: dims.width,
+                height: dims.height,
+              },
+              children: [topAccentBar, body],
+            },
+          },
+        ],
+      },
+    };
+  }
+
   return {
     type: "div",
     props: {
@@ -690,9 +788,9 @@ function buildTree(article, preset) {
   };
 }
 
-async function renderPng(article, preset) {
+async function renderPng(article, preset, opts = {}) {
   const dims = PRESETS[preset];
-  const tree = buildTree(article, preset);
+  const tree = buildTree(article, preset, opts);
   const svg = await satori(tree, {
     width: dims.width,
     height: dims.height,
@@ -706,23 +804,50 @@ async function renderPng(article, preset) {
 }
 
 // Public API: returns { path, buffer, contentType } — caches on disk.
-export async function ensureCard(article, preset = "og") {
+//
+// Photo-backed mode: when PEXELS_API_KEY is set, hero presets (og/square/story)
+// composite a Pexels stock photo behind the typography. Carousel slides stay
+// typography-only because they're a sequence and a unified clean look reads
+// better than three different photo backdrops.
+//
+// `opts.usePhoto` defaults to true for hero presets, false for carousel.
+// Pass `opts.usePhoto = false` to force the typographic-only fallback even
+// when a key is configured (useful for the admin preview "before" comparison).
+export async function ensureCard(article, preset = "og", opts = {}) {
   if (!isCardRendererReady()) throw new Error("card renderer not ready (missing fonts)");
   if (!PRESETS[preset]) throw new Error(`unknown preset: ${preset}`);
   if (!article || !article.id || !article.title) throw new Error("article with id + title required");
 
-  const hash = contentHash(article);
+  const isHero = !preset.startsWith("carousel");
+  const wantsPhoto = opts.usePhoto !== undefined ? Boolean(opts.usePhoto) : isHero;
+  const photoEnabled = wantsPhoto && isStockPhotoEnabled();
+
+  // Resolve the stock photo BEFORE hashing so the cache key reflects whether
+  // the card has a photo. If photo lookup fails the card still renders (just
+  // typographic-only); we don't want a stale photo-less card if the photo
+  // arrives on the next call, so we hash on photo presence.
+  let stockPhoto = null;
+  if (photoEnabled) {
+    try {
+      stockPhoto = await getStockPhotoForArticle(article);
+    } catch (e) {
+      logger.warn(`card renderer: stock photo lookup failed for ${article.id}: ${e.message}`);
+    }
+  }
+  const bgDataUri = stockPhoto ? stockPhotoAsDataUri(stockPhoto.path) : null;
+  const hashSuffix = bgDataUri ? "p1" : "p0"; // photo present / absent
+  const hash = `${contentHash(article)}-${hashSuffix}`;
   const filePath = cachePath(article.id, preset, hash);
 
   if (existsSync(filePath)) {
-    return { path: filePath, buffer: readFileSync(filePath), contentType: "image/png", hit: true };
+    return { path: filePath, buffer: readFileSync(filePath), contentType: "image/png", hit: true, withPhoto: Boolean(bgDataUri) };
   }
 
-  const buffer = await renderPng(article, preset);
+  const buffer = await renderPng(article, preset, { bgDataUri });
   try { writeFileSync(filePath, buffer); } catch (e) {
     logger.warn(`card renderer: failed to cache to ${filePath}: ${e.message}`);
   }
-  return { path: filePath, buffer, contentType: "image/png", hit: false };
+  return { path: filePath, buffer, contentType: "image/png", hit: false, withPhoto: Boolean(bgDataUri) };
 }
 
 export function cardUrl(articleId, preset = "og", siteUrl = "") {
