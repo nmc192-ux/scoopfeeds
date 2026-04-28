@@ -26,6 +26,49 @@ import { logger } from "./logger.js";
 
 const SITE = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 
+// ─── Editorial filter: skip programming-block / show-promo headlines ──────
+//
+// Some sources (Bloomberg, CNBC, BBC) syndicate a steady drumbeat of items
+// for daily TV/radio segments — "The China Show 4/28/2026", "Bloomberg
+// Daybreak: Asia 4/28", "Squawk Box: Closing Bell". These have all the
+// shape of an article in the feed but they're recurring program slots, not
+// news events. Posting them to social is a credibility hit (looks like
+// noise), so we filter them at publish time.
+//
+// We ONLY filter at the social-post layer — they still get ingested into
+// the article DB so the homepage / API surface them if someone really
+// wants the live block. This is a "what we choose to amplify" filter, not
+// a "what counts as news" filter.
+const PROGRAMMING_BLOCK_PATTERNS = [
+  // Date stamp anywhere in the title is the strongest signal. Real news
+  // headlines almost never carry M/D/YYYY or D-M-YYYY in the title — only
+  // recurring program slots do ("The China Show 4/28/2026").
+  /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
+  /\b\d{1,2}-\d{1,2}-\d{2,4}\b/,
+  // Generic "The X Show" — a recurring named show, not a story.
+  /^the [\w\s'.&-]{2,40} show\s*$/i,
+  /^the [\w\s'.&-]{2,40} show\b.*\d/i,
+  // Bloomberg / CNBC / BBC daily program prefixes (curated — these are
+  // names of recurring shows, not stories about them).
+  /^bloomberg\s+(daybreak|surveillance|the\s+open|the\s+close|markets|technology|wall\s+street(\s+week)?|asia|europe|americas|business\s*week|baystate|quicktake|live)\b/i,
+  /^(squawk\s+box|squawk\s+on\s+the\s+street|squawk\s+alley|fast\s+money|mad\s+money|closing\s+bell|opening\s+bell|power\s+lunch|halftime\s+report)\b/i,
+  /^bbc\s+(news|world|business)\s+(at|on)\s+(one|six|ten|the\s+hour)\b/i,
+  // Vague live markers — "Watch live:" or "Live:" with only a few words is
+  // almost always a stream block, not a story.
+  /^(watch|listen)\s+live:?\s*$/i,
+  /^live\s*:\s*[\w\s.,'-]{0,30}$/i,
+  // Episode markers.
+  /^episode\s+\d+\b/i,
+  /\bepisode\s+\d+\s*[:|–-]/i,
+  // "X (podcast)" / "X — Podcast" style.
+  /\bpodcast\s*[:|–-]/i,
+];
+
+export function looksLikeProgrammingBlock(title) {
+  if (!title || typeof title !== "string") return true; // empty title — always skip
+  return PROGRAMMING_BLOCK_PATTERNS.some(re => re.test(title));
+}
+
 // One adapter per platform. `enabled()` returns whether the env is set up;
 // `post()` returns { url, platformPostId } on success or throws.
 const ADAPTERS = {
@@ -139,15 +182,37 @@ export async function runPlatformCycle(platform, { dryRun = false, minCredibilit
     return { platform, posted: false, reason: "cadence_guard", lastAt: last };
   }
 
+  // Pull a few extra candidates (10 vs 1) so the editorial filter can drop
+  // the "China Show 4/28" / "Bloomberg Daybreak"-style program blocks
+  // without leaving the cycle empty-handed.
   const candidates = findFreshUnpostedArticles({
     platform,
     minCredibility: minCredibility ?? 7,
     withinMs: withinMs ?? 12 * 60 * 60 * 1000,
-    limit: 5,
+    limit: 10,
   });
 
-  const article = candidates[0];
-  if (!article) return { platform, posted: false, reason: "no_candidate" };
+  // Editorial filter: skip recurring programming/show blocks. These come
+  // through ingestion as articles but reading them on social as if they
+  // were news events looks like noise.
+  let droppedAsBlock = 0;
+  const newsworthy = candidates.filter(c => {
+    if (looksLikeProgrammingBlock(c.title)) {
+      droppedAsBlock += 1;
+      return false;
+    }
+    return true;
+  });
+
+  const article = newsworthy[0];
+  if (!article) {
+    return {
+      platform,
+      posted: false,
+      reason: candidates.length ? "all_filtered" : "no_candidate",
+      droppedAsBlock,
+    };
+  }
 
   let composed;
   try {

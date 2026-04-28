@@ -36,10 +36,14 @@ const COOLDOWN_PATH = path.join(PERSIST_DIR, "bluesky-cooldown.json");
 // keep hitting it during the window, the limit never clears.
 const COOLDOWN_AFTER_429_MS = 10 * 60 * 1000; // 10 minutes
 
-// Lazy getters — read at call time so backend/.env loaded by server.js body is visible.
-const getPDS = () => process.env.BLUESKY_PDS_URL || "https://bsky.social";
-const getHandle = () => process.env.BLUESKY_HANDLE || "";
-const getAppPassword = () => process.env.BLUESKY_APP_PASSWORD || "";
+// Lazy getters — read at call time so backend/.env loaded by server.js body is
+// visible. .trim() on every read because copying env values from a panel UI
+// (Hostinger) often picks up trailing whitespace/newlines, and a single
+// trailing space silently kills auth with no obvious symptom (Bluesky returns
+// "AuthenticationRequired", not "your password has whitespace").
+const getPDS = () => (process.env.BLUESKY_PDS_URL || "https://bsky.social").trim();
+const getHandle = () => (process.env.BLUESKY_HANDLE || "").trim();
+const getAppPassword = () => (process.env.BLUESKY_APP_PASSWORD || "").trim();
 
 let session = null; // { did, accessJwt, refreshJwt, createdAt, handle }
 

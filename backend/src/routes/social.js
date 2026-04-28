@@ -107,24 +107,50 @@ router.get("/auto-errors", requireAdmin, async (_req, res) => {
       LIMIT 20
     `).all();
 
-    // Bluesky cooldown state (set by blueskyClient when createSession returns 429).
+    // Bluesky cooldown + session state. Read from SCOOP_PERSISTENT_DATA_DIR
+    // when set (must match blueskyClient's PERSIST_DIR or we'd be peeking at
+    // a stale empty file in the deploy dir).
     let blueskyCooldown = null;
+    let blueskySession = null;
     try {
       const fs = await import("fs");
       const path = await import("path");
       const url = await import("url");
       const here = path.dirname(url.fileURLToPath(import.meta.url));
-      const cooldownPath = path.join(here, "../../data/bluesky-cooldown.json");
+      const persistDir = process.env.SCOOP_PERSISTENT_DATA_DIR
+        ? path.resolve(process.env.SCOOP_PERSISTENT_DATA_DIR)
+        : path.resolve(here, "../../data");
+
+      const cooldownPath = path.join(persistDir, "bluesky-cooldown.json");
       if (fs.existsSync(cooldownPath)) {
         const raw = JSON.parse(fs.readFileSync(cooldownPath, "utf8"));
         const remainingMs = (raw?.until || 0) - Date.now();
         blueskyCooldown = remainingMs > 0
           ? { active: true, remainingSecs: Math.ceil(remainingMs / 1000), until: raw.until }
           : { active: false, until: raw?.until || 0 };
+      } else {
+        blueskyCooldown = { active: false, present: false };
+      }
+
+      const sessionPath = path.join(persistDir, "bluesky-session.json");
+      if (fs.existsSync(sessionPath)) {
+        const raw = JSON.parse(fs.readFileSync(sessionPath, "utf8"));
+        blueskySession = {
+          present: true,
+          handle: raw?.handle || null,
+          did: raw?.did ? raw.did.slice(0, 24) + "…" : null,
+          createdAt: raw?.createdAt || null,
+          ageHours: raw?.createdAt ? Math.round((Date.now() - raw.createdAt) / 3600000) : null,
+          // never echo the JWTs themselves
+          hasAccessJwt: Boolean(raw?.accessJwt),
+          hasRefreshJwt: Boolean(raw?.refreshJwt),
+        };
+      } else {
+        blueskySession = { present: false };
       }
     } catch (e) { blueskyCooldown = { error: e.message }; }
 
-    res.json({ count: rows.length, rows, blueskyCooldown });
+    res.json({ count: rows.length, rows, blueskyCooldown, blueskySession });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -143,6 +169,42 @@ router.post("/auto-post", requireAdmin, jsonParser, async (req, res) => {
     res.json({ ok: true, results: out });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /scoop-ops/bluesky-reset
+// One-shot ops escape hatch when Bluesky posting is wedged: clears the
+// 429 cooldown file, deletes the cached session (so the next attempt
+// runs a full createSession with the current env credentials, not a
+// refresh of a possibly-revoked old session), and returns what was
+// cleared. Safe to call any time.
+router.post("/bluesky-reset", requireAdmin, async (_req, res) => {
+  try {
+    const fs = await import("fs");
+    const path = await import("path");
+    const url = await import("url");
+    const here = path.dirname(url.fileURLToPath(import.meta.url));
+
+    // The persist dir is the same one cardRenderer / blueskyClient use.
+    const persistDir = process.env.SCOOP_PERSISTENT_DATA_DIR
+      ? path.resolve(process.env.SCOOP_PERSISTENT_DATA_DIR)
+      : path.resolve(here, "../../data");
+
+    const cleared = {};
+    for (const [name, file] of [
+      ["cooldown", path.join(persistDir, "bluesky-cooldown.json")],
+      ["session",  path.join(persistDir, "bluesky-session.json")],
+    ]) {
+      if (fs.existsSync(file)) {
+        try { fs.unlinkSync(file); cleared[name] = "deleted"; }
+        catch (e) { cleared[name] = `error: ${e.message}`; }
+      } else {
+        cleared[name] = "absent";
+      }
+    }
+    res.json({ ok: true, cleared, persistDir });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
