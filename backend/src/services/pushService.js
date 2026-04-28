@@ -17,7 +17,12 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = path.resolve(__dirname, "../..");
-const DATA_DIR = path.join(BACKEND_ROOT, "data");
+// Prefer SCOOP_PERSISTENT_DATA_DIR (lives outside the deploy tree on Hostinger,
+// survives git clean -fd redeploys). Without it, VAPID keys live inside
+// backend/data/ and get wiped on every redeploy — invaliding all subscriptions.
+const DATA_DIR = process.env.SCOOP_PERSISTENT_DATA_DIR
+  ? path.resolve(process.env.SCOOP_PERSISTENT_DATA_DIR)
+  : path.join(BACKEND_ROOT, "data");
 const VAPID_PATH = path.join(DATA_DIR, "vapid.json");
 
 const CONTACT = process.env.VAPID_CONTACT || "mailto:hi@scoopfeeds.com";
