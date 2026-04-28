@@ -201,7 +201,7 @@ app.get("/api/public-config", (req, res) => {
     // Ko-fi tip jar — set KO_FI_URL=https://ko-fi.com/<handle> in env to enable.
     // Falls back to the known handle so the button always shows after first deploy.
     kofi: {
-      url: (process.env.KO_FI_URL || "https://ko-fi.com/drjahanzeb").trim(),
+      url: (process.env.KO_FI_URL || "https://ko-fi.com/scoopfeeds").trim(),
     },
     meter: {
       enabled: String(process.env.METER_ENABLED ?? "true").toLowerCase() !== "false",

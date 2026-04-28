@@ -14,7 +14,7 @@
 import { Heart } from "lucide-react";
 import { track } from "../../lib/track";
 
-const DEFAULT_KO_FI_URL = "https://ko-fi.com/drjahanzeb";
+const DEFAULT_KO_FI_URL = "https://ko-fi.com/scoopfeeds";
 const AMOUNTS           = [3, 5, 10];
 
 export default function TipJar({ compact = false, kofiUrl = DEFAULT_KO_FI_URL }) {
