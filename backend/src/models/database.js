@@ -892,7 +892,7 @@ export function findFreshUnpostedArticles({ platform, minCredibility = 7, within
   return getDb().prepare(`
     SELECT a.id, a.title, a.description, a.category, a.source_name, a.published_at, a.credibility, a.url, a.image_url
     FROM articles a
-    LEFT JOIN social_posts s ON s.article_id = a.id AND s.platform = ?
+    LEFT JOIN social_posts s ON s.article_id = a.id AND s.platform = ? AND s.status = 'posted'
     WHERE s.article_id IS NULL
       AND a.published_at > ?
       AND a.credibility >= ?
