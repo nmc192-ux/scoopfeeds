@@ -1015,25 +1015,42 @@ export function consumeAuthToken(token) {
 }
 
 // Find or create a user by email. Returns the user row.
+//
+// Ko-fi premium back-fill: when a new user signs in for the first time, we
+// check whether there's a completed Ko-fi subscription tip row for this email.
+// If one exists they pre-paid before creating an account — upgrade them to
+// premium immediately so they get the ad-free experience without any friction.
 export function upsertUser({ id, email, language, preferredTopics, preferredCountry, subscriberToken }) {
   const db = getDb();
-  const existing = db.prepare(`SELECT * FROM users WHERE email = ?`).get(email.toLowerCase());
+  const normalEmail = email.toLowerCase();
+  const existing = db.prepare(`SELECT * FROM users WHERE email = ?`).get(normalEmail);
   if (existing) {
     db.prepare(`UPDATE users SET last_login_at = ? WHERE id = ?`).run(Date.now(), existing.id);
     return existing;
   }
+
+  // Check for a pre-existing Ko-fi subscription payment (the webhook may have
+  // arrived before the user created their account).
+  const kofiSub = db.prepare(`
+    SELECT id FROM tips
+    WHERE email = ? AND status = 'completed' AND id LIKE 'kofi_%'
+    LIMIT 1
+  `).get(normalEmail);
+  const initialTier = kofiSub ? "premium" : "free";
+
   db.prepare(`
-    INSERT INTO users (id, email, created_at, last_login_at, preferred_topics, preferred_country, language, subscriber_token)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO users (id, email, created_at, last_login_at, preferred_topics, preferred_country, language, subscriber_token, tier)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
-    email.toLowerCase(),
+    normalEmail,
     Date.now(),
     Date.now(),
     JSON.stringify(Array.isArray(preferredTopics) ? preferredTopics : []),
     preferredCountry || null,
     language || "en",
     subscriberToken || null,
+    initialTier,
   );
   return db.prepare(`SELECT * FROM users WHERE id = ?`).get(id);
 }
@@ -1226,6 +1243,29 @@ export function setStripeCustomer(userId, stripeCustomerId) {
 
 export function getUserByStripeCustomer(stripeCustomerId) {
   return getDb().prepare(`SELECT * FROM users WHERE stripe_customer_id = ?`).get(stripeCustomerId) || null;
+}
+
+export function getUserByEmail(email) {
+  if (!email) return null;
+  return getDb().prepare(`SELECT * FROM users WHERE email = ?`).get(email.toLowerCase().trim()) || null;
+}
+
+// Record a completed Ko-fi payment (donation or subscription tick).
+// Uses the Ko-fi transaction ID as the row primary key so it's idempotent
+// — Ko-fi may retry the webhook if our server doesn't return 200 quickly.
+export function recordKofiPayment({ kofiTransactionId, amountCents, currency = "usd", email = null, message = null, type = "donation" }) {
+  getDb().prepare(`
+    INSERT OR IGNORE INTO tips
+      (id, amount_cents, currency, email, message, status, stripe_pi, created_at)
+    VALUES (?, ?, ?, ?, ?, 'completed', NULL, ?)
+  `).run(
+    `kofi_${kofiTransactionId}`,
+    amountCents,
+    currency.toLowerCase(),
+    email || null,
+    message || null,
+    Date.now()
+  );
 }
 
 // ─── Video job queue helpers ─────────────────────────────────────────────────

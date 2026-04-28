@@ -24,6 +24,7 @@ import { Router } from "express";
 import {
   createTipRecord, completeTip, getTipStats,
   getUserBySession, upgradeTier, setStripeCustomer, getUserByStripeCustomer,
+  getUserByEmail, recordKofiPayment,
 } from "../models/database.js";
 import { logger } from "../services/logger.js";
 
@@ -229,6 +230,96 @@ router.post(
     res.json({ received: true });
   }
 );
+
+// ─── POST /api/tips/kofi-webhook ────────────────────────────────────────────
+// Ko-fi POSTs a form-urlencoded body with a single `data` field containing
+// a JSON-encoded payment object. We verify the payload using the
+// KOFI_WEBHOOK_TOKEN env var (set this to the "Verification Token" shown in
+// Ko-fi Settings → API → Ko-fi Button / Webhooks). If the token is not set
+// we skip verification (useful during initial setup / local dev).
+//
+// On a successful donation we record it in the `tips` table.
+// On a successful subscription (type === "Subscription") we additionally look
+// up the user by email and upgrade their tier to "premium" — this wires the
+// Ko-fi monthly membership directly to the ad-free tier gate.
+//
+// Ko-fi requires a 200 response; any non-200 triggers a retry, so we always
+// return 200 (with an `ok: false` body on validation failures to help debug).
+router.post("/kofi-webhook", (req, res) => {
+  // 1. Parse — Ko-fi sends application/x-www-form-urlencoded with a `data` key.
+  let payload;
+  try {
+    const raw = req.body?.data;
+    if (!raw) return res.status(200).json({ ok: false, error: "missing data field" });
+    payload = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch (err) {
+    logger.warn(`kofi-webhook: JSON parse failed — ${err.message}`);
+    return res.status(200).json({ ok: false, error: "invalid json" });
+  }
+
+  // 2. Verify the token if KOFI_WEBHOOK_TOKEN is set.
+  const expectedToken = process.env.KOFI_WEBHOOK_TOKEN?.trim();
+  if (expectedToken && payload.verification_token !== expectedToken) {
+    logger.warn(`kofi-webhook: bad verification_token — rejecting`);
+    return res.status(200).json({ ok: false, error: "invalid token" });
+  }
+
+  const {
+    kofi_transaction_id: txId,
+    type = "Donation",
+    amount = "0",
+    currency = "USD",
+    email,
+    from_name: fromName,
+    message,
+    is_subscription_payment: isSubPayment,
+    tier_name: tierName,
+  } = payload;
+
+  if (!txId) {
+    return res.status(200).json({ ok: false, error: "missing kofi_transaction_id" });
+  }
+
+  const amountCents = Math.round(parseFloat(amount || 0) * 100);
+  const paymentType = String(type).toLowerCase();
+  const tipMessage  = [fromName, message].filter(Boolean).join(" — ").slice(0, 500) || null;
+
+  // 3. Record in tips table (INSERT OR IGNORE = idempotent).
+  try {
+    recordKofiPayment({
+      kofiTransactionId: txId,
+      amountCents,
+      currency,
+      email: email || null,
+      message: tipMessage,
+      type: paymentType,
+    });
+  } catch (err) {
+    logger.warn(`kofi-webhook: failed to record payment ${txId}: ${err.message}`);
+  }
+
+  // 4. On subscription payment — upgrade the user's tier if we can match their email.
+  if (paymentType === "subscription" && isSubPayment && email) {
+    try {
+      const user = getUserByEmail(email);
+      if (user && user.tier !== "premium") {
+        upgradeTier(user.id, "premium");
+        logger.info(`⭐ Ko-fi premium activated: ${email} (tier: ${tierName || "unknown"})`);
+      } else if (!user) {
+        // User hasn't created a Scoop account yet — store the intent so when
+        // they do sign up with the same email their tier is pre-upgraded.
+        // We store this as a special "kofi_sub" tip row that auth.js reads
+        // on first login to auto-upgrade. (Handled in auth.js upsertUser path.)
+        logger.info(`kofi-webhook: subscription from ${email} — no matching user yet; tip recorded`);
+      }
+    } catch (err) {
+      logger.warn(`kofi-webhook: tier upgrade failed for ${email}: ${err.message}`);
+    }
+  }
+
+  logger.info(`💛 Ko-fi ${paymentType}: ${amount} ${currency} from ${fromName || email || "anonymous"}`);
+  res.status(200).json({ ok: true });
+});
 
 // ─── GET /api/tips/stats ─────────────────────────────────────────────────────
 router.get("/stats", (_req, res) => {

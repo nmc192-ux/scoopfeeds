@@ -103,6 +103,8 @@ app.use(cors({
 }));
 // Stripe webhook needs raw body for signature verification — must be before express.json().
 app.use("/api/tips/webhook", express.raw({ type: "application/json" }));
+// Ko-fi webhook sends application/x-www-form-urlencoded with a `data` JSON field.
+app.use("/api/tips/kofi-webhook", express.urlencoded({ extended: false }));
 app.use(express.json({ limit: "1mb" }));
 
 const limiter = rateLimit({

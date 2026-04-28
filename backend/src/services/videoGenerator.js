@@ -39,9 +39,14 @@ const require = createRequire(import.meta.url);
 const __dirname    = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = path.resolve(__dirname, "../..");
 const FONT_DIR     = path.join(BACKEND_ROOT, "assets", "fonts");
-const DATA_DIR     = path.join(BACKEND_ROOT, "data");
+// Prefer SCOOP_PERSISTENT_DATA_DIR so videos survive Hostinger redeploys that
+// wipe untracked files. Without this the data/videos/ dir is recreated fresh
+// on every deploy, breaking in-flight jobs and losing rendered frames.
+const DATA_DIR     = process.env.SCOOP_PERSISTENT_DATA_DIR
+  ? path.resolve(process.env.SCOOP_PERSISTENT_DATA_DIR)
+  : path.join(BACKEND_ROOT, "data");
 const VIDEOS_DIR   = path.join(DATA_DIR, "videos");
-const FRAMES_DIR   = path.join(DATA_DIR, "_frames"); // temp slides
+const FRAMES_DIR   = path.join(DATA_DIR, "_frames"); // temp slides (can be transient, but must exist)
 
 for (const d of [VIDEOS_DIR, FRAMES_DIR]) {
   if (!existsSync(d)) mkdirSync(d, { recursive: true });
