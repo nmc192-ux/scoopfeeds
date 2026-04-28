@@ -184,7 +184,7 @@ router.post("/auto-post", requireAdmin, jsonParser, async (req, res) => {
 //                    known to need a long clear period).
 //   failCount      — seed the new cooldown's fail counter so the
 //                    exponential backoff picks the right step.
-router.post("/bluesky-reset", requireAdmin, async (req, res) => {
+router.get("/bluesky-reset", requireAdmin, async (req, res) => {
   try {
     const fs = await import("fs");
     const path = await import("path");
