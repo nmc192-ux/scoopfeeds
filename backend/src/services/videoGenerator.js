@@ -562,12 +562,61 @@ async function runFFmpeg(args, ffmpegPath) {
 // well-tested sweet spot for vertical news content.
 const XFADE_DURATION = 0.4;
 
+// xfade was added in ffmpeg 4.3 (Dec 2020). Older bundles like
+// @ffmpeg-installer/ffmpeg@1.1.0 ship 4.2.x which fails with
+// "No such filter: 'xfade'". Probe the version once and fall back to hard
+// cuts (concat) when xfade isn't available so videos still render.
+let _supportsXfade = undefined; // undefined = unprobed
+function supportsXfade() {
+  if (_supportsXfade !== undefined) return _supportsXfade;
+  const ff = getFFmpegPath();
+  if (!ff) { _supportsXfade = false; return _supportsXfade; }
+  try {
+    // -filters lists every available filter. Cheaper + more reliable than
+    // parsing version numbers (some custom builds skip filters even on 4.3+).
+    const out = execSync(`"${ff}" -hide_banner -filters 2>&1`, {
+      stdio: ["pipe","pipe","pipe"],
+      timeout: 5000,
+    }).toString();
+    _supportsXfade = / xfade /i.test(out) || /\sxfade\s/.test(out);
+    if (!_supportsXfade) {
+      logger.warn(`videoGenerator: ffmpeg lacks 'xfade' filter — falling back to hard cuts (no transitions)`);
+    }
+  } catch (err) {
+    logger.warn(`videoGenerator: filter probe failed (${err.message}) — assuming no xfade`);
+    _supportsXfade = false;
+  }
+  return _supportsXfade;
+}
+
 // Build a filter_complex that scales each slide then chains xfade transitions
 // between them. The math is fiddly because xfade's `offset` is measured from
 // the *combined* timeline of all preceding clips (already including their
 // xfade overlaps), not from the start of clip N. See:
 //   https://ffmpeg.org/ffmpeg-filters.html#xfade
 function buildSlideshowFilter(slidePaths, durations) {
+  // No-xfade fallback: scale each slide and concat them with hard cuts.
+  // Visually less polished but works on every ffmpeg ≥ 2.1.
+  if (!supportsXfade()) {
+    const n = slidePaths.length;
+    const parts = [];
+    for (let i = 0; i < n; i++) {
+      parts.push(
+        `[${i}:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+        `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=#0f172a,setsar=1,` +
+        `format=yuv420p,fps=25[s${i}]`
+      );
+    }
+    if (n === 1) {
+      parts.push(`[s0]copy[out]`);
+      return { filter: parts.join("; "), totalDuration: durations[0] };
+    }
+    const concatInputs = Array.from({ length: n }, (_, i) => `[s${i}]`).join("");
+    parts.push(`${concatInputs}concat=n=${n}:v=1:a=0[out]`);
+    const totalDuration = durations.reduce((a, b) => a + b, 0);
+    return { filter: parts.join("; "), totalDuration };
+  }
+
   const n = slidePaths.length;
   const parts = [];
 
