@@ -88,6 +88,7 @@ router.get("/auto-status", requireAdmin, (_req, res) => {
       LINKEDIN_ACCESS_TOKEN:Boolean(process.env.LINKEDIN_ACCESS_TOKEN),
       PINTEREST_ACCESS_TOKEN:Boolean(process.env.PINTEREST_ACCESS_TOKEN),
       PINTEREST_BOARD_ID:    Boolean(process.env.PINTEREST_BOARD_ID),
+      PEXELS_API_KEY:        Boolean(process.env.PEXELS_API_KEY),
     },
     blueskyHandle: process.env.BLUESKY_HANDLE || "",
     facebookPageId: process.env.FACEBOOK_PAGE_ID || "",
