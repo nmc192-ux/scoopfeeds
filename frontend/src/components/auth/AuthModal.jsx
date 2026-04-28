@@ -12,18 +12,24 @@
 import { useState } from "react";
 import { X, Mail, Check, Loader2, LogOut, User, BookmarkCheck, Star } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
+import { usePublicConfig } from "../../hooks/usePublicConfig";
 import { readSubToken } from "../newsletter/NewsletterSignup";
 
 export default function AuthModal({ open, onClose }) {
   const auth = useAuth();
+  const { data: publicConfig } = usePublicConfig();
   const [email, setEmail]       = useState("");
   const [sent, setSent]         = useState(false);
   const [busy, setBusy]         = useState(false);
   const [err, setErr]           = useState("");
-  const [upgrading, setUpgrading] = useState(false);
 
   const subToken = readSubToken();
   const referralUrl = subToken ? `https://scoopfeeds.com/?ref=${subToken}` : null;
+
+  // Premium upgrade is offered ONLY when a Ko-fi membership URL is configured.
+  // Stripe is intentionally bypassed for now — account activation requires US
+  // tax info we don't have. Set KO_FI_MEMBERSHIP_URL on the backend to enable.
+  const membershipUrl = publicConfig?.kofi?.membershipUrl || null;
 
   if (!open) return null;
 
@@ -46,30 +52,12 @@ export default function AuthModal({ open, onClose }) {
     onClose();
   };
 
-  const handleUpgrade = async () => {
-    if (upgrading) return;
-    setUpgrading(true);
-    try {
-      const res = await fetch("/api/tips/subscribe", {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-      });
-      const data = await res.json();
-      if (data.alreadyPremium) {
-        // Already premium — nothing to do; modal will show premium badge on next hydration.
-        window.location.reload();
-        return;
-      }
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        setErr(data.error || "Could not start upgrade. Try again.");
-      }
-    } catch {
-      setErr("Network error. Please try again.");
-    } finally {
-      setUpgrading(false);
-    }
+  const handleUpgrade = () => {
+    // Open the Ko-fi membership page in a new tab. The user picks their tier
+    // there and pays via Ko-fi's checkout. A future webhook on the backend
+    // will receive the subscription event and auto-flip their tier.
+    if (!membershipUrl) return;
+    window.open(membershipUrl, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -111,7 +99,7 @@ export default function AuthModal({ open, onClose }) {
               </p>
             </div>
 
-            {/* Premium upgrade / status */}
+            {/* Premium upgrade / status — only renders when Ko-fi membership is set up */}
             {auth.isPremium ? (
               <div className="rounded-xl border border-amber-400/40 bg-amber-50 dark:bg-amber-900/10 p-3 mb-4 flex items-center gap-2">
                 <Star size={14} className="text-amber-500 flex-shrink-0" />
@@ -120,18 +108,17 @@ export default function AuthModal({ open, onClose }) {
                   <p className="text-[11px] text-[var(--color-text-tertiary)]">Thank you for supporting Scoop!</p>
                 </div>
               </div>
-            ) : (
+            ) : membershipUrl ? (
               <button
                 onClick={handleUpgrade}
-                disabled={upgrading}
                 className="w-full mb-4 flex items-center justify-center gap-2 py-2.5 rounded-xl
                            bg-gradient-to-r from-amber-500 to-orange-500 text-white text-sm font-semibold
-                           hover:opacity-90 disabled:opacity-60 transition-opacity"
+                           hover:opacity-90 transition-opacity"
               >
-                {upgrading ? <Loader2 size={14} className="animate-spin" /> : <Star size={14} />}
-                Go Premium — Ad-free · $5/mo
+                <Star size={14} />
+                Go Premium — Ad-free · via Ko-fi
               </button>
-            )}
+            ) : null}
 
             {referralUrl && (
               <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface2)] p-3 mb-4">

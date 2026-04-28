@@ -200,8 +200,13 @@ app.get("/api/public-config", (req, res) => {
     },
     // Ko-fi tip jar — set KO_FI_URL=https://ko-fi.com/<handle> in env to enable.
     // Falls back to the known handle so the button always shows after first deploy.
+    // membershipUrl: optional — set KO_FI_MEMBERSHIP_URL when you want to surface
+    // a "Go Premium" CTA pointing at a Ko-fi monthly membership tier. Until
+    // it's set the AuthModal hides the upgrade button entirely (Stripe is
+    // intentionally not used: account activation requires US tax info).
     kofi: {
-      url: (process.env.KO_FI_URL || "https://ko-fi.com/scoopfeeds").trim(),
+      url:           (process.env.KO_FI_URL || "https://ko-fi.com/scoopfeeds").trim(),
+      membershipUrl: (process.env.KO_FI_MEMBERSHIP_URL || "").trim() || null,
     },
     meter: {
       enabled: String(process.env.METER_ENABLED ?? "true").toLowerCase() !== "false",
