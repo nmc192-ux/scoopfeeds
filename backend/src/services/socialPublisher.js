@@ -109,12 +109,20 @@ const ADAPTERS = {
     minIntervalMs: 60 * 60 * 1000, // 60 min — Facebook algorithm rewards spacing over volume
     composeKey: "facebook",
     enabled: isFacebookConfigured,
-    async post(article, composed) {
+    async post(article, composed, thumbBuffer) {
       // Photo post with branded OG card for maximum visual reach.
-      // Falls back to link post inside facebookClient if the image isn't reachable.
+      // Pass the in-memory buffer (already rendered upstream by ensureCard)
+      // so Facebook receives the bytes via multipart instead of fetching the
+      // URL — eliminates the cold-cache + URL-fetcher race that was silently
+      // dropping images and falling back to link posts.
       const imageUrl = `${SITE}/api/cards/og/${encodeURIComponent(article.id)}.png`;
       const articleUrl = `${SITE}/article/${encodeURIComponent(article.id)}?utm_source=social_facebook&utm_medium=social&utm_campaign=scoop_auto`;
-      const out = await postToFacebook({ text: composed.caption, imageUrl, link: articleUrl });
+      const out = await postToFacebook({
+        text: composed.caption,
+        imageBuffer: thumbBuffer || null,
+        imageUrl,
+        link: articleUrl,
+      });
       return { url: out.url, platformPostId: out.id };
     },
   },

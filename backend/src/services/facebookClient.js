@@ -136,6 +136,40 @@ async function _postPhoto({ imageUrl, caption }) {
   return { id: postId, url: postUrl };
 }
 
+// Upload an in-memory image buffer (multipart/form-data) instead of giving
+// Facebook a URL. Far more reliable than _postPhoto because:
+//   - No dependency on FB's URL fetcher (which can timeout, follow redirects
+//     incorrectly, or get blocked by edge caches between FB → our origin)
+//   - Works even when the public card URL is on cold cache (every redeploy
+//     wipes the disk-rendered cards on Hostinger; first FB fetch after deploy
+//     would trigger a fresh render and FB would frequently time out)
+//   - We already have the bytes in memory after ensureCard() — zero extra cost
+async function _postPhotoBuffer({ buffer, caption, contentType = "image/png" }) {
+  const t = _loadToken();
+  if (!t) throw new Error("facebook not configured");
+  const fd = new FormData();
+  // Node 18+ ships globalThis.Blob — wrap the Node Buffer for multipart upload.
+  fd.append("source", new Blob([buffer], { type: contentType }), "card.png");
+  fd.append("caption", caption);
+  fd.append("published", "true");
+  fd.append("access_token", t.pageToken);
+  const res = await fetch(`${API_BASE}/${t.pageId}/photos`, { method: "POST", body: fd });
+  const text = await res.text();
+  let json = {};
+  try { json = text ? JSON.parse(text) : {}; } catch {}
+  if (!res.ok) {
+    const msg = json?.error?.message || text || "unknown";
+    const err = new Error(`facebook /photos (multipart) → ${res.status} ${msg}`);
+    err.statusCode = res.status;
+    err.body = json;
+    throw err;
+  }
+  if (!json?.id) throw new Error(`facebook multipart photo post returned no id: ${JSON.stringify(json).slice(0, 200)}`);
+  const postId  = json.post_id || json.id;
+  const postUrl = `https://www.facebook.com/${t.pageId}/posts/${postId.split("_").pop()}`;
+  return { id: postId, url: postUrl };
+}
+
 // Fallback: plain link post (no image). Used if the image URL is not available.
 async function _postLink({ message, link }) {
   const t = _loadToken();
@@ -149,18 +183,27 @@ async function _postLink({ message, link }) {
   return { id: res.id, url: postUrl };
 }
 
-// Public API: post text + optional image URL.
-// Tries photo post first; falls back to link post if imageUrl is absent.
+// Public API: post text + optional image (buffer preferred; URL as fallback).
+// Strategy:
+//   1. If imageBuffer is provided → upload bytes directly (most reliable).
+//   2. Else if imageUrl is provided → tell FB to fetch the URL.
+//   3. Either of the photo paths failing → fall back to a plain link post.
 // Returns { id, url }.
-export async function postToFacebook({ text, imageUrl, link }) {
+export async function postToFacebook({ text, imageBuffer, imageUrl, link }) {
   if (!_loadToken()) throw new Error("facebook not configured");
-  try {
-    if (imageUrl) {
-      return await _postPhoto({ imageUrl, caption: text });
+  if (imageBuffer) {
+    try {
+      return await _postPhotoBuffer({ buffer: imageBuffer, caption: text });
+    } catch (err) {
+      logger.warn(`facebookClient: multipart photo upload failed (${err.message}), trying URL`);
     }
-  } catch (err) {
-    // Photo post failed (e.g. image not reachable) — fall back to link post.
-    logger.warn(`facebookClient: photo post failed (${err.message}), falling back to link post`);
+  }
+  if (imageUrl) {
+    try {
+      return await _postPhoto({ imageUrl, caption: text });
+    } catch (err) {
+      logger.warn(`facebookClient: URL photo post failed (${err.message}), falling back to link post`);
+    }
   }
   return await _postLink({ message: text, link });
 }

@@ -62,8 +62,51 @@ function cleanText(text, maxLen = 500) {
     .slice(0, maxLen);
 }
 
+// Strip the noise that varies between feeds for the same canonical article:
+//   - protocol (http/https treated as equivalent)
+//   - leading "www."
+//   - trailing slash
+//   - URL fragment
+//   - tracking query params (utm_*, ref, fbclid, gclid, mc_cid, …)
+// Without this, the same NYT article re-fed via Google News + the publisher's
+// own RSS becomes two distinct article IDs, and our social_posts dedup
+// (keyed on article_id) treats them as separate stories — re-posting the same
+// piece to FB/Bluesky/etc. multiple times within hours.
+const TRACKING_PARAM_PREFIXES = ["utm_", "_hsenc", "_hsmi", "vero_"];
+const TRACKING_PARAM_NAMES = new Set([
+  "ref", "ref_src", "ref_url", "source", "src",
+  "fbclid", "gclid", "msclkid", "mc_cid", "mc_eid",
+  "share", "shared", "via", "feed_id", "_ga",
+  "yclid", "dclid", "cmpid", "ito", "smid", "smtyp",
+]);
+function normalizeUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    u.protocol = "https:";
+    u.hostname = u.hostname.replace(/^www\./i, "").toLowerCase();
+    u.hash = "";
+    // Drop tracking params; keep meaningful ones (story IDs, page numbers, etc.).
+    const keep = new URLSearchParams();
+    for (const [k, v] of u.searchParams) {
+      const lk = k.toLowerCase();
+      if (TRACKING_PARAM_NAMES.has(lk)) continue;
+      if (TRACKING_PARAM_PREFIXES.some(p => lk.startsWith(p))) continue;
+      keep.append(k, v);
+    }
+    // Sort surviving params so ?a=1&b=2 == ?b=2&a=1.
+    keep.sort();
+    u.search = keep.toString() ? `?${keep.toString()}` : "";
+    let out = u.toString();
+    // Drop trailing "/" on the path (but keep "/" for root URLs).
+    if (u.pathname !== "/" && out.endsWith("/")) out = out.slice(0, -1);
+    return out;
+  } catch {
+    return String(rawUrl || "").trim();
+  }
+}
+
 function generateId(url) {
-  return uuidv5(url, NAMESPACE);
+  return uuidv5(normalizeUrl(url), NAMESPACE);
 }
 
 export async function fetchSource(source) {
