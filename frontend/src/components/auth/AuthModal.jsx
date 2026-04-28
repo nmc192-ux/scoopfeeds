@@ -12,7 +12,7 @@
 import { useState } from "react";
 import { X, Mail, Check, Loader2, LogOut, User, BookmarkCheck, Star } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
-import { usePublicConfig } from "../../hooks/usePublicConfig";
+import { usePublicConfig } from "../../hooks/useNews";
 import { readSubToken } from "../newsletter/NewsletterSignup";
 
 export default function AuthModal({ open, onClose }) {
