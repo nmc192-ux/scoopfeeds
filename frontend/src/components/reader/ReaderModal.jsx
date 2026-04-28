@@ -357,10 +357,10 @@ export default function ReaderModal() {
                 </section>
               )}
 
-              {/* Support Scoop tip CTA — only renders when Stripe is configured */}
-              {publicConfig?.stripe?.configured && (
+              {/* Support Scoop tip CTA — renders when Ko-fi is configured */}
+              {publicConfig?.kofi?.url && (
                 <div className="mt-8 pt-6 border-t border-[var(--color-border)]">
-                  <TipJar compact />
+                  <TipJar compact kofiUrl={publicConfig.kofi.url} />
                 </div>
               )}
             </div>

@@ -235,7 +235,7 @@ export default function App() {
               format="auto"
             />
             <AffiliateWidget category="default" />
-            {publicConfig?.stripe?.configured && <TipJar />}
+            {publicConfig?.kofi?.url && <TipJar kofiUrl={publicConfig.kofi.url} />}
             <MarketStrip />
             <MostReadSidebar articles={articles} />
           </aside>

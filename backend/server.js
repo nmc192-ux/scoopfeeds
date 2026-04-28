@@ -198,6 +198,11 @@ app.get("/api/public-config", (req, res) => {
       publishableKey: process.env.STRIPE_PUBLISHABLE_KEY?.trim() || "",
       premiumPriceUsd: 5,
     },
+    // Ko-fi tip jar — set KO_FI_URL=https://ko-fi.com/<handle> in env to enable.
+    // Falls back to the known handle so the button always shows after first deploy.
+    kofi: {
+      url: (process.env.KO_FI_URL || "https://ko-fi.com/drjahanzeb").trim(),
+    },
     meter: {
       enabled: String(process.env.METER_ENABLED ?? "true").toLowerCase() !== "false",
       freeLimit: parseInt(process.env.METER_FREE_LIMIT || "10", 10),
