@@ -84,6 +84,8 @@ router.get("/auto-status", requireAdmin, (_req, res) => {
       BLUESKY_APP_PASSWORD:Boolean(process.env.BLUESKY_APP_PASSWORD),
       THREADS_USER_ID:     Boolean(process.env.THREADS_USER_ID),
       THREADS_ACCESS_TOKEN:Boolean(process.env.THREADS_ACCESS_TOKEN),
+      INSTAGRAM_USER_ID:    Boolean(process.env.INSTAGRAM_USER_ID),
+      INSTAGRAM_ACCESS_TOKEN_OR_FB: Boolean(process.env.INSTAGRAM_ACCESS_TOKEN || process.env.FACEBOOK_PAGE_TOKEN),
       LINKEDIN_PAGE_URN:   Boolean(process.env.LINKEDIN_PAGE_URN),
       LINKEDIN_ACCESS_TOKEN:Boolean(process.env.LINKEDIN_ACCESS_TOKEN),
       PINTEREST_ACCESS_TOKEN:Boolean(process.env.PINTEREST_ACCESS_TOKEN),

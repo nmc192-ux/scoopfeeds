@@ -20,6 +20,7 @@ import { ensureCard } from "./cardRenderer.js";
 import { isBlueskyConfigured, postToBluesky } from "./blueskyClient.js";
 import { isThreadsConfigured, postToThreads } from "./threadsClient.js";
 import { isFacebookConfigured, postToFacebook } from "./facebookClient.js";
+import { isInstagramConfigured, postToInstagram } from "./instagramClient.js";
 import { isLinkedinConfigured, postToLinkedin } from "./linkedinClient.js";
 import { isPinterestConfigured, postToPinterest } from "./pinterestClient.js";
 import { logger } from "./logger.js";
@@ -122,6 +123,29 @@ const ADAPTERS = {
         imageBuffer: thumbBuffer || null,
         imageUrl,
         link: articleUrl,
+      });
+      return { url: out.url, platformPostId: out.id };
+    },
+  },
+
+  instagram: {
+    name: "instagram",
+    // Instagram's algorithm penalises high-frequency feed posting hard. 4h
+    // between posts gives us 4-6 posts/day max — well within the safe band
+    // for Business accounts (Meta has flagged accounts pushing 8+/day as
+    // spam in past algo updates).
+    minIntervalMs: 4 * 60 * 60 * 1000,
+    composeKey: "instagram_feed",
+    enabled: isInstagramConfigured,
+    async post(article, composed) {
+      // Instagram requires a public URL — Meta fetches the image server-side
+      // and we have no multipart equivalent on the IG Graph API for feed
+      // posts. We use the SQUARE card preset (1080x1080), the Instagram
+      // feed-native aspect ratio, instead of the OG 1200x630.
+      const imageUrl = `${SITE}/api/cards/square/${encodeURIComponent(article.id)}.png`;
+      const out = await postToInstagram({
+        text: composed.caption,
+        imageUrl,
       });
       return { url: out.url, platformPostId: out.id };
     },
