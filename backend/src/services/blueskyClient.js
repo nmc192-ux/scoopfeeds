@@ -31,10 +31,24 @@ const SESSION_PATH  = path.join(PERSIST_DIR, "bluesky-session.json");
 const COOLDOWN_PATH = path.join(PERSIST_DIR, "bluesky-cooldown.json");
 
 // Circuit-breaker: when createSession hits 429, persist a "do not try
-// before" timestamp so subsequent cron ticks skip the call entirely. This
-// is essential because Bluesky's rate-limit window is 5 min, but if we
-// keep hitting it during the window, the limit never clears.
-const COOLDOWN_AFTER_429_MS = 10 * 60 * 1000; // 10 minutes
+// before" timestamp so subsequent cron ticks skip the call entirely.
+//
+// Cooldown strategy (exponential-ish, capped at 6 hours):
+//   Bluesky's createSession is rate-limited at 30 calls / 5-minute
+//   window per account. But even a single call per 30-min cron tick can
+//   trigger persistent 429s if the account already has too many failed
+//   attempts in its history window. Recovering requires giving the rate
+//   limiter a LONG reset window — we back off by reading how many
+//   consecutive 429s have occurred and doubling the cooldown each time.
+//
+// Retry schedule: 30 min → 2 h → 4 h → 6 h → 6 h → …
+// After a successful createSession, the backoff counter resets to 0.
+const COOLDOWN_BACKOFF_STEPS_MS = [
+  30  * 60 * 1000,   // 1st  429  → wait 30 min
+  2   * 60 * 60 * 1000, // 2nd 429  → wait 2 h
+  4   * 60 * 60 * 1000, // 3rd 429  → wait 4 h
+  6   * 60 * 60 * 1000, // 4th+ 429 → wait 6 h (cap)
+];
 
 // Lazy getters — read at call time so backend/.env loaded by server.js body is
 // visible. .trim() on every read because copying env values from a panel UI
@@ -127,17 +141,20 @@ async function _refreshSession(prev) {
 
 function _readCooldown() {
   try {
-    if (!existsSync(COOLDOWN_PATH)) return 0;
+    if (!existsSync(COOLDOWN_PATH)) return { until: 0, failCount: 0 };
     const raw = JSON.parse(readFileSync(COOLDOWN_PATH, "utf8"));
-    return typeof raw?.until === "number" ? raw.until : 0;
-  } catch { return 0; }
+    return {
+      until:     typeof raw?.until     === "number" ? raw.until     : 0,
+      failCount: typeof raw?.failCount === "number" ? raw.failCount : 0,
+    };
+  } catch { return { until: 0, failCount: 0 }; }
 }
 
-function _writeCooldown(untilMs) {
+function _writeCooldown(untilMs, failCount = 0) {
   try {
     const dir = path.dirname(COOLDOWN_PATH);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(COOLDOWN_PATH, JSON.stringify({ until: untilMs, setAt: Date.now() }));
+    writeFileSync(COOLDOWN_PATH, JSON.stringify({ until: untilMs, failCount, setAt: Date.now() }));
   } catch (e) {
     logger.warn(`blueskyClient: failed to persist cooldown: ${e.message}`);
   }
@@ -145,7 +162,7 @@ function _writeCooldown(untilMs) {
 
 async function _createSession() {
   // Circuit-breaker: skip if we're inside a recent 429 cooldown window.
-  const cooldownUntil = _readCooldown();
+  const { until: cooldownUntil, failCount } = _readCooldown();
   if (cooldownUntil && Date.now() < cooldownUntil) {
     const secs = Math.ceil((cooldownUntil - Date.now()) / 1000);
     const err = new Error(`bluesky createSession on cooldown (${secs}s remaining after recent 429)`);
@@ -166,16 +183,22 @@ async function _createSession() {
       createdAt:  Date.now(),
     };
     _persistSession(next);
-    // Successful login → clear any lingering cooldown.
-    if (cooldownUntil) _writeCooldown(0);
+    // Successful login → clear cooldown + reset backoff counter.
+    if (cooldownUntil) _writeCooldown(0, 0);
     return next;
   } catch (err) {
-    // Persist the cooldown so 30-min cron ticks don't keep amplifying the
-    // rate-limit window. 10 min covers Bluesky's 5-min sliding window with
-    // headroom for clock skew.
     if (err.statusCode === 429) {
-      _writeCooldown(Date.now() + COOLDOWN_AFTER_429_MS);
-      logger.warn(`blueskyClient: createSession 429, sleeping ${COOLDOWN_AFTER_429_MS/60000}min`);
+      // Exponential backoff — each consecutive 429 doubles the wait, capped
+      // at the last step (6 h). This gives Bluesky's rate-limit window a
+      // realistic chance to clear before we try again.
+      const newFailCount = failCount + 1;
+      const stepIdx = Math.min(newFailCount - 1, COOLDOWN_BACKOFF_STEPS_MS.length - 1);
+      const waitMs  = COOLDOWN_BACKOFF_STEPS_MS[stepIdx];
+      _writeCooldown(Date.now() + waitMs, newFailCount);
+      logger.warn(
+        `blueskyClient: createSession 429 (fail #${newFailCount}), ` +
+        `cooling down for ${Math.round(waitMs / 60000)} min`
+      );
     }
     throw err;
   }

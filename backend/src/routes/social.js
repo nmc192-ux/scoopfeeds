@@ -172,13 +172,19 @@ router.post("/auto-post", requireAdmin, jsonParser, async (req, res) => {
   }
 });
 
-// POST /scoop-ops/bluesky-reset
+// POST /scoop-ops/bluesky-reset[?cooldownHours=N&failCount=N]
 // One-shot ops escape hatch when Bluesky posting is wedged: clears the
-// 429 cooldown file, deletes the cached session (so the next attempt
-// runs a full createSession with the current env credentials, not a
-// refresh of a possibly-revoked old session), and returns what was
-// cleared. Safe to call any time.
-router.post("/bluesky-reset", requireAdmin, async (_req, res) => {
+// 429 cooldown file + cached session so the next attempt runs a fresh
+// createSession with current env credentials.
+//
+// Optional query params:
+//   cooldownHours  — immediately seed a new cooldown of N hours so the
+//                    next createSession attempt doesn't fire until after
+//                    that window (useful when Bluesky's rate-limit is
+//                    known to need a long clear period).
+//   failCount      — seed the new cooldown's fail counter so the
+//                    exponential backoff picks the right step.
+router.post("/bluesky-reset", requireAdmin, async (req, res) => {
   try {
     const fs = await import("fs");
     const path = await import("path");
@@ -202,7 +208,26 @@ router.post("/bluesky-reset", requireAdmin, async (_req, res) => {
         cleared[name] = "absent";
       }
     }
-    res.json({ ok: true, cleared, persistDir });
+
+    // Optionally pre-seed a new cooldown so the first retry doesn't fire
+    // immediately (useful when the account is known to be rate-limited).
+    let preCooldown = null;
+    const cooldownHours = parseFloat(req.query.cooldownHours);
+    if (cooldownHours > 0 && cooldownHours <= 24) {
+      const failCount = parseInt(req.query.failCount, 10) || 3;
+      const untilMs = Date.now() + cooldownHours * 60 * 60 * 1000;
+      try {
+        fs.writeFileSync(
+          path.join(persistDir, "bluesky-cooldown.json"),
+          JSON.stringify({ until: untilMs, failCount, setAt: Date.now() })
+        );
+        preCooldown = { cooldownHours, failCount, until: untilMs };
+      } catch (e) {
+        preCooldown = { error: e.message };
+      }
+    }
+
+    res.json({ ok: true, cleared, preCooldown, persistDir });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
