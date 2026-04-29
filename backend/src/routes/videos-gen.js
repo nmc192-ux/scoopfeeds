@@ -32,9 +32,11 @@ import {
   getDb,
   listLiveEvents,
   getLiveEvent,
+  getVideoJobsReadyToPublish,
 } from "../models/database.js";
 import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEventVideo, previewSlide } from "../services/videoGenerator.js";
 import { isTtsConfigured, ttsProvider } from "../services/ttsService.js";
+import { isYouTubeConfigured, uploadToYouTube, getChannelInfo } from "../services/youtubeClient.js";
 import { logger } from "../services/logger.js";
 
 const router = Router();
@@ -86,11 +88,12 @@ router.get("/status", (_req, res) => {
     byStatus[j.status] = (byStatus[j.status] || 0) + 1;
   }
   res.json({
-    configured: isVideoConfigured(),
-    ttsConfigured: isTtsConfigured(),
-    ttsProvider: ttsProvider(),
-    jobsByStatus: byStatus,
-    totalJobs: jobs.length,
+    configured:      isVideoConfigured(),
+    ttsConfigured:   isTtsConfigured(),
+    ttsProvider:     ttsProvider(),
+    youtubeConfigured: isYouTubeConfigured(),
+    jobsByStatus:    byStatus,
+    totalJobs:       jobs.length,
   });
 });
 
@@ -458,6 +461,145 @@ router.post("/mark-failed", requireAdmin, express.json({ limit: "8kb" }), (req, 
   setVideoJobFailed(jobId, reason);
   logger.warn(`video job ${jobId} marked failed: ${reason}`);
   res.json({ ok: true, jobId, status: "failed", reason });
+});
+
+// ─── Publish approved jobs to YouTube Shorts ────────────────────────────────
+// POST /scoop-ops/videos-gen/publish
+//   Body: { jobId?: number, dryRun?: boolean }
+//
+// Uploads 'review_approved' video jobs to YouTube Shorts. If jobId is given,
+// publishes that specific job only; otherwise processes up to 5 approved jobs
+// in oldest-first order.
+//
+// Requires: YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET + YOUTUBE_REFRESH_TOKEN
+// One-time setup: run `node scripts/youtube-auth.mjs` locally to get the
+// refresh token, then set all three in Hostinger env panel.
+router.post("/publish", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
+  if (!isYouTubeConfigured()) {
+    return res.json({
+      ok:    false,
+      reason: "YouTube not configured",
+      setup:  "Run `node scripts/youtube-auth.mjs` locally, then set YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN in Hostinger env panel.",
+    });
+  }
+
+  const db       = getDb();
+  const dryRun   = Boolean(req.body?.dryRun);
+  const jobIdArg = req.body?.jobId ? parseInt(req.body.jobId, 10) : null;
+
+  // Fetch the jobs to publish.
+  let jobs;
+  if (jobIdArg) {
+    const j = getVideoJobById(jobIdArg);
+    if (!j) return res.status(404).json({ ok: false, error: `job ${jobIdArg} not found` });
+    if (!["review_approved", "ready"].includes(j.status)) {
+      return res.status(400).json({ ok: false, error: `job ${jobIdArg} has status '${j.status}'; needs 'review_approved'` });
+    }
+    jobs = [j];
+  } else {
+    jobs = db.prepare(`
+      SELECT j.*, a.title AS article_title, a.description AS article_description,
+             a.category, a.source_name, a.image_url
+      FROM video_jobs j LEFT JOIN articles a ON a.id = j.article_id
+      WHERE j.status = 'review_approved' AND j.output_path IS NOT NULL
+      ORDER BY j.approved_at ASC
+      LIMIT 5
+    `).all();
+  }
+
+  if (jobs.length === 0) {
+    return res.json({ ok: true, published: 0, message: "No approved jobs ready to publish." });
+  }
+
+  const results = [];
+  for (const job of jobs) {
+    if (!job.output_path || !existsSync(job.output_path)) {
+      results.push({ jobId: job.id, ok: false, error: "output file missing" });
+      continue;
+    }
+
+    // Build a quality YouTube title + description from the article.
+    const article = getArticleById(job.article_id);
+    const title   = (article?.title || job.article_title || "News").slice(0, 99);
+    const source  = article?.source_name || "Scoop";
+    const cat     = (article?.category || job.category || "news").replace(/-/g, " ");
+    const desc    = [
+      article?.description?.slice(0, 300) || "",
+      `\nSource: ${source}`,
+      `\nFull story → https://scoopfeeds.com/article/${job.article_id}`,
+      `\nCategory: ${cat}`,
+      `\n\n#Scoop #${cat.replace(/\s+/g, "")} #News #Shorts #BreakingNews`,
+    ].join("").slice(0, 5000);
+
+    const tags = [
+      "scoop", "news", "shorts", cat.replace(/\s+/g, ""),
+      ...(article?.category ? [article.category] : []),
+    ].filter(Boolean).slice(0, 15);
+
+    if (dryRun) {
+      results.push({ jobId: job.id, ok: true, dryRun: true, title, outputPath: job.output_path });
+      continue;
+    }
+
+    try {
+      const { videoId, videoUrl } = await uploadToYouTube({
+        filePath:    job.output_path,
+        title,
+        description: desc,
+        tags,
+        category:    25,  // 25 = News & Politics
+        isShort:     true,
+      });
+
+      // Mark as published in the DB.
+      db.prepare(`
+        UPDATE video_jobs
+        SET status = 'published',
+            platforms_posted = ?,
+            published_at = ?
+        WHERE id = ?
+      `).run(JSON.stringify(["youtube"]), Date.now(), job.id);
+
+      // Also record in social_posts table for the attribution dashboard.
+      try {
+        db.prepare(`
+          INSERT OR IGNORE INTO social_posts
+            (article_id, platform, status, post_url, platform_post_id, posted_at)
+          VALUES (?, 'youtube', 'posted', ?, ?, ?)
+        `).run(job.article_id, videoUrl, videoId, Date.now());
+      } catch {}
+
+      logger.info(`📺 Published to YouTube Shorts: ${videoId} — "${title}"`);
+      results.push({ jobId: job.id, ok: true, videoId, videoUrl, title });
+    } catch (err) {
+      logger.error(`📺 YouTube publish failed for job ${job.id}: ${err.message}`);
+      results.push({ jobId: job.id, ok: false, error: err.message });
+    }
+  }
+
+  const okCount   = results.filter(r => r.ok).length;
+  const failCount = results.filter(r => !r.ok).length;
+  res.json({ ok: okCount > 0 || dryRun, published: okCount, failed: failCount, dryRun, results });
+});
+
+// ─── YouTube channel info ────────────────────────────────────────────────────
+// GET /scoop-ops/videos-gen/youtube-channel
+//   Returns subscriber count, video count, and channel URL.
+//   Useful for checking if YouTube Partner Program thresholds have been hit.
+router.get("/youtube-channel", requireAdmin, async (_req, res) => {
+  if (!isYouTubeConfigured()) {
+    return res.json({
+      ok: false,
+      configured: false,
+      setup: "Set YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN in Hostinger env.",
+    });
+  }
+  try {
+    const info = await getChannelInfo();
+    res.json({ ok: true, configured: true, channel: info });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ─── Reset failed jobs ───────────────────────────────────────────────────────
