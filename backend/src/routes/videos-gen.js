@@ -38,6 +38,8 @@ import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEvent
 import { isTtsConfigured, ttsProvider } from "../services/ttsService.js";
 import { isYouTubeConfigured, uploadToYouTube, getChannelInfo } from "../services/youtubeClient.js";
 import { isTikTokConfigured, uploadToTikTok } from "../services/tiktokClient.js";
+import { isInstagramConfigured, postReelToInstagram } from "../services/instagramClient.js";
+import { isFacebookConfigured, postReelToFacebook } from "../services/facebookClient.js";
 import { logger } from "../services/logger.js";
 
 const router = Router();
@@ -92,8 +94,10 @@ router.get("/status", (_req, res) => {
     configured:      isVideoConfigured(),
     ttsConfigured:   isTtsConfigured(),
     ttsProvider:     ttsProvider(),
-    youtubeConfigured: isYouTubeConfigured(),
-    tiktokConfigured:  isTikTokConfigured(),
+    youtubeConfigured:   isYouTubeConfigured(),
+    tiktokConfigured:    isTikTokConfigured(),
+    instagramConfigured: isInstagramConfigured(),
+    facebookConfigured:  isFacebookConfigured(),
     jobsByStatus:    byStatus,
     totalJobs:       jobs.length,
   });
@@ -479,17 +483,24 @@ router.post("/mark-failed", requireAdmin, express.json({ limit: "8kb" }), (req, 
 router.post("/publish", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
   const ytConfigured  = isYouTubeConfigured();
   const tikConfigured = isTikTokConfigured();
+  const igConfigured  = isInstagramConfigured();
+  const fbConfigured  = isFacebookConfigured();
 
-  if (!ytConfigured && !tikConfigured) {
+  if (!ytConfigured && !tikConfigured && !igConfigured && !fbConfigured) {
     return res.json({
       ok:    false,
       reason: "No video platform configured",
       setup:  [
-        "YouTube: run `node scripts/youtube-auth.mjs` locally, then set YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN.",
-        "TikTok:  run `node scripts/tiktok-auth.mjs` locally (after Content Posting API approval), then set TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, TIKTOK_ACCESS_TOKEN, TIKTOK_OPEN_ID.",
+        "YouTube:   run `node scripts/youtube-auth.mjs` locally, then set YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN.",
+        "TikTok:    run `node scripts/tiktok-auth.mjs` locally (after Content Posting API approval), then set TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, TIKTOK_ACCESS_TOKEN, TIKTOK_OPEN_ID.",
+        "Instagram: set INSTAGRAM_USER_ID + FACEBOOK_PAGE_TOKEN. Convert IG account to Professional and connect to FB Page.",
+        "Facebook:  set FACEBOOK_PAGE_ID + FACEBOOK_PAGE_TOKEN.",
       ],
     });
   }
+
+  // Build the public video URL for platforms that fetch via URL (IG Reels, FB Reels).
+  const SITE_ORIGIN = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 
   const db       = getDb();
   const dryRun   = Boolean(req.body?.dryRun);
@@ -544,16 +555,21 @@ router.post("/publish", requireAdmin, express.json({ limit: "8kb" }), async (req
       ...(article?.category ? [article.category] : []),
     ].filter(Boolean).slice(0, 15);
 
+    // Public video URL (used by IG/FB Reels which fetch by URL, not by bytes).
+    const safeArtId   = String(job.article_id).replace(/[^a-z0-9_-]/gi, "_");
+    const publicVideoUrl = `${SITE_ORIGIN}/scoop-ops/videos-gen/file/${encodeURIComponent(safeArtId)}`;
+
     if (dryRun) {
       results.push({
         jobId: job.id, ok: true, dryRun: true, title,
         outputPath: job.output_path,
-        platforms: { youtube: ytConfigured, tiktok: tikConfigured },
+        publicVideoUrl,
+        platforms: { youtube: ytConfigured, tiktok: tikConfigured, instagram: igConfigured, facebook: fbConfigured },
       });
       continue;
     }
 
-    const jobResult   = { jobId: job.id, ok: false, title, youtube: null, tiktok: null };
+    const jobResult = { jobId: job.id, ok: false, title, youtube: null, tiktok: null, instagram: null, facebook: null };
     const platforms   = [];
 
     // ── YouTube Shorts ──────────────────────────────────────────────────────
@@ -605,6 +621,53 @@ router.post("/publish", requireAdmin, express.json({ limit: "8kb" }), async (req
       } catch (err) {
         jobResult.tiktok = { error: err.message };
         logger.error(`📱 TikTok publish failed for job ${job.id}: ${err.message}`);
+      }
+    }
+
+    // ── Instagram Reels ─────────────────────────────────────────────────────
+    if (igConfigured) {
+      try {
+        const { id: igId, url: igUrl } = await postReelToInstagram({
+          videoUrl: publicVideoUrl,
+          caption:  `${title}\n\n#Scoop #News #Reels #Shorts\n\nFull story → https://scoopfeeds.com/article/${job.article_id}`.slice(0, 2200),
+        });
+        platforms.push("instagram_reels");
+        jobResult.instagram = { id: igId, url: igUrl };
+        try {
+          db.prepare(`
+            INSERT OR IGNORE INTO social_posts
+              (article_id, platform, status, post_url, platform_post_id, posted_at)
+            VALUES (?, 'instagram_reels', 'posted', ?, ?, ?)
+          `).run(job.article_id, igUrl, igId, Date.now());
+        } catch {}
+        logger.info(`📸 Instagram Reel published: ${igId} — "${title}"`);
+      } catch (err) {
+        jobResult.instagram = { error: err.message };
+        logger.error(`📸 Instagram Reel failed for job ${job.id}: ${err.message}`);
+      }
+    }
+
+    // ── Facebook Reels ──────────────────────────────────────────────────────
+    if (fbConfigured) {
+      try {
+        const { id: fbId, url: fbUrl } = await postReelToFacebook({
+          filePath: job.output_path,
+          videoUrl: publicVideoUrl,
+          caption:  `${title}\n\n#Scoop #News #Reels\n\nFull story → https://scoopfeeds.com/article/${job.article_id}`.slice(0, 2200),
+        });
+        platforms.push("facebook_reels");
+        jobResult.facebook = { id: fbId, url: fbUrl };
+        try {
+          db.prepare(`
+            INSERT OR IGNORE INTO social_posts
+              (article_id, platform, status, post_url, platform_post_id, posted_at)
+            VALUES (?, 'facebook_reels', 'posted', ?, ?, ?)
+          `).run(job.article_id, fbUrl, fbId, Date.now());
+        } catch {}
+        logger.info(`📘 Facebook Reel published: ${fbId} — "${title}"`);
+      } catch (err) {
+        jobResult.facebook = { error: err.message };
+        logger.error(`📘 Facebook Reel failed for job ${job.id}: ${err.message}`);
       }
     }
 

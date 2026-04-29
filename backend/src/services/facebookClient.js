@@ -183,6 +183,92 @@ async function _postLink({ message, link }) {
   return { id: res.id, url: postUrl };
 }
 
+// ─── Facebook Reels ───────────────────────────────────────────────────────────
+// Uploads a short-form video as a Facebook Reel.
+//
+// Flow (server-upload variant):
+//   1. POST /{page-id}/video_reels?upload_phase=start  → { video_id, upload_url }
+//   2. POST {upload_url} with raw MP4 bytes             → HTTP 200
+//   3. POST /{page-id}/video_reels?upload_phase=finish  → success object
+//
+// Required: same FACEBOOK_PAGE_TOKEN + FACEBOOK_PAGE_ID as image posts.
+// The video must be H.264 MP4 (9:16 preferred), ≤ 90s.
+//
+// If the upload_phase API is unavailable (requires business verification in some
+// regions), we fall back to posting via `link` (sharing the public video URL as
+// a standard feed post) rather than throwing.
+export async function postReelToFacebook({ filePath, videoUrl, caption = "" }) {
+  const t = _loadToken();
+  if (!t) throw new Error("facebook not configured");
+
+  // We need raw bytes to do a server-side upload. If the caller passes only
+  // a videoUrl (public link) and no filePath, fall back to a plain link post.
+  const { readFileSync, existsSync } = await import("fs");
+  let bytes = null;
+  if (filePath) {
+    try {
+      if (!existsSync(filePath)) throw new Error(`file not found: ${filePath}`);
+      bytes = readFileSync(filePath);
+    } catch (err) {
+      logger.warn(`facebookClient: could not read reel file (${err.message}), will use link fallback`);
+    }
+  }
+
+  if (bytes) {
+    try {
+      // Step 1: initialise the upload session.
+      const init = await _call(`/${t.pageId}/video_reels`, {
+        method: "POST",
+        params: {
+          upload_phase:  "start",
+          file_size:     String(bytes.length),
+        },
+      });
+      if (!init?.video_id || !init?.upload_url) {
+        throw new Error(`FB reels start missing video_id/upload_url: ${JSON.stringify(init).slice(0, 200)}`);
+      }
+
+      // Step 2: upload raw MP4 bytes.
+      const upRes = await fetch(init.upload_url, {
+        method:  "POST",
+        headers: {
+          "Authorization": `OAuth ${t.pageToken}`,
+          "offset":        "0",
+          "file_size":     String(bytes.length),
+          "Content-Type":  "application/octet-stream",
+        },
+        body: bytes,
+      });
+      if (!upRes.ok) {
+        const errTxt = await upRes.text().catch(() => "");
+        throw new Error(`FB reels upload → ${upRes.status}: ${errTxt.slice(0, 200)}`);
+      }
+
+      // Step 3: finalise and publish.
+      const finish = await _call(`/${t.pageId}/video_reels`, {
+        method: "POST",
+        params: {
+          upload_phase:  "finish",
+          video_id:      init.video_id,
+          video_state:   "PUBLISHED",
+          description:   caption,
+        },
+      });
+
+      const postUrl = `https://www.facebook.com/reel/${init.video_id}`;
+      logger.info(`📘 Facebook Reel published: ${init.video_id}`);
+      return { id: init.video_id, url: postUrl };
+
+    } catch (err) {
+      logger.warn(`facebookClient: Reel binary upload failed (${err.message}), falling back to link post`);
+    }
+  }
+
+  // Fallback: plain link post with the video URL.
+  const msg = caption + (videoUrl ? `\n\n${videoUrl}` : "");
+  return await _postLink({ message: msg, link: videoUrl || "" });
+}
+
 // Public API: post text + optional image (buffer preferred; URL as fallback).
 // Strategy:
 //   1. If imageBuffer is provided → upload bytes directly (most reliable).

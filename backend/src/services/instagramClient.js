@@ -136,6 +136,68 @@ async function _waitForFinished(creationId, { maxAttempts = 10, gapMs = 1500 } =
   throw new Error(`instagram container ${creationId} not ready after ${maxAttempts * gapMs}ms`);
 }
 
+// ─── Reels (video) upload ────────────────────────────────────────────────────
+// Post a short-form video (Reel) to Instagram. Meta must be able to GET the
+// video from `videoUrl` server-side — so the URL must be publicly reachable.
+// We use: https://scoopfeeds.com/scoop-ops/videos-gen/file/{articleId}
+//
+// Notes:
+//   - Video must be H.264 MP4, ≤ 60s, ≥ 720p, 9:16 aspect ratio preferred.
+//   - Processing takes 30–120s — we poll with a generous budget.
+//   - `share_to_feed: true` also shows the Reel in the IG grid (recommended).
+//   - After publish, permalink lookup gives the final URL.
+//
+// Required env (same as image posts):
+//   INSTAGRAM_USER_ID + FACEBOOK_PAGE_TOKEN (or INSTAGRAM_ACCESS_TOKEN)
+export async function postReelToInstagram({ videoUrl, caption = "" }) {
+  const t = _loadToken();
+  if (!t) throw new Error("instagram not configured");
+  if (!videoUrl) throw new Error("postReelToInstagram requires a videoUrl");
+
+  // Step 1: create the media container for the Reel.
+  const create = await _call(`/${t.userId}/media`, {
+    method: "POST",
+    params: {
+      media_type:    "REELS",
+      video_url:     videoUrl,
+      caption,
+      share_to_feed: "true",   // also show in main IG feed
+      thumb_offset:  "1000",   // ms offset for auto-generated thumbnail
+    },
+  });
+  if (!create?.id) {
+    throw new Error(`instagram reel container creation returned no id: ${JSON.stringify(create).slice(0, 200)}`);
+  }
+
+  // Step 2: wait for Meta to download + transcode the video.
+  // Reels take significantly longer than images — poll with a 5s gap, up to 3 min.
+  await _waitForFinished(create.id, { maxAttempts: 36, gapMs: 5000 });
+
+  // Step 3: publish.
+  const publish = await _call(`/${t.userId}/media_publish`, {
+    method: "POST",
+    params: { creation_id: create.id },
+  });
+  if (!publish?.id) {
+    throw new Error(`instagram reel publish returned no id: ${JSON.stringify(publish).slice(0, 200)}`);
+  }
+
+  // Best-effort permalink.
+  let url = "";
+  const handle = getHandle();
+  if (handle) {
+    url = `https://www.instagram.com/reel/${publish.id}/`;
+  } else {
+    try {
+      const lookup = await _call(`/${publish.id}`, { params: { fields: "permalink" } });
+      url = lookup?.permalink || "";
+    } catch {}
+  }
+
+  logger.info(`📸 Instagram Reel published: ${publish.id} — ${url}`);
+  return { id: publish.id, url };
+}
+
 // Public: post a single image with caption. Returns { id, url }.
 //   text     — caption text (max ~2200 chars; we leave that to the composer)
 //   imageUrl — publicly fetchable URL (Meta needs to GET it server-side)

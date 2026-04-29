@@ -188,6 +188,31 @@ export async function uploadToYouTube({ filePath, title, description = "", tags 
   return { videoId, videoUrl, title: cleanTitle };
 }
 
+// ─── Video metrics ────────────────────────────────────────────────────────────
+// Fetch view/like/comment counts for one or more video IDs.
+// Called by the scheduler to populate the video_metrics table and feed back
+// into the content ranking model (high-performing topics get more coverage).
+//
+// Returns an array of { videoId, views, likes, comments, favorites }.
+export async function getVideoStats(videoIds) {
+  if (!isYouTubeConfigured() || !videoIds?.length) return [];
+  const accessToken = await _getAccessToken();
+  const ids = (Array.isArray(videoIds) ? videoIds : [videoIds]).slice(0, 50).join(",");
+  const res = await fetch(
+    `${API_BASE}/videos?part=statistics&id=${encodeURIComponent(ids)}`,
+    { headers: { "Authorization": `Bearer ${accessToken}` } }
+  );
+  const body = await res.json();
+  if (!res.ok) throw new Error(`YouTube getVideoStats: ${body.error?.message || res.status}`);
+  return (body.items || []).map(item => ({
+    videoId:   item.id,
+    views:     parseInt(item.statistics?.viewCount    || "0", 10),
+    likes:     parseInt(item.statistics?.likeCount    || "0", 10),
+    comments:  parseInt(item.statistics?.commentCount || "0", 10),
+    favorites: parseInt(item.statistics?.favoriteCount|| "0", 10),
+  }));
+}
+
 // ─── Channel info ─────────────────────────────────────────────────────────────
 
 export async function getChannelInfo() {

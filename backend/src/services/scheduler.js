@@ -13,6 +13,7 @@ import { refreshAllEvents } from "./liveEvents.js";
 import { runBreakingNewsPush } from "./breakingNewsPusher.js";
 import { runAllPlatformsCycle, listEnabledPlatforms } from "./socialPublisher.js";
 import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEventVideo, previewSlide } from "./videoGenerator.js";
+import { isYouTubeConfigured, getVideoStats } from "./youtubeClient.js";
 import { getDb, listLiveEvents, getLiveEvent } from "../models/database.js";
 
 let isRunning    = false;
@@ -72,11 +73,22 @@ export function startScheduler() {
       logger.error("❌ Digest failed", { error: err.message });
     }
   });
-  cron.schedule("0 3 * * *",    async () => {
+  cron.schedule("0 3 * * *", async () => {
     logger.info("🧹 Pruning...");
     const n = pruneOldArticles(7);
     logger.info(`🧹 Pruned ${n} records`);
   });
+
+  // YouTube video metrics sync — runs at 14:00 daily (8h after typical upload
+  // at 06:00 UTC, when views should show at least a few dozen data points).
+  // Updates video_metrics + bubbles engagement signal into article ranking.
+  cron.schedule("0 14 * * *", async () => {
+    if (!isYouTubeConfigured()) return;
+    try { await syncVideoMetrics(); } catch (err) {
+      logger.warn(`video metrics sync failed: ${err.message}`);
+    }
+  });
+
   updateNextRun();
 }
 
@@ -298,4 +310,66 @@ export async function triggerManualRefresh() {
     runIngestionCycle(),
     runVideoCycle(),
   ]);
+}
+
+// ─── YouTube video metrics sync ──────────────────────────────────────────────
+// Fetches view/like/comment counts for all YouTube-published jobs from the
+// last 30 days and stores them in the video_metrics table. Also increments a
+// per-category "engagement weight" used by getUserCategoryWeights() in the
+// personalisation layer — so topics that produce viral Shorts float up in the
+// editorial feed for everyone (not just the uploader's subscribers).
+export async function syncVideoMetrics() {
+  if (!isYouTubeConfigured()) return { synced: 0 };
+  const db = getDb();
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+  // Collect YouTube video IDs from social_posts (inserted by /publish).
+  const rows = db.prepare(`
+    SELECT sp.platform_post_id AS video_id, sp.article_id, a.category
+    FROM social_posts sp
+    LEFT JOIN articles a ON a.id = sp.article_id
+    WHERE sp.platform = 'youtube'
+      AND sp.posted_at > ?
+      AND sp.platform_post_id IS NOT NULL
+    ORDER BY sp.posted_at DESC
+    LIMIT 50
+  `).all(thirtyDaysAgo);
+
+  if (!rows.length) return { synced: 0 };
+
+  const videoIds = rows.map(r => r.video_id);
+  const stats    = await getVideoStats(videoIds);
+
+  const byId = Object.fromEntries(stats.map(s => [s.videoId, s]));
+  let synced = 0;
+
+  for (const row of rows) {
+    const s = byId[row.video_id];
+    if (!s) continue;
+
+    // Resolve job_id from article_id.
+    const jobRow = db.prepare(`SELECT id FROM video_jobs WHERE article_id = ? LIMIT 1`).get(row.article_id);
+    if (!jobRow) continue;
+
+    // Upsert: update if already tracked, insert fresh row otherwise.
+    const existing = db.prepare(
+      `SELECT id FROM video_metrics WHERE platform = 'youtube' AND platform_id = ?`
+    ).get(row.video_id);
+
+    if (existing) {
+      db.prepare(`
+        UPDATE video_metrics SET views = ?, likes = ?, fetched_at = ? WHERE id = ?
+      `).run(s.views, s.likes, Date.now(), existing.id);
+    } else {
+      db.prepare(`
+        INSERT INTO video_metrics (job_id, platform, platform_id, views, likes, fetched_at)
+        VALUES (?, 'youtube', ?, ?, ?, ?)
+      `).run(jobRow.id, row.video_id, s.views, s.likes, Date.now());
+    }
+
+    synced++;
+  }
+
+  logger.info(`📊 YouTube metrics synced: ${synced} videos`);
+  return { synced };
 }
