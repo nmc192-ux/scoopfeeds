@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useReaderStore, useReaderArticle, useTranslatedReader } from "../../hooks/useReader";
 import { useNewsStore } from "../../store/newsStore";
+import { useSaveArticle } from "../../hooks/useSaveArticle";
 import { usePublicConfig } from "../../hooks/useNews";
 import { isRtl, langFont, nativeName, LANG_BY_CODE } from "../../lib/languages";
 import { track, trackShare, trackOutboundClick, trackSave } from "../../lib/track";
@@ -37,7 +38,8 @@ const FONT_SIZES = [
 
 export default function ReaderModal() {
   const { article, open, closeReader, openReader } = useReaderStore();
-  const { saveArticle, savedArticles, language, autoLanguage, setAuthOpen } = useNewsStore();
+  const { language, autoLanguage, setAuthOpen } = useNewsStore();
+  const { toggle: toggleSave, isSaved: checkSaved } = useSaveArticle();
   const { data: publicConfig } = usePublicConfig();
   const url = open ? article?.url : null;
   const { data, isLoading, isError, error } = useReaderArticle(url);
@@ -86,7 +88,7 @@ export default function ReaderModal() {
   const rtl = isRtl(targetLang);
   const font = langFont(targetLang);
 
-  const isSaved = article && savedArticles?.some?.((a) => a.id === article.id);
+  const isSaved = article ? checkSaved(article.id) : false;
 
   // Lock body scroll while open + support Esc
   useEffect(() => {
@@ -116,7 +118,7 @@ export default function ReaderModal() {
 
   const handleSaveClick = () => {
     if (!article) return;
-    saveArticle?.(article);
+    toggleSave(article);
     trackSave(article.id, article.category);
   };
 

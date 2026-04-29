@@ -5,6 +5,7 @@ import { formatDistanceToNow } from "date-fns";
 import { useNewsStore } from "../../store/newsStore";
 import { useTranslatedTexts } from "../../hooks/useTranslation";
 import { useReaderStore } from "../../hooks/useReader";
+import { useSaveArticle } from "../../hooks/useSaveArticle";
 import { track, trackShare, trackSave, trackUnsave, trackOutboundClick } from "../../lib/track";
 import PaywallCTA from "../ads/PaywallCTA";
 import clsx from "clsx";
@@ -61,9 +62,9 @@ function CredibilityDots({ score }) {
 }
 
 export default function NewsCard({ article, index = 0, size = "normal" }) {
-  const { saveArticle, unsaveArticle, isArticleSaved } = useNewsStore();
+  const { toggle: toggleSave, isSaved } = useSaveArticle();
   const openReader = useReaderStore(s => s.openReader);
-  const saved = isArticleSaved(article.id);
+  const saved = isSaved(article.id);
   const [imgError, setImgError] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -86,11 +87,10 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
 
   const handleSave = (e) => {
     e.preventDefault(); e.stopPropagation();
+    toggleSave(article);
     if (saved) {
-      unsaveArticle(article.id);
       trackUnsave(article.id, article.category);
     } else {
-      saveArticle(article);
       trackSave(article.id, article.category);
     }
   };

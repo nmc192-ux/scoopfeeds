@@ -5,6 +5,7 @@ import { formatDistanceToNow } from "date-fns";
 import { useNewsStore } from "../../store/newsStore";
 import { useTranslatedTexts } from "../../hooks/useTranslation";
 import { useReaderStore } from "../../hooks/useReader";
+import { useSaveArticle } from "../../hooks/useSaveArticle";
 import clsx from "clsx";
 
 const TOPIC_COLORS = {
@@ -24,9 +25,9 @@ const TOPIC_LABELS = {
 };
 
 export default function FeaturedCard({ article }) {
-  const { saveArticle, unsaveArticle, isArticleSaved } = useNewsStore();
+  const { toggle: toggleSave, isSaved } = useSaveArticle();
   const openReader = useReaderStore(s => s.openReader);
-  const saved = isArticleSaved(article.id);
+  const saved = isSaved(article.id);
   const [imgError, setImgError] = useState(false);
   const color = TOPIC_COLORS[article.category] || "#007AFF";
   const label = TOPIC_LABELS[article.category] || article.category;
@@ -42,7 +43,7 @@ export default function FeaturedCard({ article }) {
 
   const handleSave = (e) => {
     e.preventDefault(); e.stopPropagation();
-    saved ? unsaveArticle(article.id) : saveArticle(article);
+    toggleSave(article);
   };
 
   return (
