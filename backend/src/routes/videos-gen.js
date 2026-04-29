@@ -460,6 +460,47 @@ router.post("/mark-failed", requireAdmin, express.json({ limit: "8kb" }), (req, 
   res.json({ ok: true, jobId, status: "failed", reason });
 });
 
+// ─── Reset failed jobs ───────────────────────────────────────────────────────
+// POST /scoop-ops/videos-gen/reset-failed
+//   Body: { all?: boolean }  — if all=true resets ALL failed jobs, otherwise
+//                              only jobs where error contains "ffmpeg not configured"
+//                              (the ones that failed because the host blocked spawn)
+//
+// Resets jobs from 'failed' → 'queued' so the GitHub Actions worker can pick
+// them up on the next render run.  Safe to call repeatedly — only affects
+// failed jobs, never touches ready/published/rendering jobs.
+router.post("/reset-failed", requireAdmin, express.json({ limit: "8kb" }), (req, res) => {
+  const resetAll = Boolean(req.body?.all);
+  const db = getDb();
+
+  let changed;
+  if (resetAll) {
+    changed = db.prepare(
+      `UPDATE video_jobs SET status = 'queued', error = NULL WHERE status = 'failed'`
+    ).run();
+  } else {
+    // Default: only reset jobs that failed because ffmpeg wasn't available on
+    // the host — those are safe to retry anywhere (including GH Actions).
+    changed = db.prepare(
+      `UPDATE video_jobs SET status = 'queued', error = NULL
+       WHERE status = 'failed'
+         AND (error LIKE '%ffmpeg%' OR error LIKE '%canSpawn%' OR error LIKE '%not configured%' OR error IS NULL)`
+    ).run();
+  }
+
+  const remaining = db.prepare(`SELECT COUNT(*) AS n FROM video_jobs WHERE status = 'failed'`).get();
+  const nowQueued = db.prepare(`SELECT COUNT(*) AS n FROM video_jobs WHERE status = 'queued'`).get();
+
+  logger.info(`video reset-failed: ${changed.changes} job(s) reset to queued (resetAll=${resetAll})`);
+  res.json({
+    ok:         true,
+    reset:      changed.changes,
+    resetAll,
+    nowQueued:  nowQueued.n,
+    stillFailed: remaining.n,
+  });
+});
+
 // ─── Serve the rendered MP4 ─────────────────────────────────────────────────
 // Public — needed so social platform embeds + the admin review UI can play
 // the video. Falls back to 404 cleanly when a job hasn't been rendered yet.
