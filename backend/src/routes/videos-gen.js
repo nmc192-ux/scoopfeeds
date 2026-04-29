@@ -56,13 +56,20 @@ function requireAdmin(req, res, next) {
 // ─── Filesystem paths (mirrored from videoGenerator.js) ─────────────────────
 const __dirname    = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = path.resolve(__dirname, "../..");
-// Mirror videoGenerator's SCOOP_PERSISTENT_DATA_DIR logic so video files
-// survive Hostinger redeploys that wipe the deploy directory.
-const DATA_DIR   = process.env.SCOOP_PERSISTENT_DATA_DIR
+// Use SCOOP_PERSISTENT_DATA_DIR when available so rendered MP4s survive
+// Hostinger redeploys that wipe the deploy directory. Wrap in try/catch so
+// a filesystem permission error cannot crash the whole server at import time.
+const _persistentBase = process.env.SCOOP_PERSISTENT_DATA_DIR
   ? path.resolve(process.env.SCOOP_PERSISTENT_DATA_DIR)
-  : path.join(BACKEND_ROOT, "data");
-const VIDEOS_DIR   = path.join(DATA_DIR, "videos");
-if (!existsSync(VIDEOS_DIR)) mkdirSync(VIDEOS_DIR, { recursive: true });
+  : null;
+const VIDEOS_DIR = _persistentBase
+  ? path.join(_persistentBase, "videos")
+  : path.join(BACKEND_ROOT, "data", "videos");
+try {
+  if (!existsSync(VIDEOS_DIR)) mkdirSync(VIDEOS_DIR, { recursive: true });
+} catch (e) {
+  console.error("[videos-gen] Could not create VIDEOS_DIR:", VIDEOS_DIR, e.message);
+}
 
 // Raw MP4 body parser — used by /upload. Express's default body parsers
 // (express.json) ignore video/mp4, so we need a per-route raw parser.

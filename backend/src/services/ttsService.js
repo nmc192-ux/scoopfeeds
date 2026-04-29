@@ -18,8 +18,14 @@ import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
 
 const __dirname    = path.dirname(fileURLToPath(import.meta.url));
-const AUDIO_DIR    = path.join(__dirname, "../../data/audio");
-if (!existsSync(AUDIO_DIR)) mkdirSync(AUDIO_DIR, { recursive: true });
+const AUDIO_DIR    = process.env.SCOOP_PERSISTENT_DATA_DIR
+  ? path.join(process.env.SCOOP_PERSISTENT_DATA_DIR, "audio")
+  : path.join(__dirname, "../../data/audio");
+try {
+  if (!existsSync(AUDIO_DIR)) mkdirSync(AUDIO_DIR, { recursive: true });
+} catch (e) {
+  console.error("[ttsService] Could not create AUDIO_DIR:", AUDIO_DIR, e.message);
+}
 
 // ─── Provider checks ────────────────────────────────────────────────────────
 
