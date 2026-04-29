@@ -138,11 +138,13 @@ const ADAPTERS = {
     composeKey: "instagram_feed",
     enabled: isInstagramConfigured,
     async post(article, composed) {
-      // Instagram requires a public URL — Meta fetches the image server-side
-      // and we have no multipart equivalent on the IG Graph API for feed
-      // posts. We use the SQUARE card preset (1080x1080), the Instagram
-      // feed-native aspect ratio, instead of the OG 1200x630.
-      const imageUrl = `${SITE}/api/cards/square/${encodeURIComponent(article.id)}.png`;
+      // Instagram requires a public URL — Meta fetches the image server-side.
+      // Prefer the article's own image_url (served from major CDNs like BBC/
+      // Reuters/AP that Meta's crawler can always reach). Fall back to our
+      // branded square card only if the article has no image. This avoids
+      // Meta's crawler being blocked by Hostinger's WAF on scoopfeeds.com.
+      const imageUrl = article.image_url ||
+        `${SITE}/api/cards/square/${encodeURIComponent(article.id)}.png`;
       const out = await postToInstagram({
         text: composed.caption,
         imageUrl,
