@@ -43,8 +43,8 @@ export default function ReaderModal() {
   const { language, autoLanguage, setAuthOpen } = useNewsStore();
   const { toggle: toggleSave, isSaved: checkSaved } = useSaveArticle();
   const { isPremium } = useAuth();
-  const adSenseConfig = isPremium ? null : publicConfig?.adsense;
   const { data: publicConfig } = usePublicConfig();
+  const adSenseConfig = isPremium ? null : publicConfig?.adsense;
   const url = open ? article?.url : null;
   const { data, isLoading, isError, error } = useReaderArticle(url);
 
