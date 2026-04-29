@@ -326,13 +326,13 @@ export default function ReaderModal() {
 
               {/* After-article AdSense unit — highest-viewability placement;
                   only shown to free users once article content has rendered. */}
-              {adSenseConfig && (!meterResult || meterResult.allowed) && html && (
+              {adSenseConfig?.enabled && (!meterResult || meterResult.allowed) && html && (
                 <div className="mt-8 pt-2">
                   <AdSenseUnit
-                    adSlot={adSenseConfig.afterArticleSlot || adSenseConfig.defaultSlot}
-                    adClient={adSenseConfig.client}
+                    slotName="inline"
+                    config={adSenseConfig}
+                    label="Ad"
                     format="auto"
-                    responsive
                     minHeight={100}
                   />
                 </div>
