@@ -12,11 +12,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useReaderStore, useReaderArticle, useTranslatedReader } from "../../hooks/useReader";
 import { useNewsStore } from "../../store/newsStore";
 import { useSaveArticle } from "../../hooks/useSaveArticle";
+import { useAuth } from "../../hooks/useAuth";
 import { usePublicConfig } from "../../hooks/useNews";
 import { isRtl, langFont, nativeName, LANG_BY_CODE } from "../../lib/languages";
 import { track, trackShare, trackOutboundClick, trackSave } from "../../lib/track";
 import TipJar from "../tips/TipJar";
 import NewsletterSignup, { readSubToken } from "../newsletter/NewsletterSignup";
+import { AdSenseUnit } from "../ads/AdSense";
 
 // Fetches 4 related stories in the same category, used by the recirculation
 // block at the bottom of the reader. Cached per category to avoid re-fetching
@@ -40,6 +42,8 @@ export default function ReaderModal() {
   const { article, open, closeReader, openReader } = useReaderStore();
   const { language, autoLanguage, setAuthOpen } = useNewsStore();
   const { toggle: toggleSave, isSaved: checkSaved } = useSaveArticle();
+  const { isPremium } = useAuth();
+  const adSenseConfig = isPremium ? null : publicConfig?.adsense;
   const { data: publicConfig } = usePublicConfig();
   const url = open ? article?.url : null;
   const { data, isLoading, isError, error } = useReaderArticle(url);
@@ -318,6 +322,20 @@ export default function ReaderModal() {
                   Extracted from {new URL(article.url).hostname} · approx {Math.max(1, Math.round(data.length / 1100))} min read ·{" "}
                   <a href={article.url} target="_blank" rel="noopener noreferrer" onClick={handleSourceClick} className="underline">original</a>
                 </p>
+              )}
+
+              {/* After-article AdSense unit — highest-viewability placement;
+                  only shown to free users once article content has rendered. */}
+              {adSenseConfig && (!meterResult || meterResult.allowed) && html && (
+                <div className="mt-8 pt-2">
+                  <AdSenseUnit
+                    adSlot={adSenseConfig.afterArticleSlot || adSenseConfig.defaultSlot}
+                    adClient={adSenseConfig.client}
+                    format="auto"
+                    responsive
+                    minHeight={100}
+                  />
+                </div>
               )}
 
               {/* Continue reading — recirculation block. Raises pages-per-session
