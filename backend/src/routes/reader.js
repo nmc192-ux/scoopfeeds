@@ -10,11 +10,21 @@
  */
 import { Router } from "express";
 import axios from "axios";
-import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { logger } from "../services/logger.js";
 
 const router = Router();
+
+// jsdom is loaded lazily — it has a transitive CJS→ESM compat issue with
+// html-encoding-sniffer/@exodus/bytes that crashes Node 18 at module load
+// time. Lazy-loading lets the rest of the server start even if jsdom fails.
+let _JSDOM = null;
+async function getJSDOM() {
+  if (_JSDOM) return _JSDOM;
+  const mod = await import("jsdom");
+  _JSDOM = mod.JSDOM;
+  return _JSDOM;
+}
 
 // ─── Cache (12h) ─────────────────────────────────────────────────────────────
 const CACHE = new Map();
@@ -80,6 +90,7 @@ router.get("/", async (req, res) => {
       return res.status(415).json({ success: false, error: "Not an HTML page" });
     }
 
+    const JSDOM = await getJSDOM();
     const dom = new JSDOM(html, { url });
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
