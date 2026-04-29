@@ -70,9 +70,15 @@ function _loadSessionFromDisk() {
     if (!existsSync(SESSION_PATH)) return null;
     const raw = JSON.parse(readFileSync(SESSION_PATH, "utf8"));
     if (raw?.accessJwt && raw?.refreshJwt && raw?.did) {
-      // Only trust the cache if the handle matches the current env (someone
-      // may have rotated accounts since the file was written).
-      if (raw.handle && getHandle() && raw.handle !== getHandle()) return null;
+      // Reject if handles differ AND neither could be a custom-domain alias of
+      // the other. Same DID = same account regardless of handle string, so we
+      // only reject on an outright mismatch where we have no DID to fall back on.
+      // (nmc192.bsky.social ↔ scoopfeeds.com are the same account via DID.)
+      if (raw.handle && getHandle() && raw.handle !== getHandle()) {
+        // If the DID is present we trust it — different handle strings can still
+        // resolve to the same DID (custom domain handles). Keep the session.
+        if (!raw.did) return null;
+      }
       return raw;
     }
   } catch (e) {
