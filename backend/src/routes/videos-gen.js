@@ -37,6 +37,7 @@ import {
 import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEventVideo, previewSlide } from "../services/videoGenerator.js";
 import { isTtsConfigured, ttsProvider } from "../services/ttsService.js";
 import { isYouTubeConfigured, uploadToYouTube, getChannelInfo } from "../services/youtubeClient.js";
+import { isTikTokConfigured, uploadToTikTok } from "../services/tiktokClient.js";
 import { logger } from "../services/logger.js";
 
 const router = Router();
@@ -92,6 +93,7 @@ router.get("/status", (_req, res) => {
     ttsConfigured:   isTtsConfigured(),
     ttsProvider:     ttsProvider(),
     youtubeConfigured: isYouTubeConfigured(),
+    tiktokConfigured:  isTikTokConfigured(),
     jobsByStatus:    byStatus,
     totalJobs:       jobs.length,
   });
@@ -475,11 +477,17 @@ router.post("/mark-failed", requireAdmin, express.json({ limit: "8kb" }), (req, 
 // One-time setup: run `node scripts/youtube-auth.mjs` locally to get the
 // refresh token, then set all three in Hostinger env panel.
 router.post("/publish", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
-  if (!isYouTubeConfigured()) {
+  const ytConfigured  = isYouTubeConfigured();
+  const tikConfigured = isTikTokConfigured();
+
+  if (!ytConfigured && !tikConfigured) {
     return res.json({
       ok:    false,
-      reason: "YouTube not configured",
-      setup:  "Run `node scripts/youtube-auth.mjs` locally, then set YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN in Hostinger env panel.",
+      reason: "No video platform configured",
+      setup:  [
+        "YouTube: run `node scripts/youtube-auth.mjs` locally, then set YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN.",
+        "TikTok:  run `node scripts/tiktok-auth.mjs` locally (after Content Posting API approval), then set TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, TIKTOK_ACCESS_TOKEN, TIKTOK_OPEN_ID.",
+      ],
     });
   }
 
@@ -518,7 +526,7 @@ router.post("/publish", requireAdmin, express.json({ limit: "8kb" }), async (req
       continue;
     }
 
-    // Build a quality YouTube title + description from the article.
+    // Build a quality title + description from the article.
     const article = getArticleById(job.article_id);
     const title   = (article?.title || job.article_title || "News").slice(0, 99);
     const source  = article?.source_name || "Scoop";
@@ -537,44 +545,83 @@ router.post("/publish", requireAdmin, express.json({ limit: "8kb" }), async (req
     ].filter(Boolean).slice(0, 15);
 
     if (dryRun) {
-      results.push({ jobId: job.id, ok: true, dryRun: true, title, outputPath: job.output_path });
+      results.push({
+        jobId: job.id, ok: true, dryRun: true, title,
+        outputPath: job.output_path,
+        platforms: { youtube: ytConfigured, tiktok: tikConfigured },
+      });
       continue;
     }
 
-    try {
-      const { videoId, videoUrl } = await uploadToYouTube({
-        filePath:    job.output_path,
-        title,
-        description: desc,
-        tags,
-        category:    25,  // 25 = News & Politics
-        isShort:     true,
-      });
+    const jobResult   = { jobId: job.id, ok: false, title, youtube: null, tiktok: null };
+    const platforms   = [];
 
-      // Mark as published in the DB.
+    // ── YouTube Shorts ──────────────────────────────────────────────────────
+    if (ytConfigured) {
+      try {
+        const { videoId, videoUrl } = await uploadToYouTube({
+          filePath:    job.output_path,
+          title,
+          description: desc,
+          tags,
+          category:    25,  // 25 = News & Politics
+          isShort:     true,
+        });
+        platforms.push("youtube");
+        jobResult.youtube = { videoId, videoUrl };
+        try {
+          db.prepare(`
+            INSERT OR IGNORE INTO social_posts
+              (article_id, platform, status, post_url, platform_post_id, posted_at)
+            VALUES (?, 'youtube', 'posted', ?, ?, ?)
+          `).run(job.article_id, videoUrl, videoId, Date.now());
+        } catch {}
+        logger.info(`📺 Published to YouTube Shorts: ${videoId} — "${title}"`);
+      } catch (err) {
+        jobResult.youtube = { error: err.message };
+        logger.error(`📺 YouTube publish failed for job ${job.id}: ${err.message}`);
+      }
+    }
+
+    // ── TikTok ──────────────────────────────────────────────────────────────
+    if (tikConfigured) {
+      try {
+        const { publishId, videoId: tikTokVideoId, videoUrl: tikTokUrl } = await uploadToTikTok({
+          filePath:    job.output_path,
+          title,
+          description: desc,
+          tags,
+        });
+        platforms.push("tiktok");
+        jobResult.tiktok = { publishId, videoId: tikTokVideoId, videoUrl: tikTokUrl };
+        try {
+          db.prepare(`
+            INSERT OR IGNORE INTO social_posts
+              (article_id, platform, status, post_url, platform_post_id, posted_at)
+            VALUES (?, 'tiktok', 'posted', ?, ?, ?)
+          `).run(job.article_id, tikTokUrl, tikTokVideoId || publishId, Date.now());
+        } catch {}
+        logger.info(`📱 Published to TikTok: publishId=${publishId} — "${title}"`);
+      } catch (err) {
+        jobResult.tiktok = { error: err.message };
+        logger.error(`📱 TikTok publish failed for job ${job.id}: ${err.message}`);
+      }
+    }
+
+    // Mark job published if at least one platform succeeded.
+    if (platforms.length > 0) {
       db.prepare(`
         UPDATE video_jobs
         SET status = 'published',
             platforms_posted = ?,
             published_at = ?
         WHERE id = ?
-      `).run(JSON.stringify(["youtube"]), Date.now(), job.id);
-
-      // Also record in social_posts table for the attribution dashboard.
-      try {
-        db.prepare(`
-          INSERT OR IGNORE INTO social_posts
-            (article_id, platform, status, post_url, platform_post_id, posted_at)
-          VALUES (?, 'youtube', 'posted', ?, ?, ?)
-        `).run(job.article_id, videoUrl, videoId, Date.now());
-      } catch {}
-
-      logger.info(`📺 Published to YouTube Shorts: ${videoId} — "${title}"`);
-      results.push({ jobId: job.id, ok: true, videoId, videoUrl, title });
-    } catch (err) {
-      logger.error(`📺 YouTube publish failed for job ${job.id}: ${err.message}`);
-      results.push({ jobId: job.id, ok: false, error: err.message });
+      `).run(JSON.stringify(platforms), Date.now(), job.id);
+      jobResult.ok        = true;
+      jobResult.platforms = platforms;
     }
+
+    results.push(jobResult);
   }
 
   const okCount   = results.filter(r => r.ok).length;
