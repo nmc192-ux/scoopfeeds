@@ -15,6 +15,7 @@ import { usePublicConfig } from "../../hooks/useNews";
 import { isRtl, langFont, nativeName, LANG_BY_CODE } from "../../lib/languages";
 import { track, trackShare, trackOutboundClick, trackSave } from "../../lib/track";
 import TipJar from "../tips/TipJar";
+import NewsletterSignup, { readSubToken } from "../newsletter/NewsletterSignup";
 
 // Fetches 4 related stories in the same category, used by the recirculation
 // block at the bottom of the reader. Cached per category to avoid re-fetching
@@ -355,6 +356,14 @@ export default function ReaderModal() {
                     ))}
                   </div>
                 </section>
+              )}
+
+              {/* Inline newsletter signup — shown after article body to capture
+                  readers at peak engagement. Hidden once they're subscribed. */}
+              {(!meterResult || meterResult.allowed) && !readSubToken() && (
+                <div className="mt-8 pt-6 border-t border-[var(--color-border)]">
+                  <NewsletterSignup compact source="reader_modal" />
+                </div>
               )}
 
               {/* Support Scoop tip CTA — renders when Ko-fi is configured */}
