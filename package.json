@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "main": "backend/server.js",
-  "type": "module",
   "scripts": {
     "build": "npm ci --prefix backend && npm ci --prefix frontend && npm run build --prefix frontend",
     "start": "node backend/server.js"
