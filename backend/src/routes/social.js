@@ -382,7 +382,17 @@ router.get("/ig-discover", requireAdmin, async (req, res) => {
 //   fetch(`https://scoopfeeds.com/scoop-ops/refresh-fb-token?key=ADMIN_KEY&user_token=${t}`)
 //     .then(r=>r.json()).then(console.log);
 router.get("/refresh-fb-token", requireAdmin, async (req, res) => {
-  const userToken = (req.query.user_token || "").trim();
+  // Accept either plain user_token or hex_user_token (hex-encoded to survive browser security filters).
+  let userToken = (req.query.user_token || "").trim();
+  if (!userToken && req.query.hex_user_token) {
+    // Decode hex → string
+    const hex = req.query.hex_user_token.trim().replace(/\s+/g, "");
+    try {
+      userToken = Buffer.from(hex, "hex").toString("utf8");
+    } catch (_e) {
+      return res.status(400).json({ ok: false, error: "invalid hex_user_token" });
+    }
+  }
   if (!userToken || !userToken.startsWith("EAA")) {
     return res.status(400).json({ ok: false, error: "missing or invalid user_token (must be a Graph API user access token starting with EAA)" });
   }
