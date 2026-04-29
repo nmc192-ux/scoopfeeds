@@ -602,6 +602,68 @@ router.get("/youtube-channel", requireAdmin, async (_req, res) => {
   }
 });
 
+// ─── Upload recap / live-event video (used by GH Actions render worker) ─────
+// POST /scoop-ops/videos-gen/upload-recap
+//   Query: ?slug=daily-all-2026-04-29&durationSecs=65&hasAudio=false&kind=daily|weekly|live
+//   Body:  <raw MP4 bytes, Content-Type: video/mp4>
+//
+// The GH Actions render-recap.yml workflow renders recap videos locally (where
+// ffmpeg is available) and uploads them here. The server writes the MP4 to
+// data/videos/{slug}.mp4, inserts a video_job row as 'ready', and returns the
+// job ID for the admin review UI.
+router.post("/upload-recap", requireAdmin, mp4Parser, (req, res) => {
+  const slug = String(req.query.slug || "").replace(/[^a-z0-9_-]/gi, "_").slice(0, 80);
+  if (!slug) return res.status(400).json({ ok: false, error: "slug query param required" });
+
+  if (!Buffer.isBuffer(req.body) || req.body.length < 1000) {
+    return res.status(400).json({ ok: false, error: "missing or too-small MP4 body (need ≥1KB)" });
+  }
+
+  const outputPath = path.join(VIDEOS_DIR, `${slug}.mp4`);
+  try {
+    writeFileSync(outputPath, req.body);
+    const sizeBytes   = req.body.length;
+    const durationSecs = parseInt(req.query.durationSecs, 10) || 60;
+    const hasAudio    = req.query.hasAudio === "true";
+    const kind        = String(req.query.kind || "daily").slice(0, 20);
+
+    // Insert a synthetic video_job so the review UI + publish pipeline can
+    // treat this recap just like a per-article video.
+    const db = getDb();
+
+    // Use a stable synthetic article_id so repeated uploads of the same recap
+    // don't create duplicate job rows.
+    const syntheticId = `recap-${slug}`;
+    const existing = db.prepare(`SELECT id FROM video_jobs WHERE article_id = ?`).get(syntheticId);
+
+    let jobId;
+    if (existing) {
+      // Re-upload: update the existing job back to 'ready' so it can be re-reviewed.
+      db.prepare(`
+        UPDATE video_jobs
+        SET status = 'ready', output_path = ?, duration_secs = ?, has_audio = ?,
+            rendered_at = ?, error = NULL
+        WHERE id = ?
+      `).run(outputPath, durationSecs, hasAudio ? 1 : 0, Date.now(), existing.id);
+      jobId = existing.id;
+    } else {
+      // First upload: create a new job row.
+      const r = db.prepare(`
+        INSERT INTO video_jobs (article_id, status, output_path, duration_secs,
+          has_audio, rendered_at, created_at)
+        VALUES (?, 'ready', ?, ?, ?, ?, ?)
+      `).run(syntheticId, outputPath, durationSecs, hasAudio ? 1 : 0, Date.now(), Date.now());
+      jobId = r.lastInsertRowid;
+    }
+
+    logger.info(`📥 Recap uploaded: ${slug} (${(sizeBytes / 1024).toFixed(0)} KB, ${durationSecs}s, kind=${kind}) → job ${jobId}`);
+    res.json({ ok: true, jobId, slug, outputPath, sizeBytes, durationSecs, hasAudio, kind });
+  } catch (err) {
+    logger.error(`recap upload write failed: ${err.message}`);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── Reset failed jobs ───────────────────────────────────────────────────────
 // POST /scoop-ops/videos-gen/reset-failed
 //   Body: { all?: boolean }  — if all=true resets ALL failed jobs, otherwise

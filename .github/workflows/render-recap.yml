@@ -1,0 +1,82 @@
+name: Render daily recap video
+
+# Renders a 60-second "Top 5 today" vertical MP4 recap on a free GitHub
+# runner (ffmpeg available) and uploads it to scoopfeeds.com for review.
+# Why here instead of on the server: Hostinger Cloud Hosting blocks spawn().
+#
+# Required repo secrets (Settings → Secrets → Actions):
+#   OPS_KEY   — value of ADMIN_KEY on the server
+#   SITE_URL  — optional, defaults to https://scoopfeeds.com
+#
+# Optional (enables TTS voiceover):
+#   OPENAI_API_KEY / ELEVENLABS_API_KEY / GOOGLE_TTS_KEY
+
+on:
+  schedule:
+    # 06:30 UTC daily — fires ~30 min after the article batch render to ensure
+    # fresh content is available. GitHub cron is best-effort; actual firing
+    # may be up to 15 min late.
+    - cron: "30 6 * * *"
+    # 12:30 UTC — weekly recaps (category round-ups) run on Sundays.
+    # Uses RECAP_KIND=weekly trigger below; only fires on Sunday.
+    # (We reuse the same workflow with different env rather than a 2nd file.)
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "daily | weekly"
+        required: false
+        default: "daily"
+      category:
+        description: "Category slug (leave blank for all)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Render but don't upload (true/false)"
+        required: false
+        default: "false"
+
+concurrency:
+  group: render-recap
+  cancel-in-progress: false
+
+jobs:
+  recap:
+    name: Render recap video
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend deps
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify ffmpeg + fonts
+        working-directory: backend
+        run: |
+          node -e 'import("./src/services/videoGenerator.js").then(m => {
+            const ok = m.isVideoConfigured();
+            console.log("isVideoConfigured:", ok);
+            if (!ok) process.exit(1);
+          })'
+
+      - name: Render recap
+        env:
+          SITE_URL:           ${{ secrets.SITE_URL || 'https://scoopfeeds.com' }}
+          OPS_KEY:            ${{ secrets.OPS_KEY }}
+          # For scheduled runs: daily every day, weekly on Sundays
+          RECAP_KIND:         ${{ github.event.inputs.kind || (github.event.schedule == '30 6 * * 0' && 'weekly') || 'daily' }}
+          RECAP_CATEGORY:     ${{ github.event.inputs.category || '' }}
+          OPENAI_API_KEY:     ${{ secrets.OPENAI_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          GOOGLE_TTS_KEY:     ${{ secrets.GOOGLE_TTS_KEY }}
+        run: node scripts/render-recap.mjs
