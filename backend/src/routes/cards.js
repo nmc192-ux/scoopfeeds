@@ -49,6 +49,10 @@ router.get("/:preset/:id.png", async (req, res) => {
     const card = await ensureCard(article, preset);
     res.setHeader("Content-Type", card.contentType);
     res.setHeader("Cache-Control", `public, max-age=${ONE_WEEK}, s-maxage=${ONE_WEEK}, immutable`);
+    // Allow external CDN crawlers (Meta, Pinterest, etc.) to fetch card images.
+    // Helmet sets CORP: same-origin globally; override it here so social
+    // platforms can download these assets server-side for post previews.
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     // Use the cache filename's hash chunk as the etag — invalidates when
     // headline/category/source changes.
     const etag = `"${card.path.split("-").slice(-1)[0].replace(/\.png$/, "")}"`;
