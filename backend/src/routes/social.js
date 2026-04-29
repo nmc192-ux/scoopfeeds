@@ -236,6 +236,75 @@ router.get("/bluesky-reset", requireAdmin, async (req, res) => {
   }
 });
 
+// ── Instagram user-ID discovery ───────────────────────────────────────────
+// GET /scoop-ops/ig-discover
+//
+// Queries the Meta Graph API to find the Instagram Business account ID
+// connected to the configured Facebook Page. Requires:
+//   - FACEBOOK_PAGE_ID env var
+//   - FACEBOOK_PAGE_TOKEN env var
+//
+// Returns the IG User ID (and handle) ready to be pasted into Hostinger
+// as INSTAGRAM_USER_ID. Also shows whether INSTAGRAM_USER_ID is already set.
+router.get("/ig-discover", requireAdmin, async (req, res) => {
+  const pageId    = (process.env.FACEBOOK_PAGE_ID    || "").trim();
+  const pageToken = (process.env.FACEBOOK_PAGE_TOKEN || "").trim();
+  const currentId = (process.env.INSTAGRAM_USER_ID   || "").trim();
+
+  if (!pageId || !pageToken) {
+    return res.status(400).json({
+      ok: false,
+      error: "FACEBOOK_PAGE_ID and FACEBOOK_PAGE_TOKEN env vars are required",
+    });
+  }
+
+  try {
+    const url = `https://graph.facebook.com/v19.0/${pageId}?fields=connected_instagram_account&access_token=${pageToken}`;
+    const r = await fetch(url);
+    const body = await r.json();
+
+    if (!r.ok) {
+      return res.status(502).json({
+        ok: false,
+        graphStatus: r.status,
+        error: body?.error?.message || JSON.stringify(body).slice(0, 300),
+      });
+    }
+
+    const igAcct = body?.connected_instagram_account;
+    if (!igAcct?.id) {
+      return res.json({
+        ok: false,
+        alreadySet: Boolean(currentId),
+        currentId: currentId || null,
+        message: "No Instagram account is connected to this Facebook Page. " +
+          "In the Instagram app: Profile → Edit Profile → Switch to Professional account. " +
+          "Then in Meta Business Suite (business.facebook.com): Settings → Accounts → " +
+          "Instagram accounts → Add → connect @drjahanzebhussain.",
+      });
+    }
+
+    // Fetch the IG username too
+    const igUrl = `https://graph.facebook.com/v19.0/${igAcct.id}?fields=username,name&access_token=${pageToken}`;
+    const igR = await fetch(igUrl);
+    const igBody = igR.ok ? await igR.json() : {};
+
+    res.json({
+      ok: true,
+      igUserId:    igAcct.id,
+      igUsername:  igBody.username || null,
+      igName:      igBody.name     || null,
+      alreadySet:  Boolean(currentId),
+      currentId:   currentId || null,
+      action: currentId === igAcct.id
+        ? "INSTAGRAM_USER_ID already matches — nothing to do."
+        : `Set INSTAGRAM_USER_ID=${igAcct.id} in Hostinger env panel, then redeploy.`,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Attribution dashboard ─────────────────────────────────────────────────
 // GET /scoop-ops/attribution  — per-article stats: social posts, video job,
 //   analytics events (views/saves/shares last 7d), meter opens, credibility.
