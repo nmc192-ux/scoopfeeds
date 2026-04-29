@@ -56,7 +56,12 @@ function requireAdmin(req, res, next) {
 // ─── Filesystem paths (mirrored from videoGenerator.js) ─────────────────────
 const __dirname    = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = path.resolve(__dirname, "../..");
-const VIDEOS_DIR   = path.join(BACKEND_ROOT, "data", "videos");
+// Mirror videoGenerator's SCOOP_PERSISTENT_DATA_DIR logic so video files
+// survive Hostinger redeploys that wipe the deploy directory.
+const DATA_DIR   = process.env.SCOOP_PERSISTENT_DATA_DIR
+  ? path.resolve(process.env.SCOOP_PERSISTENT_DATA_DIR)
+  : path.join(BACKEND_ROOT, "data");
+const VIDEOS_DIR   = path.join(DATA_DIR, "videos");
 if (!existsSync(VIDEOS_DIR)) mkdirSync(VIDEOS_DIR, { recursive: true });
 
 // Raw MP4 body parser — used by /upload. Express's default body parsers

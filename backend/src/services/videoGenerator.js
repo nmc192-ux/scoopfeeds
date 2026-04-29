@@ -574,6 +574,14 @@ const XFADE_DURATION = 0.4;
 let _supportsXfade = undefined; // undefined = unprobed
 function supportsXfade() {
   if (_supportsXfade !== undefined) return _supportsXfade;
+  // Hard override — set FFMPEG_NO_XFADE=1 when the system ffmpeg lists xfade
+  // in `-filters` but cannot actually use it at render time (e.g. Hostinger
+  // managed-hosting builds compiled without certain libavfilter modules).
+  if (process.env.FFMPEG_NO_XFADE) {
+    _supportsXfade = false;
+    logger.info("videoGenerator: FFMPEG_NO_XFADE set — using hard cuts (no xfade transitions)");
+    return _supportsXfade;
+  }
   const ff = getFFmpegPath();
   if (!ff) { _supportsXfade = false; return _supportsXfade; }
   try {
