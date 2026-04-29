@@ -236,6 +236,65 @@ router.get("/bluesky-reset", requireAdmin, async (req, res) => {
   }
 });
 
+// ── Bluesky session diagnostics ──────────────────────────────────────────
+// GET /scoop-ops/bluesky-diag
+// Shows the state of the persisted session and cooldown files so we can
+// debug the "session not persisting → repeated createSession → 429" loop.
+router.get("/bluesky-diag", requireAdmin, async (_req, res) => {
+  const path = await import("path");
+  const fs   = await import("fs");
+  const url  = await import("url");
+
+  const here = path.dirname(url.fileURLToPath(import.meta.url));
+  const persistDir = process.env.SCOOP_PERSISTENT_DATA_DIR
+    ? path.resolve(process.env.SCOOP_PERSISTENT_DATA_DIR)
+    : path.resolve(here, "../../data");
+
+  const result = { persistDir, files: {} };
+
+  for (const name of ["bluesky-session.json", "bluesky-cooldown.json"]) {
+    const fp = path.join(persistDir, name);
+    if (!fs.existsSync(fp)) {
+      result.files[name] = { exists: false };
+      continue;
+    }
+    try {
+      const stat = fs.statSync(fp);
+      const raw  = JSON.parse(fs.readFileSync(fp, "utf8"));
+      // Redact tokens — only show metadata
+      const safe = {};
+      if (name === "bluesky-session.json") {
+        safe.handle    = raw.handle;
+        safe.did       = raw.did ? raw.did.slice(0, 8) + "…" : null;
+        safe.createdAt = raw.createdAt ? new Date(raw.createdAt).toISOString() : null;
+        safe.hasAccessJwt  = Boolean(raw.accessJwt);
+        safe.hasRefreshJwt = Boolean(raw.refreshJwt);
+      } else {
+        safe.until      = raw.until ? new Date(raw.until).toISOString() : null;
+        safe.failCount  = raw.failCount;
+        safe.setAt      = raw.setAt ? new Date(raw.setAt).toISOString() : null;
+        safe.remainingSecs = raw.until ? Math.max(0, Math.ceil((raw.until - Date.now()) / 1000)) : 0;
+      }
+      result.files[name] = { exists: true, modifiedAt: stat.mtimeMs, ...safe };
+    } catch (e) {
+      result.files[name] = { exists: true, parseError: e.message };
+    }
+  }
+
+  // Check if the dir itself is writable
+  try {
+    const testFile = path.join(persistDir, ".write-test");
+    fs.writeFileSync(testFile, "ok", { flag: "w" });
+    fs.unlinkSync(testFile);
+    result.dirWritable = true;
+  } catch (e) {
+    result.dirWritable = false;
+    result.dirWriteError = e.message;
+  }
+
+  res.json(result);
+});
+
 // ── Instagram user-ID discovery ───────────────────────────────────────────
 // GET /scoop-ops/ig-discover
 //
