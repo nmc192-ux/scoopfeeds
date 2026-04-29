@@ -11,6 +11,7 @@ import express from "express";
 import { getDb, socialPostStats } from "../models/database.js";
 import { composeAllPlatforms } from "../services/socialComposer.js";
 import { runPlatformCycle, listEnabledPlatforms, runAllPlatformsCycle } from "../services/socialPublisher.js";
+import { updateStoredFbToken } from "../services/facebookClient.js";
 
 const SITE_URL = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 
@@ -359,6 +360,70 @@ router.get("/ig-discover", requireAdmin, async (req, res) => {
         ? "INSTAGRAM_USER_ID already matches — nothing to do."
         : `Set INSTAGRAM_USER_ID=${igAcct.id} in Hostinger env panel, then redeploy.`,
     });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── Facebook token refresh ────────────────────────────────────────────────
+// GET /scoop-ops/refresh-fb-token?key=ADMIN_KEY&user_token=SHORT_LIVED_TOKEN
+//
+// Exchanges a short-lived Graph API user token for a long-lived one (60 days),
+// then fetches the Page access token derived from it. A page token from a
+// long-lived user token never expires — this is the permanent token we want.
+//
+// The server does the exchange itself so the app secret never leaves the server
+// and the raw token is never echoed back (only its length is returned).
+//
+// Usage: call this from the browser console on developers.facebook.com
+// after clicking "Generate Access Token" with pages_manage_posts +
+// publish_to_groups + instagram_basic + instagram_content_publish permissions.
+//   const t = document.querySelector('input').value; // the user token
+//   fetch(`https://scoopfeeds.com/scoop-ops/refresh-fb-token?key=ADMIN_KEY&user_token=${t}`)
+//     .then(r=>r.json()).then(console.log);
+router.get("/refresh-fb-token", requireAdmin, async (req, res) => {
+  const userToken = (req.query.user_token || "").trim();
+  if (!userToken || !userToken.startsWith("EAA")) {
+    return res.status(400).json({ ok: false, error: "missing or invalid user_token (must be a Graph API user access token starting with EAA)" });
+  }
+
+  const APP_ID     = process.env.FACEBOOK_APP_ID || "936089979063323";
+  const APP_SECRET = (process.env.FACEBOOK_APP_SECRET || "").trim();
+  const PAGE_ID    = (process.env.FACEBOOK_PAGE_ID    || "1126859220500685").trim();
+
+  if (!APP_SECRET) {
+    return res.status(500).json({ ok: false, error: "FACEBOOK_APP_SECRET env var not set" });
+  }
+
+  try {
+    // Step 1: exchange short-lived user token → long-lived user token (60 days).
+    const exchUrl = `https://graph.facebook.com/v25.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${APP_ID}&client_secret=${APP_SECRET}&fb_exchange_token=${encodeURIComponent(userToken)}`;
+    const exchRes = await fetch(exchUrl);
+    const exchData = await exchRes.json();
+    if (!exchData.access_token) {
+      return res.status(400).json({ ok: false, step: "exchange", error: exchData.error?.message || JSON.stringify(exchData).slice(0, 200) });
+    }
+    const longLivedToken = exchData.access_token;
+
+    // Step 2: get the Page access token using the long-lived user token.
+    // A page token derived from a long-lived user token NEVER expires.
+    const acctUrl = `https://graph.facebook.com/v25.0/me/accounts?fields=id,name,access_token&access_token=${encodeURIComponent(longLivedToken)}`;
+    const acctRes = await fetch(acctUrl);
+    const acctData = await acctRes.json();
+    if (!Array.isArray(acctData.data)) {
+      return res.status(400).json({ ok: false, step: "accounts", error: acctData.error?.message || JSON.stringify(acctData).slice(0, 200) });
+    }
+
+    const page = acctData.data.find(p => p.id === PAGE_ID);
+    if (!page?.access_token) {
+      const available = acctData.data.map(p => `${p.name} (${p.id})`).join(", ");
+      return res.status(400).json({ ok: false, step: "find_page", error: `Page ${PAGE_ID} not found in accounts. Available: ${available || "none"}` });
+    }
+
+    // Step 3: persist the new permanent page token to disk + update in-memory cache.
+    updateStoredFbToken(page.access_token, PAGE_ID);
+
+    res.json({ ok: true, page: page.name, pageId: page.id, tokenLength: page.access_token.length, note: "Token saved to persistent storage. Facebook and Instagram posts will use the new token immediately." });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

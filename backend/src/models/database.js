@@ -52,7 +52,8 @@ function initializeSchema(db) {
       is_featured INTEGER DEFAULT 0,
       view_count  INTEGER DEFAULT 0,
       tags        TEXT DEFAULT '[]',
-      language    TEXT DEFAULT 'en'
+      language    TEXT DEFAULT 'en',
+      is_duplicate INTEGER DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS idx_articles_category   ON articles(category);
@@ -327,6 +328,12 @@ function initializeSchema(db) {
       db.exec("ALTER TABLE articles ADD COLUMN language TEXT DEFAULT 'en'");
       logger.info("Migrated articles table: +language");
     }
+    // Migration: add is_duplicate for same-story cross-source dedup.
+    if (!cols.some((c) => c.name === "is_duplicate")) {
+      db.exec("ALTER TABLE articles ADD COLUMN is_duplicate INTEGER DEFAULT 0");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_articles_dup ON articles(is_duplicate, published_at DESC)");
+      logger.info("Migrated articles table: +is_duplicate");
+    }
   } catch (err) {
     logger.warn("Migration check failed", { error: err.message });
   }
@@ -432,6 +439,104 @@ export function upsertArticle(article) {
   `).run(article);
 }
 
+// ─── Same-story cross-source dedup ───────────────────────────────────────────
+//
+// When Reuters AND BBC AND AP all cover the same UN vote, three cards appear in
+// the feed. This dedup layer keeps the highest-credibility version and marks
+// the others as is_duplicate=1 so getArticles() filters them out.
+//
+// Algorithm:
+//   1. Extract meaningful title tokens (length ≥ 4, not stopwords) for the
+//      newly-ingested article.
+//   2. Query the last 4h for articles from different sources.
+//   3. Compare Jaccard similarity on token sets.
+//   4. If similarity ≥ 0.55 AND at least 4 tokens in the intersection:
+//        → mark the lower-credibility article as is_duplicate = 1.
+//        → if equal credibility, mark the newer one (keep the first published).
+//
+// Called from rssFetcher.js after every successful upsertArticle().
+// Never throws — failures are silently swallowed so ingestion is never blocked.
+
+const _DEDUP_STOPWORDS = new Set([
+  "about", "after", "again", "against", "could", "during", "first", "from",
+  "have", "having", "here", "into", "more", "most", "over", "says", "such",
+  "their", "there", "these", "they", "this", "through", "under", "until",
+  "what", "when", "where", "which", "while", "with", "would", "your", "that",
+  "will", "been", "were", "also", "just", "than", "them", "then", "some",
+  "very", "only", "even", "many", "much", "must", "make", "made", "back",
+  "before", "between", "other", "still", "those", "while", "against", "among",
+  "because", "being", "both", "each", "every", "however", "same", "should",
+  "says", "said", "says", "amid", "after", "over", "amid", "amid", "amid",
+  "amid", "news", "report", "reports", "update", "updates", "latest", "live",
+]);
+
+function _titleTokens(title) {
+  if (!title || typeof title !== "string") return new Set();
+  return new Set(
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((t) => t.length >= 4 && !_DEDUP_STOPWORDS.has(t)),
+  );
+}
+
+export function markDuplicateIfSimilar(article) {
+  if (!article || !article.title || !article.id) return;
+
+  const db = getDb();
+  const newTokens = _titleTokens(article.title);
+  if (newTokens.size < 3) return; // title too short to dedup reliably
+
+  // Look at articles from a different source published within ±4 hours,
+  // credibility ≥ 7, not already marked as a duplicate. Cap at 60 candidates
+  // (ORDER BY credibility DESC so the best version rises to the top).
+  const windowMs = 4 * 60 * 60 * 1000;
+  const lo = (article.published_at || Date.now()) - windowMs;
+  const hi = (article.published_at || Date.now()) + windowMs;
+
+  const candidates = db.prepare(`
+    SELECT id, title, credibility, source_name, published_at
+    FROM   articles
+    WHERE  id != ?
+      AND  source_name != ?
+      AND  published_at BETWEEN ? AND ?
+      AND  is_duplicate = 0
+    ORDER BY credibility DESC, published_at ASC
+    LIMIT 60
+  `).all(article.id, article.source_name || "", lo, hi);
+
+  for (const cand of candidates) {
+    const candTokens = _titleTokens(cand.title);
+    if (candTokens.size < 3) continue;
+
+    const intersection = [...newTokens].filter((t) => candTokens.has(t));
+    if (intersection.length < 4) continue; // must share at least 4 meaningful words
+
+    const union = new Set([...newTokens, ...candTokens]);
+    const jaccard = intersection.length / union.size;
+    if (jaccard < 0.55) continue;
+
+    // They're the same story — decide which to keep.
+    let keepId, dupId;
+    if ((article.credibility || 0) > (cand.credibility || 0)) {
+      keepId = article.id; dupId = cand.id;
+    } else if ((cand.credibility || 0) > (article.credibility || 0)) {
+      keepId = cand.id;    dupId = article.id;
+    } else {
+      // Equal credibility — keep the earlier-published one.
+      keepId = (article.published_at || 0) <= (cand.published_at || 0) ? article.id : cand.id;
+      dupId  = keepId === article.id ? cand.id : article.id;
+    }
+
+    db.prepare(`UPDATE articles SET is_duplicate = 1 WHERE id = ?`).run(dupId);
+    logger.debug(`dedup: marked ${dupId} as duplicate of ${keepId} (jaccard=${jaccard.toFixed(2)})`);
+
+    // If the newly-inserted article itself is the duplicate, no need to check more.
+    if (dupId === article.id) return;
+  }
+}
+
 export function getArticles({
   category,
   categories = null,   // array of categories to OR-match (new; beats `category`)
@@ -444,10 +549,12 @@ export function getArticles({
 }) {
   const db = getDb();
   const useFts = search && ftsAvailable(db);
+  // is_duplicate = 0 filters out same-story cross-source near-duplicates so the
+  // feed only shows one version of each story (the highest-credibility source).
   let query = useFts
     ? `SELECT articles.* FROM articles JOIN articles_fts ON articles.rowid = articles_fts.rowid
-       WHERE articles_fts MATCH ? AND credibility >= ?`
-    : `SELECT * FROM articles WHERE credibility >= ?`;
+       WHERE articles_fts MATCH ? AND credibility >= ? AND articles.is_duplicate = 0`
+    : `SELECT * FROM articles WHERE credibility >= ? AND is_duplicate = 0`;
   const params = useFts ? [escapeFts(search), minCredibility] : [minCredibility];
 
   // Multi-category OR (new tab model). Fallback to single-category for back-compat.
@@ -500,7 +607,7 @@ export function getArticles({
 
 export function getFeaturedArticles(limit = 7) {
   return getDb().prepare(`
-    SELECT * FROM articles WHERE credibility >= 8
+    SELECT * FROM articles WHERE credibility >= 8 AND is_duplicate = 0
     ORDER BY
       (published_at / 10800000) DESC,
       CASE category
@@ -889,6 +996,8 @@ export function lastPostAt(platform) {
 
 export function findFreshUnpostedArticles({ platform, minCredibility = 7, withinMs = 12 * 60 * 60 * 1000, limit = 10 } = {}) {
   const cutoff = Date.now() - withinMs;
+  // Also filter is_duplicate = 0 so we never auto-post a near-duplicate story
+  // to social — only the highest-credibility version of each story gets posted.
   return getDb().prepare(`
     SELECT a.id, a.title, a.description, a.category, a.source_name, a.published_at, a.credibility, a.url, a.image_url
     FROM articles a
@@ -896,6 +1005,7 @@ export function findFreshUnpostedArticles({ platform, minCredibility = 7, within
     WHERE s.article_id IS NULL
       AND a.published_at > ?
       AND a.credibility >= ?
+      AND a.is_duplicate = 0
     ORDER BY a.credibility DESC, a.published_at DESC
     LIMIT ?
   `).all(platform, cutoff, minCredibility, limit);

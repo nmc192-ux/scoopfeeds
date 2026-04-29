@@ -269,6 +269,15 @@ export async function postReelToFacebook({ filePath, videoUrl, caption = "" }) {
   return await _postLink({ message: msg, link: videoUrl || "" });
 }
 
+// Update the stored page token (call after a manual token refresh).
+// Clears the in-memory cache so the very next post uses the new token.
+export function updateStoredFbToken(pageToken, pageId) {
+  cached = null;
+  _writeDiskToken({ pageToken, pageId: pageId || getEnvPageId() });
+  cached = { pageToken, pageId: pageId || getEnvPageId() }; // pre-warm
+  logger.info("facebookClient: stored page token updated");
+}
+
 // Public API: post text + optional image (buffer preferred; URL as fallback).
 // Strategy:
 //   1. If imageBuffer is provided → upload bytes directly (most reliable).

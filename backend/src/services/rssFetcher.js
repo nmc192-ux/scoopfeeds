@@ -1,7 +1,7 @@
 import Parser from "rss-parser";
 import { v5 as uuidv5 } from "uuid";
 import { logger, logIngestion, logSourceHealth } from "./logger.js";
-import { upsertArticle, logIngestionEvent, updateSourceHealth } from "../models/database.js";
+import { upsertArticle, markDuplicateIfSimilar, logIngestionEvent, updateSourceHealth } from "../models/database.js";
 
 const NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
 
@@ -83,8 +83,21 @@ function normalizeUrl(rawUrl) {
   try {
     const u = new URL(rawUrl);
     u.protocol = "https:";
-    u.hostname = u.hostname.replace(/^www\./i, "").toLowerCase();
+    // Strip www., m. (mobile), and mobile. subdomains so these are treated
+    // as the same canonical URL. e.g. m.bbc.com == www.bbc.com == bbc.com.
+    u.hostname = u.hostname
+      .replace(/^www\./i, "")
+      .replace(/^m\./i, "")
+      .replace(/^mobile\./i, "")
+      .toLowerCase();
     u.hash = "";
+    // Strip AMP URL variants so the AMP page and the canonical page get the
+    // same ID. Handles /amp/, .amp, .amp.html suffixes.
+    u.pathname = u.pathname
+      .replace(/\.amp\.html?$/i, "")
+      .replace(/\.amp$/i, "")
+      .replace(/\/amp\/?$/i, "/")
+      .replace(/\/amp\//i, "/");
     // Drop tracking params; keep meaningful ones (story IDs, page numbers, etc.).
     const keep = new URLSearchParams();
     for (const [k, v] of u.searchParams) {
@@ -163,7 +176,13 @@ export async function fetchSource(source) {
       };
 
       const insertResult = upsertArticle(article);
-      if (insertResult.changes > 0) result.newArticles++;
+      if (insertResult.changes > 0) {
+        result.newArticles++;
+        // Check if this new article is a near-duplicate of another recently
+        // ingested article (same story from a different wire/source). Mark the
+        // lower-credibility copy as is_duplicate=1 so the feed hides it.
+        try { markDuplicateIfSimilar(article); } catch (_e) { /* non-fatal */ }
+      }
     }
 
     const duration = Date.now() - startTime;
