@@ -7,13 +7,14 @@
  */
 import { motion, AnimatePresence } from "framer-motion";
 import { X, ExternalLink, Type, Sun, Bookmark, Share2, Languages, Loader2, ArrowRight } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useReaderStore, useReaderArticle, useTranslatedReader } from "../../hooks/useReader";
 import { useNewsStore } from "../../store/newsStore";
 import { useSaveArticle } from "../../hooks/useSaveArticle";
 import { useAuth } from "../../hooks/useAuth";
 import { usePublicConfig } from "../../hooks/useNews";
+import { useEscapeKey, useBodyScrollLock, useFocusTrap } from "../../hooks/useModal";
 import { isRtl, langFont, nativeName, LANG_BY_CODE } from "../../lib/languages";
 import { track, trackShare, trackOutboundClick, trackSave } from "../../lib/track";
 import TipJar from "../tips/TipJar";
@@ -94,18 +95,11 @@ export default function ReaderModal() {
 
   const isSaved = article ? checkSaved(article.id) : false;
 
-  // Lock body scroll while open + support Esc
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKey = (e) => e.key === "Escape" && closeReader();
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open, closeReader]);
+  // Modal a11y: scroll lock + Escape close + focus trap (with focus restore)
+  const sheetRef = useRef(null);
+  useBodyScrollLock(open);
+  useEscapeKey(closeReader, open);
+  useFocusTrap(sheetRef, open);
 
   const fontPx = FONT_SIZES[fontIdx].size;
 
@@ -148,12 +142,16 @@ export default function ReaderModal() {
           onClick={closeReader}
         >
           <motion.div
+            ref={sheetRef}
             key="reader-sheet"
             initial={{ y: 24, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 24, opacity: 0 }}
             transition={{ duration: 0.22, ease: "easeOut" }}
             onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={article?.title || "Article reader"}
             className={`relative w-full max-w-[780px] mx-auto my-0 sm:my-8 flex flex-col overflow-hidden shadow-2xl
                         ${sepia ? "bg-[#f7f1e3] text-[#3a2e1f]" : "bg-[var(--color-bg)] text-[var(--color-text)]"}
                         sm:rounded-2xl`}

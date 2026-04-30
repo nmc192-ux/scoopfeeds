@@ -6,14 +6,17 @@
  * sign-out button, and a link to their referral URL.
  *
  * Usage:
- *   <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} auth={auth} />
- * where `auth` is the object returned by `useAuth()`.
+ *   <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+ *
+ * Modal mechanics (Esc / focus trap / scroll lock / backdrop click) are all
+ * handled by the shared <Modal /> primitive.
  */
 import { useState } from "react";
-import { X, Mail, Check, Loader2, LogOut, User, BookmarkCheck, Star } from "lucide-react";
+import { Mail, Check, Loader2, LogOut, User, BookmarkCheck, Star } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { usePublicConfig } from "../../hooks/useNews";
 import { readSubToken } from "../newsletter/NewsletterSignup";
+import Modal, { ModalBody } from "../ui/Modal";
 
 export default function AuthModal({ open, onClose }) {
   const auth = useAuth();
@@ -27,11 +30,7 @@ export default function AuthModal({ open, onClose }) {
   const referralUrl = subToken ? `https://scoopfeeds.com/?ref=${subToken}` : null;
 
   // Premium upgrade is offered ONLY when a Ko-fi membership URL is configured.
-  // Stripe is intentionally bypassed for now — account activation requires US
-  // tax info we don't have. Set KO_FI_MEMBERSHIP_URL on the backend to enable.
   const membershipUrl = publicConfig?.kofi?.membershipUrl || null;
-
-  if (!open) return null;
 
   const handleRequest = async (e) => {
     e.preventDefault();
@@ -53,32 +52,24 @@ export default function AuthModal({ open, onClose }) {
   };
 
   const handleUpgrade = () => {
-    // Open the Ko-fi membership page in a new tab. The user picks their tier
-    // there and pays via Ko-fi's checkout. A future webhook on the backend
-    // will receive the subscription event and auto-flip their tier.
     if (!membershipUrl) return;
     window.open(membershipUrl, "_blank", "noopener,noreferrer");
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.5)" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    <Modal
+      open={open}
+      onClose={onClose}
+      size="sm"
+      ariaLabel={auth.isLoggedIn ? "Profile" : sent ? "Check your email" : "Sign in to Scoop"}
+      zIndex={50}
     >
-      <div className="w-full max-w-sm bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-border)] p-6 relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-[var(--color-text-tertiary)] hover:text-[var(--color-text)] transition-colors"
-        >
-          <X size={20} />
-        </button>
-
+      <ModalBody className="pt-6">
         {auth.isLoggedIn ? (
-          /* ── Logged-in view ────────────────��──────── */
+          /* ── Logged-in view ───────────────────────── */
           <div>
             <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-full bg-brand-blue/10 text-brand-blue flex items-center justify-center">
+              <div className="w-10 h-10 rounded-full bg-cobalt-50 text-cobalt-600 flex items-center justify-center">
                 <User size={20} />
               </div>
               <div>
@@ -89,7 +80,7 @@ export default function AuthModal({ open, onClose }) {
 
             <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface2)] p-3 mb-4">
               <div className="flex items-center gap-2 mb-1">
-                <BookmarkCheck size={14} className="text-brand-blue" />
+                <BookmarkCheck size={14} className="text-cobalt-600" />
                 <span className="text-xs font-semibold">
                   {auth.savedArticles.length} saved article{auth.savedArticles.length !== 1 ? "s" : ""}
                 </span>
@@ -99,7 +90,6 @@ export default function AuthModal({ open, onClose }) {
               </p>
             </div>
 
-            {/* Premium upgrade / status — only renders when Ko-fi membership is set up */}
             {auth.isPremium ? (
               <div className="rounded-xl border border-amber-400/40 bg-amber-50 dark:bg-amber-900/10 p-3 mb-4 flex items-center gap-2">
                 <Star size={14} className="text-amber-500 flex-shrink-0" />
@@ -112,8 +102,9 @@ export default function AuthModal({ open, onClose }) {
               <button
                 onClick={handleUpgrade}
                 className="w-full mb-4 flex items-center justify-center gap-2 py-2.5 rounded-xl
-                           bg-gradient-to-r from-amber-500 to-orange-500 text-white text-sm font-semibold
-                           hover:opacity-90 transition-opacity"
+                           bg-gradient-to-r from-scoop-orange-500 to-scoop-orange-600 text-white text-sm font-semibold
+                           hover:opacity-90 transition-opacity
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-scoop-orange-500/50"
               >
                 <Star size={14} />
                 Go Premium — Ad-free · via Ko-fi
@@ -123,24 +114,26 @@ export default function AuthModal({ open, onClose }) {
             {referralUrl && (
               <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface2)] p-3 mb-4">
                 <p className="text-xs font-semibold mb-1">Your invite link</p>
-                <p className="text-[11px] text-brand-blue break-all">{referralUrl}</p>
+                <p className="text-[11px] text-cobalt-600 break-all">{referralUrl}</p>
               </div>
             )}
 
-            {err && <p className="text-[11px] text-red-500 mb-3">{err}</p>}
+            {err && <p className="text-[11px] text-[var(--color-alert)] mb-3">{err}</p>}
 
             <button
               onClick={handleLogout}
-              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-[var(--color-border)] text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface2)] transition-colors"
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-[var(--color-border)]
+                         text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface2)] transition-colors
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/40"
             >
               <LogOut size={14} />
               Sign out
             </button>
           </div>
         ) : sent ? (
-          /* ── Magic link sent ─────────��─────────────── */
+          /* ── Magic link sent ──────────────────────── */
           <div className="text-center py-4">
-            <div className="w-12 h-12 rounded-full bg-brand-green/10 text-brand-green flex items-center justify-center mx-auto mb-3">
+            <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3">
               <Check size={22} />
             </div>
             <h3 className="text-base font-bold mb-1">Check your email</h3>
@@ -149,14 +142,14 @@ export default function AuthModal({ open, onClose }) {
             </p>
           </div>
         ) : (
-          /* ── Sign in form ──────────────────────────── */
+          /* ── Sign in form ─────────────────────────── */
           <div>
             <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-full bg-brand-blue/10 text-brand-blue flex items-center justify-center">
+              <div className="w-10 h-10 rounded-full bg-cobalt-50 text-cobalt-600 flex items-center justify-center">
                 <Mail size={20} />
               </div>
               <div>
-                <h3 className="text-base font-bold leading-tight">Sign in to Scoop</h3>
+                <h3 className="text-base font-bold leading-tight">Sign in to Scoopfeeds</h3>
                 <p className="text-[11px] text-[var(--color-text-tertiary)]">No password. We email you a link.</p>
               </div>
             </div>
@@ -169,13 +162,18 @@ export default function AuthModal({ open, onClose }) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={busy}
-                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-surface2)] text-[var(--color-text)] placeholder-[var(--color-text-tertiary)] focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)]
+                           bg-[var(--color-surface2)] text-[var(--color-text)] placeholder-[var(--color-text-tertiary)]
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/40
+                           focus:border-cobalt-500"
               />
-              {err && <p className="text-[11px] text-red-500">{err}</p>}
+              {err && <p className="text-[11px] text-[var(--color-alert)]">{err}</p>}
               <button
                 type="submit"
                 disabled={busy}
-                className="w-full py-2 rounded-lg bg-brand-blue text-white text-sm font-semibold hover:opacity-90 disabled:opacity-60 flex items-center justify-center gap-2"
+                className="w-full py-2 rounded-lg bg-cobalt-600 text-white text-sm font-semibold
+                           hover:bg-cobalt-700 disabled:opacity-60 flex items-center justify-center gap-2
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/50"
               >
                 {busy ? <Loader2 size={14} className="animate-spin" /> : null}
                 Send magic link
@@ -187,7 +185,7 @@ export default function AuthModal({ open, onClose }) {
             </p>
           </div>
         )}
-      </div>
-    </div>
+      </ModalBody>
+    </Modal>
   );
 }
