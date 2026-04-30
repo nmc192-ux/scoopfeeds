@@ -95,6 +95,16 @@ export default {
       backdropBlur: {
         xs: "2px",
       },
+      // ── Motion language (Electric Signal) ───────────────────────
+      transitionDuration: {
+        fast:   "150ms",
+        normal: "250ms",
+        slow:   "400ms",
+      },
+      transitionTimingFunction: {
+        smooth: "cubic-bezier(0.16, 1, 0.3, 1)",
+        spring: "cubic-bezier(0.68, -0.55, 0.27, 1.55)",
+      },
     },
   },
   plugins: [],

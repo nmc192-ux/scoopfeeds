@@ -26,12 +26,24 @@ function formatTime(timestamp) {
 }
 
 function CredibilityDots({ score }) {
+  const filled = Math.ceil((score ?? 0) / 2);
+  const tier =
+    filled >= 5 ? "High"   :
+    filled >= 4 ? "Strong" :
+    filled >= 3 ? "Mixed"  :
+    filled >= 2 ? "Low"    : "Unverified";
+  const label = `Source credibility ${filled} of 5 — ${tier} (raw score ${score ?? 0}/10)`;
   return (
-    <div className="flex gap-0.5" title={`Credibility: ${score}/10`}>
+    <div
+      className="flex gap-0.5"
+      role="img"
+      aria-label={label}
+      title={label}
+    >
       {[...Array(5)].map((_, i) => (
         <div key={i} className={clsx(
           "w-1.5 h-1.5 rounded-full",
-          i < Math.ceil(score / 2) ? "bg-emerald-500" : "bg-[var(--color-border)]"
+          i < filled ? "bg-emerald-500" : "bg-[var(--color-border)]"
         )} />
       ))}
     </div>

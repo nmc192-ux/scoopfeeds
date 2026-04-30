@@ -108,7 +108,7 @@ export default function HousePromo({
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
-      className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden relative"
+      className="card overflow-hidden relative"
       style={minHeight ? { minHeight } : undefined}
     >
       <div className="px-3 py-2 flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface2)]/60">

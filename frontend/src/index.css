@@ -27,6 +27,14 @@
     --color-status-live: #10B981;       /* Emerald — live/online */
     --color-alert: #EF4444;             /* True alerts only */
     --scrollbar-width: thin;
+
+    /* ── Motion language ─────────────────────────────────────── */
+    --duration-fast: 150ms;             /* button press, icon swap */
+    --duration-normal: 250ms;           /* card hover, color change */
+    --duration-slow: 400ms;             /* page transition, modal */
+    --easing-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --easing-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --easing-spring: cubic-bezier(0.68, -0.55, 0.27, 1.55);
   }
 
   .dark {

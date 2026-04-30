@@ -26,7 +26,7 @@ export default function TipJar({ compact = false, kofiUrl = DEFAULT_KO_FI_URL })
   if (compact) {
     return (
       <div className="flex items-center gap-2 flex-wrap">
-        <Heart size={14} className="text-red-400 flex-shrink-0" />
+        <Heart size={14} className="text-scoop-orange-500 flex-shrink-0" />
         <span className="text-xs text-[var(--color-text-secondary)]">Support Scoop:</span>
         {AMOUNTS.map((a) => (
           <button
@@ -42,9 +42,9 @@ export default function TipJar({ compact = false, kofiUrl = DEFAULT_KO_FI_URL })
   }
 
   return (
-    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <div className="card p-4">
       <div className="flex items-start gap-2.5 mb-3">
-        <div className="w-9 h-9 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center flex-shrink-0">
+        <div className="w-9 h-9 rounded-full bg-scoop-orange-500/10 text-scoop-orange-500 flex items-center justify-center flex-shrink-0">
           <Heart size={18} />
         </div>
         <div>
@@ -61,8 +61,8 @@ export default function TipJar({ compact = false, kofiUrl = DEFAULT_KO_FI_URL })
             key={a}
             onClick={() => openKofi(a)}
             className="flex-1 py-2 rounded-lg border border-[var(--color-border)] text-sm font-semibold
-                       hover:bg-red-50 hover:border-red-300 hover:text-red-600
-                       dark:hover:bg-red-900/20
+                       hover:bg-scoop-orange-50 hover:border-scoop-orange-400 hover:text-scoop-orange-600
+                       dark:hover:bg-scoop-orange-500/10
                        transition-colors"
           >
             ${a}

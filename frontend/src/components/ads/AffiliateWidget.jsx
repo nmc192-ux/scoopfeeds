@@ -71,7 +71,7 @@ export default function AffiliateWidget({ category = "default", className = "" }
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
-      className={`rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden relative ${className}`}
+      className={`card overflow-hidden relative ${className}`}
     >
       <div className="px-3 py-2 flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface2)]/60">
         <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-text-tertiary)]">
