@@ -9,7 +9,21 @@
 // ERR_REQUIRE_ESM on ESM entry points. The .cjs extension forces this file
 // to be CommonJS regardless of the surrounding package.json.
 
-import("./server.js").catch((err) => {
-  console.error("[server.cjs] failed to import server.js:", err);
-  process.exit(1);
+// Surface boot lifecycle to lsnode logs so we can debug 503s. lsnode kills
+// the worker if startup is silent past its grace window, so log every step.
+console.log("[server.cjs] boot pid=" + process.pid + " node=" + process.version + " ts=" + new Date().toISOString());
+
+// Catch unhandled errors that would otherwise crash the worker silently
+process.on("uncaughtException", (err) => {
+  console.error("[server.cjs] uncaughtException:", err);
 });
+process.on("unhandledRejection", (err) => {
+  console.error("[server.cjs] unhandledRejection:", err);
+});
+
+import("./server.js")
+  .then(() => console.log("[server.cjs] server.js imported ok"))
+  .catch((err) => {
+    console.error("[server.cjs] failed to import server.js:", err);
+    process.exit(1);
+  });
