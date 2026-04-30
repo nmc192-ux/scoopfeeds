@@ -120,20 +120,21 @@ export function ScoopLogo({ size = 32, className = "", dark = false }) {
     <svg width={size} height={size} viewBox="0 0 40 40" fill="none"
          xmlns="http://www.w3.org/2000/svg" className={className} aria-label="Scoop">
       <defs>
-        <linearGradient id="cobalt-badge-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#2563EB" />
+        <linearGradient id="electric-badge-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#3B82F6" />
           <stop offset="100%" stopColor="#1E3A8A" />
         </linearGradient>
       </defs>
 
-      {/* ── Cobalt badge background ──────────────────────────── */}
-      <rect width="40" height="40" rx="9" fill="url(#cobalt-badge-grad)" />
+      {/* ── Electric Signal badge ────────────────────────────── */}
+      <rect width="40" height="40" rx="9" fill="url(#electric-badge-grad)" />
       <rect x="0.5" y="0.5" width="39" height="39" rx="8.5"
             fill="none" stroke="white" strokeOpacity="0.15" strokeWidth="1" />
 
-      {/* ── Hummingbird body ─────────────────────────────────── */}
+      {/* ── Hummingbird wing — pulse ─────────────────────────── */}
       <path d="M10 20C10 14 15 9 20 9C21.5 9 21.5 13 20 19C20 19 15 21 10 20Z"
-            fill="white" fillOpacity="0.35" />
+            fill="white" fillOpacity="0.35"
+            style={{ animation: "pulseSoft 2.4s ease-in-out infinite" }} />
       <path d="M10 20C10 26 15 31 20 31C21.5 31 21.5 27 20 21C20 21 15 21 10 20Z"
             fill="white" fillOpacity="0.85" />
 
@@ -141,8 +142,8 @@ export function ScoopLogo({ size = 32, className = "", dark = false }) {
       <path d="M18 20C18 14.5 22 11 27 11C32 11 33.5 16 33.5 20C33.5 24 32 29 27 29C22 29 18 25.5 18 20Z"
             fill="white" />
 
-      {/* ── Beak ─────────────────────────────────────────────── */}
-      <path d="M31 18.5L38 20L31 21.5V18.5Z" fill="#60a5fa" />
+      {/* ── Beak — vivid orange accent ───────────────────────── */}
+      <path d="M31 18.5L38 20L31 21.5V18.5Z" fill="#F97316" />
 
       {/* ── Eye ──────────────────────────────────────────────── */}
       <circle cx="28.5" cy="17" r="2.5" fill="#1E3A8A" />
@@ -166,19 +167,21 @@ export const Logo = ({
   size = "md",
   variant = "light",
   mascot = "bird",
-  palette = "cobalt",
+  palette = "electric",
 }) => {
   const sizes      = { sm: "h-6", md: "h-10", lg: "h-16", xl: "h-24" };
   const textSizes  = { sm: "text-lg", md: "text-2xl", lg: "text-4xl", xl: "text-6xl" };
   const isDark = variant === "dark";
 
   const palettes = {
-    cobalt:  { primary: isDark ? "#60A5FA" : "#2563EB",  accent: isDark ? "#93C5FD" : "#1D4ED8", secondary: "#1E3A8A" },
-    electric:{ primary: isDark ? "#60A5FA" : "#3B82F6",  accent: "#F97316",                      secondary: "#1D4ED8" },
-    gold:    { primary: isDark ? "#FDE047" : "#EAB308",  accent: "#0F172A",                      secondary: "#CA8A04" },
+    // Electric Signal — current brand
+    electric: { primary: isDark ? "#60A5FA" : "#3B82F6", accent: "#F97316", secondary: "#1E3A8A" },
+    // Legacy aliases
+    cobalt:   { primary: isDark ? "#60A5FA" : "#3B82F6", accent: "#F97316", secondary: "#1E3A8A" },
+    gold:     { primary: isDark ? "#FDE047" : "#EAB308", accent: "#0F172A", secondary: "#CA8A04" },
   };
 
-  const theme = palettes[palette] || palettes.cobalt;
+  const theme = palettes[palette] || palettes.electric;
   const gradId = `logo-grad-${palette}-${variant}`;
 
   return (
@@ -191,9 +194,10 @@ export const Logo = ({
               <stop offset="100%" stopColor={theme.secondary} />
             </linearGradient>
           </defs>
-          {/* Wing — upper */}
+          {/* Wing — upper (pulse) */}
           <path d="M20 50C20 35 32 20 45 20C48 20 48 30 45 45C45 45 35 50 20 50Z"
-                fill={theme.primary} className="opacity-40" />
+                fill={theme.primary} className="opacity-40"
+                style={{ animation: "pulseSoft 2.4s ease-in-out infinite" }} />
           {/* Wing — lower */}
           <path d="M20 50C20 65 32 80 45 80C48 80 48 70 45 55C45 55 35 50 20 50Z"
                 fill={`url(#${gradId})`} />

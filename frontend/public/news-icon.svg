@@ -1,12 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
   <defs>
-    <linearGradient id="cobalt-bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#2563EB"/>
+    <linearGradient id="electric-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6"/>
       <stop offset="100%" stop-color="#1E3A8A"/>
     </linearGradient>
   </defs>
-  <!-- Rounded cobalt badge -->
-  <rect width="100" height="100" rx="22" fill="url(#cobalt-bg)"/>
+  <!-- Rounded Electric Signal badge -->
+  <rect width="100" height="100" rx="22" fill="url(#electric-bg)"/>
   <!-- Wing, upper -->
   <path d="M22 50C22 36 32 22 44 22C47 22 47 31 44 44C44 44 34 50 22 50Z"
         fill="white" fill-opacity="0.35"/>
@@ -16,8 +16,8 @@
   <!-- Body -->
   <path d="M40 50C40 36 50 27 64 27C77 27 81 38 81 50C81 62 77 73 64 73C50 73 40 64 40 50Z"
         fill="white"/>
-  <!-- Beak -->
-  <path d="M78 47L94 50L78 53V47Z" fill="#60A5FA"/>
+  <!-- Beak — vivid orange accent -->
+  <path d="M78 47L94 50L78 53V47Z" fill="#F97316"/>
   <!-- Eye -->
   <circle cx="68" cy="44" r="4.5" fill="#1E3A8A"/>
   <circle cx="69" cy="43" r="1.6" fill="white" fill-opacity="0.9"/>

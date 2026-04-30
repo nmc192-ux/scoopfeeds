@@ -256,7 +256,7 @@ function Converter({ currencies, defaultTo = "USD" }) {
 
   const swap = () => { setFrom(to); setTo(from); };
 
-  const selectCls = "bg-[var(--color-surface2)] text-[var(--color-text)] text-sm font-semibold px-3 py-2 rounded-lg border border-[var(--color-border)] focus:outline-none focus:border-brand-blue";
+  const selectCls = "bg-[var(--color-surface2)] text-[var(--color-text)] text-sm font-semibold px-3 py-2 rounded-lg border border-[var(--color-border)] focus:outline-none focus:border-cobalt-500 focus:ring-2 focus:ring-cobalt-500/30";
 
   return (
     <div className="max-w-xl">
@@ -268,7 +268,7 @@ function Converter({ currencies, defaultTo = "USD" }) {
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="Amount"
-            className="flex-1 bg-[var(--color-surface2)] text-[var(--color-text)] text-sm font-semibold px-3 py-2 rounded-lg border border-[var(--color-border)] focus:outline-none focus:border-brand-blue tabular-nums"
+            className="flex-1 bg-[var(--color-surface2)] text-[var(--color-text)] text-sm font-semibold px-3 py-2 rounded-lg border border-[var(--color-border)] focus:outline-none focus:border-cobalt-500 focus:ring-2 focus:ring-cobalt-500/30 tabular-nums"
           />
           <select value={from} onChange={(e) => setFrom(e.target.value)} className={selectCls}>
             {codes.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -453,7 +453,7 @@ export default function MarketStrip({ defaultOpen = true }) {
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder="Filter…"
-                    className="bg-transparent text-xs text-[var(--color-text)] placeholder-[var(--color-text-tertiary)] focus:outline-none flex-1 min-w-0"
+                    className="bg-transparent text-xs text-[var(--color-text)] placeholder-[var(--color-text-tertiary)] focus:outline-none focus-visible:ring-1 focus-visible:ring-cobalt-500/40 rounded flex-1 min-w-0"
                   />
                 </div>
               </div>

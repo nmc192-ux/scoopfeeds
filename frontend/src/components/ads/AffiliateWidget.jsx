@@ -27,8 +27,8 @@ const ICONS = {
 const TINTS = {
   amazon:  "bg-amber-500/10 text-amber-500",
   binance: "bg-yellow-500/10 text-yellow-500",
-  wise:    "bg-brand-green/10 text-brand-green",
-  nordvpn: "bg-brand-blue/10 text-brand-blue",
+  wise:    "bg-emerald-500/10 text-emerald-500",
+  nordvpn: "bg-cobalt-500/10 text-cobalt-500",
 };
 
 const DISMISS_KEY = "scoop.affiliate.dismissed";
@@ -64,7 +64,7 @@ export default function AffiliateWidget({ category = "default", className = "" }
   if (!program || dismissed) return null;
 
   const Icon = ICONS[program.icon] || ShoppingBag;
-  const tint = TINTS[program.id] || "bg-brand-blue/10 text-brand-blue";
+  const tint = TINTS[program.id] || "bg-cobalt-500/10 text-cobalt-500";
 
   return (
     <motion.div
@@ -104,7 +104,7 @@ export default function AffiliateWidget({ category = "default", className = "" }
               {program.blurb}
             </p>
           )}
-          <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-brand-blue">
+          <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-cobalt-600">
             Learn more <ExternalLink size={11} />
           </span>
         </div>

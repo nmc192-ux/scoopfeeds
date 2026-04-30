@@ -25,7 +25,7 @@ import { BackendOffline } from "./components/ui/EmptyState";
 import { useNews, useFeatured, useHealth, usePublicConfig, useRefresh } from "./hooks/useNews";
 import { useNewsStore } from "./store/newsStore";
 import { trackPageView, attachEngagementObservers } from "./lib/track";
-import ScoopMascot from "./components/mascot/KhabriMascot";
+import ScoopMascot from "./components/mascot/ScoopMascot";
 import { topicColor } from "./lib/topicColors";
 import { AdSenseBanner, AdSenseSidebar, AdSenseUnit } from "./components/ads/AdSense";
 import AffiliateWidget from "./components/ads/AffiliateWidget";
@@ -265,7 +265,7 @@ export default function App() {
                 <span
                   className="text-[var(--color-text)]"
                   style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "14px", fontWeight: 800, letterSpacing: "-0.04em" }}
-                >Scoop<span style={{ color: "var(--color-accent)" }}>feeds</span></span>
+                >Scoop<span style={{ color: "var(--color-orange)" }}>feeds</span></span>
                 <span className="ml-2 text-[var(--color-text-tertiary)] font-editorial text-[13px]">— Intelligent news, curated.</span>
               </div>
             </div>
@@ -278,7 +278,7 @@ export default function App() {
               <span>•</span>
               <span>🌐 EN + اردو</span>
               <span>•</span>
-              <span className="text-brand-green">● Live</span>
+              <span className="text-emerald-500">● Live</span>
             </div>
           </div>
           <div className="mt-5 flex flex-wrap items-center justify-center gap-4 text-xs text-[var(--color-text-tertiary)]">

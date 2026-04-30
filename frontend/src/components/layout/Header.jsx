@@ -7,7 +7,7 @@ import {
 import { useNewsStore } from "../../store/newsStore";
 import { useHealth, useRefresh } from "../../hooks/useNews";
 import { useAuth } from "../../hooks/useAuth";
-import { ScoopLogo } from "../mascot/KhabriMascot";
+import { ScoopLogo } from "../mascot/ScoopMascot";
 import CountryPicker from "./CountryPicker";
 import LanguagePicker from "./LanguagePicker";
 import { isRtl } from "../../lib/languages";
@@ -64,7 +64,7 @@ export default function Header() {
             <div className="relative">
               <ScoopLogo size={36} />
               {health?.status === "ok" && (
-                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-brand-green rounded-full border-2 border-[var(--color-bg)] animate-pulse" />
+                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-[var(--color-bg)] animate-pulse" />
               )}
             </div>
             <div className="hidden sm:flex flex-col leading-none gap-[3px]">
@@ -72,7 +72,7 @@ export default function Header() {
                 className="text-[var(--color-text)]"
                 style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "21px", fontWeight: 800, letterSpacing: "-0.04em", lineHeight: 1 }}
               >
-                Scoop<span style={{ color: "var(--color-accent)" }}>feeds</span>
+                Scoop<span style={{ color: "var(--color-orange)" }}>feeds</span>
               </span>
               <span
                 style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "10px", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--color-text-tertiary)" }}
@@ -91,7 +91,7 @@ export default function Header() {
                 exit={{ opacity: 0, scale: 0.8 }}
                 className="hidden md:flex items-center gap-2 text-xs text-[var(--color-text-tertiary)]"
               >
-                <Activity size={12} className="text-brand-green" />
+                <Activity size={12} className="text-emerald-500" />
                 <span>{articleCount.toLocaleString()} articles</span>
                 {health?.scheduler?.isRunning && (
                   <span className="breaking-badge">Live</span>

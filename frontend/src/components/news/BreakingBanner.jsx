@@ -28,10 +28,10 @@ export default function BreakingBanner() {
         initial={{ height: 0, opacity: 0 }}
         animate={{ height: "auto", opacity: 1 }}
         exit={{ height: 0, opacity: 0 }}
-        className="block bg-gradient-to-r from-red-700 via-red-600 to-red-700 text-white relative overflow-hidden group"
+        className="block bg-gradient-to-r from-cobalt-800 via-cobalt-600 to-cobalt-800 text-white relative overflow-hidden group focus-ring"
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 flex items-center gap-3">
-          <span className="flex items-center gap-1.5 flex-shrink-0 font-extrabold text-xs uppercase tracking-wider bg-white/15 px-2 py-0.5 rounded">
+          <span className="flex items-center gap-1.5 flex-shrink-0 font-extrabold text-xs uppercase tracking-wider bg-scoop-orange-500 px-2 py-0.5 rounded shadow-sm">
             <Zap size={12} className="fill-white" />
             {isUrdu ? "تازہ ترین" : "Breaking"}
           </span>

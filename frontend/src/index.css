@@ -8,7 +8,7 @@
 /* ─── Base Styles ─────────────────────────────────────────────────────────── */
 @layer base {
   :root {
-    /* ── Cobalt Intelligence — Light ──────────────────────────── */
+    /* ── Electric Signal — Light ──────────────────────────────── */
     --color-bg: #f8faff;
     --color-surface: #ffffff;
     --color-surface2: #f0f4ff;
@@ -16,16 +16,21 @@
     --color-text: #0f172a;
     --color-text-secondary: #475569;
     --color-text-tertiary: #94a3b8;
-    /* Cobalt brand */
-    --color-accent: #2563EB;
-    --color-accent-hover: #1d4ed8;
+    /* Electric Signal brand */
+    --color-accent: #3B82F6;            /* Electric Blue */
+    --color-accent-hover: #2563eb;
     --color-accent-light: #eff6ff;
-    --color-secondary: #1E3A8A;
+    --color-secondary: #1E3A8A;         /* Midnight Blue */
+    --color-orange: #F97316;            /* Vivid Orange — CTAs, hearts */
+    --color-orange-hover: #ea580c;
+    --color-orange-light: #fff7ed;
+    --color-status-live: #10B981;       /* Emerald — live/online */
+    --color-alert: #EF4444;             /* True alerts only */
     --scrollbar-width: thin;
   }
 
   .dark {
-    /* ── Cobalt Intelligence — Dark ───────────────────────────── */
+    /* ── Electric Signal — Dark ───────────────────────────────── */
     --color-bg: #060d1f;
     --color-surface: #0d1a35;
     --color-surface2: #162044;
@@ -37,6 +42,11 @@
     --color-accent-hover: #93c5fd;
     --color-accent-light: #162044;
     --color-secondary: #93c5fd;
+    --color-orange: #FB923C;
+    --color-orange-hover: #F97316;
+    --color-orange-light: #1c1610;
+    --color-status-live: #34D399;
+    --color-alert: #F87171;
   }
 
   * {
@@ -114,28 +124,40 @@
   }
 
   .text-gradient {
-    background: linear-gradient(135deg, #2563EB 0%, #1E3A8A 100%);
+    background: linear-gradient(135deg, #3B82F6 0%, #1E3A8A 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
-  .text-gradient-cobalt {
-    background: linear-gradient(135deg, #60a5fa 0%, #2563EB 50%, #1E3A8A 100%);
+  .text-gradient-electric {
+    background: linear-gradient(135deg, #60a5fa 0%, #3B82F6 50%, #1E3A8A 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
+
+  .text-gradient-orange {
+    background: linear-gradient(135deg, #FB923C 0%, #F97316 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Backward-compat alias */
+  .text-gradient-cobalt { @apply text-gradient-electric; }
 
   .breaking-badge {
     @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-md
-           bg-brand-red text-white text-xs font-bold uppercase tracking-wide;
+           text-white text-xs font-bold uppercase tracking-wide;
+    background: var(--color-alert);
     animation: pulseSoft 2s ease-in-out infinite;
   }
 
   .live-badge {
     @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md
-           bg-brand-red text-white text-xs font-bold uppercase tracking-widest;
+           text-white text-xs font-bold uppercase tracking-widest;
+    background: var(--color-alert);
     animation: livePulse 1.4s ease-in-out infinite;
   }
 
@@ -154,7 +176,7 @@
 .reader-body h4       { font-weight: 700; line-height: 1.25; margin: 1.8em 0 0.6em; }
 .reader-body h2       { font-size: 1.35em; }
 .reader-body h3       { font-size: 1.15em; }
-.reader-body a        { color: #2563EB; text-decoration: underline; text-underline-offset: 2px; }
+.reader-body a        { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
 .reader-body img,
 .reader-body video,
 .reader-body iframe   { max-width: 100%; height: auto; border-radius: 10px; margin: 1.2em 0; }
@@ -212,19 +234,40 @@
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
-  /* ── Cobalt Intelligence buttons ─────────────────────────────────────── */
-  .btn-cobalt {
+  /* ── Electric Signal buttons ─────────────────────────────────────────── */
+  .btn-primary, .btn-cobalt {
     @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
-           bg-[var(--color-accent)] text-white font-medium text-sm
-           hover:bg-[var(--color-accent-hover)] transition-all duration-200
+           text-white font-medium text-sm
+           transition-all duration-200
            shadow-sm hover:shadow-md;
+    background: var(--color-accent);
   }
+  .btn-primary:hover, .btn-cobalt:hover { background: var(--color-accent-hover); }
 
-  .btn-cobalt-ghost {
+  .btn-primary-ghost, .btn-cobalt-ghost {
     @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
-           border border-[var(--color-accent)] text-[var(--color-accent)] font-medium text-sm
-           hover:bg-[var(--color-accent-light)] transition-all duration-200;
+           font-medium text-sm transition-all duration-200;
+    border: 1px solid var(--color-accent);
+    color: var(--color-accent);
   }
+  .btn-primary-ghost:hover, .btn-cobalt-ghost:hover { background: var(--color-accent-light); }
+
+  .btn-orange {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
+           text-white font-medium text-sm
+           transition-all duration-200
+           shadow-sm hover:shadow-md;
+    background: var(--color-orange);
+  }
+  .btn-orange:hover { background: var(--color-orange-hover); }
+
+  /* ── Universal focus-visible ring (WCAG 2.4.7) ───────────────────────── */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2
+           focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)];
+    --tw-ring-color: var(--color-accent);
+  }
+  .focus-ring:focus-visible { outline: 2px solid transparent; box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent); }
 
   /* ── Undo ────────────────────────────────────────────────────────────── */
   /* ── Urdu / RTL Support ───────────────────────────────────────────────── */

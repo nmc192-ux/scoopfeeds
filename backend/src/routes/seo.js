@@ -323,7 +323,7 @@ router.get("/article/:id", (req, res) => {
 </head>
 <body>
   <div class="wrap">
-    <a class="back" href="/">← <span class="brand">Scoop<span style="color:#1E3A8A">feeds</span></span> — Intelligent news, curated.</a>
+    <a class="back" href="/">← <span class="brand">Scoop<span style="color:#F97316">feeds</span></span> — Intelligent news, curated.</a>
     <article class="card">
       ${article.image_url ? `<img class="hero" src="${xmlEscape(article.image_url)}" alt="${xmlEscape(article.title)}" loading="eager">` : ""}
       <div class="body">
@@ -604,7 +604,7 @@ ${articles.length === 0 ? `<meta name="robots" content="noindex,follow">` : ""}
 </head>
 <body>
   <div class="wrap">
-    <a class="back" href="/">← <span class="brand">Scoop<span style="color:#1E3A8A">feeds</span></span> — Intelligent news, curated.</a>
+    <a class="back" href="/">← <span class="brand">Scoop<span style="color:#F97316">feeds</span></span> — Intelligent news, curated.</a>
     <h1>${xmlEscape(meta.title)}</h1>
     <div class="topic-intro">
       <p>${xmlEscape(meta.intro)}</p>
@@ -1106,7 +1106,7 @@ ${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld)}</script
 </head>
 <body>
   <div class="wrap">
-    <a class="back" href="/">← <span class="brand">Scoop<span style="color:#1E3A8A">feeds</span></span> — Intelligent news, curated.</a>
+    <a class="back" href="/">← <span class="brand">Scoop<span style="color:#F97316">feeds</span></span> — Intelligent news, curated.</a>
     ${body}
     <footer>
       <a href="/about">About</a>

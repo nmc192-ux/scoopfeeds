@@ -1,30 +1,45 @@
 /**
- * ─── Cobalt Intelligence — Topic color system ────────────────────────────
- * Single source of truth for category accent colors used by NewsCard,
+ * ─── Electric Signal — Brand color system ────────────────────────────────
+ * Single source of truth for brand + topic accent colors used by NewsCard,
  * FeaturedCard, NewsGrid, MostReadSidebar, VideoCard, XFeedSection,
  * TopicNav, and the App side cards.
  *
- * Anchored on the cobalt palette (#2563EB primary, #1E3A8A secondary)
- * with distinct hues for each topic. Live/breaking stays red (#EF4444)
- * because that's a functional alert convention readers expect.
+ * Electric Signal palette (per AI Studio brand spec):
+ *   primary   = Electric Blue   #3B82F6  (cobalt-500)
+ *   secondary = Midnight Blue   #1E3A8A  (cobalt-800)
+ *   accent    = Vivid Orange    #F97316  (CTAs, highlights, hearts)
+ *   status    = Emerald         #10B981  (live / online indicator)
+ *   alert     = Red             #EF4444  (true alerts only)
+ *
+ * Backward-compat aliases (COBALT_*) preserved so existing imports keep
+ * working — they now map to the Electric Signal equivalents.
  */
-export const COBALT_PRIMARY   = "#2563EB";
-export const COBALT_SECONDARY = "#1E3A8A";
-export const COBALT_LIGHT     = "#60A5FA";
-export const COBALT_DEEP      = "#1D4ED8";
+export const ELECTRIC_PRIMARY   = "#3B82F6";
+export const ELECTRIC_SECONDARY = "#1E3A8A";
+export const ELECTRIC_ACCENT    = "#F97316";
+export const ELECTRIC_LIGHT     = "#60A5FA";
+export const ELECTRIC_DEEP      = "#1D4ED8";
+export const STATUS_LIVE        = "#10B981";
+export const COLOR_ALERT        = "#EF4444";
+
+// Legacy aliases — keep imports working
+export const COBALT_PRIMARY   = ELECTRIC_PRIMARY;
+export const COBALT_SECONDARY = ELECTRIC_SECONDARY;
+export const COBALT_LIGHT     = ELECTRIC_LIGHT;
+export const COBALT_DEEP      = ELECTRIC_DEEP;
 
 export const TOPIC_COLORS = {
-  // ── Cobalt-anchored core ────────────────────────────
-  top:                COBALT_PRIMARY,    // #2563EB
-  ai:                 "#3B82F6",         // cobalt-500
-  "agentic-ai":       COBALT_DEEP,       // #1D4ED8
-  weather:            COBALT_LIGHT,      // #60A5FA
-  local:              COBALT_SECONDARY,  // #1E3A8A
-  saved:              COBALT_PRIMARY,
+  // ── Brand-anchored core ─────────────────────────────
+  top:                ELECTRIC_PRIMARY,   // #3B82F6
+  ai:                 ELECTRIC_PRIMARY,   // #3B82F6
+  "agentic-ai":       ELECTRIC_DEEP,      // #1D4ED8
+  weather:            ELECTRIC_LIGHT,     // #60A5FA
+  local:              ELECTRIC_SECONDARY, // #1E3A8A
+  saved:              ELECTRIC_PRIMARY,
 
-  // ── Functional alerts (kept red) ─────────────────────
-  live:               "#EF4444",
-  breaking:           "#EF4444",
+  // ── Functional alerts (red kept for true alerts) ─────
+  live:               COLOR_ALERT,
+  breaking:           COLOR_ALERT,
 
   // ── Distinct categorical hues ────────────────────────
   world:              "#7C3AED",  // violet
@@ -78,7 +93,7 @@ export const TOPIC_EMOJIS = {
 };
 
 export function topicColor(category) {
-  return TOPIC_COLORS[category] || COBALT_PRIMARY;
+  return TOPIC_COLORS[category] || ELECTRIC_PRIMARY;
 }
 
 export function topicLabel(category) {

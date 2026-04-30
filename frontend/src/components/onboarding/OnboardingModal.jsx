@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight, Check, Globe2, Sparkles } from "lucide-react";
 import { useNewsStore } from "../../store/newsStore";
 import { useGeo } from "../../hooks/useGeo";
-import ScoopMascot from "../mascot/KhabriMascot";
+import ScoopMascot from "../mascot/ScoopMascot";
 
 // Keep aligned with TOPICS in backend/src/config/sources.js.
 // Virtual tabs (live, local, saved) are excluded — they can't be "preferred"

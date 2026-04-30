@@ -97,7 +97,7 @@ export default function LanguagePicker() {
                   placeholder="Search language…"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  className="flex-1 bg-transparent text-sm py-2 outline-none placeholder:text-[var(--color-text-tertiary)]"
+                  className="flex-1 bg-transparent text-sm py-2 outline-none focus-visible:ring-1 focus-visible:ring-cobalt-500/40 rounded placeholder:text-[var(--color-text-tertiary)]"
                 />
               </div>
               <button

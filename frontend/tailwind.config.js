@@ -5,18 +5,18 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        // ── Cobalt Intelligence UI font ────────────────────────────
+        // ── Electric Signal UI font ─────────────────────────────────
         sans: [
           "'Inter'", "-apple-system", "BlinkMacSystemFont", "SF Pro Display",
           "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"
         ],
         inter: ["'Inter'", "system-ui", "sans-serif"],
+        brand: ["'Inter'", "system-ui", "sans-serif"],
         // ── Editorial accent font (Playfair italic) ────────────────
         editorial: ["'Playfair Display'", "Georgia", "serif"],
         serif: ["Georgia", "New York", "Times New Roman", "serif"],
         mono: ["SF Mono", "Fira Code", "Monaco", "Consolas", "monospace"],
         display: ["'Bebas Neue'", "Impact", "system-ui"],
-        brand:   ["'Space Grotesk'", "'Segoe UI'", "system-ui"],
       },
       colors: {
         brand: {
@@ -29,19 +29,28 @@ export default {
           pink: "#FF2D55",
           indigo: "#5856D6",
         },
-        // ── Cobalt Intelligence palette ────────────────────────────
+        // ── Electric Signal palette ────────────────────────────────
         cobalt: {
           50:  "#eff6ff",
           100: "#dbeafe",
           200: "#bfdbfe",
           300: "#93c5fd",
           400: "#60a5fa",
-          500: "#3b82f6",
-          600: "#2563eb",   // primary
+          500: "#3b82f6",   // primary (Electric Blue)
+          600: "#2563eb",
           700: "#1d4ed8",
-          800: "#1e3a8a",   // secondary / deep navy
+          800: "#1e3a8a",   // secondary / Midnight Blue
           900: "#1e2d6e",
           950: "#0f172a",
+        },
+        // Vivid Orange accent
+        scoop: {
+          orange:      "#F97316",
+          "orange-50": "#fff7ed",
+          "orange-100":"#ffedd5",
+          "orange-400":"#fb923c",
+          "orange-500":"#f97316",
+          "orange-600":"#ea580c",
         },
         apple: {
           gray1: "#8E8E93",

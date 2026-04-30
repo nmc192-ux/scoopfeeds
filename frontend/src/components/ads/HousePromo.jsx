@@ -12,7 +12,7 @@ const PROMOS = [
   {
     id: "newsletter",
     icon: Bell,
-    tint: "bg-brand-blue/10 text-brand-blue",
+    tint: "bg-cobalt-50 text-cobalt-600",
     title: "Get the morning digest",
     body:  "Top headlines + market summary in your inbox at 8am, your time.",
     cta:   "Sign me up",
@@ -21,7 +21,7 @@ const PROMOS = [
   {
     id: "pwa",
     icon: Download,
-    tint: "bg-brand-green/10 text-brand-green",
+    tint: "bg-emerald-50 text-emerald-600",
     title: "Install Scoop on your phone",
     body:  "One tap to your home screen. Works offline, loads instantly.",
     cta:   "How to install",
@@ -95,7 +95,7 @@ export default function HousePromo({
         </div>
         <a
           href={promo.href}
-          className="text-xs font-semibold text-brand-blue hover:underline px-2 py-1 rounded whitespace-nowrap"
+          className="text-xs font-semibold text-cobalt-600 hover:underline px-2 py-1 rounded whitespace-nowrap"
         >
           {promo.cta}
         </a>
@@ -138,7 +138,7 @@ export default function HousePromo({
           <p className="text-xs text-[var(--color-text-secondary)] mt-1 leading-relaxed">
             {promo.body}
           </p>
-          <span className="mt-2 inline-block text-xs font-semibold text-brand-blue">
+          <span className="mt-2 inline-block text-xs font-semibold text-cobalt-600">
             {promo.cta} →
           </span>
         </div>
