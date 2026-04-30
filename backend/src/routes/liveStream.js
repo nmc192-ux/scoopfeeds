@@ -31,6 +31,30 @@ const CHANNELS = [
   { id: "wion",    handle: "WION",      channelId: "UC_gUM8rL-Lrg6O3adPW9K1g" },
   // ARY @handle is bot-blocked — must use channel ID URL
   { id: "ary",     channelId: "UCMmpLL2ucRHAXbNHiCPyIyg" },
+
+  // ── Global expansion (Phase 2A: Live TV page) ──────────────────────────
+  // Americas
+  { id: "abcnews",   handle: "ABCNews",          channelId: "UCBi2mrWuNuyYy4gbM6fU18Q", fallbackId: "vOTiJkg1voo" },
+  { id: "cbsnews",   handle: "CBSNews",          channelId: "UC8p1vwvWtl6T73JiExfWs1g", fallbackId: "BfL2pudZbBM" },
+  { id: "bloomberg", handle: "Bloomberg",        channelId: "UCIALMKvObZNtJ6AmdCLP7Lg", fallbackId: "iEpJwprxDdk" },
+  // Asia
+  { id: "ndtv",      handle: "ndtv",             channelId: "UCZFMm1mMw0F81Z37aaEzTUA", fallbackId: "MtnAtxiK_eQ" },
+  { id: "cna",       handle: "channelnewsasia",  channelId: "UCXKCHNtNbjMl2wTbo5xs0KA", fallbackId: "XWq5kBlakcQ" },
+  { id: "nhkworld",  handle: "NHKWORLDJAPAN",    channelId: "UCSKlINgEvU5gPV6CyN_jJgQ", fallbackId: "f0lYjLstM-A" },
+  { id: "cgtn",      handle: "CGTN",             channelId: "UCpQUQ-y9-z3qC5uYbZ2K6tw", fallbackId: "hxFunHjj8FM" },
+  // MENA / Africa
+  { id: "trtworld",  handle: "trtworld",         channelId: "UC7fWeaHhqgM4Ry-RMpM2YYw", fallbackId: "wXnCOvgnUKQ" },
+  { id: "i24",       handle: "i24NEWSEnglish",   channelId: "UCZdGJgHbmqQcVZaJCkqDRwg", fallbackId: "Z_5YDUlj_CY" },
+  { id: "africanews",handle: "africanews",       channelId: "UCyf5lBqjIWLuXcOJ7H6f4mQ", fallbackId: "Lgi2y36jb2M" },
+  // European multi-language
+  { id: "f24fr",     handle: "FRANCE24",         channelId: "UCCCPCZNChQdGa9EkATeye4g", fallbackId: "tkDUSYHoKxE" },
+  { id: "dwde",      handle: "deutschewelle",    channelId: "UCMIqrmh2ljDWGCLhXh5SVw", fallbackId: "tQ0yjYUFKAE" },
+  { id: "euronews",  handle: "euronews",         channelId: "UCSrZ3UV4jOidv8ppoVuvW9Q", fallbackId: "9Auq9mYxFEE" },
+  // Latin America
+  { id: "globonews", handle: "globonews",        channelId: "UCmJfg-J5y7Fzhx4DlaXyqgg", fallbackId: "U8kkUngclWY" },
+  { id: "dwes",      handle: "dwespanol",        channelId: "UCT4Jg2h00Z5WLs-s0lGkgKw", fallbackId: "AXC2dGCk9Yw" },
+  // South Asia (Hindi)
+  { id: "aajtak",    handle: "aajtak",           channelId: "UCt4t-jeY85JegMlZ-E5UWtA", fallbackId: "Nq2wYlWFucg" },
 ];
 
 /* ─── In-memory cache ──────────────────────────────────────────────────────── */

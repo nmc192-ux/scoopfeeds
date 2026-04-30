@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sun, Moon, Search, X, RefreshCw,
-  Activity, Grid3x3, List, UserCircle
+  Activity, Grid3x3, List, UserCircle, Tv
 } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
 import { useNewsStore } from "../../store/newsStore";
 import { useHealth, useRefresh } from "../../hooks/useNews";
 import { useAuth } from "../../hooks/useAuth";
@@ -23,9 +24,11 @@ export default function Header() {
   const { data: health } = useHealth();
   const refresh = useRefresh();
   const { isLoggedIn } = useAuth();
+  const location = useLocation();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const onLiveTv = location.pathname === "/live-tv";
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 10);
@@ -56,31 +59,33 @@ export default function Header() {
         <div className="flex items-center justify-between h-14 sm:h-16">
 
           {/* ── Logo / Brand ───────────────────────────────────────────── */}
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="flex items-center gap-2.5"
-          >
-            <div className="relative">
-              <ScoopLogo size={36} />
-              {health?.status === "ok" && (
-                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-[var(--color-bg)] animate-pulse" />
-              )}
-            </div>
-            <div className="hidden sm:flex flex-col leading-none gap-[3px]">
-              <span
-                className="text-[var(--color-text)]"
-                style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "21px", fontWeight: 800, letterSpacing: "-0.04em", lineHeight: 1 }}
-              >
-                Scoop<span style={{ color: "var(--color-orange)" }}>feeds</span>
-              </span>
-              <span
-                style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "10px", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--color-text-tertiary)" }}
-              >
-                Intelligence
-              </span>
-            </div>
-          </motion.div>
+          <Link to="/" aria-label="Scoopfeeds — Home" className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-600/40 rounded-lg">
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="flex items-center gap-2.5"
+            >
+              <div className="relative">
+                <ScoopLogo size={36} />
+                {health?.status === "ok" && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-[var(--color-bg)] animate-pulse" />
+                )}
+              </div>
+              <div className="hidden sm:flex flex-col leading-none gap-[3px]">
+                <span
+                  className="text-[var(--color-text)]"
+                  style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "21px", fontWeight: 800, letterSpacing: "-0.04em", lineHeight: 1 }}
+                >
+                  Scoop<span style={{ color: "var(--color-orange)" }}>feeds</span>
+                </span>
+                <span
+                  style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "10px", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--color-text-tertiary)" }}
+                >
+                  Intelligence
+                </span>
+              </div>
+            </motion.div>
+          </Link>
 
           {/* ── Live indicator ──────────────────────────────────────────── */}
           <AnimatePresence>
@@ -141,6 +146,23 @@ export default function Header() {
 
           {/* ── Actions ─────────────────────────────────────────────────── */}
           <div className="flex items-center gap-1 sm:gap-1.5">
+            {/* Live TV pill — high-visibility entry point */}
+            <Link
+              to="/live-tv"
+              title="Live TV channels"
+              className={clsx(
+                "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all",
+                "border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50",
+                onLiveTv
+                  ? "bg-red-500 text-white border-red-500"
+                  : "bg-red-500/10 text-red-600 border-red-500/30 hover:bg-red-500 hover:text-white hover:border-red-500"
+              )}
+            >
+              <Tv size={13} />
+              <span className="hidden sm:inline">Live TV</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+            </Link>
+
             <HeaderBtn
               onClick={() => { setShowSearch(s => !s); if (showSearch) setSearchQuery(""); }}
               title="Search"

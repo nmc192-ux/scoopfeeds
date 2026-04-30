@@ -1,6 +1,7 @@
 import { useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Bookmark } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useNewsStore } from "../../store/newsStore";
 import { useTopics } from "../../hooks/useNews";
 import { useGeo } from "../../hooks/useGeo";
@@ -11,9 +12,38 @@ export default function TopicNav() {
   const { activeTopics, toggleTopic, savedArticles } = useNewsStore();
   const { data: topics = [] } = useTopics();
   const { countryCode, country } = useGeo();
+  const navigate = useNavigate();
+  const location = useLocation();
   const scrollRef = useRef(null);
-  const savedActive = activeTopics.includes("saved");
-  const savedCount = savedArticles.length;
+
+  // Topic activation = URL when on a topic-aware route, store otherwise
+  const onHome     = location.pathname === "/";
+  const topicSlug  = location.pathname.startsWith("/topic/")
+    ? location.pathname.split("/").filter(Boolean)[1]
+    : null;
+  const onSaved    = location.pathname === "/saved";
+
+  const savedActive = onSaved || (onHome && activeTopics.includes("saved"));
+  const savedCount  = savedArticles.length;
+
+  const isTopicActive = (id) => {
+    if (topicSlug)         return topicSlug === id;
+    if (onSaved)           return id === "saved";
+    if (onHome)            return activeTopics.includes(id);
+    return false;
+  };
+
+  const goToTopic = (id) => {
+    if (id === "saved") return navigate("/saved");
+    if (id === "top")   return navigate("/");
+    // Live tab still uses the inline LiveEventsView on home — keep store path
+    if (id === "live") {
+      toggleTopic("live");
+      if (!onHome) navigate("/");
+      return;
+    }
+    navigate(`/topic/${id}`);
+  };
 
   // Auto-scroll active topic into view
   useEffect(() => {
@@ -38,7 +68,7 @@ export default function TopicNav() {
             <motion.button
               data-active={savedActive}
               whileTap={{ scale: 0.95 }}
-              onClick={() => toggleTopic("saved")}
+              onClick={() => goToTopic("saved")}
               className={clsx(
                 "topic-pill flex items-center gap-1.5 flex-shrink-0",
                 savedActive ? "topic-pill-active" : "topic-pill-inactive"
@@ -55,7 +85,7 @@ export default function TopicNav() {
             </motion.button>
           )}
           {topics.map((topic) => {
-            const isActive = activeTopics.includes(topic.id);
+            const isActive = isTopicActive(topic.id);
             const color = topicColor(topic.id);
             // Local tab shows the detected country as a subtitle so it's
             // obvious what "Local" means right now — same pattern as Apple
@@ -69,7 +99,7 @@ export default function TopicNav() {
                 key={topic.id}
                 data-active={isActive}
                 whileTap={{ scale: 0.95 }}
-                onClick={() => toggleTopic(topic.id)}
+                onClick={() => goToTopic(topic.id)}
                 className={clsx(
                   "topic-pill flex items-center gap-1.5 flex-shrink-0",
                   isActive ? "topic-pill-active" : "topic-pill-inactive"

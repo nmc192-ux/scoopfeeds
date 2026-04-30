@@ -1,0 +1,81 @@
+/**
+ * SavedPage — `/saved`
+ *
+ * Renders the user's saved-articles list. Shareable URL means power users can
+ * bookmark their reading queue. Empty state nudges sign-in for cross-device
+ * sync since unauthenticated saves only persist in localStorage.
+ */
+import { useEffect } from "react";
+import { Link } from "react-router-dom";
+import { Bookmark, ChevronLeft, LogIn } from "lucide-react";
+import NewsGrid from "../components/news/NewsGrid";
+import { useNewsStore } from "../store/newsStore";
+import { useAuth } from "../hooks/useAuth";
+import ScoopMascot from "../components/mascot/ScoopMascot";
+
+export default function SavedPage() {
+  const { savedArticles, language, setAuthOpen } = useNewsStore();
+  const { isLoggedIn } = useAuth();
+  const isUrdu = language === "ur";
+
+  useEffect(() => {
+    const prev = document.title;
+    document.title = "Saved Stories — Scoopfeeds";
+    return () => { document.title = prev; };
+  }, []);
+
+  return (
+    <>
+      <div className="flex items-center gap-3 mb-6">
+        <Link
+          to="/"
+          className="p-2 rounded-full hover:bg-[var(--color-surface2)] transition-colors"
+          aria-label="Back to home"
+        >
+          <ChevronLeft size={18} />
+        </Link>
+        <div
+          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-cobalt-50 text-cobalt-600"
+        >
+          <Bookmark size={18} fill="currentColor" />
+        </div>
+        <div>
+          <h1
+            className="text-2xl sm:text-3xl font-bold tracking-tight"
+            style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic" }}
+          >
+            {isUrdu ? "محفوظ خبریں" : "Saved Stories"}
+          </h1>
+          <p className="text-xs text-[var(--color-text-tertiary)] mt-0.5">
+            {savedArticles.length} {isUrdu ? "خبریں" : savedArticles.length === 1 ? "story" : "stories"}
+          </p>
+        </div>
+      </div>
+
+      {savedArticles.length === 0 ? (
+        <div className="flex flex-col items-center gap-4 py-20 text-center">
+          <ScoopMascot size="lg" mood="reading" animated />
+          <div className="max-w-md">
+            <p className="text-lg font-semibold text-[var(--color-text)]">
+              No saved stories yet
+            </p>
+            <p className="text-sm text-[var(--color-text-tertiary)] mt-1.5">
+              Tap the bookmark icon on any article to save it here for later.
+            </p>
+          </div>
+          {!isLoggedIn && (
+            <button
+              onClick={() => setAuthOpen(true)}
+              className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 hover:bg-cobalt-700 text-white text-sm font-semibold transition-colors"
+            >
+              <LogIn size={14} />
+              Sign in to sync across devices
+            </button>
+          )}
+        </div>
+      ) : (
+        <NewsGrid articles={savedArticles} isLoading={false} error={null} />
+      )}
+    </>
+  );
+}
