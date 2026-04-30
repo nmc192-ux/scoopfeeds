@@ -36,6 +36,29 @@ function xmlEscape(s = "") {
     .replace(/'/g, "&apos;");
 }
 
+// Detect crawlers / social unfurlers. Browsers fall through to the SPA so
+// React Router can claim /article/:id, /topic/:slug, and /about. Bots still
+// get the rich SSR HTML (Open Graph metadata, JSON-LD, full body) — that's
+// what gives us social-media link previews and Google News indexing.
+const BOT_UA_RE = /bot|crawler|spider|crawl|slurp|google|bing|yandex|baidu|duckduck|facebook|twitter|linkedin|whatsapp|telegram|discord|slack|skype|applebot|pinterest|embedly|qwantify|petalbot|seznam|mj12|ahrefs|semrush|dotbot/i;
+function isBot(req) {
+  const ua = String(req.headers["user-agent"] || "").toLowerCase();
+  // Allow opting in to the SSR view explicitly via ?ssr=1 — useful for
+  // testing the OG card and for users who land via copy-paste from a
+  // crawler-rendered link.
+  if (req.query?.ssr === "1") return true;
+  return BOT_UA_RE.test(ua);
+}
+
+// Express handler wrapper: bots get the SSR `handler`, browsers get next()
+// (which proceeds to the SPA catch-all in server.js).
+function ssrForBots(handler) {
+  return (req, res, next) => {
+    if (!isBot(req)) return next();
+    return handler(req, res, next);
+  };
+}
+
 // ── robots.txt ────────────────────────────────────────────────────────────
 router.get("/robots.txt", (_req, res) => {
   res.type("text/plain").send(
@@ -184,7 +207,7 @@ router.get("/sitemap-news.xml", (_req, res) => {
 // The synthesis + cross-source layer is what turns this from "scraped rewrite"
 // into aggregation with independent editorial value — critical for avoiding
 // Google's thin-content / scraped-content signals.
-router.get("/article/:id", (req, res) => {
+router.get("/article/:id", ssrForBots((req, res) => {
   const article = getArticleById(req.params.id);
   if (!article) return res.status(404).send(renderNotFound());
   try { incrementViewCount(article.id); } catch {}
@@ -382,7 +405,7 @@ router.get("/article/:id", (req, res) => {
   </div>
 </body>
 </html>`);
-});
+}));
 
 // ── Editorial topic hubs ──────────────────────────────────────────────────
 // SSR'd evergreen pages at /topic/:slug. Owns category-level rankings on
@@ -449,7 +472,7 @@ const TOPIC_SLUG_TO_CATEGORY = {
   sports: "sports",
 };
 
-router.get("/topic/:slug", (req, res) => {
+router.get("/topic/:slug", ssrForBots((req, res) => {
   const slug = String(req.params.slug || "").toLowerCase();
   const meta = TOPIC_HUBS[slug];
   const category = TOPIC_SLUG_TO_CATEGORY[slug];
@@ -635,7 +658,7 @@ ${articles.length === 0 ? `<meta name="robots" content="noindex,follow">` : ""}
   </div>
 </body>
 </html>`);
-});
+}));
 
 // Compact relative-time formatter for topic hub cards.
 function humanAgo(ts) {
@@ -896,7 +919,7 @@ function categoryFraming(category) {
 // These establish editorial identity, transparency, and contact — all required
 // by Google News / Discover guidelines and broader E-E-A-T signals. Without
 // these, sitemap-news.xml submissions get indexed then deranked as low-trust.
-router.get("/about", (_req, res) => {
+router.get("/about", ssrForBots((_req, res) => {
   const orgJsonld = {
     "@context": "https://schema.org",
     "@type": "Organization",
@@ -936,7 +959,7 @@ router.get("/about", (_req, res) => {
       <p>Editorial: <a href="/contact">see contact page</a>. Corrections: <a href="/corrections">corrections policy</a>.</p>
     `,
   }));
-});
+}));
 
 router.get("/editorial-policy", (_req, res) => {
   res.type("html").send(renderStaticPage({
