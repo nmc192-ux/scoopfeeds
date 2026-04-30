@@ -22,8 +22,21 @@
 import { readFileSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import dns from "node:dns";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Prefer IPv4 for all outbound DNS resolution.
+//
+// scoopfeeds.com has both A and AAAA records (Hostinger dual-stacks every
+// VPS). Node 20's resolver returns IPv6 first by default, but a non-trivial
+// slice of GitHub Actions runner subnets cannot route to Hostinger's IPv6
+// pool — the connection silently times out as "TypeError: fetch failed"
+// before the first byte. Confirmed via run 25189005214 logs: 4× retry on
+// the first fetch, all 4 hit the same IPv6 failure mode. Switching the
+// default resolution order to ipv4first makes fetch() pick the routable
+// A record and the request succeeds.
+dns.setDefaultResultOrder("ipv4first");
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const SITE_URL  = (process.env.SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
