@@ -17,20 +17,25 @@ import NewsletterCaptureModal from "./components/newsletter/NewsletterCaptureMod
 import PushOptInBanner from "./components/push/PushOptInBanner";
 import AuthModal from "./components/auth/AuthModal";
 
-import HomePage       from "./pages/HomePage";
-import TopicPage      from "./pages/TopicPage";
-import SavedPage      from "./pages/SavedPage";
-import AboutPage      from "./pages/AboutPage";
-import ArticlePage    from "./pages/ArticlePage";
-import LiveTvPage     from "./pages/LiveTvPage";
-import RegionPage     from "./pages/RegionPage";
-import CountryPage    from "./pages/CountryPage";
-import MarketsPage    from "./pages/MarketsPage";
-import WeatherPage    from "./pages/WeatherPage";
-import NewsletterPage from "./pages/NewsletterPage";
-import SourcePage     from "./pages/SourcePage";
-import TagPage        from "./pages/TagPage";
-import SearchPage     from "./pages/SearchPage";
+import HomePage            from "./pages/HomePage";
+import TopicPage           from "./pages/TopicPage";
+import SavedPage           from "./pages/SavedPage";
+import AboutPage           from "./pages/AboutPage";
+import ArticlePage         from "./pages/ArticlePage";
+import LiveTvPage          from "./pages/LiveTvPage";
+import RegionPage          from "./pages/RegionPage";
+import CountryPage         from "./pages/CountryPage";
+import MarketsPage         from "./pages/MarketsPage";
+import WeatherPage         from "./pages/WeatherPage";
+import NewsletterPage      from "./pages/NewsletterPage";
+import SourcePage          from "./pages/SourcePage";
+import TagPage             from "./pages/TagPage";
+import SearchPage          from "./pages/SearchPage";
+import PrivacyPage         from "./pages/PrivacyPage";
+import TermsPage           from "./pages/TermsPage";
+import EditorialPolicyPage from "./pages/EditorialPolicyPage";
+import ContactPage         from "./pages/ContactPage";
+import SponsorPage         from "./pages/SponsorPage";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
 const HIDE_TOPICNAV_ON = [
@@ -38,6 +43,7 @@ const HIDE_TOPICNAV_ON = [
   "/region", "/country",
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
+  "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
 ];
 
 export default function App() {
@@ -120,10 +126,15 @@ export default function App() {
           <Route path="/markets"        element={<MarketsPage />} />
           <Route path="/weather"        element={<WeatherPage />} />
           <Route path="/newsletter"     element={<NewsletterPage />} />
-          <Route path="/source/:slug"   element={<SourcePage />} />
-          <Route path="/tag/:slug"      element={<TagPage />} />
-          <Route path="/search"         element={<SearchPage />} />
-          <Route path="*"               element={<NotFound />} />
+          <Route path="/source/:slug"        element={<SourcePage />} />
+          <Route path="/tag/:slug"           element={<TagPage />} />
+          <Route path="/search"              element={<SearchPage />} />
+          <Route path="/privacy"             element={<PrivacyPage />} />
+          <Route path="/terms"               element={<TermsPage />} />
+          <Route path="/editorial-policy"    element={<EditorialPolicyPage />} />
+          <Route path="/contact"             element={<ContactPage />} />
+          <Route path="/sponsor"             element={<SponsorPage />} />
+          <Route path="*"                    element={<NotFound />} />
         </Routes>
       </main>
 

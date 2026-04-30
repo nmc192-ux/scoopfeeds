@@ -104,7 +104,7 @@ export default function Header() {
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.8 }}
-                className="hidden md:flex items-center gap-2 text-xs text-[var(--color-text-tertiary)]"
+                className="hidden sm:flex items-center gap-2 text-xs text-[var(--color-text-tertiary)]"
               >
                 <Activity size={12} className="text-emerald-500" />
                 <span>{articleCount.toLocaleString()} articles</span>

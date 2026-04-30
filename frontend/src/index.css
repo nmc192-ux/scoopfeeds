@@ -243,22 +243,22 @@
   }
 
   /* ── Electric Signal buttons ─────────────────────────────────────────── */
-  .btn-primary, .btn-cobalt {
+  .btn-primary {
     @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
            text-white font-medium text-sm
            transition-all duration-200
            shadow-sm hover:shadow-md;
     background: var(--color-accent);
   }
-  .btn-primary:hover, .btn-cobalt:hover { background: var(--color-accent-hover); }
+  .btn-primary:hover { background: var(--color-accent-hover); }
 
-  .btn-primary-ghost, .btn-cobalt-ghost {
+  .btn-primary-ghost {
     @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
            font-medium text-sm transition-all duration-200;
     border: 1px solid var(--color-accent);
     color: var(--color-accent);
   }
-  .btn-primary-ghost:hover, .btn-cobalt-ghost:hover { background: var(--color-accent-light); }
+  .btn-primary-ghost:hover { background: var(--color-accent-light); }
 
   .btn-orange {
     @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
