@@ -74,6 +74,7 @@ async function fetchTranslation(texts, lang, source = "auto") {
 export function useTranslatedTexts(texts = [], sourceLang = "en") {
   const { language, autoLanguage } = useNewsStore();
   const [translated, setTranslated] = useState(texts);
+  const [isTranslating, setIsTranslating] = useState(false);
   const prevKey = useRef(null);
 
   const target = autoLanguage ? sourceLang : language;
@@ -82,6 +83,7 @@ export function useTranslatedTexts(texts = [], sourceLang = "en") {
   useEffect(() => {
     if (skip) {
       setTranslated(texts);
+      setIsTranslating(false);
       prevKey.current = texts.join("|||") + ":::" + (target || "x");
       return;
     }
@@ -94,19 +96,27 @@ export function useTranslatedTexts(texts = [], sourceLang = "en") {
     const immediate = texts.map(t => translationCache.get(getCacheKey(t, target)) ?? t);
     setTranslated(immediate);
 
+    // Check if any texts need a network round-trip (not in cache)
+    const needsFetch = texts.some(t => !translationCache.has(getCacheKey(t, target)));
+    if (needsFetch) setIsTranslating(true);
+
     let cancelled = false;
     (async () => {
       const result = await fetchTranslation(texts, target, sourceLang);
-      if (!cancelled) setTranslated([...result]);
+      if (!cancelled) {
+        setTranslated([...result]);
+        setIsTranslating(false);
+      }
     })();
 
     return () => { cancelled = true; };
   }, [target, sourceLang, skip, texts.join("|||")]);
 
   return {
-    texts:  skip ? texts : translated,
-    isRtl:  ["ar", "fa", "ur", "he", "ps"].includes(target),
-    isUrdu: target === "ur",
+    texts:         skip ? texts : translated,
+    isRtl:         ["ar", "fa", "ur", "he", "ps"].includes(target),
+    isUrdu:        target === "ur",
+    isTranslating: !skip && isTranslating,
   };
 }
 

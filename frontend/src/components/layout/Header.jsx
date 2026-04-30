@@ -82,15 +82,10 @@ export default function Header() {
                 )}
               </div>
               <div className="hidden sm:flex flex-col leading-none gap-[3px]">
-                <span
-                  className="text-[var(--color-text)]"
-                  style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "21px", fontWeight: 800, letterSpacing: "-0.04em", lineHeight: 1 }}
-                >
-                  Scoop<span style={{ color: "var(--color-orange)" }}>feeds</span>
+                <span className="font-brand text-[21px] font-extrabold tracking-[-0.04em] leading-none text-[var(--color-text)]">
+                  Scoop<span className="text-[var(--color-orange)]">feeds</span>
                 </span>
-                <span
-                  style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: "11px", fontWeight: 400, letterSpacing: "0.01em", color: "var(--color-text-tertiary)" }}
-                >
+                <span className="font-editorial italic text-[11px] tracking-[0.01em] text-[var(--color-text-tertiary)]">
                   Intelligent news, curated.
                 </span>
               </div>

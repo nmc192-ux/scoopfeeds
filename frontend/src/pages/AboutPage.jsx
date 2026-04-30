@@ -31,8 +31,7 @@ export default function AboutPage() {
         <ScoopMascot size="lg" animated />
         <div>
           <h1
-            className="text-3xl sm:text-4xl font-bold tracking-tight"
-            style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic" }}
+            className="font-editorial italic text-3xl sm:text-4xl font-bold tracking-tight"
           >
             About Scoopfeeds
           </h1>

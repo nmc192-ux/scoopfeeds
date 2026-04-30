@@ -69,7 +69,7 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
   // German feeds stay German when user is on Auto, but translate when user
   // picks English).
   const textsToTranslate = [article.title || "", article.description || ""];
-  const { texts: translatedTexts, isUrdu } = useTranslatedTexts(
+  const { texts: translatedTexts, isUrdu, isTranslating } = useTranslatedTexts(
     textsToTranslate, article.language || "en"
   );
   const displayTitle = translatedTexts[0] || article.title;
@@ -192,7 +192,8 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
           <h3 className={clsx(
             "font-semibold text-[var(--color-text)] leading-snug mb-2 truncate-title",
             size === "large" ? "text-xl" : "text-base",
-            isUrdu && "urdu-text"
+            isUrdu && "urdu-text",
+            isTranslating && "opacity-50 animate-pulse"
           )}>
             {displayTitle}
           </h3>
@@ -201,7 +202,8 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
           {article.description && (
             <p className={clsx(
               "text-sm text-[var(--color-text-secondary)] line-clamp-2 leading-relaxed",
-              isUrdu && "urdu-text"
+              isUrdu && "urdu-text",
+              isTranslating && "opacity-50 animate-pulse"
             )}>
               {displayDesc}
             </p>
