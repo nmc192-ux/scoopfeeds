@@ -19,8 +19,15 @@
 import { readFileSync, existsSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import dns from "node:dns";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Prefer IPv4 — see scripts/render-queue.mjs for context. Node 20's
+// resolver picks IPv6 first by default, but Hostinger's IPv6 pool isn't
+// reachable from a chunk of GitHub Actions runner subnets, so fetch()
+// silently fails as "TypeError: fetch failed" before the first byte.
+dns.setDefaultResultOrder("ipv4first");
 
 const SITE_URL = (process.env.SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 const OPS_KEY  = process.env.OPS_KEY || "";
