@@ -109,12 +109,12 @@ function getEmbedUrl(ch, liveVideoId) {
   return null;
 }
 
-/* ─── Pulsing red dot ──────────────────────────────────────────────────────── */
+/* ─── Pulsing alert dot (live broadcast indicator) ────────────────────────── */
 function LiveDot() {
   return (
     <span className="relative inline-flex h-2.5 w-2.5 flex-shrink-0">
-      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
-      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-600" />
+      <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: "var(--color-alert)" }} />
+      <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ background: "var(--color-alert)" }} />
     </span>
   );
 }
@@ -275,7 +275,7 @@ export default function LiveTVSection() {
                       >
                         {activeChannel.flag} {activeChannel.name}
                       </span>
-                      <span className="flex items-center gap-1 bg-red-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider backdrop-blur-sm">
+                      <span className="flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider backdrop-blur-sm" style={{ background: "color-mix(in srgb, var(--color-alert) 90%, transparent)" }}>
                         <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                         Live
                       </span>
