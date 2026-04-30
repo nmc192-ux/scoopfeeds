@@ -141,6 +141,156 @@ function classifyError(err) {
   return { code: 502, error: "Couldn't fetch article", hint: err.message || "Unknown error." };
 }
 
+// ─── Domain-specific alternate URL strategies ─────────────────────────────────
+// For paywalled/bot-blocked sites, try AMP or mobile variants that bypass
+// the paywall check or have simpler HTML that Readability handles better.
+const DOMAIN_ALT_URL = {
+  "bloomberg.com": (url) => {
+    try {
+      const u = new URL(url);
+      if (!u.pathname.startsWith("/amp/")) {
+        return "https://www.bloomberg.com/amp" + u.pathname;
+      }
+    } catch {}
+    return null;
+  },
+  "ft.com": (url) => {
+    try {
+      const u = new URL(url);
+      return `https://amp.ft.com${u.pathname}${u.search}`;
+    } catch {}
+    return null;
+  },
+  "wsj.com": (url) => {
+    try {
+      const u = new URL(url);
+      if (!u.pathname.startsWith("/amp/")) {
+        return `https://www.wsj.com/amp${u.pathname}`;
+      }
+    } catch {}
+    return null;
+  },
+  "nytimes.com": (url) => {
+    // NYT has a Google AMP cache version
+    try {
+      const u = new URL(url);
+      const ampPath = u.hostname.replace(/\./g, "-") + u.pathname.replace(/\//g, "/");
+      return `https://www-nytimes-com.cdn.ampproject.org/c/s/www.nytimes.com${u.pathname}`;
+    } catch {}
+    return null;
+  },
+  "thetimes.co.uk": (url) => {
+    try {
+      const u = new URL(url);
+      return `https://amp.thetimes.co.uk${u.pathname}`;
+    } catch {}
+    return null;
+  },
+};
+
+function getAltUrl(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    const fn = DOMAIN_ALT_URL[host];
+    return fn ? fn(url) : null;
+  } catch { return null; }
+}
+
+// ─── Meta-tag fallback extractor ─────────────────────────────────────────────
+// When full Readability extraction fails (paywall / bot-block), extract meta
+// tags to build a usable "preview" payload — title, description, image, author,
+// publication date. Better than a blank screen.
+function extractMetaFallback(html, url) {
+  const get = (re) => {
+    const m = html.match(re);
+    return m ? m[1]
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .trim() : null;
+  };
+
+  const title =
+    get(/<meta[^>]+property="og:title"[^>]+content="([^"]+)"/i) ||
+    get(/<meta[^>]+content="([^"]+)"[^>]+property="og:title"/i) ||
+    get(/<meta[^>]+name="title"[^>]+content="([^"]+)"/i) ||
+    get(/<title>([^<]+)<\/title>/i);
+
+  const description =
+    get(/<meta[^>]+property="og:description"[^>]+content="([^"]+)"/i) ||
+    get(/<meta[^>]+content="([^"]+)"[^>]+property="og:description"/i) ||
+    get(/<meta[^>]+name="description"[^>]+content="([^"]+)"/i);
+
+  const image =
+    get(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i) ||
+    get(/<meta[^>]+content="([^"]+)"[^>]+property="og:image"/i);
+
+  const author =
+    get(/<meta[^>]+name="author"[^>]+content="([^"]+)"/i) ||
+    get(/<meta[^>]+property="article:author"[^>]+content="([^"]+)"/i) ||
+    get(/<meta[^>]+name="byl"[^>]+content="([^"]+)"/i);
+
+  const published =
+    get(/<meta[^>]+property="article:published_time"[^>]+content="([^"]+)"/i) ||
+    get(/<meta[^>]+name="publishdate"[^>]+content="([^"]+)"/i) ||
+    get(/<meta[^>]+itemprop="datePublished"[^>]+content="([^"]+)"/i);
+
+  const siteName =
+    get(/<meta[^>]+property="og:site_name"[^>]+content="([^"]+)"/i) ||
+    new URL(url).hostname.replace(/^www\./, "");
+
+  if (!title && !description) return null;
+
+  // Build minimal HTML from extracted meta — gives Readability something to work
+  // with AND gives the frontend a useful display even for hard-paywalled content.
+  const paraDesc = description
+    ? `<p>${description}</p>`
+    : "";
+  const imgTag = image
+    ? `<p><img src="${image}" alt="" style="max-width:100%" /></p>`
+    : "";
+  const paywall = `<p><em>⚠️ Full article requires a subscription at <a href="${url}" target="_blank" rel="noopener">${siteName}</a>. The summary above is extracted from public metadata.</em></p>`;
+
+  const content = `${imgTag}${paraDesc}${paywall}`;
+
+  return {
+    title,
+    byline:        author,
+    siteName,
+    excerpt:       description,
+    content,
+    textContent:   description || "",
+    length:        (description || "").length,
+    lang:          null,
+    publishedTime: published,
+    url,
+    isMeta: true,   // flag so frontend can show "preview only" badge
+  };
+}
+
+// ─── Parse HTML with Readability ─────────────────────────────────────────────
+function parseWithReadability(html, url) {
+  const { document } = parseHTML(html);
+  const reader = new Readability(document, { charThreshold: 20 });
+  const article = reader.parse();
+  if (!article || !article.content || article.length < 100) return null;
+  return {
+    title:         article.title         || null,
+    byline:        article.byline        || null,
+    siteName:      article.siteName      || new URL(url).hostname,
+    excerpt:       article.excerpt       || null,
+    content:       article.content,
+    textContent:   article.textContent   || "",
+    length:        article.length        || 0,
+    lang:          article.lang          || null,
+    publishedTime: article.publishedTime || null,
+    url,
+    isMeta: false,
+  };
+}
+
 // ─── Route ───────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   const url = String(req.query.url || "").trim();
@@ -152,13 +302,33 @@ router.get("/", async (req, res) => {
   const cached = getCached(url);
   if (cached) return res.json({ success: true, data: cached, cached: true });
 
-  // ── Fetch ─────────────────────────────────────────────────────────────────
-  let html, contentType;
+  // ── Step 1: fetch the original URL ───────────────────────────────────────
+  let html, contentType, fetchErr;
   try {
     ({ html, contentType } = await fetchHtml(url));
   } catch (err) {
-    const { code, error, hint } = classifyError(err);
-    logger.warn(`reader fetch failed [${code}] ${url}: ${err.message}`);
+    fetchErr = err;
+  }
+
+  // ── Step 2: if blocked, try domain-specific alt URL (AMP / mobile) ───────
+  if (fetchErr || (html && !contentType.includes("html"))) {
+    const altUrl = getAltUrl(url);
+    if (altUrl && isSafeUrl(altUrl)) {
+      try {
+        ({ html, contentType } = await fetchHtml(altUrl));
+        fetchErr = null;
+        logger.info(`reader: alt URL succeeded for ${url} → ${altUrl}`);
+      } catch (altErr) {
+        logger.warn(`reader: alt URL also failed for ${url}: ${altErr.message}`);
+        // keep original fetchErr so we report the primary failure
+      }
+    }
+  }
+
+  // ── Step 3: if still no HTML, give up ────────────────────────────────────
+  if (fetchErr) {
+    const { code, error, hint } = classifyError(fetchErr);
+    logger.warn(`reader fetch failed [${code}] ${url}: ${fetchErr.message}`);
     return res.status(code).json({ success: false, error, hint });
   }
 
@@ -166,39 +336,44 @@ router.get("/", async (req, res) => {
     return res.status(415).json({ success: false, error: "Not an HTML page", hint: "This link points to a non-HTML resource (PDF, image, etc.)." });
   }
 
-  // ── Parse ─────────────────────────────────────────────────────────────────
+  // ── Step 4: parse with Readability ───────────────────────────────────────
+  let payload = null;
   try {
-    const { document } = parseHTML(html);
-    const reader = new Readability(document);
-    const article = reader.parse();
-
-    if (!article || !article.content) {
-      return res.status(422).json({
-        success: false,
-        error: "Could not extract article content",
-        hint: "The page structure isn't compatible with reader extraction. Try reading on the source site.",
-      });
-    }
-
-    const payload = {
-      title:         article.title         || null,
-      byline:        article.byline        || null,
-      siteName:      article.siteName      || new URL(url).hostname,
-      excerpt:       article.excerpt       || null,
-      content:       article.content,
-      textContent:   article.textContent   || "",
-      length:        article.length        || 0,
-      lang:          article.lang          || null,
-      publishedTime: article.publishedTime || null,
-      url,
-    };
-
-    setCached(url, payload);
-    return res.json({ success: true, data: payload, cached: false });
+    payload = parseWithReadability(html, url);
   } catch (err) {
-    logger.warn(`reader parse failed for ${url}: ${err.message}`);
-    return res.status(500).json({ success: false, error: "Parse error", hint: err.message });
+    logger.warn(`reader parse error for ${url}: ${err.message}`);
   }
+
+  // ── Step 5: if Readability got nothing, try alt URL HTML ─────────────────
+  if (!payload) {
+    const altUrl = getAltUrl(url);
+    if (altUrl && isSafeUrl(altUrl)) {
+      try {
+        const { html: altHtml } = await fetchHtml(altUrl);
+        payload = parseWithReadability(altHtml, url);
+        if (payload) logger.info(`reader: Readability succeeded on alt URL for ${url}`);
+      } catch {}
+    }
+  }
+
+  // ── Step 6: last resort — extract meta tags only ─────────────────────────
+  if (!payload) {
+    payload = extractMetaFallback(html, url);
+    if (payload) {
+      logger.info(`reader: meta-only fallback used for ${url}`);
+    }
+  }
+
+  if (!payload) {
+    return res.status(422).json({
+      success: false,
+      error: "Could not extract article content",
+      hint: "The page structure isn't compatible with reader extraction. Try reading on the source site.",
+    });
+  }
+
+  setCached(url, payload);
+  return res.json({ success: true, data: payload, cached: false });
 });
 
 export default router;

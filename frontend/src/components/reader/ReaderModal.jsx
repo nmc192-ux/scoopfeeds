@@ -291,22 +291,44 @@ export default function ReaderModal() {
               )}
 
               {isError && (!meterResult || meterResult.allowed) && (
-                <div className="rounded-xl border border-[var(--color-border)] p-6 text-center space-y-2">
-                  <p className="font-semibold">{error?.message || "Couldn't extract this article"}</p>
-                  <p className="text-sm opacity-60">
-                    {error?.hint || "The source site may restrict automated access. Read it directly instead."}
+                <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-6 text-center space-y-3">
+                  <div className="text-3xl">🔒</div>
+                  <p className="font-semibold text-amber-900 dark:text-amber-200">
+                    {error?.message || "Couldn't extract this article"}
                   </p>
-                  <div className="pt-2">
+                  <p className="text-sm text-amber-700 dark:text-amber-400">
+                    {error?.hint || "This publisher restricts automated access. Read the full article directly."}
+                  </p>
+                  <a
+                    href={article.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={handleSourceClick}
+                    className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-full bg-cobalt-600 text-white text-sm font-semibold hover:bg-cobalt-700 transition-colors"
+                  >
+                    <ExternalLink size={13} />
+                    Read on {new URL(article.url).hostname}
+                  </a>
+                </div>
+              )}
+
+              {/* Paywall preview banner — shown when backend fell back to meta-only */}
+              {data?.isMeta && (!meterResult || meterResult.allowed) && (
+                <div className="flex items-start gap-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 mb-5 text-sm text-amber-800 dark:text-amber-300">
+                  <span className="text-base shrink-0">🔒</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="font-semibold">Preview only</span>
+                    {" — "}this article is behind a paywall at{" "}
                     <a
                       href={article.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={handleSourceClick}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 text-white text-sm font-semibold hover:bg-cobalt-700 transition-colors"
+                      className="underline font-medium"
                     >
-                      <ExternalLink size={13} />
-                      Read on {new URL(article.url).hostname}
+                      {new URL(article.url).hostname.replace(/^www\./, "")}
                     </a>
+                    . The summary below is from public metadata.
                   </div>
                 </div>
               )}

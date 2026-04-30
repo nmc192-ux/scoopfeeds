@@ -30,32 +30,32 @@ const CHANNELS = [
   { id: "aljazeera",  name: "Al Jazeera English", flag: "🌍", lang: "EN", region: "global",   handle: "AlJazeeraEnglish" },
   { id: "france24",   name: "France 24 English",  flag: "🇫🇷", lang: "EN", region: "global",   handle: "FRANCE24English" },
   { id: "dw",         name: "DW News",            flag: "🇩🇪", lang: "EN", region: "europe",   handle: "DWNews" },
-  { id: "bbc",        name: "BBC News",           flag: "🇬🇧", lang: "EN", region: "europe",   handle: "BBCNews" },
-  { id: "skynews",    name: "Sky News",           flag: "🇬🇧", lang: "EN", region: "europe",   handle: "SkyNews" },
+  { id: "bbc",        name: "BBC News",           flag: "🇬🇧", lang: "EN", region: "europe",   handle: "BBCNews",        fallbackId: "9cIUqVL88eM" },
+  { id: "skynews",    name: "Sky News",           flag: "🇬🇧", lang: "EN", region: "europe",   handle: "SkyNews",        fallbackId: "0wX_vEkPcPs" },
   { id: "bloomberg",  name: "Bloomberg TV",       flag: "🇺🇸", lang: "EN", region: "americas", fallbackId: "iEpJwprxDdk", handle: "Bloomberg" },
-  { id: "abcnews",    name: "ABC News Live",      flag: "🇺🇸", lang: "EN", region: "americas", fallbackId: "vOTiJkg1voo", handle: "ABCNews" },
-  { id: "cbsnews",    name: "CBS News",           flag: "🇺🇸", lang: "EN", region: "americas", fallbackId: "BfL2pudZbBM", handle: "CBSNews" },
+  { id: "abcnews",    name: "ABC News Live",      flag: "🇺🇸", lang: "EN", region: "americas", fallbackId: "0Ipya_YG-LM", handle: "ABCNews" },
+  { id: "cbsnews",    name: "CBS News",           flag: "🇺🇸", lang: "EN", region: "americas", fallbackId: "3d8m3XIYvHg", handle: "CBSNews" },
   // ── Asia ────────────────────────────────────────────────────────────────
   { id: "wion",       name: "WION",               flag: "🇮🇳", lang: "EN", region: "asia",     handle: "WION" },
-  { id: "ndtv",       name: "NDTV 24x7",          flag: "🇮🇳", lang: "EN", region: "asia",     fallbackId: "MtnAtxiK_eQ" },
+  { id: "ndtv",       name: "NDTV 24x7",          flag: "🇮🇳", lang: "EN", region: "asia",     fallbackId: "nSoxfu2tVAA", handle: "ndtv" },
   { id: "cna",        name: "Channel News Asia",  flag: "🇸🇬", lang: "EN", region: "asia",     fallbackId: "XWq5kBlakcQ", handle: "channelnewsasia" },
-  { id: "nhkworld",   name: "NHK World Japan",    flag: "🇯🇵", lang: "EN", region: "asia",     fallbackId: "f0lYjLstM-A", handle: "NHKWORLDJAPAN" },
-  { id: "cgtn",       name: "CGTN",               flag: "🇨🇳", lang: "EN", region: "asia",     fallbackId: "hxFunHjj8FM", handle: "CGTN" },
-  { id: "trtworld",   name: "TRT World",          flag: "🇹🇷", lang: "EN", region: "mena",     fallbackId: "wXnCOvgnUKQ", handle: "trtworld" },
+  { id: "nhkworld",   name: "NHK World Japan",    flag: "🇯🇵", lang: "EN", region: "asia",     fallbackId: "f0lYkdA-Gtw", handle: "NHKWORLDJAPAN" },
+  { id: "cgtn",       name: "CGTN",               flag: "🇨🇳", lang: "EN", region: "asia",     fallbackId: "mJrrcG6sfqI", handle: "CGTN" },
+  { id: "trtworld",   name: "TRT World",          flag: "🇹🇷", lang: "EN", region: "mena",     fallbackId: "1VUhRQpz_9o", handle: "trtworld" },
   // ── MENA / Africa ──────────────────────────────────────────────────────
-  { id: "i24",        name: "i24NEWS English",    flag: "🇮🇱", lang: "EN", region: "mena",     fallbackId: "Z_5YDUlj_CY", handle: "i24NEWSEnglish" },
-  { id: "africanews", name: "Africanews",         flag: "🌍", lang: "EN", region: "africa",   fallbackId: "Lgi2y36jb2M", handle: "africanews" },
+  { id: "i24",        name: "i24NEWS English",    flag: "🇮🇱", lang: "EN", region: "mena",     fallbackId: "lqfJJ5riJag", handle: "i24NEWS_EN" },
+  { id: "africanews", name: "Africanews",         flag: "🌍", lang: "EN", region: "africa",   fallbackId: "NQjabLGdP5g", handle: "africanews" },
   // ── European languages ─────────────────────────────────────────────────
-  { id: "f24fr",      name: "France 24 (Français)",flag: "🇫🇷", lang: "FR", region: "europe",  fallbackId: "tkDUSYHoKxE" },
-  { id: "dwde",       name: "DW (Deutsch)",       flag: "🇩🇪", lang: "DE", region: "europe",   fallbackId: "tQ0yjYUFKAE" },
-  { id: "euronews",   name: "Euronews",           flag: "🇪🇺", lang: "EN", region: "europe",   fallbackId: "9Auq9mYxFEE" },
+  { id: "f24fr",      name: "France 24 (Français)",flag: "🇫🇷", lang: "FR", region: "europe",  fallbackId: "l8PMl7tUDIE", handle: "FRANCE24" },
+  { id: "dwde",       name: "DW (Deutsch)",       flag: "🇩🇪", lang: "DE", region: "europe",   handle: "deutschewelle" },
+  { id: "euronews",   name: "Euronews",           flag: "🇪🇺", lang: "EN", region: "europe",   fallbackId: "pykpO5kQJ98", handle: "euronews" },
   // ── Latin America ──────────────────────────────────────────────────────
-  { id: "globonews",  name: "Globo News",         flag: "🇧🇷", lang: "PT", region: "americas", fallbackId: "U8kkUngclWY" },
-  { id: "dwes",       name: "DW (Español)",       flag: "🇪🇸", lang: "ES", region: "americas", fallbackId: "AXC2dGCk9Yw" },
+  { id: "globonews",  name: "Globo News",         flag: "🇧🇷", lang: "PT", region: "americas", fallbackId: "3faO4FViC0s", handle: "globonews" },
+  { id: "dwes",       name: "DW (Español)",       flag: "🇪🇸", lang: "ES", region: "americas", fallbackId: "yZh3xsFqCt8", handle: "dwespanol" },
   // ── South Asia ─────────────────────────────────────────────────────────
   { id: "geo",        name: "Geo News",           flag: "🇵🇰", lang: "UR", region: "asia",     handle: "geonews" },
   { id: "ary",        name: "ARY News",           flag: "🇵🇰", lang: "UR", region: "asia",     handle: "arynews" },
-  { id: "aajtak",     name: "Aaj Tak",            flag: "🇮🇳", lang: "HI", region: "asia",     fallbackId: "Nq2wYlWFucg" },
+  { id: "aajtak",     name: "Aaj Tak",            flag: "🇮🇳", lang: "HI", region: "asia",     fallbackId: "Nq2wYlWFucg", handle: "aajtak" },
 ];
 
 const REGIONS = [
