@@ -37,21 +37,21 @@ export default function ContactPage() {
       <div className="grid sm:grid-cols-2 gap-4">
 
         <ContactCard
-          icon={<Mail size={20} className="text-cobalt-600" />}
+          icon={<Mail size={20} className="text-electric-600" />}
           title="General Enquiries"
           description="Questions about the product, feedback, source suggestions, or anything else."
           email="hello@scoopfeeds.com"
         />
 
         <ContactCard
-          icon={<Newspaper size={20} className="text-cobalt-600" />}
+          icon={<Newspaper size={20} className="text-electric-600" />}
           title="Press & Media"
           description="Media requests, interview enquiries, and official statements."
           email="press@scoopfeeds.com"
         />
 
         <ContactCard
-          icon={<Megaphone size={20} className="text-cobalt-600" />}
+          icon={<Megaphone size={20} className="text-electric-600" />}
           title="Advertise"
           description="Sponsored placements, newsletter ads, and banner partnerships."
           email="ads@scoopfeeds.com"
@@ -60,7 +60,7 @@ export default function ContactPage() {
         />
 
         <ContactCard
-          icon={<Bug size={20} className="text-cobalt-600" />}
+          icon={<Bug size={20} className="text-electric-600" />}
           title="Bug Reports"
           description="Found something broken? We'd love to fix it. Email us or open an issue on GitHub."
           email="hello@scoopfeeds.com"
@@ -106,7 +106,7 @@ function ContactCard({ icon, title, description, email, emailSubject, linkTo, li
       <div className="mt-auto flex flex-col gap-1.5">
         <a
           href={href}
-          className="text-sm font-medium text-cobalt-600 hover:underline"
+          className="text-sm font-medium text-electric-600 hover:underline"
         >
           {email}
         </a>

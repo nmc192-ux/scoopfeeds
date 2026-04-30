@@ -271,7 +271,7 @@ function NotFound() {
       </p>
       <a
         href="/"
-        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 text-white text-sm font-semibold hover:bg-cobalt-700 transition-colors"
+        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 text-white text-sm font-semibold hover:bg-electric-700 transition-colors"
       >
         Go to homepage
       </a>

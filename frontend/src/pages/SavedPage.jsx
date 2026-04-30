@@ -35,7 +35,7 @@ export default function SavedPage() {
           <ChevronLeft size={18} />
         </Link>
         <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-cobalt-50 text-cobalt-600"
+          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-electric-50 text-electric-600"
         >
           <Bookmark size={18} fill="currentColor" />
         </div>
@@ -66,7 +66,7 @@ export default function SavedPage() {
           {!isLoggedIn && (
             <button
               onClick={() => setAuthOpen(true)}
-              className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 hover:bg-cobalt-700 text-white text-sm font-semibold transition-colors"
+              className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 hover:bg-electric-700 text-white text-sm font-semibold transition-colors"
             >
               <LogIn size={14} />
               Sign in to sync across devices

@@ -231,7 +231,7 @@ function EventDossier({ id, onBack }) {
                         href={s.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] text-cobalt-600 hover:underline"
+                        className="inline-flex items-center gap-1 text-[11px] text-electric-600 hover:underline"
                       >
                         {s.name}
                         <ExternalLink size={10} />

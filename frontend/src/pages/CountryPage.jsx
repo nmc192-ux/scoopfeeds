@@ -84,7 +84,7 @@ export default function CountryPage() {
         </p>
         <Link
           to="/"
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 text-white text-sm font-semibold"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 text-white text-sm font-semibold"
         >
           <ChevronLeft size={14} />
           Back to home
@@ -141,7 +141,7 @@ export default function CountryPage() {
       {articles.length === 0 && !isLoading && (
         <div className="text-center py-12 text-sm text-[var(--color-text-tertiary)]">
           No recent stories tagged for {country.name} in our feed yet — check the
-          {" "}<Link to="/" className="text-cobalt-600 hover:underline">global feed</Link>{" "}
+          {" "}<Link to="/" className="text-electric-600 hover:underline">global feed</Link>{" "}
           for related coverage.
         </div>
       )}

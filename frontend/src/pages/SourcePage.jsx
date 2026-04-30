@@ -51,7 +51,7 @@ export default function SourcePage() {
         <p className="text-[var(--color-text-tertiary)] mb-6">No source registered for "{slug}".</p>
         <Link
           to="/"
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 text-white text-sm font-semibold"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 text-white text-sm font-semibold"
         >
           <ChevronLeft size={14} />
           Back to home

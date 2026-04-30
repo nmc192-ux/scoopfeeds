@@ -53,8 +53,8 @@ function iconFor(code) {
   if (/clear|sun/.test(c))         return <Sun        size={28} className="text-amber-500" />;
   if (/partly|few/.test(c))        return <CloudSun   size={28} className="text-amber-400" />;
   if (/cloud/.test(c))             return <Cloud      size={28} className="text-[var(--color-text-tertiary)]" />;
-  if (/rain|drizzle|shower/.test(c)) return <CloudRain  size={28} className="text-cobalt-500" />;
-  if (/snow|sleet|ice/.test(c))    return <CloudSnow  size={28} className="text-cobalt-300" />;
+  if (/rain|drizzle|shower/.test(c)) return <CloudRain  size={28} className="text-electric-500" />;
+  if (/snow|sleet|ice/.test(c))    return <CloudSnow  size={28} className="text-electric-300" />;
   if (/thunder|storm/.test(c))     return <Zap        size={28} className="text-amber-500" />;
   if (/fog|mist|haze/.test(c))     return <CloudFog   size={28} className="text-[var(--color-text-tertiary)]" />;
   return <CloudSun size={28} className="text-[var(--color-text-tertiary)]" />;
@@ -146,7 +146,7 @@ export default function WeatherPage() {
         >
           <ChevronLeft size={18} />
         </button>
-        <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-cobalt-50 dark:bg-cobalt-950/40 text-cobalt-600 dark:text-cobalt-400 shrink-0">
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-electric-50 dark:bg-electric-950/40 text-electric-600 dark:text-electric-400 shrink-0">
           <CloudSun size={22} />
         </div>
         <div className="min-w-0">

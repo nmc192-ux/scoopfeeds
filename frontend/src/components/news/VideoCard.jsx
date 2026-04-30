@@ -76,7 +76,7 @@ export default function VideoCard({ video, index = 0, onPlay, size = "normal" })
       {/* Content */}
       <div className={clsx("p-3 flex flex-col", size === "wide" && "flex-1 min-w-0")}>
         <h4 className={clsx(
-          "font-semibold text-[var(--color-text)] leading-snug line-clamp-2 group-hover:text-cobalt-600 transition-colors",
+          "font-semibold text-[var(--color-text)] leading-snug line-clamp-2 group-hover:text-electric-600 transition-colors",
           size === "wide" ? "text-sm" : "text-sm"
         )}>
           {video.title}

@@ -69,7 +69,7 @@ export default function AuthModal({ open, onClose }) {
           /* ── Logged-in view ───────────────────────── */
           <div>
             <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-full bg-cobalt-50 text-cobalt-600 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-full bg-electric-50 text-electric-600 flex items-center justify-center">
                 <User size={20} />
               </div>
               <div>
@@ -80,7 +80,7 @@ export default function AuthModal({ open, onClose }) {
 
             <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface2)] p-3 mb-4">
               <div className="flex items-center gap-2 mb-1">
-                <BookmarkCheck size={14} className="text-cobalt-600" />
+                <BookmarkCheck size={14} className="text-electric-600" />
                 <span className="text-xs font-semibold">
                   {auth.savedArticles.length} saved article{auth.savedArticles.length !== 1 ? "s" : ""}
                 </span>
@@ -114,7 +114,7 @@ export default function AuthModal({ open, onClose }) {
             {referralUrl && (
               <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface2)] p-3 mb-4">
                 <p className="text-xs font-semibold mb-1">Your invite link</p>
-                <p className="text-[11px] text-cobalt-600 break-all">{referralUrl}</p>
+                <p className="text-[11px] text-electric-600 break-all">{referralUrl}</p>
               </div>
             )}
 
@@ -124,7 +124,7 @@ export default function AuthModal({ open, onClose }) {
               onClick={handleLogout}
               className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-[var(--color-border)]
                          text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface2)] transition-colors
-                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/40"
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40"
             >
               <LogOut size={14} />
               Sign out
@@ -145,7 +145,7 @@ export default function AuthModal({ open, onClose }) {
           /* ── Sign in form ─────────────────────────── */
           <div>
             <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-full bg-cobalt-50 text-cobalt-600 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-full bg-electric-50 text-electric-600 flex items-center justify-center">
                 <Mail size={20} />
               </div>
               <div>
@@ -164,16 +164,16 @@ export default function AuthModal({ open, onClose }) {
                 disabled={busy}
                 className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)]
                            bg-[var(--color-surface2)] text-[var(--color-text)] placeholder-[var(--color-text-tertiary)]
-                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/40
-                           focus:border-cobalt-500"
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40
+                           focus:border-electric-500"
               />
               {err && <p className="text-[11px] text-[var(--color-alert)]">{err}</p>}
               <button
                 type="submit"
                 disabled={busy}
-                className="w-full py-2 rounded-lg bg-cobalt-600 text-white text-sm font-semibold
-                           hover:bg-cobalt-700 disabled:opacity-60 flex items-center justify-center gap-2
-                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/50"
+                className="w-full py-2 rounded-lg bg-electric-600 text-white text-sm font-semibold
+                           hover:bg-electric-700 disabled:opacity-60 flex items-center justify-center gap-2
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/50"
               >
                 {busy ? <Loader2 size={14} className="animate-spin" /> : null}
                 Send magic link

@@ -30,7 +30,7 @@ export default function MostReadSidebar({ articles = [] }) {
     >
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--color-border)]">
-        <TrendingUp size={14} className="text-cobalt-600" />
+        <TrendingUp size={14} className="text-electric-600" />
         <h3 className="text-sm font-bold text-[var(--color-text)]">Most Read</h3>
       </div>
 
@@ -70,7 +70,7 @@ export default function MostReadSidebar({ articles = [] }) {
                     </span>
                   </div>
 
-                  <p className="text-xs font-semibold text-[var(--color-text)] line-clamp-3 leading-snug group-hover:text-cobalt-600 transition-colors">
+                  <p className="text-xs font-semibold text-[var(--color-text)] line-clamp-3 leading-snug group-hover:text-electric-600 transition-colors">
                     {article.title}
                   </p>
                   <p className="text-[10px] text-[var(--color-text-tertiary)] mt-1 truncate">

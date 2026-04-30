@@ -114,7 +114,7 @@ export default function Modal({
                 className="absolute top-3 right-3 z-10 p-1.5 rounded-full
                            text-[var(--color-text-tertiary)] hover:text-[var(--color-text)]
                            hover:bg-[var(--color-surface2)]
-                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/50"
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/50"
               >
                 <X size={18} />
               </button>

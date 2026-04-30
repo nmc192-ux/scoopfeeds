@@ -158,12 +158,12 @@ function ShortsCard({ video, onPlay }) {
           className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
         />
         <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <div className="w-10 h-10 bg-cobalt-600/90 rounded-full flex items-center justify-center shadow-xl">
+          <div className="w-10 h-10 bg-electric-600/90 rounded-full flex items-center justify-center shadow-xl">
             <Play size={16} fill="white" className="text-white ml-0.5" />
           </div>
         </div>
         <div className="absolute top-2 left-2">
-          <span className="bg-cobalt-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded leading-none">
+          <span className="bg-electric-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded leading-none">
             SHORTS
           </span>
         </div>
@@ -295,7 +295,7 @@ export default function VideoSection() {
             className={clsx(
               "flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-200 border",
               activeTab === id
-                ? "bg-cobalt-600 text-white shadow-md border-transparent"
+                ? "bg-electric-600 text-white shadow-md border-transparent"
                 : "bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface2)]"
             )}
           >
@@ -304,7 +304,7 @@ export default function VideoSection() {
             {id === "following" && followedChannels.length > 0 && (
               <span className={clsx(
                 "ml-0.5 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center",
-                activeTab === id ? "bg-white/25 text-white" : "bg-cobalt-50 text-cobalt-600"
+                activeTab === id ? "bg-white/25 text-white" : "bg-electric-50 text-electric-600"
               )}>
                 {followedChannels.length}
               </span>
@@ -369,7 +369,7 @@ export default function VideoSection() {
                     className={clsx(
                       "flex items-center gap-1 text-xs px-3 py-1.5 rounded-full font-medium whitespace-nowrap transition-all flex-shrink-0",
                       categoryFilter === cat
-                        ? "bg-cobalt-600 text-white shadow-sm"
+                        ? "bg-electric-600 text-white shadow-sm"
                         : "bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface2)]"
                     )}
                   >

@@ -66,7 +66,7 @@ export default function ArticlePage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-32">
-        <Loader2 size={28} className="text-cobalt-600 animate-spin" />
+        <Loader2 size={28} className="text-electric-600 animate-spin" />
       </div>
     );
   }
@@ -80,7 +80,7 @@ export default function ArticlePage() {
         </p>
         <Link
           to="/"
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 text-white text-sm font-semibold hover:bg-cobalt-700 transition-colors"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 text-white text-sm font-semibold hover:bg-electric-700 transition-colors"
         >
           <ChevronLeft size={14} />
           Back to home
@@ -130,7 +130,7 @@ export default function ArticlePage() {
         href={article.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 hover:bg-cobalt-700 text-white text-sm font-semibold transition-colors"
+        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 hover:bg-electric-700 text-white text-sm font-semibold transition-colors"
       >
         <ExternalLink size={13} />
         Read full article

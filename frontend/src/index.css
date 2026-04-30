@@ -153,7 +153,7 @@
   }
 
   /* Backward-compat alias */
-  .text-gradient-cobalt { @apply text-gradient-electric; }
+  .text-gradient-electric { @apply text-gradient-electric; }
 
   .breaking-badge {
     @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-md

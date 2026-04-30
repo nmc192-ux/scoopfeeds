@@ -106,7 +106,7 @@ export default function NewsGrid({ articles = [], isLoading, error, onRefresh })
                 key={i}
                 animate={{ y: [0, -8, 0] }}
                 transition={{ duration: 0.6, repeat: Infinity, delay: d }}
-                className="w-2 h-2 bg-cobalt-600 rounded-full"
+                className="w-2 h-2 bg-electric-600 rounded-full"
               />
             ))}
           </div>

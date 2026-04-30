@@ -123,7 +123,7 @@ export default function FeaturedCard({ article }) {
                   whileTap={{ scale: 0.85 }} onClick={handleSave}
                   className={clsx(
                     "p-2 rounded-full transition-colors",
-                    saved ? "bg-cobalt-600 text-white" : "bg-white/20 text-white hover:bg-white/30"
+                    saved ? "bg-electric-600 text-white" : "bg-white/20 text-white hover:bg-white/30"
                   )}
                 >
                   {saved ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}

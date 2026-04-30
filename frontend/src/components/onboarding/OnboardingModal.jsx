@@ -111,7 +111,7 @@ export default function OnboardingModal() {
             <span
               key={i}
               className={`w-2 h-2 rounded-full transition-colors ${
-                i <= step ? "bg-cobalt-600" : "bg-[var(--color-border)]"
+                i <= step ? "bg-electric-600" : "bg-[var(--color-border)]"
               }`}
             />
           ))}
@@ -123,7 +123,7 @@ export default function OnboardingModal() {
         {step === 0 && (
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <Globe2 size={16} className="text-cobalt-600" />
+              <Globe2 size={16} className="text-electric-600" />
               <h3 className="font-semibold">Where are you based?</h3>
             </div>
             <p className="text-xs text-[var(--color-text-tertiary)] mb-4">
@@ -135,9 +135,9 @@ export default function OnboardingModal() {
                   key={r.code}
                   onClick={() => pickRegion(r)}
                   className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-sm text-left transition
-                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/40
+                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40
                     ${r.code === countryCode
-                      ? "border-cobalt-500 bg-cobalt-50"
+                      ? "border-electric-500 bg-electric-50"
                       : "border-[var(--color-border)] hover:bg-[var(--color-surface2)]"}`}
                 >
                   <span className="text-xl">{r.flag}</span>
@@ -149,7 +149,7 @@ export default function OnboardingModal() {
             <button
               onClick={() => setStep(1)}
               className="w-full mt-3 text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text)] py-2
-                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/40 rounded"
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 rounded"
             >
               Skip — use auto-detection
             </button>
@@ -159,7 +159,7 @@ export default function OnboardingModal() {
         {step === 1 && (
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <Sparkles size={16} className="text-cobalt-600" />
+              <Sparkles size={16} className="text-electric-600" />
               <h3 className="font-semibold">Choose your language</h3>
             </div>
             <p className="text-xs text-[var(--color-text-tertiary)] mb-4">
@@ -168,9 +168,9 @@ export default function OnboardingModal() {
             <button
               onClick={() => { setAutoLanguage(true); setStep(2); }}
               className={`w-full px-4 py-3 rounded-xl border text-left mb-2 transition
-                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/40 ${
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 ${
                 autoLanguage
-                  ? "border-cobalt-500 bg-cobalt-50"
+                  ? "border-electric-500 bg-electric-50"
                   : "border-[var(--color-border)] hover:bg-[var(--color-surface2)]"
               }`}
             >
@@ -185,9 +185,9 @@ export default function OnboardingModal() {
                     key={l.code}
                     onClick={() => { setAutoLanguage(false); setLanguage(l.code); setStep(2); }}
                     className={`px-2 py-2 rounded-xl border text-left transition
-                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/40 ${
+                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 ${
                       on
-                        ? "border-cobalt-500 bg-cobalt-50"
+                        ? "border-electric-500 bg-electric-50"
                         : "border-[var(--color-border)] hover:bg-[var(--color-surface2)]"
                     }`}
                   >
@@ -206,7 +206,7 @@ export default function OnboardingModal() {
         {step === 2 && (
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <Sparkles size={16} className="text-cobalt-600" />
+              <Sparkles size={16} className="text-electric-600" />
               <h3 className="font-semibold">Pick what you like</h3>
             </div>
             <p className="text-xs text-[var(--color-text-tertiary)] mb-4">
@@ -220,9 +220,9 @@ export default function OnboardingModal() {
                     key={t.id}
                     onClick={() => togglePick(t.id)}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border transition
-                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/40 ${
+                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 ${
                       on
-                        ? "bg-cobalt-600 text-white border-cobalt-600"
+                        ? "bg-electric-600 text-white border-electric-600"
                         : "bg-[var(--color-surface2)] border-[var(--color-border)] hover:bg-[var(--color-border)]"
                     }`}
                   >
@@ -241,25 +241,25 @@ export default function OnboardingModal() {
         <button
           onClick={completeOnboarding}
           className="text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text)]
-                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/40 rounded px-2 py-1"
+                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 rounded px-2 py-1"
         >
           Skip all
         </button>
         {step < 2 ? (
           <button
             onClick={() => setStep(step + 1)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 text-white text-sm font-semibold
-                       hover:bg-cobalt-700 transition-colors
-                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/50"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 text-white text-sm font-semibold
+                       hover:bg-electric-700 transition-colors
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/50"
           >
             Next <ArrowRight size={14} />
           </button>
         ) : (
           <button
             onClick={finish}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 text-white text-sm font-semibold
-                       hover:bg-cobalt-700 transition-colors
-                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-500/50"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 text-white text-sm font-semibold
+                       hover:bg-electric-700 transition-colors
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/50"
           >
             Start reading <ArrowRight size={14} />
           </button>

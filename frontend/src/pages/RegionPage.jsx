@@ -59,7 +59,7 @@ export default function RegionPage() {
         <p className="text-[var(--color-text-tertiary)] mb-6">No coverage hub for "{slug}".</p>
         <Link
           to="/"
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 text-white text-sm font-semibold"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 text-white text-sm font-semibold"
         >
           <ChevronLeft size={14} />
           Back to home
@@ -95,7 +95,7 @@ export default function RegionPage() {
           <ChevronLeft size={18} />
         </button>
         <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 bg-cobalt-50 dark:bg-cobalt-950/40"
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 bg-electric-50 dark:bg-electric-950/40"
         >
           <span aria-hidden="true">{region.emoji}</span>
         </div>

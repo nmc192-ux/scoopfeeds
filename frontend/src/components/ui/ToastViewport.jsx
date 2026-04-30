@@ -18,7 +18,7 @@ import { useToasts, dismiss } from "../../lib/toast";
 const VARIANT = {
   success: { Icon: Check,          className: "bg-emerald-600" },
   error:   { Icon: AlertCircle,    className: "bg-[var(--color-alert)]" },
-  info:    { Icon: Info,           className: "bg-cobalt-600" },
+  info:    { Icon: Info,           className: "bg-electric-600" },
   warning: { Icon: AlertTriangle,  className: "bg-amber-500" },
 };
 

@@ -235,7 +235,7 @@ export default function LiveTvPage() {
                   className={clsx(
                     "px-3 py-1 rounded-full text-xs font-medium transition-colors",
                     region === r.id
-                      ? "bg-cobalt-600 text-white"
+                      ? "bg-electric-600 text-white"
                       : "bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface2)] border border-[var(--color-border)]"
                   )}
                 >
@@ -275,7 +275,7 @@ export default function LiveTvPage() {
                   className={clsx(
                     "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors",
                     isActive
-                      ? "bg-cobalt-50 dark:bg-cobalt-950/40 border border-cobalt-200 dark:border-cobalt-800"
+                      ? "bg-electric-50 dark:bg-electric-950/40 border border-electric-200 dark:border-electric-800"
                       : "border border-transparent hover:bg-[var(--color-surface)]"
                   )}
                 >
@@ -284,7 +284,7 @@ export default function LiveTvPage() {
                     <div className="flex items-center gap-1.5">
                       <p className={clsx(
                         "text-sm font-semibold truncate",
-                        isActive ? "text-cobalt-700 dark:text-cobalt-300" : "text-[var(--color-text)]"
+                        isActive ? "text-electric-700 dark:text-electric-300" : "text-[var(--color-text)]"
                       )}>
                         {ch.name}
                       </p>

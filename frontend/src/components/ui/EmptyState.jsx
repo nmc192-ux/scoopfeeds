@@ -46,7 +46,7 @@ export default function EmptyState({ type = "noArticles", onRefresh }) {
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={onRefresh}
-          className="flex items-center gap-2 px-5 py-2.5 bg-cobalt-600 text-white rounded-full font-medium text-sm shadow-lg hover:shadow-xl transition-shadow"
+          className="flex items-center gap-2 px-5 py-2.5 bg-electric-600 text-white rounded-full font-medium text-sm shadow-lg hover:shadow-xl transition-shadow"
         >
           <RefreshCw size={14} />
           Try Again
@@ -81,7 +81,7 @@ export function BackendOffline() {
             key={i}
             animate={{ scale: [1, 1.5, 1], opacity: [0.3, 1, 0.3] }}
             transition={{ duration: 1, repeat: Infinity, delay }}
-            className="w-2 h-2 bg-cobalt-600 rounded-full"
+            className="w-2 h-2 bg-electric-600 rounded-full"
           />
         ))}
       </div>

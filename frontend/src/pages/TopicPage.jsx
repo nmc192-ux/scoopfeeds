@@ -174,7 +174,7 @@ export default function TopicPage() {
         {isCompound && (
           <Link
             to={`/topic/${slug}`}
-            className="text-xs text-cobalt-600 hover:text-cobalt-700 hover:underline transition-colors hidden sm:inline-block"
+            className="text-xs text-electric-600 hover:text-electric-700 hover:underline transition-colors hidden sm:inline-block"
           >
             ← Global {label}
           </Link>
@@ -246,7 +246,7 @@ function NotFoundCard({ message }) {
       <p className="text-[var(--color-text-tertiary)] mb-6">{message}</p>
       <Link
         to="/"
-        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 text-white text-sm font-semibold"
+        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 text-white text-sm font-semibold"
       >
         <ChevronLeft size={14} />
         Back to home

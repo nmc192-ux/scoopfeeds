@@ -104,7 +104,7 @@ export default function PushOptInBanner({ topics = [], language = "en" }) {
                   type="button"
                   onClick={enable}
                   disabled={busy}
-                  className="flex-1 text-xs font-semibold px-3 py-1.5 rounded-full bg-cobalt-600 text-white hover:bg-cobalt-700 disabled:opacity-60"
+                  className="flex-1 text-xs font-semibold px-3 py-1.5 rounded-full bg-electric-600 text-white hover:bg-electric-700 disabled:opacity-60"
                 >
                   {busy ? "Enabling…" : "Turn on"}
                 </button>

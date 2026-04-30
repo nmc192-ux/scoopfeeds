@@ -67,7 +67,7 @@ export default function SearchPage() {
         >
           <ChevronLeft size={18} />
         </button>
-        <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-cobalt-50 dark:bg-cobalt-950/40 text-cobalt-600 dark:text-cobalt-400 shrink-0">
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-electric-50 dark:bg-electric-950/40 text-electric-600 dark:text-electric-400 shrink-0">
           <Search size={20} />
         </div>
         <div className="min-w-0">
@@ -100,7 +100,7 @@ export default function SearchPage() {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Search news, topics, people, places…"
-            className="w-full pl-11 pr-12 py-3 rounded-full bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] placeholder-[var(--color-text-tertiary)] focus:outline-none focus:ring-2 focus:ring-cobalt-600/40 focus:border-cobalt-600"
+            className="w-full pl-11 pr-12 py-3 rounded-full bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] placeholder-[var(--color-text-tertiary)] focus:outline-none focus:ring-2 focus:ring-electric-600/40 focus:border-electric-600"
           />
           {draft && (
             <button
@@ -127,7 +127,7 @@ export default function SearchPage() {
                 <Link
                   key={t.slug}
                   to={`/tag/${t.slug}`}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-cobalt-50 hover:text-cobalt-700 dark:hover:bg-cobalt-950/40 dark:hover:text-cobalt-300 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-electric-50 hover:text-electric-700 dark:hover:bg-electric-950/40 dark:hover:text-electric-300 transition-colors"
                 >
                   <span aria-hidden="true">{t.emoji}</span>
                   {t.name}
@@ -150,7 +150,7 @@ export default function SearchPage() {
           <p className="mt-3 text-lg font-semibold">No matches for "{q}"</p>
           <p className="text-sm text-[var(--color-text-tertiary)] mt-1">
             Try a broader keyword, or browse the
-            {" "}<Link to="/" className="text-cobalt-600 hover:underline">latest stories</Link>.
+            {" "}<Link to="/" className="text-electric-600 hover:underline">latest stories</Link>.
           </p>
         </div>
       )}

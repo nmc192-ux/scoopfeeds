@@ -5,8 +5,8 @@
  * TopicNav, and the App side cards.
  *
  * Electric Signal palette (per AI Studio brand spec):
- *   primary   = Electric Blue   #3B82F6  (cobalt-500)
- *   secondary = Midnight Blue   #1E3A8A  (cobalt-800)
+ *   primary   = Electric Blue   #3B82F6  (electric-500)
+ *   secondary = Midnight Blue   #1E3A8A  (electric-800)
  *   accent    = Vivid Orange    #F97316  (CTAs, highlights, hearts)
  *   status    = Emerald         #10B981  (live / online indicator)
  *   alert     = Red             #EF4444  (true alerts only)
@@ -23,7 +23,7 @@ export const STATUS_LIVE        = "#10B981";
 export const COLOR_ALERT        = "#EF4444";
 
 // Legacy aliases — keep imports working
-export const COBALT_PRIMARY   = ELECTRIC_PRIMARY;
+export const ELECTRIC_PRIMARY   = ELECTRIC_PRIMARY;
 export const COBALT_SECONDARY = ELECTRIC_SECONDARY;
 export const COBALT_LIGHT     = ELECTRIC_LIGHT;
 export const COBALT_DEEP      = ELECTRIC_DEEP;

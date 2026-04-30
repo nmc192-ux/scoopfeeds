@@ -80,10 +80,10 @@ export default function SafeImage({
       {/* Error fallback */}
       {isError && (
         <div className="absolute inset-0 flex items-center justify-center
-                        bg-gradient-to-br from-cobalt-50 to-cobalt-100
-                        dark:from-cobalt-950/40 dark:to-cobalt-900/40">
+                        bg-gradient-to-br from-electric-50 to-electric-100
+                        dark:from-electric-950/40 dark:to-electric-900/40">
           {fallback ?? (
-            <div className="flex flex-col items-center gap-1 text-cobalt-600 dark:text-cobalt-300">
+            <div className="flex flex-col items-center gap-1 text-electric-600 dark:text-electric-300">
               <ImageOff size={24} strokeWidth={1.5} />
               <span className="text-[10px] uppercase tracking-wider opacity-60">
                 Image unavailable

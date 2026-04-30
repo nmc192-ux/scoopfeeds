@@ -53,17 +53,17 @@ export default function AboutPage() {
 
         <div className="grid sm:grid-cols-3 gap-4 my-8 not-prose">
           <Pillar
-            icon={<Globe size={22} className="text-cobalt-600" />}
+            icon={<Globe size={22} className="text-electric-600" />}
             title="Global by default"
             body="Coverage spans 80+ sources across the Americas, Europe, Asia, MENA, and Africa — in multiple languages."
           />
           <Pillar
-            icon={<Shield size={22} className="text-cobalt-600" />}
+            icon={<Shield size={22} className="text-electric-600" />}
             title="Credibility-rated"
             body="Every source is rated 1–10 for editorial standards. Mixed-credibility stories are flagged in the UI."
           />
           <Pillar
-            icon={<Sparkles size={22} className="text-cobalt-600" />}
+            icon={<Sparkles size={22} className="text-electric-600" />}
             title="No infinite scroll"
             body="Curated lists, not algorithmic feeds. We'd rather you finish a session feeling informed than addicted."
           />
@@ -105,7 +105,7 @@ export default function AboutPage() {
 
         <div className="mt-10 p-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] not-prose">
           <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
-            <Mail size={18} className="text-cobalt-600" />
+            <Mail size={18} className="text-electric-600" />
             Get in touch
           </h3>
           <p className="text-sm text-[var(--color-text-secondary)] mb-4">
@@ -114,7 +114,7 @@ export default function AboutPage() {
           </p>
           <a
             href="mailto:hello@scoopfeeds.com"
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 hover:bg-cobalt-700 text-white text-sm font-semibold transition-colors"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 hover:bg-electric-700 text-white text-sm font-semibold transition-colors"
           >
             hello@scoopfeeds.com
           </a>

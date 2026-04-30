@@ -69,7 +69,7 @@ export default function Header() {
         <div className="flex items-center justify-between h-14 sm:h-16">
 
           {/* ── Logo / Brand ───────────────────────────────────────────── */}
-          <Link to="/" aria-label="Scoopfeeds — Home" className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt-600/40 rounded-lg">
+          <Link to="/" aria-label="Scoopfeeds — Home" className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-600/40 rounded-lg">
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
@@ -137,7 +137,7 @@ export default function Header() {
                       "w-full pl-8 pr-10 py-2 text-sm rounded-full",
                       "bg-[var(--color-surface2)] border border-[var(--color-border)]",
                       "text-[var(--color-text)] placeholder-[var(--color-text-tertiary)]",
-                      "focus:outline-none focus:ring-2 focus:ring-cobalt-600/40 focus:border-cobalt-600",
+                      "focus:outline-none focus:ring-2 focus:ring-electric-600/40 focus:border-electric-600",
                       isUrdu && "text-right pr-8 pl-4"
                     )}
                     style={isUrdu ? { fontFamily: "'Noto Nastaliq Urdu', serif" } : {}}
@@ -228,7 +228,7 @@ export default function Header() {
             >
               <UserCircle
                 size={16}
-                className={isLoggedIn ? "text-cobalt-600" : undefined}
+                className={isLoggedIn ? "text-electric-600" : undefined}
               />
             </HeaderBtn>
 

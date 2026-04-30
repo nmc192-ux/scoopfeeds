@@ -108,7 +108,7 @@ export function TwitterEmbed({ tweetUrl }) {
         href={tweetUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-cobalt-600 hover:underline text-sm break-all"
+        className="text-electric-600 hover:underline text-sm break-all"
       >
         View post on X →
       </a>

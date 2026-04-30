@@ -9,7 +9,7 @@ import { useSaveArticle } from "../../hooks/useSaveArticle";
 import { track, trackShare, trackSave, trackUnsave, trackOutboundClick } from "../../lib/track";
 import PaywallCTA from "../ads/PaywallCTA";
 import SafeImage from "../ui/SafeImage";
-import { topicColor, topicLabel, topicEmoji, COBALT_PRIMARY } from "../../lib/topicColors";
+import { topicColor, topicLabel, topicEmoji, ELECTRIC_PRIMARY } from "../../lib/topicColors";
 import clsx from "clsx";
 
 // Append scoopfeeds-visible UTM so clicks from shared posts land with a source
@@ -223,7 +223,7 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
             whileTap={{ scale: 0.85 }} onClick={handleSave}
             className={clsx(
               "p-1.5 rounded-lg transition-colors",
-              saved ? "text-cobalt-600 bg-cobalt-50" : "text-[var(--color-text-tertiary)] hover:text-cobalt-600 hover:bg-cobalt-50"
+              saved ? "text-electric-600 bg-electric-50" : "text-[var(--color-text-tertiary)] hover:text-electric-600 hover:bg-electric-50"
             )}
             title={saved ? "Remove bookmark" : "Bookmark"}
           >
@@ -233,7 +233,7 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
           <div className="relative">
             <motion.button
               whileTap={{ scale: 0.85 }} onClick={handleShare}
-              className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:text-cobalt-600 hover:bg-cobalt-50 transition-colors"
+              className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:text-electric-600 hover:bg-electric-50 transition-colors"
               title="Share"
             >
               <Share2 size={14} />
@@ -267,7 +267,7 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
 
         <a
           href={article.url} target="_blank" rel="noopener noreferrer"
-          className="flex items-center gap-1 text-xs font-medium text-cobalt-600 hover:text-brand-indigo transition-colors"
+          className="flex items-center gap-1 text-xs font-medium text-electric-600 hover:text-brand-indigo transition-colors"
           onClick={(e) => {
             e.stopPropagation();
             trackOutboundClick(article.id, article.category, article.url);

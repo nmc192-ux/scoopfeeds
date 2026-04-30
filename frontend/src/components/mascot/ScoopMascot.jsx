@@ -160,7 +160,7 @@ export const KhabriLogo = ScoopLogo;
  * ─── Full Cobalt Intelligence Logo — Pulse Hummingbird ──────────────────────
  * Sizes: sm | md | lg | xl
  * Variants: light (default) | dark
- * Palettes: cobalt | electric | gold
+ * Palettes: electric | gold
  */
 export const Logo = ({
   className = "",
@@ -178,7 +178,7 @@ export const Logo = ({
     // Electric Signal — current brand
     electric: { primary: isDark ? "#60A5FA" : "#3B82F6", accent: "#F97316", secondary: "#1E3A8A" },
     // Legacy aliases
-    cobalt:   { primary: isDark ? "#60A5FA" : "#3B82F6", accent: "#F97316", secondary: "#1E3A8A" },
+    electric: { primary: isDark ? "#60A5FA" : "#3B82F6", accent: "#F97316", secondary: "#1E3A8A" },
     gold:     { primary: isDark ? "#FDE047" : "#EAB308", accent: "#0F172A", secondary: "#CA8A04" },
   };
 

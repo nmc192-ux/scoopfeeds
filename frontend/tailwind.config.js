@@ -30,7 +30,7 @@ export default {
           indigo: "#5856D6",
         },
         // ── Electric Signal palette ────────────────────────────────
-        cobalt: {
+        electric: {
           50:  "#eff6ff",
           100: "#dbeafe",
           200: "#bfdbfe",

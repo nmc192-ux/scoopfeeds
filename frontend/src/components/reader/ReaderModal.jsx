@@ -171,7 +171,7 @@ export default function ReaderModal() {
                 {/* Translation indicator — small pill showing target language */}
                 {sourceLang !== targetLang && (
                   <span
-                    className="flex items-center gap-1 px-2 py-1 rounded-full bg-cobalt-50 text-cobalt-600 text-[10px] font-bold uppercase tracking-wider"
+                    className="flex items-center gap-1 px-2 py-1 rounded-full bg-electric-50 text-electric-600 text-[10px] font-bold uppercase tracking-wider"
                     title={`Translated from ${nativeName(sourceLang)} to ${nativeName(targetLang)}`}
                   >
                     {isTranslating
@@ -197,7 +197,7 @@ export default function ReaderModal() {
                 </button>
                 <button
                   onClick={handleSaveClick}
-                  className={`p-2 rounded-full ${isSaved ? "bg-cobalt-100 text-cobalt-700" : "hover:bg-[var(--color-surface2)]"}`}
+                  className={`p-2 rounded-full ${isSaved ? "bg-electric-100 text-electric-700" : "hover:bg-[var(--color-surface2)]"}`}
                   aria-label="Save article"
                 >
                   <Bookmark size={16} />
@@ -214,7 +214,7 @@ export default function ReaderModal() {
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={handleSourceClick}
-                  className="ml-1 flex items-center gap-1 text-xs font-semibold text-cobalt-600 hover:underline px-2 py-1 rounded whitespace-nowrap"
+                  className="ml-1 flex items-center gap-1 text-xs font-semibold text-electric-600 hover:underline px-2 py-1 rounded whitespace-nowrap"
                 >
                   <ExternalLink size={13} />
                   Source
@@ -262,7 +262,7 @@ export default function ReaderModal() {
                   <div className="flex flex-col sm:flex-row gap-3 justify-center">
                     <button
                       onClick={() => { closeReader(); setAuthOpen(true); }}
-                      className="px-6 py-2.5 rounded-full bg-cobalt-600 text-white text-sm font-semibold hover:opacity-90"
+                      className="px-6 py-2.5 rounded-full bg-electric-600 text-white text-sm font-semibold hover:opacity-90"
                     >
                       Sign in free →
                     </button>
@@ -304,7 +304,7 @@ export default function ReaderModal() {
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={handleSourceClick}
-                    className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-full bg-cobalt-600 text-white text-sm font-semibold hover:bg-cobalt-700 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-full bg-electric-600 text-white text-sm font-semibold hover:bg-electric-700 transition-colors"
                   >
                     <ExternalLink size={13} />
                     Read on {new URL(article.url).hostname}
@@ -374,7 +374,7 @@ export default function ReaderModal() {
                       <button
                         key={rel.id}
                         onClick={() => handleRelatedClick(rel)}
-                        className="text-left p-3 rounded-xl border border-[var(--color-border)] hover:border-cobalt-500 transition-colors group"
+                        className="text-left p-3 rounded-xl border border-[var(--color-border)] hover:border-electric-500 transition-colors group"
                       >
                         {rel.image_url && (
                           <SafeImage
@@ -390,7 +390,7 @@ export default function ReaderModal() {
                         <p className="text-sm font-semibold leading-snug line-clamp-3">
                           {rel.title}
                         </p>
-                        <span className="inline-flex items-center gap-1 text-xs text-cobalt-600 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span className="inline-flex items-center gap-1 text-xs text-electric-600 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           Read <ArrowRight size={11} />
                         </span>
                       </button>

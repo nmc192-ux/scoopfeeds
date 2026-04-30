@@ -5,7 +5,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useNewsStore } from "../../store/newsStore";
 import { useTopics } from "../../hooks/useNews";
 import { useGeo } from "../../hooks/useGeo";
-import { topicColor, COBALT_PRIMARY } from "../../lib/topicColors";
+import { topicColor, ELECTRIC_PRIMARY } from "../../lib/topicColors";
 import clsx from "clsx";
 
 export default function TopicNav() {
@@ -73,7 +73,7 @@ export default function TopicNav() {
                 "topic-pill flex items-center gap-1.5 flex-shrink-0",
                 savedActive ? "topic-pill-active" : "topic-pill-inactive"
               )}
-              style={savedActive ? { backgroundColor: COBALT_PRIMARY } : {}}
+              style={savedActive ? { backgroundColor: ELECTRIC_PRIMARY } : {}}
               title={`${savedCount} saved articles`}
             >
               <Bookmark size={13} className={savedActive ? "fill-white" : ""} />

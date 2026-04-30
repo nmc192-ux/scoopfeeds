@@ -122,13 +122,13 @@ export default function CountryPicker() {
                   placeholder="Search region…"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  className="flex-1 bg-transparent text-sm py-2 outline-none focus-visible:ring-1 focus-visible:ring-cobalt-500/40 rounded placeholder:text-[var(--color-text-tertiary)]"
+                  className="flex-1 bg-transparent text-sm py-2 outline-none focus-visible:ring-1 focus-visible:ring-electric-500/40 rounded placeholder:text-[var(--color-text-tertiary)]"
                 />
               </div>
               {isOverridden && (
                 <button
                   onClick={clearOverride}
-                  className="w-full text-left mt-1 px-2 py-1 text-xs text-cobalt-600 hover:bg-[var(--color-surface2)] rounded"
+                  className="w-full text-left mt-1 px-2 py-1 text-xs text-electric-600 hover:bg-[var(--color-surface2)] rounded"
                 >
                   ← Use auto-detected region
                 </button>
@@ -153,7 +153,7 @@ export default function CountryPicker() {
                     key={r.slug}
                     to={`/region/${r.slug}`}
                     onClick={() => setOpen(false)}
-                    className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface2)] text-[var(--color-text-secondary)] hover:bg-cobalt-50 hover:text-cobalt-700 dark:hover:bg-cobalt-950/40 dark:hover:text-cobalt-300 transition-colors"
+                    className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface2)] text-[var(--color-text-secondary)] hover:bg-electric-50 hover:text-electric-700 dark:hover:bg-electric-950/40 dark:hover:text-electric-300 transition-colors"
                   >
                     {r.label}
                   </Link>
@@ -171,7 +171,7 @@ export default function CountryPicker() {
                   <span className="text-lg leading-none">{c.flag}</span>
                   <span className="flex-1 min-w-0 truncate text-[var(--color-text)]">{c.name}</span>
                   <span className="text-[10px] text-[var(--color-text-tertiary)] tabular-nums">{c.currency}</span>
-                  {c.code === countryCode && <Check size={14} className="text-cobalt-600" />}
+                  {c.code === countryCode && <Check size={14} className="text-electric-600" />}
                 </button>
               ))}
               {!filtered.length && (

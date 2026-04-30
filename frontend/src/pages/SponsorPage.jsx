@@ -59,17 +59,17 @@ export default function SponsorPage() {
         <Section title="Ad Formats">
           <div className="not-prose space-y-3">
             <FormatCard
-              icon={<LayoutGrid size={18} className="text-cobalt-600" />}
+              icon={<LayoutGrid size={18} className="text-electric-600" />}
               title="Sponsored Posts"
               description="A clearly labelled sponsored card in the feed — same visual treatment as editorial cards but with a 'Sponsored' badge. Includes headline, thumbnail, and a brief description linking to your landing page."
             />
             <FormatCard
-              icon={<Mail size={18} className="text-cobalt-600" />}
+              icon={<Mail size={18} className="text-electric-600" />}
               title="Newsletter Placements"
               description="A single sponsored section in our daily digest email. The newsletter goes to opted-in subscribers who have chosen to receive Scoopfeeds updates — high open rates, high intent."
             />
             <FormatCard
-              icon={<LayoutGrid size={18} className="text-cobalt-600" />}
+              icon={<LayoutGrid size={18} className="text-electric-600" />}
               title="Banner Ads"
               description="Sidebar and inline banner placements. Served direct — no programmatic middleman. Standard IAB sizes supported."
             />
@@ -92,7 +92,7 @@ export default function SponsorPage() {
         <Section title="Contact">
           <div className="not-prose p-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
             <h3 className="text-base font-bold text-[var(--color-text)] mb-2 flex items-center gap-2">
-              <DollarSign size={16} className="text-cobalt-600" />
+              <DollarSign size={16} className="text-electric-600" />
               Start the conversation
             </h3>
             <p className="text-sm text-[var(--color-text-secondary)] mb-4">
@@ -101,7 +101,7 @@ export default function SponsorPage() {
             </p>
             <a
               href="mailto:ads@scoopfeeds.com"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 hover:bg-cobalt-700 text-white text-sm font-semibold transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 hover:bg-electric-700 text-white text-sm font-semibold transition-colors"
             >
               ads@scoopfeeds.com
             </a>

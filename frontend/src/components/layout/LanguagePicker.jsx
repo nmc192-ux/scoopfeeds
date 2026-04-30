@@ -97,13 +97,13 @@ export default function LanguagePicker() {
                   placeholder="Search language…"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  className="flex-1 bg-transparent text-sm py-2 outline-none focus-visible:ring-1 focus-visible:ring-cobalt-500/40 rounded placeholder:text-[var(--color-text-tertiary)]"
+                  className="flex-1 bg-transparent text-sm py-2 outline-none focus-visible:ring-1 focus-visible:ring-electric-500/40 rounded placeholder:text-[var(--color-text-tertiary)]"
                 />
               </div>
               <button
                 onClick={selectAuto}
                 className={`w-full flex items-center gap-2 mt-1 px-2 py-1.5 text-xs rounded hover:bg-[var(--color-surface2)] ${
-                  autoLanguage ? "text-cobalt-600 font-semibold" : "text-[var(--color-text-secondary)]"
+                  autoLanguage ? "text-electric-600 font-semibold" : "text-[var(--color-text-secondary)]"
                 }`}
               >
                 <Languages size={13} />
@@ -133,7 +133,7 @@ export default function LanguagePicker() {
                     <span className="text-[10px] text-[var(--color-text-tertiary)] uppercase tracking-wider tabular-nums">
                       {l.code}
                     </span>
-                    {isActive && <Check size={14} className="text-cobalt-600" />}
+                    {isActive && <Check size={14} className="text-electric-600" />}
                   </button>
                 );
               })}

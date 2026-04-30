@@ -57,7 +57,7 @@ function SideCard({ article }) {
         />
       </div>
       <div className="p-3">
-        <h3 className="font-semibold text-sm line-clamp-2 group-hover:text-cobalt-600 transition-colors">
+        <h3 className="font-semibold text-sm line-clamp-2 group-hover:text-electric-600 transition-colors">
           {article.title}
         </h3>
         <p className="text-xs text-[var(--color-text-tertiary)] mt-1.5">

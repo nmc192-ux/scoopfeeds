@@ -58,7 +58,7 @@ export default function TagPage() {
         <p className="text-[var(--color-text-tertiary)] mb-6">No tag registered for "{slug}".</p>
         <Link
           to="/"
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 text-white text-sm font-semibold"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 text-white text-sm font-semibold"
         >
           <ChevronLeft size={14} />
           Back to home
@@ -83,7 +83,7 @@ export default function TagPage() {
         >
           <ChevronLeft size={18} />
         </button>
-        <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0 bg-cobalt-50 dark:bg-cobalt-950/40">
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0 bg-electric-50 dark:bg-electric-950/40">
           <span aria-hidden="true">{tag.emoji}</span>
         </div>
         <div className="min-w-0">
@@ -128,7 +128,7 @@ export default function TagPage() {
               <Link
                 key={t.slug}
                 to={`/tag/${t.slug}`}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-cobalt-50 hover:text-cobalt-700 dark:hover:bg-cobalt-950/40 dark:hover:text-cobalt-300 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-electric-50 hover:text-electric-700 dark:hover:bg-electric-950/40 dark:hover:text-electric-300 transition-colors"
               >
                 <span aria-hidden="true">{t.emoji}</span>
                 {t.name}

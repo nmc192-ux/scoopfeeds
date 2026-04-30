@@ -14,22 +14,22 @@ import ScoopMascot from "../components/mascot/ScoopMascot";
 
 const VALUE_PROPS = [
   {
-    icon: <Clock size={20} className="text-cobalt-600" />,
+    icon: <Clock size={20} className="text-electric-600" />,
     title: "Daily at 7 AM",
     body: "One curated digest each morning, delivered in your time zone. No surprise sends, no clickbait.",
   },
   {
-    icon: <Globe size={20} className="text-cobalt-600" />,
+    icon: <Globe size={20} className="text-electric-600" />,
     title: "Global by default",
     body: "Stories from 80+ trusted publishers across the Americas, Europe, Asia, MENA, and Africa.",
   },
   {
-    icon: <Sparkles size={20} className="text-cobalt-600" />,
+    icon: <Sparkles size={20} className="text-electric-600" />,
     title: "Topic-tailored",
     body: "Pick AI, Politics, Markets, Climate — your digest leads with what matters to you, not the average reader.",
   },
   {
-    icon: <Shield size={20} className="text-cobalt-600" />,
+    icon: <Shield size={20} className="text-electric-600" />,
     title: "Credibility-rated",
     body: "Every source is rated 1–10 for editorial standards. Mixed-credibility stories are flagged so you can trust what you're reading.",
   },
@@ -152,7 +152,7 @@ export default function NewsletterPage() {
           <details key={i} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 group">
             <summary className="cursor-pointer list-none flex items-center justify-between font-semibold text-[var(--color-text)]">
               {f.q}
-              <span className="text-cobalt-600 group-open:rotate-180 transition-transform">▾</span>
+              <span className="text-electric-600 group-open:rotate-180 transition-transform">▾</span>
             </summary>
             <p className="text-sm text-[var(--color-text-secondary)] mt-2 leading-relaxed">{f.a}</p>
           </details>
