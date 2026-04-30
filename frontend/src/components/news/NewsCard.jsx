@@ -137,11 +137,11 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
         target="_blank" rel="noopener noreferrer" className="block">
         {/* Image */}
         {article.image_url && !imgError ? (
-          <div className={clsx("relative", size === "large" ? "h-56 sm:h-72" : "h-44")}>
+          <div className={clsx("relative overflow-hidden", size === "large" ? "h-56 sm:h-72" : "aspect-video")}>
             <SafeImage
               src={article.image_url}
               alt={article.title}
-              className="absolute inset-0"
+              className="w-full h-full"
               imgClassName="w-full h-full object-cover transition-transform duration-slow ease-smooth group-hover:scale-105"
               onErrored={() => setImgError(true)}
             />
@@ -159,7 +159,7 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
           </div>
         ) : (
           <div
-            className={clsx("relative flex items-center justify-center", size === "large" ? "h-32" : "h-28")}
+            className={clsx("relative flex items-center justify-center overflow-hidden", size === "large" ? "h-56 sm:h-72" : "aspect-video")}
             style={{ background: `linear-gradient(135deg, ${color}22, ${color}44)` }}
           >
             <span className="text-4xl opacity-60">{emoji}</span>

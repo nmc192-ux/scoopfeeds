@@ -29,7 +29,7 @@ export default function VideoCard({ video, index = 0, onPlay, size = "normal" })
         <SafeImage
           src={thumbUrl}
           alt={video.title}
-          className="absolute inset-0"
+          className="w-full h-full"
           imgClassName="w-full h-full object-cover transition-transform duration-slow ease-smooth group-hover:scale-105"
           fallback={
             <div className="w-full h-full flex items-center justify-center bg-gray-900">

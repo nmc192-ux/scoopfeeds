@@ -46,12 +46,12 @@ export default function FeaturedCard({ article }) {
         }}
         target="_blank" rel="noopener noreferrer">
         {/* Hero image */}
-        <div className="relative h-72 sm:h-96">
+        <div className="relative overflow-hidden h-72 sm:h-96">
           <SafeImage
             src={article.image_url}
             alt={article.title}
             loading="eager"
-            className="absolute inset-0"
+            className="w-full h-full"
             imgClassName="w-full h-full object-cover transition-transform duration-slow ease-smooth group-hover:scale-105"
             fallback={
               <div
@@ -70,8 +70,8 @@ export default function FeaturedCard({ article }) {
             }
           />
 
-          {/* Gradient overlay */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+          {/* Gradient overlay — stronger scrim keeps text readable across all image tones */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent" />
 
           {/* Overlay content */}
           <div className={clsx("absolute bottom-0 left-0 right-0 p-5 sm:p-7", isUrdu && "text-right")}>
