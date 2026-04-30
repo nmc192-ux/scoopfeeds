@@ -7,7 +7,7 @@
  */
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Bookmark, ChevronLeft, LogIn } from "lucide-react";
+import { Bookmark, BookmarkPlus, ChevronLeft, LogIn } from "lucide-react";
 import NewsGrid from "../components/news/NewsGrid";
 import { useNewsStore } from "../store/newsStore";
 import { useAuth } from "../hooks/useAuth";
@@ -57,21 +57,32 @@ export default function SavedPage() {
           <ScoopMascot size="lg" mood="reading" animated />
           <div className="max-w-md">
             <p className="text-lg font-semibold text-[var(--color-text)]">
-              No saved stories yet
+              {isUrdu ? "ابھی تک کوئی خبر محفوظ نہیں" : "No saved stories yet"}
             </p>
             <p className="text-sm text-[var(--color-text-tertiary)] mt-1.5">
-              Tap the bookmark icon on any article to save it here for later.
+              {isUrdu
+                ? "کسی بھی خبر پر بک مارک آئیکن دبائیں تاکہ وہ یہاں محفوظ ہو جائے۔"
+                : "Hit the bookmark icon on any article to save it here for later."}
             </p>
           </div>
-          {!isLoggedIn && (
-            <button
-              onClick={() => setAuthOpen(true)}
-              className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 hover:bg-electric-700 text-white text-sm font-semibold transition-colors"
+          <div className="flex flex-wrap items-center justify-center gap-3 mt-2">
+            <Link
+              to="/"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 hover:bg-electric-700 text-white text-sm font-semibold transition-colors"
             >
-              <LogIn size={14} />
-              Sign in to sync across devices
-            </button>
-          )}
+              <BookmarkPlus size={14} />
+              {isUrdu ? "خبریں دیکھیں" : "Browse stories"}
+            </Link>
+            {!isLoggedIn && (
+              <button
+                onClick={() => setAuthOpen(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-[var(--color-border)] hover:bg-[var(--color-surface2)] text-[var(--color-text-secondary)] text-sm font-semibold transition-colors"
+              >
+                <LogIn size={14} />
+                {isUrdu ? "سائن ان کریں" : "Sign in to sync"}
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <NewsGrid articles={savedArticles} isLoading={false} error={null} />
