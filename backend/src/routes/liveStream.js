@@ -25,37 +25,42 @@ const CHANNELS = [
   { id: "geo",       permanentId: "_FwympjOSNE", handle: "geonews"           },
 
   // Scrape /live page for current stream; fallback to verified live ID
-  { id: "bbc",     handle: "BBCNews",   channelId: "UC16niRr50-MSBwiO3YDb3RA", fallbackId: "9cIUqVL88eM" },
-  { id: "skynews", handle: "SkyNews",   channelId: "UCoMdktPbSTixAyNGwb-UYkQ", fallbackId: "0wX_vEkPcPs" },
+  // BBC and Sky don't maintain a single permanent video ID — rely on scraping only
+  { id: "bbc",     handle: "BBCNews",   channelId: "UC16niRr50-MSBwiO3YDb3RA" },
+  { id: "skynews", handle: "SkyNews",   channelId: "UCoMdktPbSTixAyNGwb-UYkQ" },
   { id: "dw",      handle: "DWNews",    channelId: "UCknLrEdhRCp1aegoMqRaCZg", fallbackId: "LuKwFajn37U" },
-  { id: "wion",    handle: "WION",      channelId: "UC_gUM8rL-Lrg6O3adPW9K1g" },
+  { id: "wion",    handle: "WION",      channelId: "UC_gUM8rL-Lrg6O3adPW9K1g", fallbackId: "gadjsB5BkK4" },
   // ARY @handle is bot-blocked — must use channel ID URL
-  { id: "ary",     channelId: "UCMmpLL2ucRHAXbNHiCPyIyg" },
+  { id: "ary",     handle: "ARYNEWSTVofficial", channelId: "UCMmpLL2ucRHAXbNHiCPyIyg", fallbackId: "K77zGtR_X58" },
 
   // ── Global expansion ──────────────────────────────────────────────────────
   // Americas
-  { id: "abcnews",   handle: "ABCNews",          channelId: "UCBi2mrWuNuyYy4gbM6fU18Q", fallbackId: "0Ipya_YG-LM" },
-  { id: "cbsnews",   handle: "CBSNews",          channelId: "UC8p1vwvWtl6T73JiExfWs1g", fallbackId: "3d8m3XIYvHg" },
+  { id: "abcnews",   handle: "ABCNews",          channelId: "UCBi2mrWuNuyYy4gbM6fU18Q", fallbackId: "iipR5yUp36o" },
+  { id: "cbsnews",   handle: "CBSNews",          channelId: "UC8p1vwvWtl6T73JiExfWs1g", fallbackId: "u90I_CIBtM8" },
   { id: "bloomberg", handle: "Bloomberg",        channelId: "UCIALMKvObZNtJ6AmdCLP7Lg", fallbackId: "iEpJwprxDdk" },
   // Asia
   { id: "ndtv",      handle: "ndtv",             channelId: "UCZFMm1mMw0F81Z37aaEzTUA", fallbackId: "nSoxfu2tVAA" },
   { id: "cna",       handle: "channelnewsasia",  channelId: "UCXKCHNtNbjMl2wTbo5xs0KA", fallbackId: "XWq5kBlakcQ" },
-  { id: "nhkworld",  handle: "NHKWORLDJAPAN",    channelId: "UCSKlINgEvU5gPV6CyN_jJgQ", fallbackId: "f0lYkdA-Gtw" },
-  { id: "cgtn",      handle: "CGTN",             channelId: "UCpQUQ-y9-z3qC5uYbZ2K6tw", fallbackId: "mJrrcG6sfqI" },
+  // channelId verified against https://www.youtube.com/channel/UCSPEjw8F2nQDtmUKPFNF7_A
+  { id: "nhkworld",  handle: "NHKWORLDJAPAN",    channelId: "UCSPEjw8F2nQDtmUKPFNF7_A", fallbackId: "f0lYkdA-Gtw" },
+  // channelId verified; fallbackId was pointing to unrelated ship-tracking stream — fixed
+  { id: "cgtn",      handle: "CGTN",             channelId: "UCgrNz-aDmcr2uuto8_DL2jg", fallbackId: "BOy2xDU1LC8" },
   // MENA / Africa
   { id: "trtworld",  handle: "trtworld",         channelId: "UC7fWeaHhqgM4Ry-RMpM2YYw", fallbackId: "1VUhRQpz_9o" },
-  // i24 uses @i24NEWS_EN handle (channel page requires this exact handle)
-  { id: "i24",       handle: "i24NEWS_EN",        channelId: "UCZdGJgHbmqQcVZaJCkqDRwg", fallbackId: "lqfJJ5riJag" },
-  { id: "africanews",handle: "africanews",       channelId: "UCyf5lBqjIWLuXcOJ7H6f4mQ", fallbackId: "NQjabLGdP5g" },
+  // i24 uses @i24NEWS_EN handle; channelId verified
+  { id: "i24",       handle: "i24NEWS_EN",        channelId: "UCvHDpsWKADrDia0c99X37vg", fallbackId: "lqfJJ5riJag" },
+  // channelId verified against https://www.youtube.com/channel/UC1_E8NeF5QHY2dtdLRBCCLA
+  { id: "africanews",handle: "africanews",       channelId: "UC1_E8NeF5QHY2dtdLRBCCLA", fallbackId: "NQjabLGdP5g" },
   // European multi-language
   // f24fr — French-language France 24 (@FRANCE24, not @FRANCE24English)
   { id: "f24fr",     handle: "FRANCE24",         channelId: "UCCCPCZNChQdGa9EkATeye4g", fallbackId: "l8PMl7tUDIE" },
-  // dwde — DW German; no reliable permanent stream ID, scraping-only
-  { id: "dwde",      handle: "deutschewelle",    channelId: "UCMIqrmh2ljDWGCLhXh5SVw" },
+  // dwde — DW German; channelId verified
+  { id: "dwde",      handle: "deutschewelle",    channelId: "UCMIgOXM2JEQ2Pv2d0_PVfcg" },
   { id: "euronews",  handle: "euronews",         channelId: "UCSrZ3UV4jOidv8ppoVuvW9Q", fallbackId: "pykpO5kQJ98" },
-  // Latin America
-  { id: "globonews", handle: "globonews",        channelId: "UCmJfg-J5y7Fzhx4DlaXyqgg", fallbackId: "3faO4FViC0s" },
-  { id: "dwes",      handle: "dwespanol",        channelId: "UCT4Jg2h00Z5WLs-s0lGkgKw", fallbackId: "yZh3xsFqCt8" },
+  // Latin America — channelIds verified; globonews has no reliable permanent fallback ID
+  { id: "globonews", handle: "globonews",        channelId: "UCp6RRaz93Pt2xYZoEye_rLA" },
+  // dwes channelId verified against https://www.youtube.com/channel/UCT4Jg8h03dD0iN3Pb5L0PMA
+  { id: "dwes",      handle: "dwespanol",        channelId: "UCT4Jg8h03dD0iN3Pb5L0PMA", fallbackId: "yZh3xsFqCt8" },
   // South Asia (Hindi)
   { id: "aajtak",    handle: "aajtak",           channelId: "UCt4t-jeY85JegMlZ-E5UWtA", fallbackId: "Nq2wYlWFucg" },
 ];
