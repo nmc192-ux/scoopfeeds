@@ -633,38 +633,106 @@ export function getFeaturedArticles(limit = 7) {
 export function getArticleById(id)    { return getDb().prepare("SELECT * FROM articles WHERE id = ?").get(id); }
 export function incrementViewCount(id){ getDb().prepare("UPDATE articles SET view_count = view_count + 1 WHERE id = ?").run(id); }
 
+// Lowercase + strip diacritics + drop non-alphanumerics, returning a Set of
+// meaningful tokens. NFD-normalise so "Atlético" (e + ◌́) decomposes and the
+// combining mark gets stripped — without this, "Atlético" and "Atletico"
+// tokenise to disjoint sets and never match across sources.
+function _coverageTokens(title) {
+  if (!title || typeof title !== "string") return new Set();
+  return new Set(
+    title
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((t) => t.length >= 4 && !STOPWORDS.has(t)),
+  );
+}
+
 // Cross-source coverage — other sources covering the same story, used by the
 // article SSR page to build a "Also covered by" block. This is what turns our
 // page from "scraped rewrite" into aggregation with genuine editorial value.
-// Matches on 2-3 meaningful title tokens across the last 3 days, excluding
-// the article itself and its own source.
+//
+// Approach (vs. the previous "any-of-N tokens LIKE-match" version, which
+// surfaced unrelated stories whenever they shared a single common word like
+// "trial" or "court"):
+//   1. Tokenise the parent title (length ≥ 4, non-stopword, accent-folded),
+//      keep top 8.
+//   2. SQL-fetch a broad candidate pool — different source, last 3 days,
+//      ANY token match — then SCORE in JS.
+//   3. Score = number of meaningful token overlaps with parent. Require at
+//      least 2 overlaps AND a Jaccard ≥ 0.13 to qualify as "same story".
+//   4. Sort by score desc, then recency desc, return top `limit`.
+//
+// The Jaccard floor is much looser than the de-dup threshold (0.55) since
+// "covered by" is a meaningful-overlap signal, not an exact-duplicate one.
+// 0.13 lets a 2-token overlap pass when titles are long (e.g. "Trump" +
+// "astronauts" between two ~10-token headlines).
 export function listAlternateCoverage(article, limit = 4) {
   if (!article || !article.title) return [];
-  const tokens = article.title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((t) => t.length >= 4)
-    .filter((t) => !STOPWORDS.has(t))
-    .slice(0, 5);
-  if (tokens.length < 2) return [];
+
+  const parentTokens = _coverageTokens(article.title);
+  if (parentTokens.size < 2) return [];
+
+  // Build SQL LIKE search terms. Include both the diacritic-folded token
+  // ("atletico") AND the raw lowercased form from the title ("atlético")
+  // so the SQL pre-filter catches both. Without the raw form, "Atlético"
+  // candidates never make it past the SQL stage to be scored.
+  const rawLowerTitle = (article.title || "").toLowerCase();
+  const tokens = [...parentTokens].slice(0, 8);
+  const searchTerms = new Set();
+  for (const t of tokens) searchTerms.add(t);
+  for (const word of rawLowerTitle.replace(/[^a-z0-9À-ɏ\s]/g, " ").split(/\s+/)) {
+    if (word.length >= 4 && !STOPWORDS.has(word)) searchTerms.add(word);
+  }
+  const searchTermsArr = [...searchTerms].slice(0, 16);
+
   const cutoff = Date.now() - 3 * 24 * 60 * 60 * 1000;
-  const likes = tokens.map(() => `LOWER(title) LIKE ?`).join(" OR ");
+  const likes = searchTermsArr.map(() => `LOWER(title) LIKE ?`).join(" OR ");
   const params = [
     article.id,
     article.source_name || "",
     cutoff,
-    ...tokens.map((t) => `%${t}%`),
-    limit,
+    ...searchTermsArr.map((t) => `%${t}%`),
   ];
-  return getDb().prepare(`
+
+  // Cast a wide net — score & filter in JS where we have the candidate
+  // titles. Cap at 80 to keep the worst case bounded.
+  const candidates = getDb().prepare(`
     SELECT id, title, url, source_name, published_at, category, image_url
     FROM articles
     WHERE id != ? AND source_name != ? AND published_at > ?
       AND (${likes})
+      AND is_duplicate = 0
     ORDER BY published_at DESC
-    LIMIT ?
+    LIMIT 80
   `).all(...params);
+
+  const scored = [];
+  for (const c of candidates) {
+    const candTokens = _coverageTokens(c.title);
+    if (candTokens.size < 2) continue;
+
+    let intersection = 0;
+    for (const t of parentTokens) if (candTokens.has(t)) intersection++;
+    if (intersection < 2) continue;
+
+    const union = new Set([...parentTokens, ...candTokens]).size;
+    const jaccard = union > 0 ? intersection / union : 0;
+    if (jaccard < 0.13) continue;
+
+    scored.push({ ...c, _score: intersection, _jaccard: jaccard });
+  }
+
+  scored.sort((a, b) => {
+    if (b._score !== a._score) return b._score - a._score;
+    if (b._jaccard !== a._jaccard) return b._jaccard - a._jaccard;
+    return (b.published_at || 0) - (a.published_at || 0);
+  });
+
+  // Strip internal scoring fields before returning.
+  return scored.slice(0, limit).map(({ _score, _jaccard, ...rest }) => rest);
 }
 
 // Related stories — same category, different URL, sorted by recency. Used on

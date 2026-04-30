@@ -200,7 +200,13 @@ router.get("/article/:id", (req, res) => {
   const title = `${article.title} — Scoop`;
   const published = new Date(article.published_at).toISOString();
   const hasFullContent = article.content && article.content.length > 500;
-  const articleBody = hasFullContent ? article.content : desc;
+  // Strip leading site chrome (share/save buttons, bylines glued to body)
+  // before splitting into paragraphs — same cleanup the takeaway extractor
+  // does, applied to the visible body too. Keeps the SSR page free of "Share
+  // Save Add as preferred on Google Lina SinjabCorrespondent, Beirut" lede.
+  const articleBody = hasFullContent
+    ? _stripLeadingChrome(article.content)
+    : desc;
   const paragraphs = articleBody
     ? articleBody.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
     : [];
@@ -642,26 +648,226 @@ function humanAgo(ts) {
   return `${d}d ago`;
 }
 
-// Extract up to 3 "key takeaway" bullets from the article. Uses a cheap
-// heuristic (first sentence of first 3 paragraphs, capped at 180 chars) —
-// avoids LLM cost on the critical path. The synthesis is good enough to give
-// the page substantive independent value over the source.
+// Extract up to 3 "key takeaway" bullets from the article body.
+//
+// Goals (vs. the previous naive "first sentence of first 3 paragraphs, slice
+// at 180" version):
+//   1. Strip site-chrome that scrapers concatenate onto the article body —
+//      e.g. BBC inserts "ShareSaveAdd as preferred on Google" before the lede,
+//      and bylines like "Lina SinjabCorrespondent, Beirut" follow. Without
+//      this, the first bullet ends up being page furniture, not editorial.
+//   2. Always emit COMPLETE sentences. Mid-sentence "…" cuts make the page
+//      feel auto-generated and broken; better to skip an over-long sentence
+//      and try the next one than to truncate it.
+//   3. Reject candidates that look like bylines, captions, or chrome.
+//
+// Still no LLM call — keeps the article SSR path fast and free.
+const TAKEAWAY_CHROME_TOKENS = [
+  "share", "save", "subscribe", "sign in", "sign up", "sign-in", "sign-up",
+  "log in", "login", "follow", "comment", "comments", "print", "email",
+  "whatsapp", "facebook", "twitter", "linkedin", "telegram", "reddit",
+  "bookmark", "listen", "watch live", "watch now", "read more", "read full",
+  "read also", "advertisement", "advertorial", "sponsored content",
+  "related article", "more from", "you might also like", "newsletter",
+  "preferred on google", "preferred source", "add as preferred",
+  "trending now", "most read", "skip to", "back to top", "show captions",
+  "play video", "image caption", "image source", "media caption",
+  "video caption", "getty images", "associated press", "agence france",
+  "all rights reserved", "copyright", "follow on x", "follow us",
+  "tap to copy", "copy link", "copied",
+];
+
+const TAKEAWAY_BYLINE_RE =
+  /^(?:by\s+|reporting by\s+|written by\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}(?:correspondent|reporter|editor|writer|columnist|contributor|staff)/i;
+
+// "Lina SinjabCorrespondent, Beirut" — capital letter glued to lowercase
+// (no space), followed by a role + city. Common when scrapers strip <span>s.
+const TAKEAWAY_GLUED_BYLINE_RE =
+  /[a-z][A-Z][a-z]+(?:Correspondent|Reporter|Editor|Writer|Columnist|Contributor)\b/;
+
+function _looksLikeChrome(text) {
+  if (!text) return true;
+  const lo = text.toLowerCase();
+  // Very short snippets (≤ 30 chars) are almost always captions, labels, or
+  // navigation crumbs — never a real takeaway. Length checks above this
+  // (e.g. minimum sentence length) are enforced by the caller.
+  if (text.length < 30) return true;
+  // Multiple chrome tokens piling up = page furniture.
+  let chromeHits = 0;
+  for (const t of TAKEAWAY_CHROME_TOKENS) {
+    if (lo.includes(t)) chromeHits++;
+    if (chromeHits >= 2) return true;
+  }
+  if (TAKEAWAY_BYLINE_RE.test(text)) return true;
+  if (TAKEAWAY_GLUED_BYLINE_RE.test(text)) return true;
+  return false;
+}
+
+// Strip leading site chrome — e.g. "ShareSaveAdd as preferred on GoogleLina
+// SinjabCorrespondent, BeirutReutersAtef Najib, former head of Political…"
+// becomes "Atef Najib, former head of Political…".
+//
+// The signature failure mode of HTML-stripping scrapers is that adjacent
+// inline elements (a button label, a span, a byline) become concatenated
+// without spaces — producing "ShareSaveAdd as preferred on GoogleLina
+// SinjabCorrespondent". So step 1 is to re-introduce word boundaries at
+// every lowercase→uppercase transition in the first ~500 chars (where this
+// glue usually lives). After that, ordinary leading-chrome stripping works.
+function _stripLeadingChrome(text) {
+  if (!text) return "";
+  // Operate on the head only — middle-of-article transitions like "iPhone"
+  // or "eBay" stay untouched.
+  const headLen = Math.min(500, text.length);
+  let head = text.slice(0, headLen);
+  const tail = text.slice(headLen);
+
+  // Insert a space at every camelCase glue point: "ShareSave" → "Share Save",
+  // "GoogleLina" → "Google Lina", "handcuffsThe" → "handcuffs The".
+  // We DO NOT touch ALLCAPS→Capital (e.g. "BBCNews" stays — that's intentional
+  // brand merging in many feeds and the next step strips known acronyms).
+  head = head.replace(/([a-z])([A-Z])/g, "$1 $2");
+
+  // Insert a period before common sentence-start words that look like they
+  // were glued onto a previous sentence (e.g. "handcuffs The highly charged
+  // scenes…" → "handcuffs. The highly charged scenes…"). This restores
+  // sentence boundaries that the scraper lost, so the takeaway picker can
+  // surface a sensible-length lede instead of a 300-char monolith.
+  head = head.replace(
+    /([a-z]{4,})\s+(The|A|An|This|That|These|Those|It|They|She|He|Officials|Lawmakers|However|Meanwhile)\s+([a-z])/g,
+    "$1. $2 $3",
+  );
+
+  let t = (head + tail).trim();
+
+  // Now repeatedly strip leading chrome tokens / bylines until stable.
+  let changed = true;
+  let safety = 30;
+  while (changed && t.length > 0 && safety-- > 0) {
+    changed = false;
+    const lo = t.toLowerCase();
+    for (const tok of TAKEAWAY_CHROME_TOKENS) {
+      if (lo.startsWith(tok)) {
+        t = t.slice(tok.length).replace(/^[\s,:;\-–—]+/, "");
+        changed = true;
+        break;
+      }
+    }
+    if (changed) continue;
+
+    // Strip a leading byline + location + wire-source attribution.
+    // After camelCase split this is normal prose. The pattern is:
+    //   "[Author Name] [Role][, optional location words] [optional wire]"
+    // e.g. "Lina Sinjab Correspondent, Beirut Reuters" → all stripped, leaving
+    // just the article body that follows.
+    const bylineMatch = t.match(
+      /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\s+(?:Correspondent|Reporter|Editor|Writer|Columnist|Contributor)(?:[\s,;\-–—]+[A-Z][a-z]+){0,2}[\s,;\-–—]+(?=[A-Z])/,
+    );
+    if (bylineMatch) {
+      t = t.slice(bylineMatch[0].length).replace(/^[\s,:;\-–—]+/, "");
+      changed = true;
+      continue;
+    }
+
+    // Strip a leading "By Author Name" byline.
+    const byMatch = t.match(/^By\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\s+/);
+    if (byMatch) {
+      t = t.slice(byMatch[0].length);
+      changed = true;
+      continue;
+    }
+
+    // Strip a leading wire-source attribution: "Reuters", "AP", "AFP",
+    // "BBC News" sitting alone at the start.
+    const wireMatch = t.match(
+      /^(?:Reuters|AP|AFP|Associated Press|Agence France(?:-Presse)?|BBC(?:\s+News)?|CNN|Bloomberg|Al Jazeera|Dawn|The Guardian|The Times)\s+(?=[A-Z])/,
+    );
+    if (wireMatch) {
+      t = t.slice(wireMatch[0].length);
+      changed = true;
+      continue;
+    }
+
+    // Strip a leading dangling preposition + brand/proper-noun.
+    // After stripping "Add as preferred" the text is "on Google Lina
+    // Sinjab Correspondent…"; consuming "on Google" lets the next pass
+    // byline-strip "Lina Sinjab Correspondent". Greedy consumption would
+    // eat the byline name too — keep it tight at one capitalised word.
+    const prepMatch = t.match(
+      /^(?:on|at|in|from|for|via|with|by)\s+[A-Z][a-z]+\s+(?=[A-Z])/,
+    );
+    if (prepMatch) {
+      t = t.slice(prepMatch[0].length);
+      changed = true;
+    }
+  }
+
+  // If the lead still doesn't start with a capital letter, fast-forward to
+  // the next sentence-like break.
+  if (t && !/^[A-Z"'(]/.test(t)) {
+    const nextSentence = t.search(/[.!?]\s+[A-Z]/);
+    if (nextSentence > 0) t = t.slice(nextSentence + 2);
+  }
+
+  return t.trim();
+}
+
+// Try to surface a full sentence (or short two-sentence run) that fits in
+// the bullet budget. Never truncates mid-word.
+function _pickSentence(paragraph, minLen = 50, maxLen = 220) {
+  if (!paragraph) return null;
+  // Split on sentence terminators while preserving them.
+  const sentences = paragraph
+    .split(/(?<=[.!?])\s+(?=[A-Z"'(])/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  for (const s of sentences) {
+    if (s.length >= minLen && s.length <= maxLen && !_looksLikeChrome(s)) {
+      return s;
+    }
+  }
+  // No single sentence fit. Try the first one if it's at least readable
+  // and trim at the last clause boundary (";" or ", " ) within budget.
+  const first = sentences[0];
+  if (!first || _looksLikeChrome(first)) return null;
+  if (first.length <= maxLen) return first;
+
+  const slice = first.slice(0, maxLen);
+  const lastBreak = Math.max(slice.lastIndexOf(". "), slice.lastIndexOf("; "));
+  if (lastBreak >= minLen) return slice.slice(0, lastBreak + 1).trim();
+
+  // Last resort: fall back to the previous sentence if any, else skip.
+  return null;
+}
+
 function extractTakeaways(article) {
-  const source = (article.content && article.content.length > 500)
-    ? article.content
-    : (article.description || "");
-  if (!source) return [];
-  const paragraphs = source.split(/\n\n+/).map(p => p.trim()).filter(Boolean);
-  const candidates = paragraphs.length >= 3 ? paragraphs.slice(0, 3) : paragraphs;
-  return candidates
-    .map((p) => {
-      const firstSentence = p.split(/(?<=[.!?])\s+/)[0] || p;
-      return firstSentence.length > 180
-        ? firstSentence.slice(0, 177).trimEnd() + "…"
-        : firstSentence;
-    })
-    .filter((s) => s.length >= 30)
-    .slice(0, 3);
+  // Use whichever source has more substance. Some feeds give us a long
+  // `description` and a tiny `content`; others vice-versa. Pick the longer
+  // one rather than gating on a fixed length threshold.
+  const c = article.content || "";
+  const d = article.description || "";
+  const rawSource = c.length >= d.length ? c : d;
+  if (!rawSource || rawSource.length < 120) return [];
+
+  const cleanedHead = _stripLeadingChrome(rawSource);
+  const paragraphs = cleanedHead
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const out = [];
+  const seen = new Set();
+  for (const p of paragraphs) {
+    if (out.length >= 3) break;
+    if (_looksLikeChrome(p)) continue;
+    const s = _pickSentence(p);
+    if (!s) continue;
+    const key = s.slice(0, 60).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
 }
 
 // Category-aware framing sentence — gives the reader context for why a story
