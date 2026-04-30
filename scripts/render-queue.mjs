@@ -39,16 +39,44 @@ if (!OPS_KEY) {
 const authQS = `key=${encodeURIComponent(OPS_KEY)}`;
 
 // ─── HTTP helpers ──────────────────────────────────────────────────────────
+//
+// Wraps fetch() with bounded retry + exponential backoff on transient
+// network errors (TCP RST, TLS handshake fail, DNS hiccup — Node surfaces
+// these all as "TypeError: fetch failed"). 2026-04 saw the 12:00 UTC cron
+// crash on its first fetch every day for a week with no useful diagnostic;
+// without retry, one flaky packet = an entire batch blocked until next cron.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchWithRetry(url, init, { attempts = 4, baseDelay = 1500 } = {}) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetch(url, init);
+    } catch (err) {
+      lastErr = err;
+      // Only retry on network-layer failures (which Node throws as TypeError).
+      // HTTP 4xx/5xx come back as a Response, never as a thrown error.
+      const transient =
+        err?.name === "TypeError" || /fetch failed|network|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN/i.test(String(err?.message || err));
+      if (!transient || i === attempts - 1) throw err;
+      const wait = baseDelay * Math.pow(2, i);
+      console.warn(`   ⚠️  fetch failed (attempt ${i + 1}/${attempts}): ${err.message} — retrying in ${wait}ms`);
+      await sleep(wait);
+    }
+  }
+  throw lastErr;
+}
+
 async function getJson(p) {
   const url = `${SITE_URL}${p}${p.includes("?") ? "&" : "?"}${authQS}`;
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url);
   if (!res.ok) throw new Error(`GET ${p} → ${res.status} ${await res.text().catch(() => "")}`);
   return res.json();
 }
 
 async function postJson(p, body = {}) {
   const url = `${SITE_URL}${p}${p.includes("?") ? "&" : "?"}${authQS}`;
-  const res = await fetch(url, {
+  const res = await fetchWithRetry(url, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify(body),
@@ -64,7 +92,7 @@ async function uploadMp4({ jobId, mp4Bytes, durationSecs, hasAudio }) {
     hasAudio:     String(hasAudio),
   });
   const url = `${SITE_URL}/scoop-ops/videos-gen/upload?${qs}&${authQS}`;
-  const res = await fetch(url, {
+  const res = await fetchWithRetry(url, {
     method:  "POST",
     headers: { "Content-Type": "video/mp4" },
     body:    mp4Bytes,
