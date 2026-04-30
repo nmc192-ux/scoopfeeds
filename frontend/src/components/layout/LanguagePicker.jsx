@@ -103,7 +103,7 @@ export default function LanguagePicker() {
               <button
                 onClick={selectAuto}
                 className={`w-full flex items-center gap-2 mt-1 px-2 py-1.5 text-xs rounded hover:bg-[var(--color-surface2)] ${
-                  autoLanguage ? "text-brand-blue font-semibold" : "text-[var(--color-text-secondary)]"
+                  autoLanguage ? "text-cobalt-600 font-semibold" : "text-[var(--color-text-secondary)]"
                 }`}
               >
                 <Languages size={13} />
@@ -133,7 +133,7 @@ export default function LanguagePicker() {
                     <span className="text-[10px] text-[var(--color-text-tertiary)] uppercase tracking-wider tabular-nums">
                       {l.code}
                     </span>
-                    {isActive && <Check size={14} className="text-brand-blue" />}
+                    {isActive && <Check size={14} className="text-cobalt-600" />}
                   </button>
                 );
               })}

@@ -398,7 +398,7 @@ export default function MarketStrip({ defaultOpen = true }) {
             </span>
           )}
           {isFetching && (
-            <span className="text-[10px] text-brand-blue animate-pulse font-medium">Updating…</span>
+            <span className="text-[10px] text-cobalt-600 animate-pulse font-medium">Updating…</span>
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">

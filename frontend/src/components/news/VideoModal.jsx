@@ -141,7 +141,7 @@ export default function VideoModal({ video, onClose }) {
                     {formatDistanceToNow(new Date(video.published_at), { addSuffix: true })}
                   </span>
                   {video.category && (
-                    <span className="px-2 py-0.5 rounded-full bg-brand-blue/15 text-brand-blue text-xs font-medium capitalize">
+                    <span className="px-2 py-0.5 rounded-full bg-cobalt-100 text-cobalt-600 text-xs font-medium capitalize">
                       {video.category.replace(/-/g, " ")}
                     </span>
                   )}

@@ -291,7 +291,7 @@ export default function LiveTVSection() {
                       href={activeChannel.ytUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 text-xs font-medium text-brand-blue hover:underline"
+                      className="flex items-center gap-1.5 text-xs font-medium text-cobalt-600 hover:underline"
                     >
                       YouTube <ExternalLink size={11} />
                     </a>

@@ -126,7 +126,7 @@ export default function NewsletterSignup({ compact = false, source = "inline" })
     return (
       <div className={wrapClass}>
         <div className="flex items-start gap-2.5 mb-3">
-          <div className="w-9 h-9 rounded-full bg-brand-blue/10 text-brand-blue flex items-center justify-center flex-shrink-0">
+          <div className="w-9 h-9 rounded-full bg-cobalt-50 text-cobalt-600 flex items-center justify-center flex-shrink-0">
             <Users size={18} />
           </div>
           <div className="min-w-0">
@@ -144,7 +144,7 @@ export default function NewsletterSignup({ compact = false, source = "inline" })
           </div>
           <button
             onClick={copyLink}
-            className="px-2.5 py-1.5 rounded-lg bg-brand-blue text-white text-xs font-semibold hover:opacity-90 flex items-center gap-1"
+            className="px-2.5 py-1.5 rounded-lg bg-cobalt-600 text-white text-xs font-semibold hover:opacity-90 flex items-center gap-1"
           >
             {copied ? <Check size={13} /> : <Copy size={13} />}
             {copied ? "Copied" : "Copy"}
@@ -158,7 +158,7 @@ export default function NewsletterSignup({ compact = false, source = "inline" })
     return (
       <div className={wrapClass}>
         <div className="flex items-start gap-2.5 mb-3">
-          <div className="w-9 h-9 rounded-full bg-brand-green/10 text-brand-green flex items-center justify-center flex-shrink-0">
+          <div className="w-9 h-9 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center flex-shrink-0">
             <Check size={18} />
           </div>
           <div className="min-w-0">
@@ -179,7 +179,7 @@ export default function NewsletterSignup({ compact = false, source = "inline" })
               </div>
               <button
                 onClick={copyLink}
-                className="px-2.5 py-1.5 rounded-lg bg-brand-blue text-white text-xs font-semibold hover:opacity-90 flex items-center gap-1"
+                className="px-2.5 py-1.5 rounded-lg bg-cobalt-600 text-white text-xs font-semibold hover:opacity-90 flex items-center gap-1"
               >
                 {copied ? <Check size={13} /> : <Copy size={13} />}
                 {copied ? "Copied" : "Copy"}
@@ -194,7 +194,7 @@ export default function NewsletterSignup({ compact = false, source = "inline" })
   return (
     <form onSubmit={submit} className={wrapClass} id="newsletter">
       <div className="flex items-start gap-2.5 mb-2.5">
-        <div className="w-9 h-9 rounded-full bg-brand-blue/10 text-brand-blue flex items-center justify-center flex-shrink-0">
+        <div className="w-9 h-9 rounded-full bg-cobalt-50 text-cobalt-600 flex items-center justify-center flex-shrink-0">
           <Bell size={18} />
         </div>
         <div className="min-w-0">
@@ -212,12 +212,12 @@ export default function NewsletterSignup({ compact = false, source = "inline" })
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           disabled={state === "loading"}
-          className="flex-1 min-w-0 px-3 py-1.5 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-surface2)] text-[var(--color-text)] placeholder-[var(--color-text-tertiary)] focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+          className="flex-1 min-w-0 px-3 py-1.5 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-surface2)] text-[var(--color-text)] placeholder-[var(--color-text-tertiary)] focus:outline-none focus:ring-2 focus:ring-cobalt-500/40"
         />
         <button
           type="submit"
           disabled={state === "loading"}
-          className="px-3 py-1.5 rounded-lg bg-brand-blue text-white text-sm font-semibold hover:opacity-90 disabled:opacity-60 flex items-center gap-1.5"
+          className="px-3 py-1.5 rounded-lg bg-cobalt-600 text-white text-sm font-semibold hover:opacity-90 disabled:opacity-60 flex items-center gap-1.5"
         >
           {state === "loading" ? <Loader2 size={14} className="animate-spin" /> : "Subscribe"}
         </button>

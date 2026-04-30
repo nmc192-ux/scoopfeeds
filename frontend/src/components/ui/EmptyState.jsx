@@ -46,7 +46,7 @@ export default function EmptyState({ type = "noArticles", onRefresh }) {
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={onRefresh}
-          className="flex items-center gap-2 px-5 py-2.5 bg-brand-blue text-white rounded-full font-medium text-sm shadow-lg hover:shadow-xl transition-shadow"
+          className="flex items-center gap-2 px-5 py-2.5 bg-cobalt-600 text-white rounded-full font-medium text-sm shadow-lg hover:shadow-xl transition-shadow"
         >
           <RefreshCw size={14} />
           Try Again
@@ -69,8 +69,8 @@ export function BackendOffline() {
         Start the backend server first, then this app will come alive with fresh news!
       </p>
       <div className="card p-4 text-left text-sm font-mono text-[var(--color-text-secondary)] max-w-sm w-full">
-        <p className="text-brand-green mb-1">$ cd backend</p>
-        <p className="text-brand-green">$ npm start</p>
+        <p className="text-emerald-500 mb-1">$ cd backend</p>
+        <p className="text-emerald-500">$ npm start</p>
       </div>
       <p className="mt-4 text-xs text-[var(--color-text-tertiary)]">
         Waiting for API on port 4000...
@@ -81,7 +81,7 @@ export function BackendOffline() {
             key={i}
             animate={{ scale: [1, 1.5, 1], opacity: [0.3, 1, 0.3] }}
             transition={{ duration: 1, repeat: Infinity, delay }}
-            className="w-2 h-2 bg-brand-blue rounded-full"
+            className="w-2 h-2 bg-cobalt-600 rounded-full"
           />
         ))}
       </div>

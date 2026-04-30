@@ -124,7 +124,7 @@ export default function CountryPicker() {
               {isOverridden && (
                 <button
                   onClick={clearOverride}
-                  className="w-full text-left mt-1 px-2 py-1 text-xs text-brand-blue hover:bg-[var(--color-surface2)] rounded"
+                  className="w-full text-left mt-1 px-2 py-1 text-xs text-cobalt-600 hover:bg-[var(--color-surface2)] rounded"
                 >
                   ← Use auto-detected region
                 </button>
@@ -141,7 +141,7 @@ export default function CountryPicker() {
                   <span className="text-lg leading-none">{c.flag}</span>
                   <span className="flex-1 min-w-0 truncate text-[var(--color-text)]">{c.name}</span>
                   <span className="text-[10px] text-[var(--color-text-tertiary)] tabular-nums">{c.currency}</span>
-                  {c.code === countryCode && <Check size={14} className="text-brand-blue" />}
+                  {c.code === countryCode && <Check size={14} className="text-cobalt-600" />}
                 </button>
               ))}
               {!filtered.length && (

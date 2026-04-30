@@ -18,7 +18,7 @@ export default function PaywallCTA({ sourceName, className = "" }) {
       target="_blank"
       rel="sponsored noopener noreferrer"
       onClick={(e) => e.stopPropagation()}
-      className={`text-[10px] font-semibold uppercase tracking-wider text-brand-blue hover:underline ${className}`}
+      className={`text-[10px] font-semibold uppercase tracking-wider text-cobalt-600 hover:underline ${className}`}
       title={`Subscribe to ${sourceName} via Scoop`}
     >
       Subscribe
