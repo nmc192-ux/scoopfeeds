@@ -89,9 +89,9 @@ export default function Header() {
                   Scoop<span style={{ color: "var(--color-orange)" }}>feeds</span>
                 </span>
                 <span
-                  style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "10px", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--color-text-tertiary)" }}
+                  style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: "11px", fontWeight: 400, letterSpacing: "0.01em", color: "var(--color-text-tertiary)" }}
                 >
-                  Intelligence
+                  Intelligent news, curated.
                 </span>
               </div>
             </motion.div>
