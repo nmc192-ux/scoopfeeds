@@ -2,116 +2,117 @@ import { motion } from "framer-motion";
 import clsx from "clsx";
 
 /**
- * Scout — the SCOOP mascot
- * A scrappy basset hound journalist with a press hat & magnifying glass
+ * Pulse — the Scoopfeeds mascot.
+ * An Electric Signal hummingbird with a vivid-orange beak.
  * Sizes: sm (32) | md (48) | lg (80) | xl (120) | hero (200)
+ *
+ * Replaces the legacy basset-hound "Scout" mascot. The visual language is
+ * cobalt body + orange beak (matches CSS tokens --color-accent / --color-orange)
+ * with a soft-pulsing upper wing for the "always live" feel.
+ *
+ * Mood currently drives a subtle eye sparkle so empty states feel a touch
+ * more inviting than info states. The shape is otherwise identical so the
+ * brand mark stays consistent across surfaces.
  */
-export default function ScoopMascot({ size = "md", className = "", animated = true, mood = "happy" }) {
+export default function ScoopMascot({
+  size      = "md",
+  className = "",
+  animated  = true,
+  mood      = "happy",
+}) {
   const sizes = { sm: 32, md: 48, lg: 80, xl: 120, hero: 200 };
   const px = sizes[size] || sizes.md;
-  const h  = Math.round(px * 120 / 100);
 
   const Wrapper = animated ? motion.div : "div";
   const wrapperProps = animated
-    ? { animate: { y: [0, -4, 0] }, transition: { duration: 3.5, repeat: Infinity, ease: "easeInOut" } }
+    ? {
+        animate:    { y: [0, -4, 0] },
+        transition: { duration: 3.5, repeat: Infinity, ease: "easeInOut" },
+      }
     : {};
 
+  // Per-mount gradient ID so multiple instances on the same page can render
+  // independently (otherwise SVG defs collide on duplicate ids).
+  const gradId   = `pulse-grad-${size}`;
+  const shadowId = `pulse-shadow-${size}`;
+
   return (
-    <Wrapper {...wrapperProps} className={clsx("inline-flex items-center justify-center select-none", className)}>
-      <svg width={px} height={h} viewBox="0 0 100 120" fill="none"
-           xmlns="http://www.w3.org/2000/svg" aria-label="Scout, the Scoop mascot">
+    <Wrapper
+      {...wrapperProps}
+      className={clsx("inline-flex items-center justify-center select-none", className)}
+    >
+      <svg
+        width={px}
+        height={px}
+        viewBox="0 0 100 100"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        role="img"
+        aria-label="Pulse, the Scoopfeeds hummingbird"
+      >
+        <defs>
+          <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%"   stopColor="#3B82F6" />
+            <stop offset="100%" stopColor="#1E3A8A" />
+          </linearGradient>
+          <radialGradient id={shadowId} cx="50%" cy="50%" r="50%">
+            <stop offset="0%"   stopColor="#0F172A" stopOpacity="0.15" />
+            <stop offset="100%" stopColor="#0F172A" stopOpacity="0" />
+          </radialGradient>
+        </defs>
 
-        {/* ── Shadow ──────────────────────────────────────── */}
-        <ellipse cx="50" cy="118" rx="24" ry="4" fill="black" fillOpacity="0.1" />
+        {/* ── Soft drop shadow ─────────────────────────────────── */}
+        <ellipse cx="55" cy="90" rx="30" ry="5" fill={`url(#${shadowId})`} />
 
-        {/* ── Left ear (long droopy) ──────────────────────── */}
-        <path d="M26,24 Q13,50 11,82 Q9,104 18,112 Q24,116 30,110 Q36,104 36,82 Q37,50 32,24Z"
-              fill="#7A4218" />
-        <path d="M28,26 Q17,52 16,80 Q15,100 21,108 Q24,110 28,106 Q31,102 31,80 Q32,52 30,26Z"
-              fill="#A06030" fillOpacity="0.45" />
+        {/* ── Wing (upper) — pulse ────────────────────────────── */}
+        <path
+          d="M20 50C20 35 32 20 45 20C48 20 48 30 45 45C45 45 35 50 20 50Z"
+          fill="#3B82F6"
+          fillOpacity="0.4"
+          style={{ animation: "pulseSoft 2.4s ease-in-out infinite" }}
+        />
 
-        {/* ── Right ear ──────────────────────────────────── */}
-        <path d="M74,24 Q87,50 89,82 Q91,104 82,112 Q76,116 70,110 Q64,104 64,82 Q63,50 68,24Z"
-              fill="#7A4218" />
-        <path d="M72,26 Q83,52 84,80 Q85,100 79,108 Q76,110 72,106 Q69,102 69,80 Q68,52 70,26Z"
-              fill="#A06030" fillOpacity="0.45" />
+        {/* ── Wing (lower) — solid gradient ───────────────────── */}
+        <path
+          d="M20 50C20 65 32 80 45 80C48 80 48 70 45 55C45 55 35 50 20 50Z"
+          fill={`url(#${gradId})`}
+        />
 
-        {/* ── Body ────────────────────────────────────────── */}
-        <ellipse cx="50" cy="92" rx="27" ry="21" fill="#F5E0B8" />
-        <ellipse cx="50" cy="94" rx="19" ry="13" fill="#EDD9A8" fillOpacity="0.5" />
+        {/* ── Body ────────────────────────────────────────────── */}
+        <path
+          d="M38 50C38 35 50 25 65 25C78 25 82 38 82 50C82 62 78 75 65 75C50 75 38 65 38 50Z"
+          fill={`url(#${gradId})`}
+        />
 
-        {/* ── Paws ────────────────────────────────────────── */}
-        <rect x="28" y="109" width="15" height="9" rx="4.5" fill="#F5E0B8" stroke="#7A4218" strokeWidth="0.8" />
-        <rect x="57" y="109" width="15" height="9" rx="4.5" fill="#F5E0B8" stroke="#7A4218" strokeWidth="0.8" />
-        {/* Toe lines */}
-        <path d="M30,118 Q32,115 34,118 Q36,115 38,118" stroke="#7A4218" strokeWidth="0.7" fill="none" strokeLinecap="round" />
-        <path d="M59,118 Q61,115 63,118 Q65,115 67,118" stroke="#7A4218" strokeWidth="0.7" fill="none" strokeLinecap="round" />
+        {/* ── Belly highlight for depth ──────────────────────── */}
+        <path
+          d="M44 52C44 42 52 36 62 36C71 36 74 42 74 50"
+          fill="none"
+          stroke="white"
+          strokeOpacity="0.18"
+          strokeWidth="3"
+          strokeLinecap="round"
+        />
 
-        {/* ── Magnifying glass (right paw) ──────────────── */}
-        <circle cx="74" cy="104" r="6" fill="none" stroke="#7A4218" strokeWidth="2" />
-        <circle cx="74" cy="104" r="4.5" fill="#B3D4E8" fillOpacity="0.4" />
-        <line x1="78.5" y1="108.5" x2="83" y2="113" stroke="#7A4218" strokeWidth="2.5" strokeLinecap="round" />
+        {/* ── Beak — vivid orange accent ─────────────────────── */}
+        <path d="M80 46L96 50L80 54V46Z" fill="#F97316" />
 
-        {/* ── SCOOP press badge on chest ────────────────── */}
-        <rect x="33" y="79" width="34" height="17" rx="3" fill="white" fillOpacity="0.97" />
-        <rect x="33" y="79" width="34" height="17" rx="3" stroke="#2563EB" strokeWidth="1.5" />
-        <text x="50" y="89.5" textAnchor="middle" fontSize="6.5" fontWeight="900"
-              fill="#2563EB" fontFamily="system-ui, -apple-system, sans-serif">SCOOP</text>
-        <text x="50" y="94" textAnchor="middle" fontSize="3.5"
-              fill="#999" fontFamily="system-ui, sans-serif">press</text>
-
-        {/* ── Head ────────────────────────────────────────── */}
-        <circle cx="50" cy="42" r="30" fill="#F5E0B8" />
-
-        {/* ── Press hat ───────────────────────────────────── */}
-        <rect x="28" y="8" width="44" height="18" rx="5" fill="#111111" />
-        <rect x="24" y="23" width="52" height="6" rx="3" fill="#1A1A1A" />
-        {/* Badge */}
-        <rect x="31" y="9" width="38" height="16" rx="3" fill="#2563EB" />
-        <text x="50" y="20" textAnchor="middle" fontSize="7.5" fontWeight="900"
-              fill="white" fontFamily="system-ui, -apple-system, sans-serif">PRESS</text>
-
-        {/* ── Worried brows (classic basset) ──────────────── */}
-        <path d="M30,33 Q37,29 44,33" fill="none" stroke="#7A4218" strokeWidth="2.2" strokeLinecap="round" />
-        <path d="M56,33 Q63,29 70,33" fill="none" stroke="#7A4218" strokeWidth="2.2" strokeLinecap="round" />
-
-        {/* ── Left eye ────────────────────────────────────── */}
-        <circle cx="38" cy="43" r="8.5" fill="white" />
-        <circle cx="38" cy="44" r="6" fill="#2C1810" />
-        <circle cx="36.5" cy="42" r="2.2" fill="white" />
-        <circle cx="36.5" cy="42" r="1.1" fill="white" fillOpacity="0.8" />
-        {/* Droopy lower lid */}
-        <path d="M29,49 Q38,54 47,49" fill="none" stroke="#7A4218" strokeWidth="1.2"
-              strokeLinecap="round" strokeOpacity="0.65" />
-
-        {/* ── Right eye ───────────────────────────────────── */}
-        <circle cx="62" cy="43" r="8.5" fill="white" />
-        <circle cx="62" cy="44" r="6" fill="#2C1810" />
-        <circle cx="60.5" cy="42" r="2.2" fill="white" />
-        <circle cx="60.5" cy="42" r="1.1" fill="white" fillOpacity="0.8" />
-        <path d="M53,49 Q62,54 71,49" fill="none" stroke="#7A4218" strokeWidth="1.2"
-              strokeLinecap="round" strokeOpacity="0.65" />
-
-        {/* ── Muzzle / snout ──────────────────────────────── */}
-        <ellipse cx="50" cy="57" rx="14" ry="10.5" fill="#EDD9A8" />
-
-        {/* ── Nose ────────────────────────────────────────── */}
-        <ellipse cx="50" cy="52" rx="7" ry="5.5" fill="#1A1A1A" />
-        <ellipse cx="48" cy="50.5" rx="2.8" ry="2" fill="white" fillOpacity="0.35" />
-
-        {/* ── Mouth ───────────────────────────────────────── */}
-        {(mood === "happy") && (
-          <path d="M41,62 Q50,68 59,62" fill="none" stroke="#7A4218" strokeWidth="1.8" strokeLinecap="round" />
+        {/* ── Eye ─────────────────────────────────────────────── */}
+        <circle cx="70" cy="42" r="6.5" fill="white" />
+        <circle cx="71" cy="43" r="3.5" fill="#0F172A" />
+        <circle cx="72.5" cy="41.5" r="1.4" fill="white" />
+        {mood === "happy" && (
+          <circle cx="69.5" cy="42" r="0.8" fill="white" fillOpacity="0.7" />
         )}
-        {(mood === "reading") && (
-          <path d="M43,62 Q50,65 57,62" fill="none" stroke="#7A4218" strokeWidth="1.8" strokeLinecap="round" />
-        )}
+
+        {/* ── Subtle chest mark — small orange dot, ties to beak */}
+        <circle cx="58" cy="62" r="1.6" fill="#F97316" fillOpacity="0.55" />
       </svg>
     </Wrapper>
   );
 }
 
-// Backward-compat alias
+// Backward-compat alias — the file used to export "Scout" as KhabriMascot.
 export const KhabriMascot = ScoopMascot;
 
 /** ─── Compact header logo mark — cobalt hummingbird badge ───────────────── */
