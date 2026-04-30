@@ -1,12 +1,11 @@
-import { useState } from "react";
 import { motion } from "framer-motion";
 import { Play, Youtube, Clock, ExternalLink } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { topicColor } from "../../lib/topicColors";
+import SafeImage from "../ui/SafeImage";
 import clsx from "clsx";
 
 export default function VideoCard({ video, index = 0, onPlay, size = "normal" }) {
-  const [thumbError, setThumbError] = useState(false);
   const color = topicColor(video.category);
   const thumbUrl = video.thumbnail || `https://img.youtube.com/vi/${video.video_id}/hqdefault.jpg`;
 
@@ -27,19 +26,17 @@ export default function VideoCard({ video, index = 0, onPlay, size = "normal" })
         size === "wide" ? "w-40 h-28 rounded-l-2xl rounded-r-none" : "rounded-t-2xl",
         size !== "wide" && "aspect-video"
       )}>
-        {!thumbError ? (
-          <img
-            src={thumbUrl}
-            alt={video.title}
-            loading="lazy"
-            onError={() => setThumbError(true)}
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gray-900">
-            <Youtube size={32} className="text-red-600 opacity-60" />
-          </div>
-        )}
+        <SafeImage
+          src={thumbUrl}
+          alt={video.title}
+          className="absolute inset-0"
+          imgClassName="w-full h-full object-cover transition-transform duration-slow ease-smooth group-hover:scale-105"
+          fallback={
+            <div className="w-full h-full flex items-center justify-center bg-gray-900">
+              <Youtube size={32} className="text-red-600 opacity-60" />
+            </div>
+          }
+        />
 
         {/* Play overlay */}
         <div className="absolute inset-0 bg-black/30 flex flex-col items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">

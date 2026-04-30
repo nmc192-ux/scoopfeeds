@@ -20,6 +20,7 @@ import { track, trackShare, trackOutboundClick, trackSave } from "../../lib/trac
 import TipJar from "../tips/TipJar";
 import NewsletterSignup, { readSubToken } from "../newsletter/NewsletterSignup";
 import { AdSenseUnit } from "../ads/AdSense";
+import SafeImage from "../ui/SafeImage";
 
 // Fetches 4 related stories in the same category, used by the recirculation
 // block at the bottom of the reader. Cached per category to avoid re-fetching
@@ -228,11 +229,11 @@ export default function ReaderModal() {
               lang={targetLang}
             >
               {article.image_url && (
-                <img
+                <SafeImage
                   src={article.image_url}
                   alt=""
-                  className="w-full rounded-xl mb-6 max-h-[360px] object-cover"
-                  onError={(e) => { e.target.style.display = "none"; }}
+                  className="w-full rounded-xl mb-6 h-[280px] sm:h-[360px]"
+                  imgClassName="w-full h-full object-cover"
                 />
               )}
 
@@ -351,15 +352,12 @@ export default function ReaderModal() {
                         className="text-left p-3 rounded-xl border border-[var(--color-border)] hover:border-cobalt-500 transition-colors group"
                       >
                         {rel.image_url && (
-                          <div className="aspect-video overflow-hidden rounded-lg mb-2 bg-[var(--color-surface2)]">
-                            <img
-                              src={rel.image_url}
-                              alt=""
-                              loading="lazy"
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                              onError={(e) => { e.target.style.display = "none"; }}
-                            />
-                          </div>
+                          <SafeImage
+                            src={rel.image_url}
+                            alt=""
+                            className="aspect-video rounded-lg mb-2"
+                            imgClassName="w-full h-full object-cover group-hover:scale-105 transition-transform duration-normal ease-smooth"
+                          />
                         )}
                         <p className="text-[10px] uppercase tracking-wider opacity-60 mb-1">
                           {rel.source_name}

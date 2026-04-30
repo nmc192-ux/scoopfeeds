@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { motion } from "framer-motion";
 import { ExternalLink, Clock, Bookmark, BookmarkCheck } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
@@ -7,13 +6,13 @@ import { useTranslatedTexts } from "../../hooks/useTranslation";
 import { useReaderStore } from "../../hooks/useReader";
 import { useSaveArticle } from "../../hooks/useSaveArticle";
 import { topicColor, topicLabel } from "../../lib/topicColors";
+import SafeImage from "../ui/SafeImage";
 import clsx from "clsx";
 
 export default function FeaturedCard({ article }) {
   const { toggle: toggleSave, isSaved } = useSaveArticle();
   const openReader = useReaderStore(s => s.openReader);
   const saved = isSaved(article.id);
-  const [imgError, setImgError] = useState(false);
   const color = topicColor(article.category);
   const label = topicLabel(article.category);
   const isRecent = Date.now() - article.published_at < 2 * 60 * 60 * 1000;
@@ -47,28 +46,29 @@ export default function FeaturedCard({ article }) {
         }}
         target="_blank" rel="noopener noreferrer">
         {/* Hero image */}
-        <div className="relative h-72 sm:h-96 overflow-hidden bg-[var(--color-surface2)]">
-          {article.image_url && !imgError ? (
-            <img
-              src={article.image_url} alt={article.title} loading="eager"
-              onError={() => setImgError(true)}
-              className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-            />
-          ) : (
-            <div
-              className="w-full h-full flex items-center justify-center"
-              style={{ background: `linear-gradient(135deg, ${color}33, ${color}66)` }}
-            >
-              <span className="text-8xl opacity-40">
-                {article.category === "ai" ? "🤖" :
-                 article.category === "sports" ? "🏆" :
-                 article.category === "science" ? "🔬" :
-                 article.category === "environment" ? "🌱" :
-                 article.category === "weather" ? "🌤️" :
-                 article.category === "pakistan" ? "🇵🇰" : "📰"}
-              </span>
-            </div>
-          )}
+        <div className="relative h-72 sm:h-96">
+          <SafeImage
+            src={article.image_url}
+            alt={article.title}
+            loading="eager"
+            className="absolute inset-0"
+            imgClassName="w-full h-full object-cover transition-transform duration-slow ease-smooth group-hover:scale-105"
+            fallback={
+              <div
+                className="w-full h-full flex items-center justify-center"
+                style={{ background: `linear-gradient(135deg, ${color}33, ${color}66)` }}
+              >
+                <span className="text-8xl opacity-40">
+                  {article.category === "ai" ? "🤖" :
+                   article.category === "sports" ? "🏆" :
+                   article.category === "science" ? "🔬" :
+                   article.category === "environment" ? "🌱" :
+                   article.category === "weather" ? "🌤️" :
+                   article.category === "pakistan" ? "🇵🇰" : "📰"}
+                </span>
+              </div>
+            }
+          />
 
           {/* Gradient overlay */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />

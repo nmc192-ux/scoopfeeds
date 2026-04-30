@@ -8,6 +8,7 @@ import { useReaderStore } from "../../hooks/useReader";
 import { useSaveArticle } from "../../hooks/useSaveArticle";
 import { track, trackShare, trackSave, trackUnsave, trackOutboundClick } from "../../lib/track";
 import PaywallCTA from "../ads/PaywallCTA";
+import SafeImage from "../ui/SafeImage";
 import { topicColor, topicLabel, topicEmoji, COBALT_PRIMARY } from "../../lib/topicColors";
 import clsx from "clsx";
 
@@ -136,13 +137,15 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
         target="_blank" rel="noopener noreferrer" className="block">
         {/* Image */}
         {article.image_url && !imgError ? (
-          <div className={clsx("relative overflow-hidden bg-[var(--color-surface2)]", size === "large" ? "h-56 sm:h-72" : "h-44")}>
-            <img
-              src={article.image_url} alt={article.title} loading="lazy"
-              onError={() => setImgError(true)}
-              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          <div className={clsx("relative", size === "large" ? "h-56 sm:h-72" : "h-44")}>
+            <SafeImage
+              src={article.image_url}
+              alt={article.title}
+              className="absolute inset-0"
+              imgClassName="w-full h-full object-cover transition-transform duration-slow ease-smooth group-hover:scale-105"
+              onErrored={() => setImgError(true)}
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-normal pointer-events-none" />
             <div className="absolute top-3 left-3">
               <span className="topic-pill text-white text-xs px-2.5 py-1 shadow-lg" style={{ backgroundColor: color }}>
                 {label}

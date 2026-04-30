@@ -27,6 +27,7 @@ import { useNewsStore } from "./store/newsStore";
 import { trackPageView, attachEngagementObservers } from "./lib/track";
 import ScoopMascot from "./components/mascot/ScoopMascot";
 import { topicColor } from "./lib/topicColors";
+import SafeImage from "./components/ui/SafeImage";
 import { AdSenseBanner, AdSenseSidebar, AdSenseUnit } from "./components/ads/AdSense";
 import AffiliateWidget from "./components/ads/AffiliateWidget";
 import TipJar from "./components/tips/TipJar";
@@ -421,13 +422,12 @@ function SideCard({ article }) {
       className="card card-hover flex gap-3 p-4"
     >
       {article.image_url && (
-        <div className="flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden bg-[var(--color-surface2)]">
-          <img
-            src={article.image_url} alt={article.title} loading="lazy"
-            className="w-full h-full object-cover"
-            onError={e => e.target.style.display = "none"}
-          />
-        </div>
+        <SafeImage
+          src={article.image_url}
+          alt={article.title}
+          className="flex-shrink-0 w-20 h-20 rounded-xl"
+          imgClassName="w-full h-full object-cover"
+        />
       )}
       <div className="flex-1 min-w-0">
         <span
