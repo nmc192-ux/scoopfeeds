@@ -4,7 +4,7 @@ import {
   Sun, Moon, Search, X, RefreshCw,
   Activity, Grid3x3, List, UserCircle, Tv
 } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useNewsStore } from "../../store/newsStore";
 import { useHealth, useRefresh } from "../../hooks/useNews";
 import { useAuth } from "../../hooks/useAuth";
@@ -25,10 +25,20 @@ export default function Header() {
   const refresh = useRefresh();
   const { isLoggedIn } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const onLiveTv = location.pathname === "/live-tv";
+
+  const submitSearch = (e) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    if (q.length >= 2) {
+      navigate(`/search?q=${encodeURIComponent(q)}`);
+      setShowSearch(false);
+    }
+  };
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 10);
@@ -108,7 +118,8 @@ export default function Header() {
           {/* ── Search bar ──────────────────────────────────────────────── */}
           <AnimatePresence>
             {showSearch && (
-              <motion.div
+              <motion.form
+                onSubmit={submitSearch}
                 initial={{ opacity: 0, width: 0 }}
                 animate={{ opacity: 1, width: "auto" }}
                 exit={{ opacity: 0, width: 0 }}
@@ -118,12 +129,12 @@ export default function Header() {
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]" />
                   <input
                     autoFocus
-                    type="text"
-                    placeholder={isUrdu ? "خبریں تلاش کریں..." : "Search news..."}
+                    type="search"
+                    placeholder={isUrdu ? "خبریں تلاش کریں..." : "Search news…"}
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     className={clsx(
-                      "w-full pl-8 pr-4 py-2 text-sm rounded-full",
+                      "w-full pl-8 pr-10 py-2 text-sm rounded-full",
                       "bg-[var(--color-surface2)] border border-[var(--color-border)]",
                       "text-[var(--color-text)] placeholder-[var(--color-text-tertiary)]",
                       "focus:outline-none focus:ring-2 focus:ring-cobalt-600/40 focus:border-cobalt-600",
@@ -133,14 +144,18 @@ export default function Header() {
                   />
                   {searchQuery && (
                     <button
+                      type="button"
                       onClick={() => setSearchQuery("")}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)] hover:text-[var(--color-text)]"
+                      aria-label="Clear"
                     >
                       <X size={14} />
                     </button>
                   )}
                 </div>
-              </motion.div>
+                {/* Keyboard-accessible submit (form Enter handles primary path) */}
+                <button type="submit" className="sr-only">Search</button>
+              </motion.form>
             )}
           </AnimatePresence>
 

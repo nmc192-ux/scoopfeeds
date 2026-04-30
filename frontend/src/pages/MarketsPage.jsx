@@ -75,17 +75,19 @@ export default function MarketsPage() {
     return () => { document.title = prev; };
   }, []);
 
-  // Defensive readers — backend can return shapes that differ slightly between
-  // the cached snapshot and a freshly synced response. Default to {} so the
-  // skeleton renders cleanly without prop-type errors.
-  const indices    = market?.indices    || {};
-  const fx         = market?.fx         || {};
-  const crypto     = market?.crypto     || {};
-  const commodities= market?.commodities|| market?.gold ? {
-    gold:   market?.gold   || market?.commodities?.gold,
-    silver: market?.silver || market?.commodities?.silver,
-    oil:    market?.oil    || market?.commodities?.oil,
-  } : {};
+  // Backend shape (verified against /api/market):
+  //   indices:    [{ sym, name, flag, price, changePct, currency }]
+  //   crypto:     [{ symbol, name, price, changePct, image }]
+  //   currencies: { USD: { code, name, rate } }    (keyed by ISO)
+  //   metals:     {} (gold/silver — currently empty server-side)
+  //   commodities:[] (oil/wheat — currently empty server-side)
+  const indices    = Array.isArray(market?.indices)     ? market.indices     : [];
+  const cryptos    = Array.isArray(market?.crypto)      ? market.crypto      : [];
+  const currencies = market?.currencies && typeof market.currencies === "object"
+    ? Object.values(market.currencies) : [];
+  const metals     = market?.metals && typeof market.metals === "object"
+    ? Object.entries(market.metals) : [];
+  const commodities = Array.isArray(market?.commodities) ? market.commodities : [];
 
   return (
     <div>
@@ -138,15 +140,16 @@ export default function MarketsPage() {
             subtitle="Major exchanges worldwide"
             icon={<span className="text-xl" aria-hidden="true">📈</span>}
           >
-            {Object.keys(indices).length === 0 ? (
+            {indices.length === 0 ? (
               <p className="text-sm text-[var(--color-text-tertiary)] py-4 text-center">No index data right now.</p>
             ) : (
-              Object.entries(indices).map(([key, v]) => (
+              indices.map((v) => (
                 <PriceRow
-                  key={key}
-                  label={v?.label || key.toUpperCase()}
-                  value={fmtNum(v?.value ?? v?.price, 2)}
-                  change={v?.changePct ?? v?.change_percent ?? v?.change}
+                  key={v.sym || v.name}
+                  label={`${v.flag ? v.flag + " " : ""}${v.name || v.sym}`}
+                  value={fmtNum(v.price, 2)}
+                  change={v.changePct}
+                  suffix={v.currency}
                 />
               ))
             )}
@@ -154,19 +157,18 @@ export default function MarketsPage() {
 
           {/* ── FX ────────────────────────────────────────────────────────── */}
           <SectionCard
-            title="FX / Forex"
-            subtitle="Major currency pairs"
+            title="Currencies"
+            subtitle="vs PKR base · live FX rates"
             icon={<span className="text-xl" aria-hidden="true">💱</span>}
           >
-            {Object.keys(fx).length === 0 ? (
+            {currencies.length === 0 ? (
               <p className="text-sm text-[var(--color-text-tertiary)] py-4 text-center">No FX data right now.</p>
             ) : (
-              Object.entries(fx).map(([pair, v]) => (
+              currencies.slice(0, 12).map((v) => (
                 <PriceRow
-                  key={pair}
-                  label={v?.label || pair.toUpperCase()}
-                  value={fmtNum(v?.rate ?? v?.value, 4)}
-                  change={v?.changePct ?? v?.change_percent}
+                  key={v.code}
+                  label={`${v.code} · ${v.name}`}
+                  value={fmtNum(v.rate, 4)}
                 />
               ))
             )}
@@ -178,40 +180,51 @@ export default function MarketsPage() {
             subtitle="Top digital assets"
             icon={<span className="text-xl" aria-hidden="true">🪙</span>}
           >
-            {Object.keys(crypto).length === 0 ? (
+            {cryptos.length === 0 ? (
               <p className="text-sm text-[var(--color-text-tertiary)] py-4 text-center">No crypto data right now.</p>
             ) : (
-              Object.entries(crypto).map(([sym, v]) => (
+              cryptos.slice(0, 10).map((v) => (
                 <PriceRow
-                  key={sym}
-                  label={v?.label || sym.toUpperCase()}
-                  value={fmtNum(v?.price ?? v?.value, 2)}
-                  change={v?.changePct ?? v?.change24h ?? v?.change_percent}
+                  key={v.id || v.symbol}
+                  label={`${v.name} (${v.symbol?.toUpperCase()})`}
+                  value={fmtNum(v.price, 2)}
+                  change={v.changePct}
                   suffix="USD"
                 />
               ))
             )}
           </SectionCard>
 
-          {/* ── Commodities ───────────────────────────────────────────────── */}
+          {/* ── Commodities & Metals ───────────────────────────────────────── */}
           <SectionCard
             title="Commodities"
-            subtitle="Gold, silver, and oil benchmarks"
+            subtitle="Precious metals, oil, and benchmarks"
             icon={<span className="text-xl" aria-hidden="true">🥇</span>}
           >
-            {Object.values(commodities).every(v => !v) ? (
-              <p className="text-sm text-[var(--color-text-tertiary)] py-4 text-center">No commodity data right now.</p>
+            {commodities.length === 0 && metals.length === 0 ? (
+              <p className="text-sm text-[var(--color-text-tertiary)] py-4 text-center">
+                Commodity feed is currently quiet — refreshes hourly.
+              </p>
             ) : (
               <>
-                {commodities.gold && (
-                  <PriceRow label="Gold (oz)"   value={fmtNum(commodities.gold?.price ?? commodities.gold,   2)} change={commodities.gold?.changePct} suffix="USD" />
-                )}
-                {commodities.silver && (
-                  <PriceRow label="Silver (oz)" value={fmtNum(commodities.silver?.price ?? commodities.silver, 2)} change={commodities.silver?.changePct} suffix="USD" />
-                )}
-                {commodities.oil && (
-                  <PriceRow label="Oil (Brent)" value={fmtNum(commodities.oil?.price    ?? commodities.oil,    2)} change={commodities.oil?.changePct}    suffix="USD" />
-                )}
+                {metals.map(([key, v]) => (
+                  <PriceRow
+                    key={key}
+                    label={(v?.name || key).replace(/^\w/, c => c.toUpperCase())}
+                    value={fmtNum(v?.price ?? v, 2)}
+                    change={v?.changePct}
+                    suffix="USD"
+                  />
+                ))}
+                {commodities.map((v) => (
+                  <PriceRow
+                    key={v.sym || v.name}
+                    label={v.name || v.sym}
+                    value={fmtNum(v.price, 2)}
+                    change={v.changePct}
+                    suffix={v.currency || "USD"}
+                  />
+                ))}
               </>
             )}
           </SectionCard>

@@ -28,12 +28,16 @@ import CountryPage    from "./pages/CountryPage";
 import MarketsPage    from "./pages/MarketsPage";
 import WeatherPage    from "./pages/WeatherPage";
 import NewsletterPage from "./pages/NewsletterPage";
+import SourcePage     from "./pages/SourcePage";
+import TagPage        from "./pages/TagPage";
+import SearchPage     from "./pages/SearchPage";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
 const HIDE_TOPICNAV_ON = [
   "/live-tv", "/about", "/article", "/saved",
   "/region", "/country",
   "/markets", "/weather", "/newsletter",
+  "/source", "/tag", "/search",
 ];
 
 export default function App() {
@@ -105,8 +109,9 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         <Routes>
           <Route path="/"               element={<HomePage />} />
-          <Route path="/topic/:slug"    element={<TopicPage />} />
-          <Route path="/article/:id"    element={<ArticlePage />} />
+          <Route path="/topic/:slug"            element={<TopicPage />} />
+          <Route path="/topic/:slug/:country"   element={<TopicPage />} />
+          <Route path="/article/:id"            element={<ArticlePage />} />
           <Route path="/saved"          element={<SavedPage />} />
           <Route path="/about"          element={<AboutPage />} />
           <Route path="/live-tv"        element={<LiveTvPage />} />
@@ -115,6 +120,9 @@ export default function App() {
           <Route path="/markets"        element={<MarketsPage />} />
           <Route path="/weather"        element={<WeatherPage />} />
           <Route path="/newsletter"     element={<NewsletterPage />} />
+          <Route path="/source/:slug"   element={<SourcePage />} />
+          <Route path="/tag/:slug"      element={<TagPage />} />
+          <Route path="/search"         element={<SearchPage />} />
           <Route path="*"               element={<NotFound />} />
         </Routes>
       </main>
@@ -200,6 +208,27 @@ function Footer({ health }) {
           <a href="/region/mena"     className="hover:text-[var(--color-text)] transition-colors">MENA</a>
           <a href="/region/africa"   className="hover:text-[var(--color-text)] transition-colors">Africa</a>
           <a href="/region/oceania"  className="hover:text-[var(--color-text)] transition-colors">Oceania</a>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-tertiary)]">
+          <span className="font-semibold text-[var(--color-text-secondary)]">Trending:</span>
+          <a href="/tag/openai"     className="hover:text-[var(--color-text)] transition-colors">OpenAI</a>
+          <a href="/tag/tesla"      className="hover:text-[var(--color-text)] transition-colors">Tesla</a>
+          <a href="/tag/ukraine"    className="hover:text-[var(--color-text)] transition-colors">Ukraine</a>
+          <a href="/tag/climate"    className="hover:text-[var(--color-text)] transition-colors">Climate</a>
+          <a href="/tag/crypto"     className="hover:text-[var(--color-text)] transition-colors">Crypto</a>
+          <a href="/tag/olympics"   className="hover:text-[var(--color-text)] transition-colors">Olympics</a>
+          <a href="/tag/space"      className="hover:text-[var(--color-text)] transition-colors">Space</a>
+          <a href="/tag/world-cup"  className="hover:text-[var(--color-text)] transition-colors">World Cup</a>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-tertiary)]">
+          <span className="font-semibold text-[var(--color-text-secondary)]">Publishers:</span>
+          <a href="/source/reuters"        className="hover:text-[var(--color-text)] transition-colors">Reuters</a>
+          <a href="/source/bbc-news"       className="hover:text-[var(--color-text)] transition-colors">BBC</a>
+          <a href="/source/al-jazeera"     className="hover:text-[var(--color-text)] transition-colors">Al Jazeera</a>
+          <a href="/source/guardian"       className="hover:text-[var(--color-text)] transition-colors">The Guardian</a>
+          <a href="/source/bloomberg"      className="hover:text-[var(--color-text)] transition-colors">Bloomberg</a>
+          <a href="/source/nhk"            className="hover:text-[var(--color-text)] transition-colors">NHK World</a>
+          <a href="/source/dw"             className="hover:text-[var(--color-text)] transition-colors">DW</a>
         </div>
         <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-tertiary)]">
           <span className="font-semibold text-[var(--color-text-secondary)]">Countries:</span>

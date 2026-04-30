@@ -100,16 +100,16 @@ function CityCard({ city, big = false }) {
       {w && (
         <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] text-[var(--color-text-tertiary)]">
           <div>
-            <p className="uppercase tracking-wider">High</p>
-            <p className="text-[var(--color-text-secondary)] font-semibold">{w.high != null ? `${Math.round(w.high)}°` : "—"}</p>
+            <p className="uppercase tracking-wider">Feels</p>
+            <p className="text-[var(--color-text-secondary)] font-semibold">{w.feelsLike != null ? `${Math.round(w.feelsLike)}°` : "—"}</p>
           </div>
           <div>
-            <p className="uppercase tracking-wider">Low</p>
-            <p className="text-[var(--color-text-secondary)] font-semibold">{w.low != null ? `${Math.round(w.low)}°` : "—"}</p>
+            <p className="uppercase tracking-wider">Humidity</p>
+            <p className="text-[var(--color-text-secondary)] font-semibold">{w.humidity != null ? `${Math.round(w.humidity)}%` : "—"}</p>
           </div>
           <div>
             <p className="uppercase tracking-wider">Wind</p>
-            <p className="text-[var(--color-text-secondary)] font-semibold">{w.windSpeed != null ? `${Math.round(w.windSpeed)} km/h` : "—"}</p>
+            <p className="text-[var(--color-text-secondary)] font-semibold">{w.wind != null ? `${Math.round(w.wind)} km/h` : "—"}</p>
           </div>
         </div>
       )}
