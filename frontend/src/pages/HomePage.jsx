@@ -30,7 +30,9 @@ import { useReaderStore } from "../hooks/useReader";
 
 const LiveEventsView  = lazy(() => import("../components/live/LiveEventsView"));
 const VideoSection    = lazy(() => import("../components/news/VideoSection"));
-const LiveTVSection   = lazy(() => import("../components/news/LiveTVSection"));
+// LiveTVSection removed — its full experience now lives at /live-tv as a
+// dedicated route. Keeping it on the home page duplicated the surface and
+// stretched the home feed unnecessarily long.
 const XFeedSection    = lazy(() => import("../components/news/XFeedSection"));
 const MagazineSection = lazy(() => import("../components/news/MagazineSection"));
 const CarsSection     = lazy(() => import("../components/news/CarsSection"));
@@ -207,7 +209,6 @@ export default function HomePage() {
       {!showingLive && (
         <Suspense fallback={<SectionFallback />}>
           <VideoSection />
-          <LiveTVSection />
           <MagazineSection />
           <CarsSection />
           <XFeedSection />

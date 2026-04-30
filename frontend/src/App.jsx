@@ -17,17 +17,24 @@ import NewsletterCaptureModal from "./components/newsletter/NewsletterCaptureMod
 import PushOptInBanner from "./components/push/PushOptInBanner";
 import AuthModal from "./components/auth/AuthModal";
 
-import HomePage    from "./pages/HomePage";
-import TopicPage   from "./pages/TopicPage";
-import SavedPage   from "./pages/SavedPage";
-import AboutPage   from "./pages/AboutPage";
-import ArticlePage from "./pages/ArticlePage";
-import LiveTvPage  from "./pages/LiveTvPage";
-import RegionPage  from "./pages/RegionPage";
-import CountryPage from "./pages/CountryPage";
+import HomePage       from "./pages/HomePage";
+import TopicPage      from "./pages/TopicPage";
+import SavedPage      from "./pages/SavedPage";
+import AboutPage      from "./pages/AboutPage";
+import ArticlePage    from "./pages/ArticlePage";
+import LiveTvPage     from "./pages/LiveTvPage";
+import RegionPage     from "./pages/RegionPage";
+import CountryPage    from "./pages/CountryPage";
+import MarketsPage    from "./pages/MarketsPage";
+import WeatherPage    from "./pages/WeatherPage";
+import NewsletterPage from "./pages/NewsletterPage";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
-const HIDE_TOPICNAV_ON = ["/live-tv", "/about", "/article", "/saved", "/region", "/country"];
+const HIDE_TOPICNAV_ON = [
+  "/live-tv", "/about", "/article", "/saved",
+  "/region", "/country",
+  "/markets", "/weather", "/newsletter",
+];
 
 export default function App() {
   const { activeTopics, lastRefreshed, language, authOpen, setAuthOpen } = useNewsStore();
@@ -105,6 +112,9 @@ export default function App() {
           <Route path="/live-tv"        element={<LiveTvPage />} />
           <Route path="/region/:slug"   element={<RegionPage />} />
           <Route path="/country/:iso"   element={<CountryPage />} />
+          <Route path="/markets"        element={<MarketsPage />} />
+          <Route path="/weather"        element={<WeatherPage />} />
+          <Route path="/newsletter"     element={<NewsletterPage />} />
           <Route path="*"               element={<NotFound />} />
         </Routes>
       </main>
@@ -153,6 +163,12 @@ function Footer({ health }) {
           <a href="/about"             className="hover:text-[var(--color-text)] transition-colors">About</a>
           <span>·</span>
           <a href="/live-tv"           className="hover:text-[var(--color-text)] transition-colors">Live TV</a>
+          <span>·</span>
+          <a href="/markets"           className="hover:text-[var(--color-text)] transition-colors">Markets</a>
+          <span>·</span>
+          <a href="/weather"           className="hover:text-[var(--color-text)] transition-colors">Weather</a>
+          <span>·</span>
+          <a href="/newsletter"        className="hover:text-[var(--color-text)] transition-colors">Newsletter</a>
           <span>·</span>
           <a href="/saved"             className="hover:text-[var(--color-text)] transition-colors">Saved</a>
           <span>·</span>
