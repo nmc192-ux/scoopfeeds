@@ -25,12 +25,25 @@ export function useReaderArticle(url) {
     enabled: !!url,
     staleTime: 10 * 60 * 1000,
     gcTime:    60 * 60 * 1000,
-    retry: 1,
+    retry: false,           // backend already retries 3 strategies internally
     refetchOnWindowFocus: false,
     queryFn: async () => {
-      const { data } = await api.get("/reader", { params: { url } });
-      if (!data?.success) throw new Error(data?.error || "Extraction failed");
-      return data.data;
+      try {
+        const { data } = await api.get("/reader", { params: { url } });
+        if (!data?.success) {
+          const err = new Error(data?.error || "Extraction failed");
+          err.hint = data?.hint || null;
+          throw err;
+        }
+        return data.data;
+      } catch (axiosErr) {
+        // Axios throws on non-2xx — extract the structured error body
+        const body = axiosErr?.response?.data;
+        const err  = new Error(body?.error || axiosErr.message || "Extraction failed");
+        err.hint   = body?.hint || null;
+        err.status = axiosErr?.response?.status || null;
+        throw err;
+      }
     },
   });
 }

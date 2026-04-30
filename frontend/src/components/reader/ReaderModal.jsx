@@ -291,20 +291,23 @@ export default function ReaderModal() {
               )}
 
               {isError && (!meterResult || meterResult.allowed) && (
-                <div className="rounded-xl border border-[var(--color-border)] p-6 text-center">
-                  <p className="font-semibold mb-2">Couldn't extract this article</p>
-                  <p className="text-sm opacity-70 mb-4">
-                    {error?.message || "The source site blocked extraction or the page isn't a standard article."}
+                <div className="rounded-xl border border-[var(--color-border)] p-6 text-center space-y-2">
+                  <p className="font-semibold">{error?.message || "Couldn't extract this article"}</p>
+                  <p className="text-sm opacity-60">
+                    {error?.hint || "The source site may restrict automated access. Read it directly instead."}
                   </p>
-                  <a
-                    href={article.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={handleSourceClick}
-                    className="inline-block px-4 py-2 rounded-full bg-cobalt-600 text-white text-sm font-semibold"
-                  >
-                    Read on {new URL(article.url).hostname}
-                  </a>
+                  <div className="pt-2">
+                    <a
+                      href={article.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={handleSourceClick}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-cobalt-600 text-white text-sm font-semibold hover:bg-cobalt-700 transition-colors"
+                    >
+                      <ExternalLink size={13} />
+                      Read on {new URL(article.url).hostname}
+                    </a>
+                  </div>
                 </div>
               )}
 
