@@ -23,9 +23,11 @@ import SavedPage   from "./pages/SavedPage";
 import AboutPage   from "./pages/AboutPage";
 import ArticlePage from "./pages/ArticlePage";
 import LiveTvPage  from "./pages/LiveTvPage";
+import RegionPage  from "./pages/RegionPage";
+import CountryPage from "./pages/CountryPage";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
-const HIDE_TOPICNAV_ON = ["/live-tv", "/about", "/article", "/saved"];
+const HIDE_TOPICNAV_ON = ["/live-tv", "/about", "/article", "/saved", "/region", "/country"];
 
 export default function App() {
   const { activeTopics, lastRefreshed, language, authOpen, setAuthOpen } = useNewsStore();
@@ -101,6 +103,8 @@ export default function App() {
           <Route path="/saved"          element={<SavedPage />} />
           <Route path="/about"          element={<AboutPage />} />
           <Route path="/live-tv"        element={<LiveTvPage />} />
+          <Route path="/region/:slug"   element={<RegionPage />} />
+          <Route path="/country/:iso"   element={<CountryPage />} />
           <Route path="*"               element={<NotFound />} />
         </Routes>
       </main>
@@ -170,6 +174,30 @@ function Footer({ health }) {
           <a href="/topic/health"        className="hover:text-[var(--color-text)] transition-colors">Health</a>
           <a href="/topic/cars"          className="hover:text-[var(--color-text)] transition-colors">Cars</a>
           <a href="/topic/sports"        className="hover:text-[var(--color-text)] transition-colors">Sports</a>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-tertiary)]">
+          <span className="font-semibold text-[var(--color-text-secondary)]">Regions:</span>
+          <a href="/region/world"    className="hover:text-[var(--color-text)] transition-colors">World</a>
+          <a href="/region/americas" className="hover:text-[var(--color-text)] transition-colors">Americas</a>
+          <a href="/region/europe"   className="hover:text-[var(--color-text)] transition-colors">Europe</a>
+          <a href="/region/asia"     className="hover:text-[var(--color-text)] transition-colors">Asia</a>
+          <a href="/region/mena"     className="hover:text-[var(--color-text)] transition-colors">MENA</a>
+          <a href="/region/africa"   className="hover:text-[var(--color-text)] transition-colors">Africa</a>
+          <a href="/region/oceania"  className="hover:text-[var(--color-text)] transition-colors">Oceania</a>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-tertiary)]">
+          <span className="font-semibold text-[var(--color-text-secondary)]">Countries:</span>
+          <a href="/country/us" className="hover:text-[var(--color-text)] transition-colors">🇺🇸 USA</a>
+          <a href="/country/gb" className="hover:text-[var(--color-text)] transition-colors">🇬🇧 UK</a>
+          <a href="/country/in" className="hover:text-[var(--color-text)] transition-colors">🇮🇳 India</a>
+          <a href="/country/pk" className="hover:text-[var(--color-text)] transition-colors">🇵🇰 Pakistan</a>
+          <a href="/country/jp" className="hover:text-[var(--color-text)] transition-colors">🇯🇵 Japan</a>
+          <a href="/country/cn" className="hover:text-[var(--color-text)] transition-colors">🇨🇳 China</a>
+          <a href="/country/de" className="hover:text-[var(--color-text)] transition-colors">🇩🇪 Germany</a>
+          <a href="/country/fr" className="hover:text-[var(--color-text)] transition-colors">🇫🇷 France</a>
+          <a href="/country/br" className="hover:text-[var(--color-text)] transition-colors">🇧🇷 Brazil</a>
+          <a href="/country/au" className="hover:text-[var(--color-text)] transition-colors">🇦🇺 Australia</a>
+          <a href="/country/ng" className="hover:text-[var(--color-text)] transition-colors">🇳🇬 Nigeria</a>
         </div>
       </div>
     </footer>

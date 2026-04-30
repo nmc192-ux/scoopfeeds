@@ -6,6 +6,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Check, Globe2 } from "lucide-react";
+import { useNavigate, Link } from "react-router-dom";
 import { useGeo } from "../../hooks/useGeo";
 
 // Curated list — covers the biggest user markets + strong currency coverage.
@@ -43,6 +44,7 @@ const COUNTRIES = [
 
 export default function CountryPicker() {
   const { countryCode, isOverridden, setOverride } = useGeo();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const ref = useRef(null);
@@ -81,6 +83,8 @@ export default function CountryPicker() {
       city:        null,
     });
     setOpen(false);
+    // Navigate to the country hub so the user immediately sees relevant news.
+    navigate(`/country/${country.code.toLowerCase()}`);
   };
 
   const clearOverride = () => {
@@ -129,6 +133,32 @@ export default function CountryPicker() {
                   ← Use auto-detected region
                 </button>
               )}
+            </div>
+
+            {/* Browse by region — quick links to /region/:slug */}
+            <div className="px-3 py-2 border-b border-[var(--color-border)]">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-[var(--color-text-tertiary)] mb-1.5">
+                Browse by region
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {[
+                  { slug: "world",    label: "🌍 World" },
+                  { slug: "americas", label: "🌎 Americas" },
+                  { slug: "europe",   label: "🇪🇺 Europe" },
+                  { slug: "asia",     label: "🌏 Asia" },
+                  { slug: "mena",     label: "🕌 MENA" },
+                  { slug: "africa",   label: "🌍 Africa" },
+                ].map(r => (
+                  <Link
+                    key={r.slug}
+                    to={`/region/${r.slug}`}
+                    onClick={() => setOpen(false)}
+                    className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface2)] text-[var(--color-text-secondary)] hover:bg-cobalt-50 hover:text-cobalt-700 dark:hover:bg-cobalt-950/40 dark:hover:text-cobalt-300 transition-colors"
+                  >
+                    {r.label}
+                  </Link>
+                ))}
+              </div>
             </div>
 
             <div className="overflow-y-auto flex-1 py-1">
