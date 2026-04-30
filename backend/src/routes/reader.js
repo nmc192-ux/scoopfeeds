@@ -8,24 +8,18 @@
  * Caching: 12h per URL in memory.
  * Fetch strategy: tries up to 3 browser-like UA variants; classifies errors so
  * the frontend can show a useful message (blocked vs timeout vs parse failure).
+ *
+ * DOM: uses linkedom (not jsdom) — jsdom has a transitive CJS→ESM compat issue
+ * with html-encoding-sniffer/@exodus/bytes that crashes on Node 18 shared hosting.
+ * linkedom is a drop-in for Readability with no encoding-sniffer dependency.
  */
 import { Router } from "express";
 import axios from "axios";
 import { Readability } from "@mozilla/readability";
+import { parseHTML } from "linkedom";
 import { logger } from "../services/logger.js";
 
 const router = Router();
-
-// jsdom is loaded lazily — it has a transitive CJS→ESM compat issue with
-// html-encoding-sniffer/@exodus/bytes that crashes Node 18 at module load
-// time. Lazy-loading lets the rest of the server start even if jsdom fails.
-let _JSDOM = null;
-async function getJSDOM() {
-  if (_JSDOM) return _JSDOM;
-  const mod = await import("jsdom");
-  _JSDOM = mod.JSDOM;
-  return _JSDOM;
-}
 
 // ─── Cache (12h) ─────────────────────────────────────────────────────────────
 const CACHE = new Map();
@@ -174,9 +168,8 @@ router.get("/", async (req, res) => {
 
   // ── Parse ─────────────────────────────────────────────────────────────────
   try {
-    const JSDOM = await getJSDOM();
-    const dom = new JSDOM(html, { url });
-    const reader = new Readability(dom.window.document);
+    const { document } = parseHTML(html);
+    const reader = new Readability(document);
     const article = reader.parse();
 
     if (!article || !article.content) {
