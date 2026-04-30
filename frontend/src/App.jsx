@@ -28,6 +28,8 @@ import { trackPageView, attachEngagementObservers } from "./lib/track";
 import ScoopMascot from "./components/mascot/ScoopMascot";
 import { topicColor } from "./lib/topicColors";
 import SafeImage from "./components/ui/SafeImage";
+import ToastViewport from "./components/ui/ToastViewport";
+import { toast } from "./lib/toast";
 import { AdSenseBanner, AdSenseSidebar, AdSenseUnit } from "./components/ads/AdSense";
 import AffiliateWidget from "./components/ads/AffiliateWidget";
 import TipJar from "./components/tips/TipJar";
@@ -66,10 +68,7 @@ export default function App() {
 
   // Analytics: fire a page_view on load + wire up scroll/dwell observers.
   // Also persist ?ref= token so newsletter referral attribution survives SPA navigation.
-  // Handle ?auth=verified redirect from magic-link flow.
-  const [authToast, setAuthToast]             = useState(false);
-  const [paymentToast, setPaymentToast]       = useState(false);
-  const [newsletterToast, setNewsletterToast] = useState(false);
+  // Handle ?auth=verified, ?payment=success, ?newsletter=confirmed redirects.
   useEffect(() => {
     trackPageView({ topics: activeTopics, language });
     attachEngagementObservers();
@@ -78,24 +77,28 @@ export default function App() {
       const ref = params.get("ref");
       if (ref && /^[0-9a-f]{48}$/.test(ref)) localStorage.setItem("scoop_ref_token", ref);
       if (params.get("auth") === "verified") {
-        setAuthToast(true);
+        toast.success("Signed in — your saves sync across devices now");
         window.history.replaceState({}, "", window.location.pathname);
-        setTimeout(() => setAuthToast(false), 4000);
       }
       if (params.get("payment") === "success") {
-        setPaymentToast(true);
+        toast.success("Thank you for supporting Scoopfeeds! ❤️", { duration: 5000 });
         window.history.replaceState({}, "", window.location.pathname);
-        setTimeout(() => setPaymentToast(false), 5000);
       }
       if (params.get("newsletter") === "confirmed") {
-        setNewsletterToast(true);
+        toast.info("You're subscribed! First digest arrives at 7am.", { duration: 5000 });
         window.history.replaceState({}, "", window.location.pathname);
-        setTimeout(() => setNewsletterToast(false), 5000);
       }
     } catch {}
     // Intentionally run once on mount; topic-change events are fired from TopicNav.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Fire a toast each time the user kicks off a refresh
+  useEffect(() => {
+    if (!lastRefreshed) return;
+    toast.info(isUrdu ? "خبریں تازہ ہو رہی ہیں..." : "Refreshing news + videos…", { duration: 2500 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastRefreshed]);
 
   if (isOffline) return <BackendOffline />;
 
@@ -320,69 +323,11 @@ export default function App() {
       <PushOptInBanner topics={activeTopics} language={language} />
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
 
-      {/* ── Auth verified toast ────────────────────────────────────── */}
-      <AnimatePresence>
-        {authToast && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, x: "-50%" }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 50 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50
-                       bg-cobalt-700 text-white text-sm px-5 py-2.5 rounded-full shadow-2xl
-                       flex items-center gap-2"
-          >
-            ✓ Signed in — your saves sync across devices now
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Payment success toast ───────────────────────────────────── */}
-      <AnimatePresence>
-        {paymentToast && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, x: "-50%" }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 50 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50
-                       bg-cobalt-600 text-white text-sm px-5 py-2.5 rounded-full shadow-2xl
-                       flex items-center gap-2"
-          >
-            ❤️ Thank you for supporting Scoop!
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Newsletter confirmed toast ──────────────────────────────── */}
-      <AnimatePresence>
-        {newsletterToast && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, x: "-50%" }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 50 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50
-                       bg-cobalt-600 text-white text-sm px-5 py-2.5 rounded-full shadow-2xl
-                       flex items-center gap-2"
-          >
-            📬 You're subscribed! First digest arrives at 7am.
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Refresh toast ──────────────────────────────────────────── */}
-      <AnimatePresence>
-        {lastRefreshed && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, x: "-50%" }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 50 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50
-                       bg-cobalt-900 text-white text-sm px-5 py-2.5 rounded-full shadow-2xl
-                       flex items-center gap-2"
-          >
-            ✓ {isUrdu ? "خبریں تازہ ہو رہی ہیں..." : "Refreshing news + videos..."}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* ── Toast notifications ─────────────────────────────────────
+          All status messages (auth/payment/newsletter/refresh) now flow
+          through the shared toast queue. Fire from anywhere via:
+            toast.success(msg) / toast.info(msg) / toast.error(msg)        */}
+      <ToastViewport />
     </div>
   );
 }
