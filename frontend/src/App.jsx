@@ -26,6 +26,7 @@ import { useNews, useFeatured, useHealth, usePublicConfig, useRefresh } from "./
 import { useNewsStore } from "./store/newsStore";
 import { trackPageView, attachEngagementObservers } from "./lib/track";
 import ScoopMascot from "./components/mascot/KhabriMascot";
+import { topicColor } from "./lib/topicColors";
 import { AdSenseBanner, AdSenseSidebar, AdSenseUnit } from "./components/ads/AdSense";
 import AffiliateWidget from "./components/ads/AffiliateWidget";
 import TipJar from "./components/tips/TipJar";
@@ -215,7 +216,7 @@ export default function App() {
                 <ScoopMascot size="lg" mood="reading" animated />
                 <div>
                   <p className="text-lg font-semibold text-[var(--color-text)]">
-                    {isUrdu ? "کوئی خبر نہیں ملی" : "Nothing sniffed out yet"}
+                    {isUrdu ? "کوئی خبر نہیں ملی" : "Nothing in this stream yet"}
                   </p>
                   <p className="text-sm text-[var(--color-text-tertiary)] mt-1">
                     {isUrdu ? "دوسرا موضوع منتخب کریں" : "Try a different topic or hit refresh"}
@@ -263,9 +264,9 @@ export default function App() {
               <div>
                 <span
                   className="text-[var(--color-text)]"
-                  style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif", fontSize: "14px", fontWeight: 700, letterSpacing: "-0.02em" }}
-                >Scoop</span>
-                <span className="ml-2 text-[var(--color-text-tertiary)]">— News, sniffed out.</span>
+                  style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "14px", fontWeight: 800, letterSpacing: "-0.04em" }}
+                >Scoop<span style={{ color: "var(--color-accent)" }}>feeds</span></span>
+                <span className="ml-2 text-[var(--color-text-tertiary)] font-editorial text-[13px]">— Intelligent news, curated.</span>
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-3">
@@ -326,7 +327,7 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50
-                       bg-green-600 text-white text-sm px-5 py-2.5 rounded-full shadow-2xl
+                       bg-cobalt-700 text-white text-sm px-5 py-2.5 rounded-full shadow-2xl
                        flex items-center gap-2"
           >
             ✓ Signed in — your saves sync across devices now
@@ -342,7 +343,7 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50
-                       bg-red-500 text-white text-sm px-5 py-2.5 rounded-full shadow-2xl
+                       bg-cobalt-600 text-white text-sm px-5 py-2.5 rounded-full shadow-2xl
                        flex items-center gap-2"
           >
             ❤️ Thank you for supporting Scoop!
@@ -358,7 +359,7 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50
-                       bg-brand-blue text-white text-sm px-5 py-2.5 rounded-full shadow-2xl
+                       bg-cobalt-600 text-white text-sm px-5 py-2.5 rounded-full shadow-2xl
                        flex items-center gap-2"
           >
             📬 You're subscribed! First digest arrives at 7am.
@@ -374,7 +375,7 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50
-                       bg-gray-900 text-white text-sm px-5 py-2.5 rounded-full shadow-2xl
+                       bg-cobalt-900 text-white text-sm px-5 py-2.5 rounded-full shadow-2xl
                        flex items-center gap-2"
           >
             ✓ {isUrdu ? "خبریں تازہ ہو رہی ہیں..." : "Refreshing news + videos..."}
@@ -413,11 +414,6 @@ function MobileAnchorAd({ config }) {
 
 /* ── Side card used in the hero grid ───────────────────────────────────────── */
 function SideCard({ article }) {
-  const COLORS = {
-    top: "#FF3B30", politics: "#007AFF", sports: "#34C759",
-    science: "#5AC8FA", ai: "#007AFF", health: "#4CD964",
-    pakistan: "#01411C", international: "#5856D6",
-  };
   return (
     <motion.a
       href={article.url} target="_blank" rel="noopener noreferrer"
@@ -436,7 +432,7 @@ function SideCard({ article }) {
       <div className="flex-1 min-w-0">
         <span
           className="text-xs font-bold text-white px-2 py-0.5 rounded"
-          style={{ backgroundColor: COLORS[article.category] || "#007AFF" }}
+          style={{ backgroundColor: topicColor(article.category) }}
         >
           {article.category}
         </span>

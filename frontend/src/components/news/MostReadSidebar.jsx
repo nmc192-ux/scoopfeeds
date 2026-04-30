@@ -2,14 +2,7 @@ import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { TrendingUp } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
-
-const TOPIC_COLORS = {
-  top: "#FF3B30", politics: "#007AFF", international: "#5856D6",
-  pakistan: "#01411C", local: "#FF9500", sports: "#34C759",
-  science: "#5AC8FA", medicine: "#FF2D55", health: "#4CD964",
-  "public-health": "#FF6B35", "self-help": "#AF52DE", environment: "#30B0C7",
-  weather: "#64D2FF", ai: "#007AFF", "computer-science": "#5856D6", "agentic-ai": "#FF3B30",
-};
+import { topicColor } from "../../lib/topicColors";
 
 export default function MostReadSidebar({ articles = [] }) {
   const topArticles = useMemo(() => {
@@ -37,14 +30,14 @@ export default function MostReadSidebar({ articles = [] }) {
     >
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--color-border)]">
-        <TrendingUp size={14} className="text-brand-orange" />
+        <TrendingUp size={14} className="text-cobalt-600" />
         <h3 className="text-sm font-bold text-[var(--color-text)]">Most Read</h3>
       </div>
 
       {/* Ranked article list */}
       <ol className="divide-y divide-[var(--color-border)]">
         {topArticles.map((article, i) => {
-          const accentColor = TOPIC_COLORS[article.category] || "#007AFF";
+          const accentColor = topicColor(article.category);
           return (
             <li key={article.id}>
               <a
@@ -53,10 +46,10 @@ export default function MostReadSidebar({ articles = [] }) {
                 rel="noopener noreferrer"
                 className="flex gap-3 px-4 py-3 hover:bg-[var(--color-surface2)] transition-colors group"
               >
-                {/* Rank number — top-3 in orange, rest muted */}
+                {/* Rank number — top-3 in cobalt, rest muted */}
                 <span
                   className="flex-shrink-0 text-xl font-black tabular-nums leading-tight mt-0.5 w-5 text-right select-none"
-                  style={{ color: i < 3 ? "#FF9500" : "var(--color-border)" }}
+                  style={{ color: i < 3 ? "#2563EB" : "var(--color-border)" }}
                 >
                   {i + 1}
                 </span>
@@ -77,7 +70,7 @@ export default function MostReadSidebar({ articles = [] }) {
                     </span>
                   </div>
 
-                  <p className="text-xs font-semibold text-[var(--color-text)] line-clamp-3 leading-snug group-hover:text-brand-blue transition-colors">
+                  <p className="text-xs font-semibold text-[var(--color-text)] line-clamp-3 leading-snug group-hover:text-cobalt-600 transition-colors">
                     {article.title}
                   </p>
                   <p className="text-[10px] text-[var(--color-text-tertiary)] mt-1 truncate">

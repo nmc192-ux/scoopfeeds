@@ -697,17 +697,17 @@ function renderPage(composed) {
   .hdr { display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-start; }
   .hdr img { width: 80px; height: 80px; object-fit: cover; border-radius: 8px; flex-shrink: 0; background: #eee; }
   .hdr h2 { font-size: 16px; line-height: 1.3; margin: 0 0 6px; }
-  .hdr .tag { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 6px; border-radius: 4px; background: #DC2626; color: #fff; font-weight: 700; margin-right: 6px; }
+  .hdr .tag { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 6px; border-radius: 4px; background: #2563EB; color: #fff; font-weight: 700; margin-right: 6px; }
   .hdr .src { font-size: 12px; color: #666; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
   .platform { border: 1px solid #e5e5e8; border-radius: 10px; padding: 10px 12px; background: #fafafa; }
-  .platform .label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #DC2626; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+  .platform .label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #2563EB; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
   .platform textarea { width: 100%; min-height: 90px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; padding: 6px 8px; border: 1px solid #e0e0e5; border-radius: 6px; resize: vertical; background: #fff; color: #111; box-sizing: border-box; }
   .platform .footer { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 11px; color: #888; }
-  .platform button { font-size: 11px; background: #DC2626; color: #fff; border: 0; padding: 3px 10px; border-radius: 999px; font-weight: 600; cursor: pointer; }
+  .platform button { font-size: 11px; background: #2563EB; color: #fff; border: 0; padding: 3px 10px; border-radius: 999px; font-weight: 600; cursor: pointer; }
   .platform button:hover { opacity: 0.9; }
   .platform button.copied { background: #22c55e; }
-  .platform .warn { color: #DC2626; font-weight: 600; }
+  .platform .warn { color: #2563EB; font-weight: 600; }
   .note { font-size: 11px; color: #888; margin-top: 4px; font-style: italic; }
 </style>
 </head>

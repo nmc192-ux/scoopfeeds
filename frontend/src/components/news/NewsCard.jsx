@@ -8,6 +8,7 @@ import { useReaderStore } from "../../hooks/useReader";
 import { useSaveArticle } from "../../hooks/useSaveArticle";
 import { track, trackShare, trackSave, trackUnsave, trackOutboundClick } from "../../lib/track";
 import PaywallCTA from "../ads/PaywallCTA";
+import { topicColor, topicLabel, topicEmoji, COBALT_PRIMARY } from "../../lib/topicColors";
 import clsx from "clsx";
 
 // Append scoopfeeds-visible UTM so clicks from shared posts land with a source
@@ -18,30 +19,6 @@ function withShareUtm(url, network) {
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}utm_source=share_${network}&utm_medium=social&utm_campaign=scoop`;
 }
-
-const TOPIC_COLORS = {
-  top: "#FF3B30", politics: "#007AFF", international: "#5856D6",
-  pakistan: "#01411C", local: "#FF9500", sports: "#34C759",
-  science: "#5AC8FA", medicine: "#FF2D55", health: "#4CD964",
-  "public-health": "#FF6B35", "self-help": "#AF52DE", environment: "#30B0C7",
-  weather: "#64D2FF", ai: "#007AFF", "computer-science": "#5856D6", "agentic-ai": "#FF3B30",
-};
-
-const TOPIC_LABELS = {
-  top: "Top", politics: "Politics", international: "World", local: "Local",
-  pakistan: "Pakistan", sports: "Sports", science: "Science", medicine: "Medicine",
-  health: "Health", "public-health": "Public Health", "self-help": "Self Help",
-  environment: "Environment", weather: "Weather", ai: "AI",
-  "computer-science": "Tech", "agentic-ai": "Agentic AI",
-};
-
-const TOPIC_EMOJIS = {
-  top: "📰", politics: "🏛️", international: "🌍", pakistan: "🇵🇰",
-  local: "📍", sports: "🏆", science: "🔬", medicine: "💊",
-  health: "💪", "public-health": "🏥", "self-help": "🌟",
-  environment: "🌱", weather: "🌤️", ai: "🤖",
-  "computer-science": "💻", "agentic-ai": "🤖",
-};
 
 function formatTime(timestamp) {
   try { return formatDistanceToNow(new Date(timestamp), { addSuffix: true }); }
@@ -70,9 +47,9 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
   const [copied, setCopied] = useState(false);
   const shareUrl = `${typeof window !== "undefined" ? window.location.origin : "https://scoopfeeds.com"}/article/${article.id}`;
 
-  const color = TOPIC_COLORS[article.category] || "#007AFF";
-  const label = TOPIC_LABELS[article.category] || article.category;
-  const emoji = TOPIC_EMOJIS[article.category] || "📰";
+  const color = topicColor(article.category);
+  const label = topicLabel(article.category);
+  const emoji = topicEmoji(article.category);
   const isRecent = Date.now() - article.published_at < 3 * 60 * 60 * 1000;
 
   // Translation — source lang defaults to article's own language (so e.g.
@@ -231,7 +208,7 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
             whileTap={{ scale: 0.85 }} onClick={handleSave}
             className={clsx(
               "p-1.5 rounded-lg transition-colors",
-              saved ? "text-brand-blue bg-brand-blue/10" : "text-[var(--color-text-tertiary)] hover:text-brand-blue hover:bg-brand-blue/10"
+              saved ? "text-cobalt-600 bg-cobalt-50" : "text-[var(--color-text-tertiary)] hover:text-cobalt-600 hover:bg-cobalt-50"
             )}
             title={saved ? "Remove bookmark" : "Bookmark"}
           >
@@ -241,7 +218,7 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
           <div className="relative">
             <motion.button
               whileTap={{ scale: 0.85 }} onClick={handleShare}
-              className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:text-brand-blue hover:bg-brand-blue/10 transition-colors"
+              className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:text-cobalt-600 hover:bg-cobalt-50 transition-colors"
               title="Share"
             >
               <Share2 size={14} />
@@ -275,7 +252,7 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
 
         <a
           href={article.url} target="_blank" rel="noopener noreferrer"
-          className="flex items-center gap-1 text-xs font-medium text-brand-blue hover:text-brand-indigo transition-colors"
+          className="flex items-center gap-1 text-xs font-medium text-cobalt-600 hover:text-brand-indigo transition-colors"
           onClick={(e) => {
             e.stopPropagation();
             trackOutboundClick(article.id, article.category, article.url);

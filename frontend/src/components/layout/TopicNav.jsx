@@ -4,22 +4,8 @@ import { Bookmark } from "lucide-react";
 import { useNewsStore } from "../../store/newsStore";
 import { useTopics } from "../../hooks/useNews";
 import { useGeo } from "../../hooks/useGeo";
+import { topicColor, COBALT_PRIMARY } from "../../lib/topicColors";
 import clsx from "clsx";
-
-// Colours are stable per tab id (referenced by both the pill background when
-// active and the subtle accent on hover). Keep aligned with the TOPICS export
-// on the backend.
-const TOPIC_COLORS = {
-  top:      "#FF3B30",
-  live:     "#EF4444",
-  local:    "#FF9500",
-  world:    "#5856D6",
-  politics: "#007AFF",
-  business: "#F59E0B",
-  tech:     "#0EA5E9",
-  science:  "#5AC8FA",
-  sports:   "#34C759",
-};
 
 export default function TopicNav() {
   const { activeTopics, toggleTopic, savedArticles } = useNewsStore();
@@ -57,7 +43,7 @@ export default function TopicNav() {
                 "topic-pill flex items-center gap-1.5 flex-shrink-0",
                 savedActive ? "topic-pill-active" : "topic-pill-inactive"
               )}
-              style={savedActive ? { backgroundColor: "#007AFF" } : {}}
+              style={savedActive ? { backgroundColor: COBALT_PRIMARY } : {}}
               title={`${savedCount} saved articles`}
             >
               <Bookmark size={13} className={savedActive ? "fill-white" : ""} />
@@ -70,7 +56,7 @@ export default function TopicNav() {
           )}
           {topics.map((topic) => {
             const isActive = activeTopics.includes(topic.id);
-            const color = TOPIC_COLORS[topic.id] || "#007AFF";
+            const color = topicColor(topic.id);
             // Local tab shows the detected country as a subtitle so it's
             // obvious what "Local" means right now — same pattern as Apple
             // News' "Local: San Francisco". Users can override via the

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>OG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Playfair+Display:ital@1&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: linear-gradient(135deg, #060d1f 0%, #0d1a35 40%, #1E3A8A 100%);
+    color: white;
+    position: relative;
+    overflow: hidden;
+  }
+  /* Subtle grid overlay */
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(96,165,250,0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(96,165,250,0.06) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(circle at 30% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 80%);
+    -webkit-mask-image: radial-gradient(circle at 30% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 80%);
+  }
+  /* Glow blob */
+  .glow {
+    position: absolute;
+    width: 720px; height: 720px;
+    right: -180px; top: -180px;
+    background: radial-gradient(circle, rgba(96,165,250,0.45) 0%, rgba(37,99,235,0.18) 35%, transparent 70%);
+    filter: blur(40px);
+  }
+  .container {
+    position: relative;
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    padding: 80px 96px;
+    justify-content: space-between;
+  }
+  .top { display: flex; align-items: center; gap: 22px; }
+  .badge {
+    width: 88px; height: 88px;
+    border-radius: 22px;
+    background: linear-gradient(135deg, #2563EB 0%, #1E3A8A 100%);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 16px 40px rgba(37,99,235,0.4);
+  }
+  .badge svg { width: 64px; height: 64px; }
+  .brand-stack { display: flex; flex-direction: column; gap: 4px; }
+  .brand-name {
+    font-weight: 800;
+    font-size: 44px;
+    letter-spacing: -0.04em;
+    line-height: 1;
+  }
+  .brand-name .accent { color: #60A5FA; }
+  .brand-tag {
+    font-weight: 500;
+    font-size: 14px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(191,219,254,0.75);
+  }
+  .headline {
+    display: flex; flex-direction: column; gap: 16px;
+    max-width: 920px;
+  }
+  .kicker {
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-size: 28px;
+    color: #93c5fd;
+    letter-spacing: -0.005em;
+  }
+  .lead {
+    font-weight: 800;
+    font-size: 80px;
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+    background: linear-gradient(135deg, #ffffff 0%, #bfdbfe 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-top: 24px;
+    border-top: 1px solid rgba(96,165,250,0.18);
+  }
+  .meta { display: flex; gap: 18px; align-items: center; font-size: 18px; color: rgba(191,219,254,0.85); font-weight: 500; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: #60A5FA; }
+  .url { font-weight: 700; color: #ffffff; letter-spacing: -0.01em; }
+</style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="glow"></div>
+  <div class="container">
+    <!-- Top: brand badge -->
+    <div class="top">
+      <div class="badge">
+        <svg viewBox="0 0 100 100" fill="none">
+          <path d="M22 50C22 36 32 22 44 22C47 22 47 31 44 44C44 44 34 50 22 50Z" fill="white" fill-opacity="0.4"/>
+          <path d="M22 50C22 64 32 78 44 78C47 78 47 69 44 56C44 56 34 50 22 50Z" fill="white" fill-opacity="0.9"/>
+          <path d="M40 50C40 36 50 27 64 27C77 27 81 38 81 50C81 62 77 73 64 73C50 73 40 64 40 50Z" fill="white"/>
+          <path d="M78 47L94 50L78 53V47Z" fill="#60A5FA"/>
+          <circle cx="68" cy="44" r="4.5" fill="#1E3A8A"/>
+        </svg>
+      </div>
+      <div class="brand-stack">
+        <div class="brand-name">Scoop<span class="accent">feeds</span></div>
+        <div class="brand-tag">Intelligence</div>
+      </div>
+    </div>
+
+    <!-- Headline -->
+    <div class="headline">
+      <div class="kicker">Premium technical intelligence</div>
+      <div class="lead">Intelligent news,<br/>curated.</div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <div class="meta">
+        <span class="url">scoopfeeds.com</span>
+        <span class="dot"></span>
+        <span>English &amp; اردو</span>
+        <span class="dot"></span>
+        <span>Refreshed every 30 min</span>
+      </div>
+      <div class="meta"><span style="color:#60A5FA;font-weight:700">●</span> Live</div>
+    </div>
+  </div>
+</body>
+</html>

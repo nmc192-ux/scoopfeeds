@@ -8,26 +8,35 @@
 /* ─── Base Styles ─────────────────────────────────────────────────────────── */
 @layer base {
   :root {
-    --color-bg: #f5f5f7;
+    /* ── Cobalt Intelligence — Light ──────────────────────────── */
+    --color-bg: #f8faff;
     --color-surface: #ffffff;
-    --color-surface2: #f0f0f2;
-    --color-border: #d1d1d6;
-    --color-text: #1c1c1e;
-    --color-text-secondary: #636366;
-    --color-text-tertiary: #8e8e93;
-    --color-accent: #007AFF;
+    --color-surface2: #f0f4ff;
+    --color-border: #dbe4f5;
+    --color-text: #0f172a;
+    --color-text-secondary: #475569;
+    --color-text-tertiary: #94a3b8;
+    /* Cobalt brand */
+    --color-accent: #2563EB;
+    --color-accent-hover: #1d4ed8;
+    --color-accent-light: #eff6ff;
+    --color-secondary: #1E3A8A;
     --scrollbar-width: thin;
   }
 
   .dark {
-    --color-bg: #000000;
-    --color-surface: #1c1c1e;
-    --color-surface2: #2c2c2e;
-    --color-border: #38383a;
-    --color-text: #f5f5f7;
-    --color-text-secondary: #ebebf5;
-    --color-text-tertiary: #8e8e93;
-    --color-accent: #0a84ff;
+    /* ── Cobalt Intelligence — Dark ───────────────────────────── */
+    --color-bg: #060d1f;
+    --color-surface: #0d1a35;
+    --color-surface2: #162044;
+    --color-border: #1e3a6e;
+    --color-text: #f0f6ff;
+    --color-text-secondary: #bfdbfe;
+    --color-text-tertiary: #60a5fa;
+    --color-accent: #60A5FA;
+    --color-accent-hover: #93c5fd;
+    --color-accent-light: #162044;
+    --color-secondary: #93c5fd;
   }
 
   * {
@@ -42,11 +51,12 @@
 
   body {
     @apply bg-[var(--color-bg)] text-[var(--color-text)] antialiased;
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI",
-      Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display",
+      "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     transition: background-color 0.3s ease, color 0.3s ease;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
   /* Custom scrollbar */
@@ -104,7 +114,14 @@
   }
 
   .text-gradient {
-    background: linear-gradient(135deg, #DC2626 0%, #EA580C 100%);
+    background: linear-gradient(135deg, #2563EB 0%, #1E3A8A 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-cobalt {
+    background: linear-gradient(135deg, #60a5fa 0%, #2563EB 50%, #1E3A8A 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -137,7 +154,7 @@
 .reader-body h4       { font-weight: 700; line-height: 1.25; margin: 1.8em 0 0.6em; }
 .reader-body h2       { font-size: 1.35em; }
 .reader-body h3       { font-size: 1.15em; }
-.reader-body a        { color: #007AFF; text-decoration: underline; text-underline-offset: 2px; }
+.reader-body a        { color: #2563EB; text-decoration: underline; text-underline-offset: 2px; }
 .reader-body img,
 .reader-body video,
 .reader-body iframe   { max-width: 100%; height: auto; border-radius: 10px; margin: 1.2em 0; }
@@ -184,6 +201,32 @@
     line-height: 1.4;
   }
 
+  /* ── Cobalt Intelligence typography ─────────────────────────────────── */
+  .font-editorial {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-style: italic;
+  }
+
+  .font-inter {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* ── Cobalt Intelligence buttons ─────────────────────────────────────── */
+  .btn-cobalt {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
+           bg-[var(--color-accent)] text-white font-medium text-sm
+           hover:bg-[var(--color-accent-hover)] transition-all duration-200
+           shadow-sm hover:shadow-md;
+  }
+
+  .btn-cobalt-ghost {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
+           border border-[var(--color-accent)] text-[var(--color-accent)] font-medium text-sm
+           hover:bg-[var(--color-accent-light)] transition-all duration-200;
+  }
+
+  /* ── Undo ────────────────────────────────────────────────────────────── */
   /* ── Urdu / RTL Support ───────────────────────────────────────────────── */
   .font-urdu {
     font-family: 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', serif;
@@ -251,7 +294,7 @@
   align-items: center;
   justify-content: center;
   gap: 16px;
-  background: #000;
+  background: #060d1f;
   z-index: 9999;
   transition: opacity 0.5s ease;
 }

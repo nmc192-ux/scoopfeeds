@@ -2,19 +2,12 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Play, Youtube, Clock, ExternalLink } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { topicColor } from "../../lib/topicColors";
 import clsx from "clsx";
-
-const TOPIC_COLORS = {
-  top: "#FF3B30", politics: "#007AFF", international: "#5856D6",
-  pakistan: "#01411C", local: "#FF9500", sports: "#34C759",
-  science: "#5AC8FA", medicine: "#FF2D55", health: "#4CD964",
-  "public-health": "#FF6B35", "self-help": "#AF52DE", environment: "#30B0C7",
-  weather: "#64D2FF", ai: "#007AFF", "computer-science": "#5856D6", "agentic-ai": "#FF3B30",
-};
 
 export default function VideoCard({ video, index = 0, onPlay, size = "normal" }) {
   const [thumbError, setThumbError] = useState(false);
-  const color = TOPIC_COLORS[video.category] || "#FF0000";
+  const color = topicColor(video.category);
   const thumbUrl = video.thumbnail || `https://img.youtube.com/vi/${video.video_id}/hqdefault.jpg`;
 
   return (
@@ -86,7 +79,7 @@ export default function VideoCard({ video, index = 0, onPlay, size = "normal" })
       {/* Content */}
       <div className={clsx("p-3 flex flex-col", size === "wide" && "flex-1 min-w-0")}>
         <h4 className={clsx(
-          "font-semibold text-[var(--color-text)] leading-snug line-clamp-2 group-hover:text-brand-blue transition-colors",
+          "font-semibold text-[var(--color-text)] leading-snug line-clamp-2 group-hover:text-cobalt-600 transition-colors",
           size === "wide" ? "text-sm" : "text-sm"
         )}>
           {video.title}

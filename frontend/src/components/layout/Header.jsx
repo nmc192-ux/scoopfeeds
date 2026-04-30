@@ -70,14 +70,14 @@ export default function Header() {
             <div className="hidden sm:flex flex-col leading-none gap-[3px]">
               <span
                 className="text-[var(--color-text)]"
-                style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif", fontSize: "21px", fontWeight: 700, letterSpacing: "-0.02em", lineHeight: 1 }}
+                style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "21px", fontWeight: 800, letterSpacing: "-0.04em", lineHeight: 1 }}
               >
-                Scoop
+                Scoop<span style={{ color: "var(--color-accent)" }}>feeds</span>
               </span>
               <span
-                style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif", fontSize: "10px", fontWeight: 400, letterSpacing: "0.01em", color: "var(--color-text-tertiary)" }}
+                style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "10px", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--color-text-tertiary)" }}
               >
-                News, sniffed out.
+                Intelligence
               </span>
             </div>
           </motion.div>
@@ -121,7 +121,7 @@ export default function Header() {
                       "w-full pl-8 pr-4 py-2 text-sm rounded-full",
                       "bg-[var(--color-surface2)] border border-[var(--color-border)]",
                       "text-[var(--color-text)] placeholder-[var(--color-text-tertiary)]",
-                      "focus:outline-none focus:ring-2 focus:ring-brand-blue/40 focus:border-brand-blue",
+                      "focus:outline-none focus:ring-2 focus:ring-cobalt-600/40 focus:border-cobalt-600",
                       isUrdu && "text-right pr-8 pl-4"
                     )}
                     style={isUrdu ? { fontFamily: "'Noto Nastaliq Urdu', serif" } : {}}
@@ -191,7 +191,7 @@ export default function Header() {
             >
               <UserCircle
                 size={16}
-                className={isLoggedIn ? "text-brand-blue" : undefined}
+                className={isLoggedIn ? "text-cobalt-600" : undefined}
               />
             </HeaderBtn>
 

@@ -3,15 +3,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ExternalLink, CheckCircle2, Users, X, Search } from "lucide-react";
 import { useNewsStore } from "../../store/newsStore";
 import { X_ACCOUNTS } from "../../config/xAccounts";
+import { topicColor } from "../../lib/topicColors";
 import clsx from "clsx";
-
-const TOPIC_COLORS = {
-  top: "#FF3B30", politics: "#007AFF", international: "#5856D6",
-  pakistan: "#01411C", local: "#FF9500", sports: "#34C759",
-  science: "#5AC8FA", medicine: "#FF2D55", health: "#4CD964",
-  "public-health": "#FF6B35", "self-help": "#AF52DE", environment: "#30B0C7",
-  weather: "#64D2FF", ai: "#007AFF", "computer-science": "#5856D6", "agentic-ai": "#FF3B30",
-};
 
 // X/Twitter bird icon (text-based since no icon library has it)
 function XIcon({ size = 14 }) {
@@ -77,7 +70,7 @@ export default function XFeedSection() {
     : activeTopics[0] || "top";
 
   const accounts = X_ACCOUNTS[currentTopic] || X_ACCOUNTS["top"] || [];
-  const color = TOPIC_COLORS[currentTopic] || "#1DA1F2";
+  const color = topicColor(currentTopic);
 
   const topicLabel = currentTopic.replace(/-/g, " ");
   const searchUrl = `https://x.com/search?q=${encodeURIComponent(topicLabel)}&f=live`;

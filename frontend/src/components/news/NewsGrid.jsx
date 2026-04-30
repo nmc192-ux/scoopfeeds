@@ -8,6 +8,7 @@ import EmptyState from "../ui/EmptyState";
 import { AdSenseUnit } from "../ads/AdSense";
 import SponsorCard from "../ads/SponsorCard";
 import { usePublicConfig } from "../../hooks/useNews";
+import { topicColor } from "../../lib/topicColors";
 
 const AD_INTERVAL = 6;        // show an in-feed ad after every N cards
 const SPONSOR_POSITION = 3;   // inject the sponsor card after the Nth article (front-of-feed)
@@ -105,7 +106,7 @@ export default function NewsGrid({ articles = [], isLoading, error, onRefresh })
                 key={i}
                 animate={{ y: [0, -8, 0] }}
                 transition={{ duration: 0.6, repeat: Infinity, delay: d }}
-                className="w-2 h-2 bg-brand-blue rounded-full"
+                className="w-2 h-2 bg-cobalt-600 rounded-full"
               />
             ))}
           </div>
@@ -143,12 +144,6 @@ export default function NewsGrid({ articles = [], isLoading, error, onRefresh })
 function ListCard({ article, index }) {
   const [imgError, setImgError] = useState(false);
 
-  const TOPIC_COLORS = {
-    top: "#FF3B30", politics: "#007AFF", sports: "#34C759",
-    science: "#5AC8FA", ai: "#007AFF", "agentic-ai": "#FF3B30",
-    health: "#4CD964", environment: "#30B0C7",
-  };
-
   return (
     <motion.article
       initial={{ opacity: 0, x: -20 }}
@@ -177,7 +172,7 @@ function ListCard({ article, index }) {
           <div className="flex items-center gap-2 mb-1">
             <span
               className="text-xs font-semibold px-2 py-0.5 rounded-full text-white"
-              style={{ backgroundColor: TOPIC_COLORS[article.category] || "#007AFF" }}
+              style={{ backgroundColor: topicColor(article.category) }}
             >
               {article.category}
             </span>

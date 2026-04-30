@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Square</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800;900&family=Playfair+Display:ital@1&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1024px; height: 1024px; overflow: hidden; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: linear-gradient(135deg, #060d1f 0%, #0d1a35 35%, #1E3A8A 100%);
+    color: white;
+    position: relative;
+  }
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(96,165,250,0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(96,165,250,0.06) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(circle at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 75%);
+    -webkit-mask-image: radial-gradient(circle at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 75%);
+  }
+  .glow {
+    position: absolute;
+    width: 900px; height: 900px;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(96,165,250,0.45) 0%, rgba(37,99,235,0.18) 35%, transparent 70%);
+    filter: blur(60px);
+  }
+  .container {
+    position: relative;
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 56px;
+  }
+  .badge {
+    width: 360px; height: 360px;
+    border-radius: 84px;
+    background: linear-gradient(135deg, #2563EB 0%, #1E3A8A 100%);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 32px 80px rgba(37,99,235,0.5);
+  }
+  .badge svg { width: 260px; height: 260px; }
+  .stack { text-align: center; display: flex; flex-direction: column; gap: 14px; }
+  .name {
+    font-weight: 800;
+    font-size: 96px;
+    letter-spacing: -0.045em;
+    line-height: 1;
+  }
+  .name .accent { color: #60A5FA; }
+  .tag {
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-size: 36px;
+    color: #93c5fd;
+    letter-spacing: -0.005em;
+  }
+</style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="glow"></div>
+  <div class="container">
+    <div class="badge">
+      <svg viewBox="0 0 100 100" fill="none">
+        <path d="M22 50C22 36 32 22 44 22C47 22 47 31 44 44C44 44 34 50 22 50Z" fill="white" fill-opacity="0.4"/>
+        <path d="M22 50C22 64 32 78 44 78C47 78 47 69 44 56C44 56 34 50 22 50Z" fill="white" fill-opacity="0.9"/>
+        <path d="M40 50C40 36 50 27 64 27C77 27 81 38 81 50C81 62 77 73 64 73C50 73 40 64 40 50Z" fill="white"/>
+        <path d="M78 47L94 50L78 53V47Z" fill="#60A5FA"/>
+        <circle cx="68" cy="44" r="4.5" fill="#1E3A8A"/>
+      </svg>
+    </div>
+    <div class="stack">
+      <div class="name">Scoop<span class="accent">feeds</span></div>
+      <div class="tag">Intelligent news, curated.</div>
+    </div>
+  </div>
+</body>
+</html>

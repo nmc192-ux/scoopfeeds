@@ -125,7 +125,7 @@ router.get("/feed.xml", (_req, res) => {
      FROM articles ORDER BY published_at DESC LIMIT 50`
   ).all();
   res.type("application/rss+xml").send(buildRss({
-    feedTitle: "Scoop — News, sniffed out.",
+    feedTitle: "Scoopfeeds — Intelligent news, curated.",
     feedDesc: "The day's biggest stories from trusted sources worldwide, with cross-source context.",
     feedUrl: `${SITE}/feed.xml`,
     rows,
@@ -141,7 +141,7 @@ router.get("/feed/:category.xml", (req, res) => {
      FROM articles WHERE category = ? ORDER BY published_at DESC LIMIT 50`
   ).all(cat);
   res.type("application/rss+xml").send(buildRss({
-    feedTitle: `Scoop — ${cat}`,
+    feedTitle: `Scoopfeeds — ${cat}`,
     feedDesc: `Latest ${cat} stories curated by Scoop.`,
     feedUrl: `${SITE}/feed/${cat}.xml`,
     rows,
@@ -272,36 +272,36 @@ router.get("/article/:id", (req, res) => {
   @media (prefers-color-scheme: dark) { body { background: #0a0a0a; color: #eee; } .card { background: #151515 !important; border-color: #222 !important; } a { color: #4aa3ff; } }
   .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
   .back { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; text-decoration: none; color: #666; margin-bottom: 20px; }
-  .back:hover { color: #DC2626; }
+  .back:hover { color: #2563EB; }
   .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 16px; overflow: hidden; }
   .hero { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: #eee; }
   .body { padding: 24px; }
-  .cat { display: inline-block; background: #DC2626; color: #fff; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; letter-spacing: 0.04em; }
+  .cat { display: inline-block; background: #2563EB; color: #fff; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; letter-spacing: 0.04em; }
   h1 { font-size: 28px; line-height: 1.25; margin: 12px 0 8px; font-weight: 700; }
   .meta { font-size: 13px; color: #888; margin-bottom: 18px; }
   .desc { font-size: 17px; margin: 0 0 24px; }
   .content p { font-size: 17px; margin: 0 0 18px; color: #222; }
   @media (prefers-color-scheme: dark) { .content p { color: #d4d4d4; } }
   .content { margin-bottom: 28px; }
-  .source-note { font-size: 13px; color: #888; margin: 24px 0 16px; padding: 12px 16px; background: rgba(220,38,38,0.05); border-left: 3px solid #DC2626; border-radius: 4px; }
-  .cta { display: inline-block; background: #DC2626; color: #fff; text-decoration: none; padding: 12px 20px; border-radius: 999px; font-weight: 600; font-size: 15px; }
+  .source-note { font-size: 13px; color: #888; margin: 24px 0 16px; padding: 12px 16px; background: rgba(37,99,235,0.05); border-left: 3px solid #2563EB; border-radius: 4px; }
+  .cta { display: inline-block; background: #2563EB; color: #fff; text-decoration: none; padding: 12px 20px; border-radius: 999px; font-weight: 600; font-size: 15px; }
   .cta:hover { background: #b91c1c; }
   .secondary { margin-left: 12px; font-size: 14px; color: #666; text-decoration: none; }
-  .brand { font-weight: 700; font-size: 18px; color: #DC2626; text-decoration: none; }
-  .takeaways { margin: 20px 0 24px; padding: 16px 20px; background: rgba(220,38,38,0.04); border: 1px solid rgba(220,38,38,0.15); border-radius: 12px; }
-  .takeaways h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #DC2626; margin: 0 0 10px; font-weight: 700; }
+  .brand { font-weight: 700; font-size: 18px; color: #2563EB; text-decoration: none; }
+  .takeaways { margin: 20px 0 24px; padding: 16px 20px; background: rgba(37,99,235,0.04); border: 1px solid rgba(37,99,235,0.15); border-radius: 12px; }
+  .takeaways h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #2563EB; margin: 0 0 10px; font-weight: 700; }
   .takeaways ul { margin: 0; padding-left: 20px; }
   .takeaways li { font-size: 15px; line-height: 1.5; margin-bottom: 6px; color: #222; }
-  @media (prefers-color-scheme: dark) { .takeaways { background: rgba(220,38,38,0.08); border-color: rgba(220,38,38,0.25); } .takeaways li { color: #d4d4d4; } }
+  @media (prefers-color-scheme: dark) { .takeaways { background: rgba(37,99,235,0.08); border-color: rgba(37,99,235,0.25); } .takeaways li { color: #d4d4d4; } }
   .why-matters { font-size: 14px; color: #555; font-style: italic; margin: 0 0 24px; padding: 10px 14px; border-left: 3px solid #aaa; background: rgba(0,0,0,0.02); border-radius: 0 8px 8px 0; }
   @media (prefers-color-scheme: dark) { .why-matters { color: #aaa; background: rgba(255,255,255,0.02); } }
   .coverage { margin: 32px 0 20px; }
   .coverage h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: #666; margin: 0 0 12px; font-weight: 700; }
   .coverage-list { display: grid; grid-template-columns: 1fr; gap: 10px; }
   .coverage-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: #fafafa; border: 1px solid #eee; border-radius: 10px; text-decoration: none; color: inherit; transition: border-color .15s; }
-  .coverage-item:hover { border-color: #DC2626; }
+  .coverage-item:hover { border-color: #2563EB; }
   @media (prefers-color-scheme: dark) { .coverage-item { background: #111; border-color: #222; } }
-  .coverage-source { flex-shrink: 0; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #DC2626; min-width: 90px; }
+  .coverage-source { flex-shrink: 0; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #2563EB; min-width: 90px; }
   .coverage-title { font-size: 14px; line-height: 1.4; flex: 1; }
   .related { margin: 40px 0 24px; padding-top: 28px; border-top: 1px solid #eee; }
   @media (prefers-color-scheme: dark) { .related { border-top-color: #222; } }
@@ -309,9 +309,9 @@ router.get("/article/:id", (req, res) => {
   .related-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
   @media (min-width: 560px) { .related-grid { grid-template-columns: 1fr 1fr; } }
   .related-card { display: block; padding: 14px; background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; text-decoration: none; color: inherit; transition: transform .15s, border-color .15s; }
-  .related-card:hover { transform: translateY(-2px); border-color: #DC2626; }
+  .related-card:hover { transform: translateY(-2px); border-color: #2563EB; }
   @media (prefers-color-scheme: dark) { .related-card { background: #151515; border-color: #222; } }
-  .related-card .rc-source { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #DC2626; letter-spacing: 0.04em; }
+  .related-card .rc-source { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #2563EB; letter-spacing: 0.04em; }
   .related-card .rc-title { font-size: 14px; margin-top: 6px; line-height: 1.4; color: #222; }
   @media (prefers-color-scheme: dark) { .related-card .rc-title { color: #d4d4d4; } }
   .eeat-foot { margin: 40px 0 0; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #888; line-height: 1.6; }
@@ -323,7 +323,7 @@ router.get("/article/:id", (req, res) => {
 </head>
 <body>
   <div class="wrap">
-    <a class="back" href="/">← <span class="brand">Scoop</span> — News, sniffed out.</a>
+    <a class="back" href="/">← <span class="brand">Scoop<span style="color:#1E3A8A">feeds</span></span> — Intelligent news, curated.</a>
     <article class="card">
       ${article.image_url ? `<img class="hero" src="${xmlEscape(article.image_url)}" alt="${xmlEscape(article.title)}" loading="eager">` : ""}
       <div class="body">
@@ -370,7 +370,7 @@ router.get("/article/:id", (req, res) => {
               </a>`).join("")}
           </div>
           ${TOPIC_HUB_SLUGS.has(article.category) ? `
-          <p style="margin:14px 0 0;font-size:14px"><a href="/topic/${xmlEscape(article.category)}" style="color:#DC2626;font-weight:600;text-decoration:none">Browse all ${xmlEscape(article.category)} coverage →</a></p>` : ""}
+          <p style="margin:14px 0 0;font-size:14px"><a href="/topic/${xmlEscape(article.category)}" style="color:#2563EB;font-weight:600;text-decoration:none">Browse all ${xmlEscape(article.category)} coverage →</a></p>` : ""}
         </section>` : ""}
 
         <div class="eeat-foot">
@@ -568,8 +568,8 @@ ${articles.length === 0 ? `<meta name="robots" content="noindex,follow">` : ""}
   @media (prefers-color-scheme: dark) { body { background: #0a0a0a; color: #eee; } .hub-card { background: #151515 !important; border-color: #222 !important; } a { color: #4aa3ff; } .topic-intro { background: #151515 !important; border-color: #222 !important; } }
   .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px 64px; }
   .back { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; text-decoration: none; color: #666; margin-bottom: 18px; }
-  .back:hover { color: #DC2626; }
-  .brand { font-weight: 700; color: #DC2626; }
+  .back:hover { color: #2563EB; }
+  .brand { font-weight: 700; color: #2563EB; }
   h1 { font-size: 36px; line-height: 1.15; margin: 6px 0 16px; font-weight: 800; letter-spacing: -0.02em; }
   h2 { font-size: 22px; margin: 36px 0 14px; font-weight: 700; letter-spacing: -0.01em; }
   .topic-intro { background: #fff; border: 1px solid #e5e5e5; border-radius: 14px; padding: 18px 22px; margin-bottom: 24px; }
@@ -584,7 +584,7 @@ ${articles.length === 0 ? `<meta name="robots" content="noindex,follow">` : ""}
   .hub-card-body { padding: 14px 16px 16px; flex: 1; display: flex; flex-direction: column; }
   .hub-card-body a { text-decoration: none; color: inherit; }
   .hub-card-body h3 { font-size: 16px; line-height: 1.35; margin: 0 0 8px; font-weight: 700; }
-  .hub-card-body h3:hover { color: #DC2626; }
+  .hub-card-body h3:hover { color: #2563EB; }
   .hub-card-body p { font-size: 13px; color: #555; margin: 0 0 12px; line-height: 1.5; }
   @media (prefers-color-scheme: dark) { .hub-card-body p { color: #aaa; } }
   .hub-card-meta { font-size: 12px; color: #888; margin-top: auto; display: flex; gap: 6px; align-items: center; }
@@ -595,7 +595,7 @@ ${articles.length === 0 ? `<meta name="robots" content="noindex,follow">` : ""}
   .other-topics h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: #888; margin: 0 0 12px; font-weight: 600; }
   .other-topics ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
   .other-topics li a { display: inline-block; padding: 7px 14px; background: #fff; border: 1px solid #e5e5e5; border-radius: 999px; font-size: 14px; text-decoration: none; color: #333; }
-  .other-topics li a:hover { border-color: #DC2626; color: #DC2626; }
+  .other-topics li a:hover { border-color: #2563EB; color: #2563EB; }
   @media (prefers-color-scheme: dark) { .other-topics li a { background: #151515; border-color: #222; color: #ddd; } }
   footer { margin: 48px 0 0; padding-top: 20px; border-top: 1px solid #e5e5e5; font-size: 13px; color: #888; }
   @media (prefers-color-scheme: dark) { footer { border-top-color: #222; } }
@@ -604,7 +604,7 @@ ${articles.length === 0 ? `<meta name="robots" content="noindex,follow">` : ""}
 </head>
 <body>
   <div class="wrap">
-    <a class="back" href="/">← <span class="brand">Scoop</span> — News, sniffed out.</a>
+    <a class="back" href="/">← <span class="brand">Scoop<span style="color:#1E3A8A">feeds</span></span> — Intelligent news, curated.</a>
     <h1>${xmlEscape(meta.title)}</h1>
     <div class="topic-intro">
       <p>${xmlEscape(meta.intro)}</p>
@@ -1018,7 +1018,7 @@ router.get("/contact", (_req, res) => {
           <label for="contact-message" style="display:block;font-size:14px;font-weight:600;margin-bottom:4px;">Message</label>
           <textarea id="contact-message" name="Message" rows="5" placeholder="Your message…" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;resize:vertical;"></textarea>
         </div>
-        <button type="submit" style="background:#DC2626;color:#fff;border:none;padding:11px 24px;border-radius:999px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;">Send message</button>
+        <button type="submit" style="background:#2563EB;color:#fff;border:none;padding:11px 24px;border-radius:999px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;">Send message</button>
       </form>
     `,
   }));
@@ -1090,14 +1090,14 @@ ${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld)}</script
   @media (prefers-color-scheme: dark) { body { background: #0a0a0a; color: #e5e5e5; } a { color: #4aa3ff; } }
   .wrap { max-width: 760px; margin: 0 auto; padding: 24px 20px 64px; }
   .back { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; text-decoration: none; color: #666; margin-bottom: 20px; }
-  .back:hover { color: #DC2626; }
-  .brand { font-weight: 700; color: #DC2626; }
+  .back:hover { color: #2563EB; }
+  .brand { font-weight: 700; color: #2563EB; }
   h1 { font-size: 32px; line-height: 1.2; margin: 4px 0 20px; font-weight: 700; }
   h2 { font-size: 20px; margin: 32px 0 10px; font-weight: 700; }
   p { font-size: 16px; margin: 0 0 14px; }
   ul { margin: 0 0 18px; padding-left: 22px; }
   li { font-size: 16px; margin-bottom: 6px; }
-  a { color: #DC2626; }
+  a { color: #2563EB; }
   .updated { font-size: 13px; color: #888; margin-top: 28px; }
   footer { margin: 48px 0 0; padding-top: 20px; border-top: 1px solid #e5e5e5; font-size: 13px; color: #888; }
   @media (prefers-color-scheme: dark) { footer { border-top-color: #222; } }
@@ -1106,7 +1106,7 @@ ${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld)}</script
 </head>
 <body>
   <div class="wrap">
-    <a class="back" href="/">← <span class="brand">Scoop</span> — News, sniffed out.</a>
+    <a class="back" href="/">← <span class="brand">Scoop<span style="color:#1E3A8A">feeds</span></span> — Intelligent news, curated.</a>
     ${body}
     <footer>
       <a href="/about">About</a>
@@ -1155,14 +1155,14 @@ router.get("/sponsor", (_req, res) => {
 
       <h2>Get in touch</h2>
       <p>Email <a href="mailto:sponsor@scoopfeeds.com">sponsor@scoopfeeds.com</a> with your brand name, target dates, and any questions. We respond within 24 hours.</p>
-      <p><a href="mailto:sponsor@scoopfeeds.com" style="display:inline-block;background:#DC2626;color:#fff;padding:11px 22px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">Email us to get started →</a></p>
+      <p><a href="mailto:sponsor@scoopfeeds.com" style="display:inline-block;background:#2563EB;color:#fff;padding:11px 22px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">Email us to get started →</a></p>
       <p class="updated">Rates valid through Q3 2026. Minimum 2 business days lead time.</p>
     `,
   }));
 });
 
 function renderNotFound() {
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Not found — Scoop</title><meta name="robots" content="noindex"><style>body{font-family:system-ui;text-align:center;padding:80px 20px;color:#333}a{color:#DC2626}</style></head><body><h1>Story not found</h1><p>This article may have expired.</p><p><a href="/">← Back to Scoop</a></p></body></html>`;
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Not found — Scoopfeeds</title><meta name="robots" content="noindex"><style>body{font-family:system-ui;text-align:center;padding:80px 20px;color:#333}a{color:#2563EB}</style></head><body><h1>Story not found</h1><p>This article may have expired.</p><p><a href="/">← Back to Scoopfeeds</a></p></body></html>`;
 }
 
 export default router;

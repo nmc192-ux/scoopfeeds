@@ -6,31 +6,16 @@ import { useNewsStore } from "../../store/newsStore";
 import { useTranslatedTexts } from "../../hooks/useTranslation";
 import { useReaderStore } from "../../hooks/useReader";
 import { useSaveArticle } from "../../hooks/useSaveArticle";
+import { topicColor, topicLabel } from "../../lib/topicColors";
 import clsx from "clsx";
-
-const TOPIC_COLORS = {
-  top: "#FF3B30", politics: "#007AFF", international: "#5856D6",
-  pakistan: "#01411C", local: "#FF9500", sports: "#34C759",
-  science: "#5AC8FA", medicine: "#FF2D55", health: "#4CD964",
-  "public-health": "#FF6B35", "self-help": "#AF52DE", environment: "#30B0C7",
-  weather: "#64D2FF", ai: "#007AFF", "computer-science": "#5856D6", "agentic-ai": "#FF3B30",
-};
-
-const TOPIC_LABELS = {
-  top: "Top Story", politics: "Politics", international: "World News",
-  pakistan: "Pakistan", local: "Local", sports: "Sports", science: "Science",
-  medicine: "Medicine", health: "Health", "public-health": "Public Health",
-  "self-help": "Wellness", environment: "Environment", weather: "Weather",
-  ai: "Artificial Intelligence", "computer-science": "Technology", "agentic-ai": "Agentic AI",
-};
 
 export default function FeaturedCard({ article }) {
   const { toggle: toggleSave, isSaved } = useSaveArticle();
   const openReader = useReaderStore(s => s.openReader);
   const saved = isSaved(article.id);
   const [imgError, setImgError] = useState(false);
-  const color = TOPIC_COLORS[article.category] || "#007AFF";
-  const label = TOPIC_LABELS[article.category] || article.category;
+  const color = topicColor(article.category);
+  const label = topicLabel(article.category);
   const isRecent = Date.now() - article.published_at < 2 * 60 * 60 * 1000;
 
   // Translation — source language comes from the article's metadata.
@@ -138,7 +123,7 @@ export default function FeaturedCard({ article }) {
                   whileTap={{ scale: 0.85 }} onClick={handleSave}
                   className={clsx(
                     "p-2 rounded-full transition-colors",
-                    saved ? "bg-brand-blue text-white" : "bg-white/20 text-white hover:bg-white/30"
+                    saved ? "bg-cobalt-600 text-white" : "bg-white/20 text-white hover:bg-white/30"
                   )}
                 >
                   {saved ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}

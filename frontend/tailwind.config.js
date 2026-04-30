@@ -5,10 +5,14 @@ export default {
   theme: {
     extend: {
       fontFamily: {
+        // ── Cobalt Intelligence UI font ────────────────────────────
         sans: [
-          "-apple-system", "BlinkMacSystemFont", "SF Pro Display",
+          "'Inter'", "-apple-system", "BlinkMacSystemFont", "SF Pro Display",
           "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"
         ],
+        inter: ["'Inter'", "system-ui", "sans-serif"],
+        // ── Editorial accent font (Playfair italic) ────────────────
+        editorial: ["'Playfair Display'", "Georgia", "serif"],
         serif: ["Georgia", "New York", "Times New Roman", "serif"],
         mono: ["SF Mono", "Fira Code", "Monaco", "Consolas", "monospace"],
         display: ["'Bebas Neue'", "Impact", "system-ui"],
@@ -24,6 +28,20 @@ export default {
           teal: "#5AC8FA",
           pink: "#FF2D55",
           indigo: "#5856D6",
+        },
+        // ── Cobalt Intelligence palette ────────────────────────────
+        cobalt: {
+          50:  "#eff6ff",
+          100: "#dbeafe",
+          200: "#bfdbfe",
+          300: "#93c5fd",
+          400: "#60a5fa",
+          500: "#3b82f6",
+          600: "#2563eb",   // primary
+          700: "#1d4ed8",
+          800: "#1e3a8a",   // secondary / deep navy
+          900: "#1e2d6e",
+          950: "#0f172a",
         },
         apple: {
           gray1: "#8E8E93",
