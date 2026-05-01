@@ -29,7 +29,7 @@ import {
 } from "../models/database.js";
 import { logger } from "./logger.js";
 
-const GEMINI_MODEL    = "gemini-1.5-flash-latest";
+const GEMINI_MODEL    = "gemini-flash-latest";
 const GEMINI_ENDPOINT = (key) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
 
