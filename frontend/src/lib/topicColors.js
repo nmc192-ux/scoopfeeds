@@ -23,7 +23,7 @@ export const STATUS_LIVE        = "#10B981";
 export const COLOR_ALERT        = "#EF4444";
 
 // Legacy aliases — keep imports working
-export const ELECTRIC_PRIMARY   = ELECTRIC_PRIMARY;
+export const COBALT_PRIMARY   = ELECTRIC_PRIMARY;
 export const COBALT_SECONDARY = ELECTRIC_SECONDARY;
 export const COBALT_LIGHT     = ELECTRIC_LIGHT;
 export const COBALT_DEEP      = ELECTRIC_DEEP;

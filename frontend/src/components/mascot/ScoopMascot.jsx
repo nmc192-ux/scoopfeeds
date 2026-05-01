@@ -177,8 +177,8 @@ export const Logo = ({
   const palettes = {
     // Electric Signal — current brand
     electric: { primary: isDark ? "#60A5FA" : "#3B82F6", accent: "#F97316", secondary: "#1E3A8A" },
-    // Legacy aliases
-    electric: { primary: isDark ? "#60A5FA" : "#3B82F6", accent: "#F97316", secondary: "#1E3A8A" },
+    // Legacy alias kept for old `palette="cobalt"` callers
+    cobalt:   { primary: isDark ? "#60A5FA" : "#3B82F6", accent: "#F97316", secondary: "#1E3A8A" },
     gold:     { primary: isDark ? "#FDE047" : "#EAB308", accent: "#0F172A", secondary: "#CA8A04" },
   };
 
