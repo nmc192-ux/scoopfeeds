@@ -37,25 +37,40 @@ const GEMINI_ENDPOINT = (key) =>
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// Free-tier Gemini intermittently returns 503 UNAVAILABLE (overload) and
+// 429 RESOURCE_EXHAUSTED (rate limit). Both are transient — back off and
+// retry. Permanent errors (4xx other than 429) are returned as null on
+// the first failure.
 async function callGemini(prompt) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
-  try {
-    const { data } = await axios.post(
-      GEMINI_ENDPOINT(key),
-      {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
-      },
-      { timeout: 25000 }
-    );
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return null;
-    return JSON.parse(text);
-  } catch (err) {
-    logger.warn("📊 Gemini call failed", { error: err.message });
-    return null;
+  const RETRY_DELAYS_MS = [4000, 9000, 18000]; // up to 3 retries
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const { data } = await axios.post(
+        GEMINI_ENDPOINT(key),
+        {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
+        },
+        { timeout: 25000 }
+      );
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) return null;
+      return JSON.parse(text);
+    } catch (err) {
+      const status = err.response?.status;
+      const transient = status === 503 || status === 429 || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
+      if (transient && attempt < RETRY_DELAYS_MS.length) {
+        logger.warn(`📊 Gemini ${status || err.code} — retrying in ${RETRY_DELAYS_MS[attempt]}ms (attempt ${attempt + 1})`);
+        await sleep(RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      logger.warn("📊 Gemini call failed", { status, error: err.message });
+      return null;
+    }
   }
+  return null;
 }
 
 // ─── Heuristic story clustering ───────────────────────────────────────────

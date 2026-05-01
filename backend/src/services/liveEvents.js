@@ -134,45 +134,61 @@ Sources:
 ${items}${socialBlock}`;
 }
 
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Free-tier Gemini intermittently returns 503 UNAVAILABLE / 429 RESOURCE_EXHAUSTED
+// for prompts of this size. Retry transient errors with exponential backoff so
+// we don't silently fall back to deterministic briefs every cycle.
 async function synthesizeWithGemini(event, articles, socialPosts = []) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
   if (articles.length === 0 && socialPosts.length === 0) return null;
+  const prompt = buildPrompt(event, articles, socialPosts);
+  const RETRY_DELAYS_MS = [4000, 9000, 18000];
 
-  try {
-    const prompt = buildPrompt(event, articles, socialPosts);
-    const { data } = await axios.post(
-      GEMINI_ENDPOINT(key),
-      {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType: "application/json",
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const { data } = await axios.post(
+        GEMINI_ENDPOINT(key),
+        {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: "application/json",
+          },
         },
-      },
-      { timeout: 20000 }
-    );
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return null;
-    const parsed = JSON.parse(text);
-    // Attach source objects using the indices Gemini returned.
-    const brief = (parsed.brief || []).map((p) => ({
-      ts: p.ts,
-      text: p.text,
-      sources: (p.sourceIndices || [])
-        .map((i) => articles[i - 1])
-        .filter(Boolean)
-        .map((a) => ({ name: a.source_name, url: a.url })),
-    }));
-    return {
-      summary: parsed.summary || null,
-      brief,
-      metrics: parsed.metrics || {},
-    };
-  } catch (err) {
-    logger.warn("Gemini synthesis failed", { event: event.id, error: err.message });
-    return null;
+        { timeout: 25000 }
+      );
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) return null;
+      const parsed = JSON.parse(text);
+      // Attach source objects using the indices Gemini returned.
+      const brief = (parsed.brief || []).map((p) => ({
+        ts: p.ts,
+        text: p.text,
+        sources: (p.sourceIndices || [])
+          .map((i) => articles[i - 1])
+          .filter(Boolean)
+          .map((a) => ({ name: a.source_name, url: a.url })),
+      }));
+      return {
+        summary: parsed.summary || null,
+        brief,
+        metrics: parsed.metrics || {},
+      };
+    } catch (err) {
+      const status = err.response?.status;
+      const transient = status === 503 || status === 429 || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
+      if (transient && attempt < RETRY_DELAYS_MS.length) {
+        logger.warn(`🛰️  Gemini ${status || err.code} for event ${event.id} — retrying in ${RETRY_DELAYS_MS[attempt]}ms`);
+        await sleep(RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      logger.warn("Gemini synthesis failed", { event: event.id, status, error: err.message });
+      return null;
+    }
   }
+  return null;
 }
 
 // Deterministic fallback — no LLM, no hallucination. Just the most recent
@@ -281,12 +297,17 @@ export async function refreshEvent(eventConfig) {
 
 export async function refreshAllEvents() {
   const results = [];
-  for (const evt of LIVE_EVENTS) {
+  for (let i = 0; i < LIVE_EVENTS.length; i++) {
+    const evt = LIVE_EVENTS[i];
     try {
       results.push(await refreshEvent(evt));
     } catch (err) {
       logger.error("Event refresh failed", { event: evt.id, error: err.message });
     }
+    // Space Gemini calls out — free tier is 15 RPM and these prompts are
+    // large enough to hit transient 503/429. 5s gap keeps us safely under
+    // the limit without dragging the cycle out.
+    if (i < LIVE_EVENTS.length - 1) await sleep(5000);
   }
   logger.info(`🛰️  Live events refreshed: ${results.length}`);
   return results;
