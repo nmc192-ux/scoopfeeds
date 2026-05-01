@@ -19,13 +19,15 @@ name: Render video queue
 #   GOOGLE_TTS_KEY      — fallback
 
 on:
-  schedule:
-    # 03:00 UTC — primary per-article batch (5 videos, post-overnight ingestion)
-    - cron: "0 3 * * *"
-    # 06:00 UTC — top-up batch in case morning ingestion brings new stories
-    - cron: "0 6 * * *"
-    # 12:00 UTC — midday batch
-    - cron: "0 12 * * *"
+  # PAUSED — video generation on hold pending quality/content improvements.
+  # To re-enable, uncomment the schedule block below.
+  # schedule:
+  #   # 03:00 UTC — primary per-article batch (5 videos, post-overnight ingestion)
+  #   - cron: "0 3 * * *"
+  #   # 06:00 UTC — top-up batch in case morning ingestion brings new stories
+  #   - cron: "0 6 * * *"
+  #   # 12:00 UTC — midday batch
+  #   - cron: "0 12 * * *"
   # Manual trigger from the Actions tab — useful for testing + ad-hoc runs.
   workflow_dispatch:
     inputs:
