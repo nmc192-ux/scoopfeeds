@@ -1423,11 +1423,19 @@ const METER_WINDOW_MS  = 30 * 24 * 60 * 60 * 1000; // 30-day rolling window
 export function checkMeter(deviceKey, articleId, { record = false, userId = null } = {}) {
   const db = getDb();
 
-  // If userId is provided, check tier first — premium bypasses meter entirely.
+  // Signed-in users get unlimited reading — this matches the soft wall promise
+  // ("Sign in for unlimited reading — it's free"). Premium additionally hides
+  // ads via the isPremium flag.
   if (userId) {
     const user = db.prepare(`SELECT tier FROM users WHERE id = ?`).get(userId);
-    if (user?.tier === "premium") {
-      return { allowed: true, count: 0, limit: METER_FREE_LIMIT, isPremium: true };
+    if (user) {
+      return {
+        allowed:   true,
+        count:     0,
+        limit:     METER_FREE_LIMIT,
+        isPremium: user.tier === "premium",
+        signedIn:  true,
+      };
     }
   }
 

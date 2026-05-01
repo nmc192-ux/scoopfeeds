@@ -8,10 +8,10 @@
  * GET  /api/meter/status
  *   → Returns current open count + limit for this device (no side effects).
  *
- * The device key is SHA-256(IP + UA + salt). Authenticated users use their
- * user_id so their quota follows them across devices once they sign in.
- * Premium users (tier='premium') are always allowed — the frontend hides all
- * ad units for them too.
+ * The device key is SHA-256(IP + UA + salt). Anonymous visitors are capped at
+ * METER_FREE_LIMIT distinct articles per 30-day window. **Any signed-in user
+ * gets unlimited reading** (the sign-in CTA on the soft wall promises this).
+ * Premium users (tier='premium') additionally have ads hidden via isPremium.
  *
  * Meter is disabled entirely when METER_ENABLED env var is "false".
  */
