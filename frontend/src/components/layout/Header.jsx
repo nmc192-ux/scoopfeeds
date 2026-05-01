@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sun, Moon, Search, X, RefreshCw,
-  Activity, Grid3x3, List, UserCircle, Tv
+  Activity, Grid3x3, List, UserCircle, Tv, Sparkles
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useNewsStore } from "../../store/newsStore";
@@ -29,7 +29,8 @@ export default function Header() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const onLiveTv = location.pathname === "/live-tv";
+  const onLiveTv      = location.pathname === "/live-tv";
+  const onAnalysis    = location.pathname.startsWith("/analysis");
 
   const submitSearch = (e) => {
     e.preventDefault();
@@ -171,6 +172,22 @@ export default function Header() {
               <Tv size={13} />
               <span className="hidden sm:inline">Live TV</span>
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+            </Link>
+
+            {/* Analysis pill */}
+            <Link
+              to="/analysis"
+              title="AI News Analysis"
+              className={clsx(
+                "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all",
+                "border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-600/40",
+                onAnalysis
+                  ? "bg-electric-600 text-white border-electric-600"
+                  : "bg-electric-500/10 text-electric-600 border-electric-500/30 hover:bg-electric-600 hover:text-white hover:border-electric-600"
+              )}
+            >
+              <Sparkles size={13} />
+              <span className="hidden sm:inline">Analysis</span>
             </Link>
 
             <HeaderBtn

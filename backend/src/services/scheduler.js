@@ -10,6 +10,7 @@ import { RSS_SOURCES, YOUTUBE_SOURCES } from "../config/sources.js";
 import { sendDailyDigest } from "./digest.js";
 import { runWelcomeSequenceCycle } from "./welcomeSequence.js";
 import { refreshAllEvents } from "./liveEvents.js";
+import { refreshAnalysis } from "./analysisService.js";
 import { runBreakingNewsPush } from "./breakingNewsPusher.js";
 import { runAllPlatformsCycle, listEnabledPlatforms } from "./socialPublisher.js";
 import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEventVideo, previewSlide } from "./videoGenerator.js";
@@ -22,15 +23,17 @@ let isGenRun     = false;   // short-form video generation
 let isRecapRun   = false;   // daily recap video
 let isLiveVidRun = false;   // 6h live-event video
 let isEnrichRun  = false;
-let isEventsRun  = false;
-let lastRun      = null;
+let isEventsRun   = false;
+let isAnalysisRun = false;
+let lastRun       = null;
 let lastVideoRun = null;
 let lastGenRun   = null;
 let lastRecapRun = null;
 let lastLiveVidRun = null;
 let lastEnrichRun = null;
-let lastEventsRun = null;
-let nextRun      = null;
+let lastEventsRun   = null;
+let lastAnalysisRun = null;
+let nextRun         = null;
 
 export function startScheduler() {
   logger.info("⏰ Scheduler initialized — 30 min news, 60 min video, 15 min enrich, 60 min events, 2 AM video gen");
@@ -39,10 +42,13 @@ export function startScheduler() {
   setTimeout(runEnrichCycle, 60_000);
   // Delay first events pass — it needs some ingested articles to work with.
   setTimeout(runEventsCycle, 90_000);
+  // Delay first analysis pass — 5 min after startup, needs ingested articles.
+  setTimeout(runAnalysisCycle, 5 * 60 * 1000);
   cron.schedule("*/30 * * * *", () => runIngestionCycle());
   cron.schedule("0 * * * *",    () => runVideoCycle());
   cron.schedule("*/15 * * * *", () => runEnrichCycle());
   cron.schedule("0 * * * *",    () => runEventsCycle());
+  cron.schedule("0 */2 * * *",  () => runAnalysisCycle()); // every 2 hours
   // ─── Video generation crons (in-process) ───────────────────────────────
   // Disabled in production because Hostinger Cloud Hosting blocks subprocess
   // execution at the kernel level (RLIMIT_NPROC). Rendering is delegated to
@@ -102,6 +108,19 @@ async function runEventsCycle() {
     logger.error("❌ Events refresh failed", { error: err.message });
   } finally {
     isEventsRun = false;
+  }
+}
+
+async function runAnalysisCycle() {
+  if (isAnalysisRun) return;
+  isAnalysisRun = true;
+  lastAnalysisRun = new Date().toISOString();
+  try {
+    await refreshAnalysis();
+  } catch (err) {
+    logger.error("❌ Analysis refresh failed", { error: err.message });
+  } finally {
+    isAnalysisRun = false;
   }
 }
 
@@ -297,8 +316,8 @@ function updateNextRun() {
 
 export function getSchedulerStatus() {
   return {
-    isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun,
-    lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, nextRun,
+    isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
+    lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun, nextRun,
     sourceCount: RSS_SOURCES.length, videoChannels: YOUTUBE_SOURCES.length,
     videoGenConfigured: isVideoConfigured(),
   };

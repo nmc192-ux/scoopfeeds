@@ -319,6 +319,61 @@ function initializeSchema(db) {
       updated_at  INTEGER NOT NULL,
       ceasefire_at INTEGER              -- optional ISO timestamp as ms since epoch
     );
+
+    -- ─── News Analysis — Story Clusters ───────────────────────────────
+    -- Auto-detected trending story groups built from bigram clustering of
+    -- recent article titles. Brief and perspectives are JSON blobs generated
+    -- by Gemini 1.5 Flash every 2h. expires_at = created_at + 24h.
+    CREATE TABLE IF NOT EXISTS story_clusters (
+      id           TEXT PRIMARY KEY,
+      title        TEXT NOT NULL,
+      summary      TEXT,
+      category     TEXT NOT NULL,
+      keywords     TEXT NOT NULL,          -- JSON array of keyword strings
+      article_ids  TEXT DEFAULT '[]',      -- JSON array of article IDs used
+      article_count INTEGER DEFAULT 0,
+      brief        TEXT DEFAULT '[]',      -- JSON: [{ts, text, sources:[{name,url}]}]
+      perspectives TEXT,                   -- JSON: [{sourceName, outlets[], angle, quote}]
+      created_at   INTEGER NOT NULL,
+      updated_at   INTEGER NOT NULL,
+      expires_at   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_clusters_category ON story_clusters(category);
+    CREATE INDEX IF NOT EXISTS idx_clusters_updated  ON story_clusters(updated_at DESC);
+
+    -- ─── News Analysis — Explained Pieces ─────────────────────────────
+    -- Long-form Gemini-generated explainers for top-2 trending categories.
+    -- content is HTML. facts/timeline/sources are JSON arrays.
+    -- expires_at = created_at + 12h.
+    CREATE TABLE IF NOT EXISTS explained_pieces (
+      id           TEXT PRIMARY KEY,
+      slug         TEXT NOT NULL UNIQUE,
+      title        TEXT NOT NULL,
+      category     TEXT NOT NULL,
+      summary      TEXT,
+      content      TEXT,                   -- HTML body (400-600 words)
+      facts        TEXT DEFAULT '[]',      -- JSON: [{value, unit, label, source}]
+      timeline     TEXT DEFAULT '[]',      -- JSON: [{date, event, source}]
+      sources      TEXT DEFAULT '[]',      -- JSON: [{name, url}]
+      image_url    TEXT,
+      created_at   INTEGER NOT NULL,
+      updated_at   INTEGER NOT NULL,
+      expires_at   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_explained_updated ON explained_pieces(updated_at DESC);
+
+    -- ─── News Analysis — Article Analysis Cache ────────────────────────
+    -- On-demand per-article Gemini analysis. Cached 6h per article_id.
+    -- Populated lazily when the user opens the article deep dive panel.
+    CREATE TABLE IF NOT EXISTS article_analysis_cache (
+      article_id   TEXT PRIMARY KEY,
+      takeaways    TEXT DEFAULT '[]',      -- JSON: string[]
+      tone         TEXT,                   -- neutral|critical|optimistic|alarming|analytical
+      tone_reason  TEXT,
+      related_ids  TEXT DEFAULT '[]',      -- JSON: string[]
+      created_at   INTEGER NOT NULL,
+      expires_at   INTEGER NOT NULL        -- 6h TTL
+    );
   `);
 
   // Lightweight migration: add `language` column on existing deployments.
@@ -1563,4 +1618,167 @@ export function findFreshUnpushedArticles({ minCredibility = 8, withinMs = 30 * 
     ORDER BY a.credibility DESC, a.published_at DESC
     LIMIT ?
   `).all(cutoff, minCredibility, limit);
+}
+
+// ─── Analysis helpers ─────────────────────────────────────────────────────
+
+function tryParseJson(val, fallback) {
+  try { return JSON.parse(val || "null") ?? fallback; } catch { return fallback; }
+}
+
+// ─── Story Clusters ───────────────────────────────────────────────────────
+
+export function upsertStoryCluster(cluster) {
+  getDb().prepare(`
+    INSERT INTO story_clusters
+      (id, title, summary, category, keywords, article_ids, article_count,
+       brief, perspectives, created_at, updated_at, expires_at)
+    VALUES
+      (@id, @title, @summary, @category, @keywords, @article_ids, @article_count,
+       @brief, @perspectives, @created_at, @updated_at, @expires_at)
+    ON CONFLICT(id) DO UPDATE SET
+      title         = excluded.title,
+      summary       = excluded.summary,
+      keywords      = excluded.keywords,
+      article_ids   = excluded.article_ids,
+      article_count = excluded.article_count,
+      brief         = excluded.brief,
+      perspectives  = excluded.perspectives,
+      updated_at    = excluded.updated_at,
+      expires_at    = excluded.expires_at
+  `).run({
+    id:            cluster.id,
+    title:         cluster.title,
+    summary:       cluster.summary || null,
+    category:      cluster.category,
+    keywords:      JSON.stringify(cluster.keywords || []),
+    article_ids:   JSON.stringify(cluster.article_ids || []),
+    article_count: cluster.article_count || 0,
+    brief:         JSON.stringify(cluster.brief || []),
+    perspectives:  cluster.perspectives ? JSON.stringify(cluster.perspectives) : null,
+    created_at:    cluster.created_at || Date.now(),
+    updated_at:    cluster.updated_at || Date.now(),
+    expires_at:    cluster.expires_at || (Date.now() + 24 * 60 * 60 * 1000),
+  });
+}
+
+function hydrateCluster(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    keywords:     tryParseJson(row.keywords, []),
+    article_ids:  tryParseJson(row.article_ids, []),
+    brief:        tryParseJson(row.brief, []),
+    perspectives: tryParseJson(row.perspectives, null),
+  };
+}
+
+export function listStoryClusters({ limit = 10 } = {}) {
+  return getDb().prepare(
+    `SELECT * FROM story_clusters WHERE expires_at > ? ORDER BY updated_at DESC LIMIT ?`
+  ).all(Date.now(), limit).map(hydrateCluster);
+}
+
+export function getStoryCluster(id) {
+  return hydrateCluster(getDb().prepare(
+    `SELECT * FROM story_clusters WHERE id = ?`
+  ).get(id));
+}
+
+// ─── Explained Pieces ─────────────────────────────────────────────────────
+
+export function upsertExplainedPiece(piece) {
+  getDb().prepare(`
+    INSERT INTO explained_pieces
+      (id, slug, title, category, summary, content, facts, timeline, sources,
+       image_url, created_at, updated_at, expires_at)
+    VALUES
+      (@id, @slug, @title, @category, @summary, @content, @facts, @timeline, @sources,
+       @image_url, @created_at, @updated_at, @expires_at)
+    ON CONFLICT(id) DO UPDATE SET
+      title      = excluded.title,
+      summary    = excluded.summary,
+      content    = excluded.content,
+      facts      = excluded.facts,
+      timeline   = excluded.timeline,
+      sources    = excluded.sources,
+      image_url  = excluded.image_url,
+      updated_at = excluded.updated_at,
+      expires_at = excluded.expires_at
+  `).run({
+    id:         piece.id,
+    slug:       piece.slug,
+    title:      piece.title,
+    category:   piece.category,
+    summary:    piece.summary || null,
+    content:    piece.content || null,
+    facts:      JSON.stringify(piece.facts || []),
+    timeline:   JSON.stringify(piece.timeline || []),
+    sources:    JSON.stringify(piece.sources || []),
+    image_url:  piece.image_url || null,
+    created_at: piece.created_at || Date.now(),
+    updated_at: piece.updated_at || Date.now(),
+    expires_at: piece.expires_at || (Date.now() + 12 * 60 * 60 * 1000),
+  });
+}
+
+function hydrateExplained(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    facts:    tryParseJson(row.facts, []),
+    timeline: tryParseJson(row.timeline, []),
+    sources:  tryParseJson(row.sources, []),
+  };
+}
+
+export function listExplainedPieces({ limit = 10 } = {}) {
+  return getDb().prepare(
+    `SELECT id, slug, title, category, summary, image_url, updated_at
+     FROM explained_pieces WHERE expires_at > ? ORDER BY updated_at DESC LIMIT ?`
+  ).all(Date.now(), limit).map(hydrateExplained);
+}
+
+export function getExplainedBySlug(slug) {
+  return hydrateExplained(getDb().prepare(
+    `SELECT * FROM explained_pieces WHERE slug = ?`
+  ).get(slug));
+}
+
+// ─── Article Analysis Cache ───────────────────────────────────────────────
+
+export function getArticleAnalysisCache(articleId) {
+  const row = getDb().prepare(
+    `SELECT * FROM article_analysis_cache WHERE article_id = ? AND expires_at > ?`
+  ).get(articleId, Date.now());
+  if (!row) return null;
+  return {
+    ...row,
+    takeaways:   tryParseJson(row.takeaways, []),
+    related_ids: tryParseJson(row.related_ids, []),
+  };
+}
+
+export function upsertArticleAnalysisCache(data) {
+  const now = Date.now();
+  getDb().prepare(`
+    INSERT INTO article_analysis_cache
+      (article_id, takeaways, tone, tone_reason, related_ids, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(article_id) DO UPDATE SET
+      takeaways   = excluded.takeaways,
+      tone        = excluded.tone,
+      tone_reason = excluded.tone_reason,
+      related_ids = excluded.related_ids,
+      created_at  = excluded.created_at,
+      expires_at  = excluded.expires_at
+  `).run(
+    data.article_id,
+    JSON.stringify(data.takeaways || []),
+    data.tone || "neutral",
+    data.tone_reason || null,
+    JSON.stringify(data.related_ids || []),
+    now,
+    now + 6 * 60 * 60 * 1000,
+  );
 }

@@ -36,6 +36,8 @@ import TermsPage           from "./pages/TermsPage";
 import EditorialPolicyPage from "./pages/EditorialPolicyPage";
 import ContactPage         from "./pages/ContactPage";
 import SponsorPage         from "./pages/SponsorPage";
+import AnalysisPage        from "./pages/AnalysisPage";
+import AnalysisExplainedPage from "./pages/AnalysisExplainedPage";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
 const HIDE_TOPICNAV_ON = [
@@ -44,6 +46,7 @@ const HIDE_TOPICNAV_ON = [
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
+  "/analysis",
 ];
 
 export default function App() {
@@ -134,6 +137,8 @@ export default function App() {
           <Route path="/editorial-policy"    element={<EditorialPolicyPage />} />
           <Route path="/contact"             element={<ContactPage />} />
           <Route path="/sponsor"             element={<SponsorPage />} />
+          <Route path="/analysis"            element={<AnalysisPage />} />
+          <Route path="/analysis/explained/:slug" element={<AnalysisExplainedPage />} />
           <Route path="*"                    element={<NotFound />} />
         </Routes>
       </main>

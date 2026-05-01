@@ -29,6 +29,7 @@ import tipsRouter        from "./src/routes/tips.js";
 import videoGenRouter    from "./src/routes/videos-gen.js";
 import newsletterOpsRouter from "./src/routes/newsletter-ops.js";
 import meterRouter       from "./src/routes/meter.js";
+import analysisRouter    from "./src/routes/analysis.js";
 import { detectCountry } from "./src/services/geolocation.js";
 import { skimlinksPublisherId, amazonInfoForCountry } from "./src/config/affiliates.js";
 import { isStripeConfigured } from "./src/routes/tips.js";
@@ -146,6 +147,7 @@ app.use("/api/push",        pushRouter);       // web push: VAPID public key, su
 app.use("/api/auth",        authRouter);       // magic-link auth: /request, /verify, /me, /logout, /saves
 app.use("/api/tips",        tipsRouter);       // Stripe tip jar: /create-session, /webhook, /stats
 app.use("/api/meter",       meterRouter);      // metered paywall: /open (gate check + record), /status
+app.use("/api/analysis",   cacheMiddleware("short"), analysisRouter); // AI-powered news analysis: stories, trends, deep-dive, explained
 app.use("/scoop-ops",       socialRouter);     // /scoop-ops/social-queue — preview auto-generated social captions (renamed from /admin to bypass host WAF)
 app.use("/scoop-ops/videos-gen", videoGenRouter); // video generation queue: /queue, /run, /approve/:id, /reject/:id
 app.use("/scoop-ops/newsletter", newsletterOpsRouter); // newsletter ops: /status, /welcome/run, /welcome/test

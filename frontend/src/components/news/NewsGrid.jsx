@@ -7,11 +7,13 @@ import { LoadingGrid } from "../ui/LoadingCard";
 import EmptyState from "../ui/EmptyState";
 import { AdSenseUnit } from "../ads/AdSense";
 import SponsorCard from "../ads/SponsorCard";
+import StoryBriefingCard from "../analysis/StoryBriefingCard";
 import { usePublicConfig } from "../../hooks/useNews";
 import { topicColor } from "../../lib/topicColors";
 
 const AD_INTERVAL = 6;        // show an in-feed ad after every N cards
 const SPONSOR_POSITION = 3;   // inject the sponsor card after the Nth article (front-of-feed)
+const ANALYSIS_POSITION = 8;  // inject the analysis briefing card after the Nth article
 
 const PAGE_SIZE = 18;
 
@@ -65,6 +67,10 @@ export default function NewsGrid({ articles = [], isLoading, error, onRefresh })
               // Native sponsor slot — appears once, near the top of the feed.
               if (i + 1 === SPONSOR_POSITION && sponsor?.enabled && i < visibleArticles.length - 1) {
                 items.push(<SponsorCard key="sponsor" sponsor={sponsor} />);
+              }
+              // Analysis briefing card — injected once mid-feed after first page load
+              if (i === ANALYSIS_POSITION && i < visibleArticles.length - 1) {
+                items.push(<StoryBriefingCard key="analysis-brief" />);
               }
               if ((i + 1) % AD_INTERVAL === 0 && i < visibleArticles.length - 1) {
                 items.push(

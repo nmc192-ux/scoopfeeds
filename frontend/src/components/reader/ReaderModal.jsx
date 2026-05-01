@@ -21,6 +21,7 @@ import TipJar from "../tips/TipJar";
 import NewsletterSignup, { readSubToken } from "../newsletter/NewsletterSignup";
 import { AdSenseUnit } from "../ads/AdSense";
 import SafeImage from "../ui/SafeImage";
+import ArticleDeepDive from "../analysis/ArticleDeepDive";
 
 // Fetches 4 related stories in the same category, used by the recirculation
 // block at the bottom of the reader. Cached per category to avoid re-fetching
@@ -405,6 +406,11 @@ export default function ReaderModal() {
                 <div className="mt-8 pt-6 border-t border-[var(--color-border)]">
                   <NewsletterSignup compact source="reader_modal" />
                 </div>
+              )}
+
+              {/* AI Deep Dive — lazy analysis panel, only fires when expanded */}
+              {(!meterResult || meterResult.allowed) && html && article && (
+                <ArticleDeepDive article={article} />
               )}
 
               {/* Support Scoop tip CTA — renders when Ko-fi is configured */}
