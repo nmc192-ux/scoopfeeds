@@ -296,7 +296,7 @@ export function autoApproveReadyJobs({
 } = {}) {
   const cutoff = Date.now() - maxAgeHours * 60 * 60 * 1000;
   const candidates = getDb().prepare(`
-    SELECT j.id, j.article_id, j.output_path, j.created_at,
+    SELECT j.id, j.article_id, j.output_path, j.created_at, j.has_audio,
            a.title, a.category, a.credibility, a.published_at
     FROM video_jobs j
     LEFT JOIN articles a ON a.id = j.article_id
@@ -318,6 +318,14 @@ export function autoApproveReadyJobs({
 
     const reason = (() => {
       if (!existsSync(c.output_path)) return "output_missing";
+      // Silent videos (no narration) read as low-effort on Reels/Shorts —
+      // every view starts with a "wait, is this broken?" moment when there's
+      // no voice. Hold them for human review until TTS produced narration.
+      // Operators who want to post silent clips anyway can flip
+      // VIDEO_AUTO_APPROVE_ALLOW_SILENT=1.
+      if (!c.has_audio && process.env.VIDEO_AUTO_APPROVE_ALLOW_SILENT !== "1") {
+        return "no_audio";
+      }
       if (isRecapJob) {
         // Stale recap (>48h since render) doesn't justify auto-publishing.
         if ((c.created_at || 0) < Date.now() - 48 * 60 * 60 * 1000) return "stale_recap";
