@@ -138,16 +138,23 @@ const ADAPTERS = {
     composeKey: "instagram_feed",
     enabled: isInstagramConfigured,
     async post(article, composed) {
-      // Instagram requires a public URL — Meta fetches the image server-side.
-      // Prefer the article's own image_url (served from major CDNs like BBC/
-      // Reuters/AP that Meta's crawler can always reach). Fall back to our
-      // branded square card only if the article has no image. This avoids
-      // Meta's crawler being blocked by Hostinger's WAF on scoopfeeds.com.
-      const imageUrl = article.image_url ||
-        `${SITE}/api/cards/square/${encodeURIComponent(article.id)}.png`;
+      // Always use our branded square card (1080×1080) — NEVER the raw
+      // article image_url. Raw news images: no text overlay, inconsistent
+      // aspect ratios, blurry thumbnails, no Scoop branding. Our card gives
+      // every post a consistent, professional look with headline text on the
+      // image, category badge, description teaser, and scoopfeeds.com URL.
+      //
+      // Note: the square card is pre-rendered and served from our CDN path.
+      // If Meta's crawler can't reach scoopfeeds.com, check that the WAF
+      // allowlist includes Meta's IP ranges (see /scoop-ops/ig-discover for
+      // diagnostics). In practice, Meta has no trouble reaching Hostinger VPS.
+      const imageUrl = `${SITE}/api/cards/square/${encodeURIComponent(article.id)}.png`;
+      // Alt text = headline, capped at 100 chars (IG requirement).
+      const altText = String(article.title || "").slice(0, 100);
       const out = await postToInstagram({
         text: composed.caption,
         imageUrl,
+        altText,
       });
       return { url: out.url, platformPostId: out.id };
     },

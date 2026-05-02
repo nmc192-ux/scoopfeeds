@@ -115,10 +115,11 @@ function truncate(s, limit) {
 
 function headlineCap(preset) {
   // Per-preset headline character budget — tuned so text fills ~3 lines at
-  // the configured font size without overflowing the hero region. Tighter
-  // than the previous design because we bumped headline size for impact.
+  // the configured font size without overflowing the hero region. The square
+  // preset is tighter because we now reserve space below the headline for a
+  // 2-line description teaser.
   if (preset === "og") return 120;
-  if (preset === "square") return 150;
+  if (preset === "square") return 100; // reduced — description teaser below
   return 200;
 }
 
@@ -418,14 +419,25 @@ function buildCarouselTree(article, slide) {
   };
 }
 
-// Hash that invalidates the cache if the headline or category changes.
+// Hash that invalidates the cache if the headline, category, or description
+// changes — or when the card design version bumps (CARD_DESIGN_VER).
+// Bump CARD_DESIGN_VER whenever the visual layout changes so stale cached
+// PNGs are never served alongside the new design.
+const CARD_DESIGN_VER = "v2"; // bumped: description teaser + scoopfeeds.com footer for square
+
 function contentHash(article) {
   const h = createHash("sha1");
+  h.update(CARD_DESIGN_VER);
+  h.update("|");
   h.update(String(article.title || ""));
   h.update("|");
   h.update(String(article.category || ""));
   h.update("|");
   h.update(String(article.source_name || ""));
+  h.update("|");
+  // Include first 80 chars of description so the teaser re-renders when
+  // the description is corrected/enriched after first ingest.
+  h.update(String(article.description || "").slice(0, 80));
   return h.digest("hex").slice(0, 10);
 }
 
@@ -589,10 +601,71 @@ function buildTree(article, preset, opts = {}) {
   };
 
   // Footer: hairline divider + (source · date) on left, tagline on right.
+  // For the square (Instagram) preset: replace the tagline with a prominent
+  // "scoopfeeds.com ↗" so the branded URL is immediately visible in the feed.
   const footerLeftPieces = [];
   if (source) footerLeftPieces.push(`Via ${source}`);
   if (dateStr) footerLeftPieces.push(dateStr);
   const footerLeft = footerLeftPieces.join("  ·  ");
+
+  const isSquare = preset === "square";
+
+  // Square-only: description teaser — 2 lines of article context visible in
+  // the image itself. Gives the viewer a reason to "link in bio" before they
+  // even read the caption. Shown only when description is non-empty.
+  const descTeaser = (() => {
+    if (!isSquare) return null;
+    const rawDesc = String(article.description || "").replace(/\s+/g, " ").trim();
+    if (!rawDesc) return null;
+    const text = truncate(rawDesc, 130);
+    return {
+      type: "div",
+      props: {
+        style: {
+          display: "flex",
+          fontSize: 28,
+          fontWeight: 600,
+          lineHeight: 1.45,
+          color: "#A1A1AA",
+          letterSpacing: 0.1,
+        },
+        children: text,
+      },
+    };
+  })();
+
+  // Right-side footer: branded tagline normally, prominent "scoopfeeds.com ↗"
+  // for the square (IG) preset to maximize brand recall in the feed.
+  const footerRight = isSquare
+    ? {
+        type: "div",
+        props: {
+          style: { display: "flex", flexDirection: "row", gap: 3, alignItems: "baseline" },
+          children: [
+            {
+              type: "span",
+              props: {
+                style: { display: "flex", fontSize: taglineFont + 3, fontWeight: 700, color, letterSpacing: -0.3 },
+                children: "scoopfeeds.com",
+              },
+            },
+            {
+              type: "span",
+              props: {
+                style: { display: "flex", fontSize: taglineFont, fontWeight: 600, color: "#52525B" },
+                children: " ↗",
+              },
+            },
+          ],
+        },
+      }
+    : {
+        type: "div",
+        props: {
+          style: { display: "flex", fontSize: taglineFont, fontWeight: 600, color: "#71717A", letterSpacing: 0.5 },
+          children: "News, sniffed out.",
+        },
+      };
 
   const footerSection = {
     type: "div",
@@ -639,23 +712,26 @@ function buildTree(article, preset, opts = {}) {
                   children: footerLeft || " ",
                 },
               },
-              {
-                type: "div",
-                props: {
-                  style: {
-                    display: "flex",
-                    fontSize: taglineFont,
-                    fontWeight: 600,
-                    color: "#71717A",
-                    letterSpacing: 0.5,
-                  },
-                  children: "News, sniffed out.",
-                },
-              },
+              footerRight,
             ],
           },
         },
       ],
+    },
+  };
+
+  // Middle section: headline + optional description teaser, grouped so they
+  // stay together when justifyContent: "space-between" positions the three
+  // main regions (header · mid · footer).
+  const midSection = {
+    type: "div",
+    props: {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: isSquare ? 24 : 0,
+      },
+      children: [headlineSection, ...(descTeaser ? [descTeaser] : [])],
     },
   };
 
@@ -673,7 +749,7 @@ function buildTree(article, preset, opts = {}) {
         paddingTop: dims.padding - 8, // shave a touch since accent bar adds visual weight up top
         paddingBottom: dims.padding,
       },
-      children: [headerRow, headlineSection, footerSection],
+      children: [headerRow, midSection, footerSection],
     },
   };
 

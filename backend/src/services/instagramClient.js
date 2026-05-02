@@ -201,15 +201,24 @@ export async function postReelToInstagram({ videoUrl, caption = "" }) {
 // Public: post a single image with caption. Returns { id, url }.
 //   text     — caption text (max ~2200 chars; we leave that to the composer)
 //   imageUrl — publicly fetchable URL (Meta needs to GET it server-side)
-export async function postToInstagram({ text, imageUrl }) {
+//   altText  — optional accessibility alt text for the image (max 100 chars).
+//              Passed to the media container as `alt_text`. Improves
+//              accessibility AND feeds IG's image-understanding ranking signal.
+export async function postToInstagram({ text, imageUrl, altText = "" }) {
   const t = _loadToken();
   if (!t) throw new Error("instagram not configured");
   if (!imageUrl) throw new Error("instagram requires an image_url (no text-only posts)");
 
   // Step 1: create the media container.
+  const containerParams = {
+    image_url: imageUrl,
+    caption: text || "",
+  };
+  if (altText) containerParams.alt_text = String(altText).slice(0, 100);
+
   const create = await _call(`/${t.userId}/media`, {
     method: "POST",
-    params: { image_url: imageUrl, caption: text || "" },
+    params: containerParams,
   });
   if (!create?.id) {
     throw new Error(`instagram container creation returned no id: ${JSON.stringify(create).slice(0, 200)}`);

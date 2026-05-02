@@ -416,20 +416,128 @@ function composeLinkedIn(article) {
   return { caption, url, characterCount: caption.length };
 }
 
+// ── Instagram-specific constants ──────────────────────────────────────────
+
+// Per-category hashtag pools. These combine with IG_BASE_HASHTAGS → 12-15
+// total tags, the sweet spot for news accounts (enough for discovery,
+// not enough to look spammy).
+const IG_CATEGORY_HASHTAGS = {
+  top:          ["#breakingnews", "#headlines", "#worldnews", "#topnews", "#newsalert", "#latestnews", "#newsfeed", "#newsbreak"],
+  politics:     ["#politics", "#politicalnews", "#government", "#worldpolitics", "#policywatch", "#politico", "#elections", "#democracy"],
+  pakistan:     ["#Pakistan", "#PakistanNews", "#pakistani", "#southasia", "#desi", "#PakNews", "#islamabad", "#karachi"],
+  international:["#worldnews", "#international", "#globalaffairs", "#geopolitics", "#foreignpolicy", "#diplomacy", "#worldaffairs", "#globalnews"],
+  science:      ["#science", "#sciencenews", "#research", "#discovery", "#STEM", "#innovation", "#sciencefacts", "#newresearch"],
+  medicine:     ["#medicine", "#healthcare", "#medicalresearch", "#healthnews", "#doctors", "#medicalbreakthrough", "#clinicalresearch", "#globalhealth"],
+  "public-health":["#publichealth", "#healthpolicy", "#healthcare", "#globalhealth", "#pandemic", "#epidemiology", "#healthawareness", "#wellness"],
+  health:       ["#health", "#wellness", "#healthtips", "#selfcare", "#healthylifestyle", "#wellbeing", "#mentalhealth", "#healthyliving"],
+  environment:  ["#environment", "#climatechange", "#climate", "#sustainability", "#greennews", "#climatecrisis", "#ecofriendly", "#savetheplanet"],
+  "self-help":  ["#selfimprovement", "#selfhelp", "#personaldevelopment", "#motivation", "#growthmindset", "#mindset", "#successmindset", "#positivity"],
+  sports:       ["#sports", "#sportsnews", "#athlete", "#sportsupdate", "#football", "#cricket", "#sportsmotivation", "#sportslife"],
+  cars:         ["#cars", "#automotive", "#carporn", "#carlife", "#EVs", "#autoshow", "#carlover", "#carsofinstagram"],
+  ai:           ["#AI", "#artificialintelligence", "#tech", "#technology", "#MachineLearning", "#futuretech", "#AItools", "#deeplearning"],
+};
+
+// Always included in every IG post.
+const IG_BASE_HASHTAGS = ["#ScoopFeeds", "#news", "#currentevents", "#dailynews", "#newsoftheday"];
+
+// Category-aware engagement CTAs. Two signals drive IG algorithm reach for
+// news accounts: comments and saves. Mix question types (opinion / share /
+// save) so posts don't all read identically.
+const IG_ENGAGEMENTS = {
+  politics:      ["💬 What's your take? Drop it below! 👇", "📢 Agree or disagree? Comment below!", "💭 Where do you stand? Let us know 👇"],
+  pakistan:      ["🇵🇰 Your thoughts? Drop them below! 👇", "💬 How will this play out? Comment below!", "📢 Share your take 👇"],
+  international: ["🌍 How does this look from your country? 👇", "💬 What does this mean globally? Drop a comment!", "📢 Your thoughts 👇"],
+  science:       ["🔬 Surprised? Comment below! 👇", "💬 What's the next big question this raises? 🤔", "📢 Mind blown? Share this post! 🚀"],
+  medicine:      ["💊 Would this change how you think about your health? 👇", "💬 Share this with someone who needs to see it! 📲", "🏥 Thoughts? Drop a comment below 👇"],
+  "public-health":["💬 Is this getting enough attention? 👇", "📢 Tag someone who should see this! 📲", "🏥 Share your thoughts 👇"],
+  health:        ["💪 Have you noticed this yourself? Comment below! 👇", "💬 Save this for later 🔖 then tell us your thoughts 👇", "🌟 Tag a friend who needs to see this! 📲"],
+  environment:   ["🌱 Is enough being done? Comment below! 👇", "💬 Share this — awareness is the first step 📲", "🌍 What's one thing you're doing for the planet? 👇"],
+  "self-help":   ["🌟 Save this post for when you need a reminder 🔖", "💬 What would you add to this? 👇", "📲 Share with someone who needs to hear it!"],
+  sports:        ["🏆 Game-changer or one-off? Comment below! 👇", "💬 Hot take? Drop it below! 🔥", "📢 Tag a fellow fan! 📲"],
+  cars:          ["🚗 Would you drive one? Comment below! 👇", "💬 Hot take? Drop it below! 🔥", "📢 Tag a car lover! 📲"],
+  ai:            ["🤖 Game-changer or hype? Comment below! 👇", "💬 Excited or concerned? Tell us 👇", "📢 Tag a tech friend who should see this! 📲"],
+  top:           ["💬 What do you think? Drop a comment below! 👇", "📲 Share this with someone who should see it!", "🔥 Hot take? We're listening 👇"],
+};
+
+// Build the hashtag list: base + category-specific, deduplicated, capped at 15.
+function buildIgHashtags(article) {
+  const catTags = IG_CATEGORY_HASHTAGS[article.category] || IG_CATEGORY_HASHTAGS.top;
+  const seen = new Set();
+  const result = [];
+  for (const t of [...IG_BASE_HASHTAGS, ...catTags]) {
+    const lower = t.toLowerCase();
+    if (!seen.has(lower)) { seen.add(lower); result.push(t); }
+    if (result.length >= 15) break;
+  }
+  return result;
+}
+
+// Pick a stable engagement CTA from the pool (same article always → same CTA).
+function pickIgEngagement(article, cleanTitle) {
+  if (TRAGEDY_KEYWORDS.test(cleanTitle)) return null;
+  const pool = IG_ENGAGEMENTS[article.category] || IG_ENGAGEMENTS.top;
+  const id = String(article.id || "");
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return pool[h % pool.length];
+}
+
 function composeInstagramFeed(article) {
-  // Instagram doesn't allow clickable links in captions — we pin them in bio
-  // or use link-stickers in Stories. Caption focuses on hook + CTA to bio.
+  // Instagram captions: no clickable links in body — pin them in bio.
+  // Best-practice structure for news accounts (maximises comments + saves,
+  // the two signals that most boost IG reach in the feed algorithm):
+  //
+  //   [emoji] [cleaned headline]          ← hook (visible before "…more")
+  //
+  //   [2-3 sentence context]              ← brief, readable
+  //
+  //   [engagement CTA — question/share]   ← drives comments & saves
+  //
+  //   🔗 Full story → Link in bio @handle ← explicit CTA
+  //
+  //   .                                   ← dots collapse hashtags
+  //   .
+  //   .
+  //   #tag1 #tag2 … (12-15 tags)          ← discovery, below the fold
   const emoji = CATEGORY_EMOJI[article.category] || "📰";
-  const hashtags = [...(CATEGORY_HASHTAGS[article.category] || []), BRAND_HASHTAG, "#newsoftheday", "#dailynews"].slice(0, 8);
-  const body = truncate(article.description || "", 260);
+  const cleanTitle = cleanHeadline(article.title) || article.title || "";
+  const desc = String(article.description || "").trim();
   const url = utmUrl(article.id, "instagram");
-  const caption = [
-    `${emoji} ${article.title}`,
+
+  // Hook line — emoji + cleaned headline, stays above the "more" fold.
+  const hook = `${emoji} ${cleanTitle}`;
+
+  // Body — first 2-3 sentences of description, sentence-aware truncation so
+  // it reads as a complete thought rather than a cut-off string.
+  const body = desc ? truncateBySentence(desc, 300) : "";
+
+  // Engagement CTA — category-aware, avoids tragedy topics.
+  const engagement = pickIgEngagement(article, cleanTitle);
+
+  // Bio-link instruction with the handle so followers know exactly where to go.
+  const igHandle = (process.env.INSTAGRAM_HANDLE || "scoop.feeds").trim();
+  const linkCta = `🔗 Full story → Link in bio @${igHandle}`;
+
+  // Hashtags (12-15). Three-dot separator pushes them below the "more" fold
+  // on mobile — keeps the main caption clean while preserving discovery value.
+  const hashtags = buildIgHashtags(article);
+
+  const parts = [
+    hook,
     body || null,
-    `🔗 Full story: link in bio → scoopfeeds.com`,
+    engagement || null,
+    linkCta,
+    ".\n.\n.",
     hashtags.join(" "),
-  ].filter(Boolean).join("\n\n");
-  return { caption, url, characterCount: caption.length, meta: { note: "Link goes in bio (IG captions aren't clickable)." } };
+  ].filter(Boolean);
+
+  const caption = parts.join("\n\n");
+  return {
+    caption,
+    url,
+    characterCount: caption.length,
+    meta: { note: `Link goes in bio (@${igHandle}). Hashtags after the dot-separator.` },
+  };
 }
 
 function composePinterest(article) {
