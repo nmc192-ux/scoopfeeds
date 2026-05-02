@@ -21,24 +21,57 @@ import { getStockPhotoForArticle, stockPhotoAsDataUri, isStockPhotoEnabled } fro
 // converts it to a base64 data URI, and caches it on disk so re-renders are fast.
 // Returns null on any failure (network error, non-image, too large, etc.).
 //
-// Many news CDNs (BBC, Reuters, etc.) block fetches with non-browser UAs or
-// expose only thumbnail-size images at the URL the RSS feed advertises. We
-// therefore: (1) send a realistic browser User-Agent + Accept headers, (2)
-// rewrite known thumbnail URL patterns to high-res variants before fetching.
+// News CDNs are hostile in three different ways and we have to handle each:
+//   1. UA blocking — they reject non-browser User-Agents. Solved with a
+//      realistic Chrome UA + Accept-Language + Accept headers.
+//   2. Hotlink protection — many require Referer pointing at the publisher's
+//      site (not the CDN itself). We use a generic search-engine Referer
+//      (google.com/) which most CDNs accept and which mimics organic traffic.
+//   3. URL-thumbnail problem — RSS feeds advertise tiny thumbnail URLs (BBC's
+//      /240x135/ path, Hill's ?w=900). We rewrite these to high-res variants,
+//      with a fallback to the original URL if the upscale doesn't work.
 function upscaleKnownThumbnailUrl(url) {
-  // BBC: https://ichef.bbci.co.uk/images/ic/240x135/p0xyz.jpg → swap to /1024x576/
-  // The BBC CDN serves the same image at multiple sizes via a path segment.
+  // Skip upscaling URLs with signed-token params — changing width breaks the
+  // signature (Guardian: ?s=..., AWS-signed: ?X-Amz-Signature=..., etc.).
+  if (/[?&](?:s|sig|signature|x-amz-signature|token)=/i.test(url)) return url;
+
+  // BBC iChef: /images/ic/240x135/x.jpg → /images/ic/976x549/x.jpg
+  // 976 is BBC's largest standard size; 1024 returns a 1-byte placeholder.
   let out = url.replace(
     /(\/images\/ic\/)\d{2,4}x\d{2,4}(\/[a-z0-9]+\.(?:jpg|jpeg|png|webp))/i,
-    "$11024x576$2"
+    "$1976x549$2"
   );
-  // CNN: i2.cdn.turner.com/.../{w}x{h}/... — leave alone (works as-is at any res)
-  // Reuters: cloudfront-us-east-2.images.arcpublishing.com/reuters/.../resize/{w}/{h}/quality/.../format/jpg
-  // Generic: ?w=240 / &width=240 query params → bump to 1080
+  // BBC ace: /ace/standard/240/cpsprodpb/... → /ace/standard/976/cpsprodpb/...
+  // Same CDN, different URL shape used for newer articles.
   if (out === url) {
-    out = url.replace(/([?&](?:w|width|size))=\d{2,3}\b/gi, "$1=1080");
+    out = url.replace(
+      /(\/ace\/(?:standard|landscape|portrait|square)\/)(\d{2,4})(\/cpsprodpb\/)/i,
+      "$1976$3"
+    );
+  }
+  // Generic query-param pattern: ?w=240 / &width=240 / ?size=300 → 1080.
+  // Done last because it's the broadest match.
+  if (out === url) {
+    out = url.replace(/([?&](?:w|width|size))=\d{2,4}\b/gi, "$1=1080");
   }
   return out;
+}
+
+// JPEG / PNG / WebP magic-byte detector. Used to verify fetched bytes are an
+// actual image (some CDNs return 200 with a 1-byte placeholder body when a
+// requested size doesn't exist) and to normalise the MIME type for satori.
+function detectImageMime(buf) {
+  if (!buf || buf.length < 12) return null;
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return "image/png";
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return "image/jpeg";
+  // WebP: "RIFF" .... "WEBP"
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46
+      && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return "image/webp";
+  // GIF: "GIF87a" / "GIF89a"
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return "image/gif";
+  return null;
 }
 
 async function fetchArticlePhotoDataUri(imageUrl, imgCacheDir) {
@@ -67,8 +100,10 @@ async function fetchArticlePhotoDataUri(imageUrl, imgCacheDir) {
     }
   }
 
-  // Fetch with browser-like headers (some CDNs reject non-browser UAs) and a
-  // generous timeout (Hostinger outbound to remote CDNs can be slow).
+  // Fetch with browser-like headers and an organic Referer. CDN hotlink
+  // protection rejects empty referers and referers pointing at the CDN itself,
+  // so we use google.com/ which mimics a search-result click. Generous timeout
+  // because Hostinger → remote CDN paths can be slow.
   const tryFetch = async (urlToFetch) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
@@ -80,59 +115,54 @@ async function fetchArticlePhotoDataUri(imageUrl, imgCacheDir) {
           "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
           "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
           "Accept-Language": "en-US,en;q=0.9",
-          "Referer": (() => {
-            try { return new URL(urlToFetch).origin + "/"; } catch { return "https://www.google.com/"; }
-          })(),
+          "Referer": "https://www.google.com/",
         },
       });
-      return res;
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      // Magic-byte sniff — many CDNs return 200 + image/* content-type but
+      // a 1-byte body when the requested size variant doesn't exist.
+      // Validating the magic bytes guarantees satori actually has decodable
+      // pixels to render.
+      const mime = detectImageMime(buf);
+      if (!mime) return null;
+      // Reject suspiciously small (broken thumbnails) or huge bodies.
+      if (buf.length < 2500 || buf.length > 12 * 1024 * 1024) return null;
+      return { buf, mime };
+    } catch (err) {
+      if (!String(err.name || "").includes("Abort")) {
+        logger.warn(`card renderer: image fetch error for ${urlToFetch.slice(0, 80)}: ${err.message}`);
+      }
+      return null;
     } finally {
       clearTimeout(timer);
     }
   };
 
-  try {
-    let res = await tryFetch(finalUrl);
-    // If upscaled URL fails (e.g. CDN doesn't have that resolution), fall
-    // back to the original thumbnail URL.
-    if ((!res.ok || !(res.headers.get("content-type") || "").toLowerCase().startsWith("image/"))
-        && finalUrl !== imageUrl) {
-      res = await tryFetch(imageUrl);
-    }
-
-    if (!res.ok) {
-      logger.warn(`card renderer: article image HTTP ${res.status} for ${imageUrl.slice(0, 80)}`);
-      return null;
-    }
-    const ct = (res.headers.get("content-type") || "").toLowerCase();
-    if (!ct.startsWith("image/")) {
-      logger.warn(`card renderer: article image non-image type "${ct}" for ${imageUrl.slice(0, 80)}`);
-      return null;
-    }
-
-    const buf = Buffer.from(await res.arrayBuffer());
-    // Skip suspiciously small (broken) or enormous images.
-    if (buf.length < 2000 || buf.length > 12 * 1024 * 1024) {
-      logger.warn(`card renderer: article image size ${buf.length}b out of range for ${imageUrl.slice(0, 80)}`);
-      return null;
-    }
-
-    let ext = ".jpg";
-    let mime = "image/jpeg";
-    if (ct.includes("png"))  { ext = ".png";  mime = "image/png"; }
-    else if (ct.includes("webp")) { ext = ".webp"; mime = "image/webp"; }
-
-    const cachePath = path.join(imgCacheDir, `${urlHash}${ext}`);
-    try { writeFileSync(cachePath, buf); } catch {}
-    return `data:${mime};base64,${buf.toString("base64")}`;
-  } catch (err) {
-    if (!String(err.name || "").includes("Abort")) {
-      logger.warn(`card renderer: article image fetch failed for ${imageUrl.slice(0, 80)}: ${err.message}`);
-    } else {
-      logger.warn(`card renderer: article image fetch timed out for ${imageUrl.slice(0, 80)}`);
-    }
+  // Try upscaled URL first; if it doesn't return a valid image (CDN gave a
+  // 1-byte placeholder, 404, or not-an-image type), fall back to the original
+  // thumbnail URL. Better a small valid image than no image at all.
+  let result = await tryFetch(finalUrl);
+  if (!result && finalUrl !== imageUrl) {
+    result = await tryFetch(imageUrl);
+  }
+  if (!result) {
+    logger.warn(`card renderer: article image unusable for ${imageUrl.slice(0, 80)}`);
     return null;
   }
+
+  // Satori only handles JPEG / PNG natively. WebP and GIF inputs would render
+  // as broken images and trigger a 500 on the cards endpoint. Reject anything
+  // that isn't JPEG/PNG so the renderer falls through to no-photo mode.
+  if (result.mime !== "image/jpeg" && result.mime !== "image/png") {
+    logger.warn(`card renderer: unsupported image type ${result.mime} for ${imageUrl.slice(0, 80)}`);
+    return null;
+  }
+
+  const ext = result.mime === "image/png" ? ".png" : ".jpg";
+  const cachePath = path.join(imgCacheDir, `${urlHash}${ext}`);
+  try { writeFileSync(cachePath, result.buf); } catch {}
+  return `data:${result.mime};base64,${result.buf.toString("base64")}`;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -542,7 +572,7 @@ function buildCarouselTree(article, slide) {
 // changes — or when the card design version bumps (CARD_DESIGN_VER).
 // Bump CARD_DESIGN_VER whenever the visual layout changes so stale cached
 // PNGs are never served alongside the new design.
-const CARD_DESIGN_VER = "v4"; // bumped: magazine — no social icons, stronger photo fetch, Pexels fallback
+const CARD_DESIGN_VER = "v5"; // bumped: BBC ace pattern, magic-byte validation, signature-aware skip
 
 function contentHash(article, preset) {
   const h = createHash("sha1");
@@ -1283,17 +1313,28 @@ function buildTree(article, preset, opts = {}) {
 
 async function renderPng(article, preset, opts = {}) {
   const dims = PRESETS[preset];
-  const tree = buildTree(article, preset, opts);
-  const svg = await satori(tree, {
-    width: dims.width,
-    height: dims.height,
-    fonts: [
-      { name: "Inter", data: FONT_SEMIBOLD, weight: 600, style: "normal" },
-      { name: "Inter", data: FONT_BOLD,     weight: 700, style: "normal" },
-    ],
-  });
-  const resvg = new Resvg(svg, { background: "#0B0B0D", fitTo: { mode: "original" } });
-  return resvg.render().asPng();
+  const fonts = [
+    { name: "Inter", data: FONT_SEMIBOLD, weight: 600, style: "normal" },
+    { name: "Inter", data: FONT_BOLD,     weight: 700, style: "normal" },
+  ];
+
+  // First attempt: with whatever bgDataUri we got. If satori or resvg throw
+  // (e.g. malformed image bytes that magic-byte sniff didn't catch — corrupt
+  // JPEG headers, truncated PNGs), retry without the photo so we still
+  // produce a valid card instead of 500'ing the cards endpoint.
+  try {
+    const tree = buildTree(article, preset, opts);
+    const svg = await satori(tree, { width: dims.width, height: dims.height, fonts });
+    return new Resvg(svg, { background: "#0B0B0D", fitTo: { mode: "original" } }).render().asPng();
+  } catch (err) {
+    if (opts.bgDataUri) {
+      logger.warn(`card renderer: render failed with photo for ${article.id} — retrying without: ${err.message}`);
+      const tree = buildTree(article, preset, { ...opts, bgDataUri: null });
+      const svg = await satori(tree, { width: dims.width, height: dims.height, fonts });
+      return new Resvg(svg, { background: "#0B0B0D", fitTo: { mode: "original" } }).render().asPng();
+    }
+    throw err;
+  }
 }
 
 // Public API: returns { path, buffer, contentType } — caches on disk.
