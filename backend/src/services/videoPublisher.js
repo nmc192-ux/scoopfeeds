@@ -59,6 +59,26 @@ const SITE_ORIGIN = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").r
 // thumbnail. Stays in human-review queue.
 const TRAGEDY_KEYWORDS = /\b(dies?|killed|death|murdered|fatal|tragedy|massacre|crash|attack|shooting|terror|disaster|funeral|mourns?|stabbed|drowned|murders?|homicide|assassinat|gunman)\b/i;
 
+// Programming-block / show-promo headlines — recurring TV/radio segments
+// that some sources syndicate as "articles" (Bloomberg's daily shows, BBC
+// programs, etc.). Generated as videos they read as noise, never news.
+// Mirrors the filter in socialPublisher.js so video and text channels
+// agree on what counts as auto-postable news.
+const PROGRAMMING_BLOCK_PATTERNS = [
+  /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
+  /\b\d{1,2}-\d{1,2}-\d{2,4}\b/,
+  /^the [\w\s'.&-]{2,40} show\s*$/i,
+  /^the [\w\s'.&-]{2,40} show\b.*\d/i,
+  /^bloomberg\s+(daybreak|surveillance|the\s+open|the\s+close|markets|technology|wall\s+street(\s+week)?|asia|europe|americas|business\s*week)\b/i,
+  /^(squawk\s+box|squawk\s+on\s+the\s+street|fast\s+money|mad\s+money|closing\s+bell|opening\s+bell|power\s+lunch)\b/i,
+  /^(watch|listen)\s+live:?\s*$/i,
+  /^live\s*:\s*[\w\s.,'-]{0,30}$/i,
+];
+function looksLikeProgrammingBlock(title) {
+  if (!title || typeof title !== "string") return true;
+  return PROGRAMMING_BLOCK_PATTERNS.some(re => re.test(title));
+}
+
 // Categories where auto-publishing breaking-style video clips would feel
 // crass even with a clean headline. Skip these — humans review.
 const AUTO_PUBLISH_SKIP_CATEGORIES = new Set([
@@ -291,13 +311,24 @@ export function autoApproveReadyJobs({
 
   for (const c of candidates) {
     if (approved.length >= limit) break;
+    // Recap / live-event videos use synthetic article_ids (e.g. recap-daily-all-...).
+    // They have no article-table row → no title, no credibility. Approve them
+    // based on freshness of the JOB itself instead of the absent article.
+    const isRecapJob = !c.title && /^(recap|live-event)/i.test(String(c.article_id || ""));
+
     const reason = (() => {
+      if (!existsSync(c.output_path)) return "output_missing";
+      if (isRecapJob) {
+        // Stale recap (>48h since render) doesn't justify auto-publishing.
+        if ((c.created_at || 0) < Date.now() - 48 * 60 * 60 * 1000) return "stale_recap";
+        return null;
+      }
       if (!c.title) return "no_title";
       if ((c.credibility || 0) < minCredibility) return `low_credibility(${c.credibility})`;
       if ((c.published_at || 0) < cutoff) return "stale_article";
       if (TRAGEDY_KEYWORDS.test(c.title)) return "tragedy_keyword";
+      if (looksLikeProgrammingBlock(c.title)) return "programming_block";
       if (AUTO_PUBLISH_SKIP_CATEGORIES.has(c.category)) return `skip_category(${c.category})`;
-      if (!existsSync(c.output_path)) return "output_missing";
       return null;
     })();
     if (reason) {
