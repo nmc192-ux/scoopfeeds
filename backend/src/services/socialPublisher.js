@@ -139,32 +139,53 @@ const ADAPTERS = {
     composeKey: "instagram_feed",
     enabled: isInstagramConfigured,
     async post(article, composed) {
-      // Post as a 3-slide CAROUSEL: cover (magazine photo card) → key points
-      // (typographic bullets from description) → CTA (scoopfeeds.com end card).
-      // News carousels see ~70% higher save rate than single images on IG;
-      // saves are the strongest algorithmic signal in the feed ranker.
+      // Post style is controlled by IG_POST_STYLE env var:
+      //   "carousel" (default) — 3-slide carousel (cover → key points → CTA).
+      //                          Highest save-rate, but requires the CAROUSEL_ALBUM
+      //                          API path which has stricter rate limits.
+      //   "single"             — single branded square card (reliable, was original).
+      //   "auto"               — tries carousel, falls back to single if it throws.
       //
-      // All three slides are pre-rendered + cached at /api/cards/{preset}/{id}.png
-      // and served publicly so Meta's crawler can fetch them server-side.
+      // Meta's carousel API is more fragile than single-image: the 4-step
+      // child-container → wait-FINISHED → parent-container → publish dance can fail
+      // if any container takes too long or the children param is mis-formed.
+      // Setting IG_POST_STYLE=auto makes the adapter self-heal.
+      const style = (process.env.IG_POST_STYLE || "auto").toLowerCase();
       const baseId = encodeURIComponent(article.id);
+
+      const squareUrl = `${SITE}/api/cards/square/${baseId}.png`;
+      const singleAlt = String(article.title || "").slice(0, 100);
+
       const imageUrls = [
-        `${SITE}/api/cards/square/${baseId}.png`,    // slide 1 — magazine cover
-        `${SITE}/api/cards/carousel2/${baseId}.png`, // slide 2 — key points
-        `${SITE}/api/cards/carousel3/${baseId}.png`, // slide 3 — read at scoopfeeds.com
+        squareUrl,
+        `${SITE}/api/cards/carousel2/${baseId}.png`,
+        `${SITE}/api/cards/carousel3/${baseId}.png`,
       ];
-      // Alt texts per slide. Slide 1 = headline (most important for SEO/access).
-      // Slides 2/3 carry their own descriptive alt text.
       const altTexts = [
-        String(article.title || "").slice(0, 100),
+        singleAlt,
         `Key points from ${article.source_name || "the source"}`.slice(0, 100),
         "Read the full story at scoopfeeds.com",
       ];
-      const out = await postCarouselToInstagram({
-        text: composed.caption,
-        imageUrls,
-        altTexts,
-      });
-      return { url: out.url, platformPostId: out.id };
+
+      const tryCarousel = async () => {
+        const out = await postCarouselToInstagram({ text: composed.caption, imageUrls, altTexts });
+        return { url: out.url, platformPostId: out.id };
+      };
+      const trySingle = async () => {
+        const out = await postToInstagram({ text: composed.caption, imageUrl: squareUrl, altText: singleAlt });
+        return { url: out.url, platformPostId: out.id };
+      };
+
+      if (style === "single") return trySingle();
+      if (style === "carousel") return tryCarousel();
+
+      // "auto" — carousel first, fall back to single on any error.
+      try {
+        return await tryCarousel();
+      } catch (carouselErr) {
+        logger.warn(`instagram carousel failed (${carouselErr.message?.slice(0, 120)}) — falling back to single image`);
+        return trySingle();
+      }
     },
   },
 
