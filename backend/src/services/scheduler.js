@@ -16,6 +16,9 @@ import { runAllPlatformsCycle, listEnabledPlatforms } from "./socialPublisher.js
 import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEventVideo, previewSlide } from "./videoGenerator.js";
 import { runVideoPublishAndApproveCycle } from "./videoPublisher.js";
 import { isYouTubeConfigured, getVideoStats } from "./youtubeClient.js";
+import { isInstagramConfigured } from "./instagramClient.js";
+import { isFacebookConfigured } from "./facebookClient.js";
+import { isTikTokConfigured } from "./tiktokClient.js";
 import { getDb, listLiveEvents, getLiveEvent } from "../models/database.js";
 
 let isRunning    = false;
@@ -118,14 +121,29 @@ export function startScheduler() {
 // returns a no-op when there are no jobs ready.
 let isPublishRun = false;
 let lastPublishRun = null;
+let lastPublishResult = null; // stores the last cycle's approve+publish summary
 export async function runVideoPublishCycle() {
   if (isPublishRun) { logger.warn("⏸️ Video publish cycle already running"); return null; }
   isPublishRun = true;
   lastPublishRun = new Date().toISOString();
   try {
     const out = await runVideoPublishAndApproveCycle({ approveLimit: 5, publishLimit: 3 });
+    // Persist the last cycle result for health endpoint diagnostics.
+    lastPublishResult = {
+      at: lastPublishRun,
+      approved:  out.autoApprove?.approved?.length  ?? null,
+      skipped:   out.autoApprove?.skipped           ?? null,
+      published: out.publish?.published             ?? 0,
+      failed:    out.publish?.failed                ?? 0,
+      reason:    out.publish?.reason                ?? null,
+    };
     if (out.autoApprove?.approved?.length) {
       logger.info(`✅ Auto-approved ${out.autoApprove.approved.length} video jobs (${out.autoApprove.skipped.length} skipped)`);
+    }
+    if (out.autoApprove?.skipped?.length && !out.autoApprove.approved?.length) {
+      // Every job was skipped — log why so it's visible in server logs.
+      const reasons = out.autoApprove.skipped.map(s => `${s.jobId}:${s.reason}`).join(", ");
+      logger.warn(`⏭️ Auto-approve skipped all ${out.autoApprove.skipped.length} ready jobs: ${reasons}`);
     }
     if (out.publish?.published) {
       logger.info(`📺 Published ${out.publish.published} videos to platforms (${out.publish.failed} failed)`);
@@ -366,10 +384,18 @@ export function getSchedulerStatus() {
     isPublishRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
+    lastPublishResult,
     nextRun,
     sourceCount: RSS_SOURCES.length, videoChannels: YOUTUBE_SOURCES.length,
     videoGenConfigured: isVideoConfigured(),
     videoAutoApprove: process.env.VIDEO_AUTO_APPROVE === "1",
+    publishConfigured: {
+      youtube:   isYouTubeConfigured(),
+      instagram: isInstagramConfigured(),
+      facebook:  isFacebookConfigured(),
+      tiktok:    isTikTokConfigured(),
+      any: isYouTubeConfigured() || isInstagramConfigured() || isFacebookConfigured() || isTikTokConfigured(),
+    },
   };
 }
 
