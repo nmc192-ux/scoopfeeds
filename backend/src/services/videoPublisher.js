@@ -54,10 +54,37 @@ import { logger } from "./logger.js";
 
 const SITE_ORIGIN = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 
-// Tragedy / sensitive-violence keyword filter — videos about deaths, attacks,
-// disasters etc. shouldn't auto-publish without human eyes on the script and
-// thumbnail. Stays in human-review queue.
-const TRAGEDY_KEYWORDS = /\b(dies?|killed|death|murdered|fatal|tragedy|massacre|crash|attack|shooting|terror|disaster|funeral|mourns?|stabbed|drowned|murders?|homicide|assassinat|gunman)\b/i;
+// Tragedy / sensitive-violence keyword filter — videos about deaths, violent
+// crimes, abuse, disasters etc. shouldn't auto-publish without human eyes on
+// the script and thumbnail. Stays in human-review queue. We err on the side
+// of over-filtering — the cost of a missed auto-post is one human-review
+// click; the cost of a TTS narration about a crime against a child landing
+// on the public Reels feed is a brand crisis.
+const TRAGEDY_KEYWORDS = new RegExp(
+  "\\b(" + [
+    // Death / killing
+    "die(?:s|d)?", "killed?", "death", "murder(?:s|ed|ing|er)?", "fatal", "homicide",
+    "assassinat(?:e|ed|ion)", "gunman", "gunshot", "executed?", "execution",
+    "beheaded?", "lynch(?:ed|ing)?",
+    // Tragedy / disaster
+    "tragedy", "tragedies", "massacre", "crash(?:ed|ing|es)?", "disaster(?:s|ous)?",
+    "funeral", "mourn(?:s|ed|ing)?",
+    // Violence / weapons
+    "attack(?:s|ed|ing|er)?", "shoot(?:ing|er|s)", "terror(?:ist|ism)?",
+    "stab(?:bed|bing|s)?", "drown(?:ed|ing)?", "tortur(?:ed|ing|e)",
+    "hostage", "shot\\s+dead",
+    // Sensitive crime
+    "poison(?:s|ed|ing)?",            // includes "rat poison found in baby"
+    "abuse(?:d|s|r)?", "abusive",     // physical/child/sexual abuse
+    "rape(?:d|s)?", "rapist",
+    "kidnap(?:ped|ping|per|s)?",
+    "molest(?:ed|er|ation|ing)?",
+    "sexual\\s+(?:assault|abuse|misconduct)",
+    // Self-harm
+    "suicide", "overdose", "self-harm",
+  ].join("|") + ")\\b",
+  "i"
+);
 
 // Programming-block / show-promo headlines — recurring TV/radio segments
 // that some sources syndicate as "articles" (Bloomberg's daily shows, BBC
