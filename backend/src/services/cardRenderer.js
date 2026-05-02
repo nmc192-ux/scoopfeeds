@@ -634,7 +634,7 @@ function buildCarouselTree(article, slide) {
 // changes — or when the card design version bumps (CARD_DESIGN_VER).
 // Bump CARD_DESIGN_VER whenever the visual layout changes so stale cached
 // PNGs are never served alongside the new design.
-const CARD_DESIGN_VER = "v9"; // bumped: word-highlighted headlines + vibrant category gradient
+const CARD_DESIGN_VER = "v10"; // bumped: photo path now opt-in (CARD_USE_ARTICLE_PHOTO=1) — typographic by default
 
 function contentHash(article, preset) {
   const h = createHash("sha1");
@@ -1514,21 +1514,28 @@ export async function ensureCard(article, preset = "og", opts = {}) {
 
   if (wantsPhoto) {
     if (preset === "square" || preset === "carousel1") {
-      // Magazine square / carousel cover: prefer the article's own image_url
-      // (with smart photo picker scanning article HTML for high-res variants),
-      // fall back to a Pexels stock photo if all candidates fail.
-      const imgCacheDir = path.join(CARDS_DIR, "img-cache");
-      try {
-        bgDataUri = await fetchArticlePhotoDataUri(article, imgCacheDir);
-      } catch (e) {
-        logger.warn(`card renderer: article photo fetch failed for ${article.id}: ${e.message}`);
-      }
-      if (!bgDataUri && isStockPhotoEnabled()) {
+      // Magazine square / carousel cover. Photo embedding is opt-in via
+      // CARD_USE_ARTICLE_PHOTO=1 because the @resvg/resvg-js v2.6.x linux-x64
+      // build silently drops embedded JPEG images (data URIs make it through
+      // satori but rasterise as transparent on Hostinger's Node 18 container,
+      // while macOS arm64 renders them perfectly). The typographic-only path
+      // looks great on its own — vibrant category gradient + word-highlighted
+      // headline — so we default to it until resvg-js is fixed/upgraded.
+      const photoBgEnabled = process.env.CARD_USE_ARTICLE_PHOTO === "1";
+      if (photoBgEnabled) {
+        const imgCacheDir = path.join(CARDS_DIR, "img-cache");
         try {
-          const stock = await getStockPhotoForArticle(article, { orientation: "square" });
-          if (stock) bgDataUri = stockPhotoAsDataUri(stock.path);
+          bgDataUri = await fetchArticlePhotoDataUri(article, imgCacheDir);
         } catch (e) {
-          logger.warn(`card renderer: stock photo fallback failed for ${article.id}: ${e.message}`);
+          logger.warn(`card renderer: article photo fetch failed for ${article.id}: ${e.message}`);
+        }
+        if (!bgDataUri && isStockPhotoEnabled()) {
+          try {
+            const stock = await getStockPhotoForArticle(article, { orientation: "square" });
+            if (stock) bgDataUri = stockPhotoAsDataUri(stock.path);
+          } catch (e) {
+            logger.warn(`card renderer: stock photo fallback failed for ${article.id}: ${e.message}`);
+          }
         }
       }
     } else if (isStockPhotoEnabled()) {
