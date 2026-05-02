@@ -634,7 +634,7 @@ function buildCarouselTree(article, slide) {
 // changes — or when the card design version bumps (CARD_DESIGN_VER).
 // Bump CARD_DESIGN_VER whenever the visual layout changes so stale cached
 // PNGs are never served alongside the new design.
-const CARD_DESIGN_VER = "v8"; // bumped: SVG embed diagnostic + cache-bust for satori probe
+const CARD_DESIGN_VER = "v9"; // bumped: word-highlighted headlines + vibrant category gradient
 
 function contentHash(article, preset) {
   const h = createHash("sha1");
@@ -651,9 +651,18 @@ function contentHash(article, preset) {
   h.update(String(article.description || "").slice(0, 80));
   // For the magazine square card, also hash the image URL so the card
   // invalidates when the article's image changes (e.g. after enrichment).
-  if (preset === "square") {
+  if (preset === "square" || preset === "carousel1") {
     h.update("|");
     h.update(String(article.image_url || ""));
+    // Tags drive the selective word-highlighting on the typographic path
+    // so we hash them too — change tags → re-render with new highlights.
+    h.update("|");
+    let tagStr = "";
+    try {
+      const arr = Array.isArray(article.tags) ? article.tags : JSON.parse(article.tags || "[]");
+      tagStr = arr.slice(0, 5).join(",");
+    } catch { tagStr = ""; }
+    h.update(tagStr);
   }
   return h.digest("hex").slice(0, 10);
 }
@@ -665,24 +674,102 @@ function cachePath(articleId, preset, hash) {
 
 // ── Magazine-style square card ───────────────────────────────────────────────
 //
-// Instagram 1080×1080 card that looks like a polished editorial photo-post:
+// Instagram 1080×1080 card that looks like a polished editorial photo-post.
+// Two render paths:
 //
-//   ┌──────────────────────────────────────────────┐
-//   │ scoopfeeds            [CATEGORY PILL]        │  ← top bar
-//   │                                              │
-//   │            article photo fills              │
-//   │               entire background             │
-//   │                                              │
-//   │████████████ gradient darkens ████████████████│
-//   │                                              │
-//   │  BIG BOLD WHITE HEADLINE GOES               │  ← headline
-//   │  HERE ACROSS UP TO THREE LINES              │
-//   │                                              │
-//   │  [f][ig][X][in][www]         via BBC News   │  ← footer icons
-//   └──────────────────────────────────────────────┘
+//   1. Photo path (article image_url loaded successfully) — full-bleed photo
+//      background + dark bottom gradient + headline overlay.
 //
-// When the article has no usable image_url (fetch failed or absent), the card
-// falls back to the standard dark typographic layout (buildTree with no bgDataUri).
+//   2. Typographic path (no photo OR resvg can't decode it) — vibrant
+//      category-colored gradient background + selective WORD HIGHLIGHTING
+//      (1-2 keywords from article tags get a white background pill behind
+//      them, à la editorial magazine covers).
+//
+// Both paths use the same top bar + bottom footer structure so cards in a
+// feed read as cohesive even when some have photos and others don't.
+
+// Pick 1-2 keywords from the article to highlight in the headline. Drawn
+// from article tags first (more specific), then capitalised proper nouns
+// from the headline. Skips category-name + generic news vocab so we don't
+// get vacuous "POLITICS" highlighted on a politics post.
+function pickHighlightKeywords(article, headline) {
+  const out = new Set();
+  const headLower = String(headline || "").toLowerCase();
+  const cat = String(article.category || "").toLowerCase();
+
+  // Generic words that add no editorial weight when highlighted.
+  const NOISE = new Set([
+    "news", "story", "report", "update", "breaking", "live", "latest",
+    "today", "yesterday", "watch", "video", "photos", "the", "and", "with",
+    "from", "after", "before", "during", "amid", "over", "about",
+    "global", "world", "international", "national",
+  ]);
+
+  // Try article.tags first (most editorially-curated source).
+  let tags = [];
+  try { tags = Array.isArray(article.tags) ? article.tags : JSON.parse(article.tags || "[]"); } catch {}
+  for (const tag of tags) {
+    const t = String(tag || "").trim();
+    if (!t) continue;
+    const tl = t.toLowerCase();
+    if (tl === cat || NOISE.has(tl)) continue;
+    if (t.length < 3 || t.length > 18) continue;
+    // Tag must actually appear (case-insensitive) in the headline to highlight.
+    if (!headLower.includes(tl)) continue;
+    out.add(tl);
+    if (out.size >= 2) break;
+  }
+
+  // Fallback: proper-noun capitalised words in the headline (≥4 chars).
+  if (out.size === 0) {
+    const properNouns = [...String(headline || "").matchAll(/\b([A-Z][a-z]{3,15})\b/g)].map(m => m[1].toLowerCase());
+    for (const p of properNouns) {
+      if (NOISE.has(p) || p === cat) continue;
+      out.add(p);
+      if (out.size >= 1) break; // just one fallback to avoid over-highlighting
+    }
+  }
+
+  return [...out];
+}
+
+// Tokenise a headline into nodes for satori, applying highlight styling to
+// any token whose lowercased word (sans trailing punctuation) is in `highlights`.
+// Returns an array of satori div nodes, suitable for use as flex-wrap children.
+function buildHighlightedHeadlineNodes(headline, highlights, opts) {
+  const { fontSize = 92, color = "#FFFFFF", highlightBg = "#FFFFFF", highlightFg = "#0A0A0C" } = opts || {};
+  const set = new Set(highlights.map(h => h.toLowerCase()));
+  if (!headline) return [];
+
+  // Split on whitespace, preserving punctuation attached to words. Each
+  // token becomes a flex-item div; satori's flex-wrap handles line-breaks.
+  const tokens = headline.split(/\s+/);
+  return tokens.map((token) => {
+    const stripped = token.toLowerCase().replace(/[.,;:!?'""()]/g, "");
+    const isHi = set.has(stripped);
+    return {
+      type: "div",
+      props: {
+        style: {
+          display: "flex",
+          fontSize,
+          fontWeight: 700,
+          letterSpacing: -2,
+          lineHeight: 1.04,
+          color: isHi ? highlightFg : color,
+          backgroundColor: isHi ? highlightBg : "transparent",
+          paddingLeft:  isHi ? 14 : 0,
+          paddingRight: isHi ? 14 : 0,
+          paddingTop:   isHi ? 2  : 0,
+          paddingBottom:isHi ? 2  : 0,
+          borderRadius: isHi ? 8 : 0,
+        },
+        children: token,
+      },
+    };
+  });
+}
+
 function buildSquareMagazineTree(article, bgDataUri) {
   const W = 1080, H = 1080;
   const PAD = 60;
@@ -690,10 +777,11 @@ function buildSquareMagazineTree(article, bgDataUri) {
   const label = labelFor(article.category);
   const source = article.source_name || "";
 
-  // Headline: larger font than the standard square, tight letter-spacing.
-  // Up to 110 chars — at 88px Inter Bold, ~3 lines at 1080px width.
+  // Headline: 92px Inter Bold for typographic-only path (no photo); slightly
+  // smaller (88px) when a photo is the focal point. Up to 110 chars → ~3 lines.
   const headline = truncate(article.title, 110);
   const dateStr = formatShortDate(article.published_at);
+  const highlights = pickHighlightKeywords(article, headline);
 
   // ── Top row: wordmark left, category pill right ───────────────────────
   const topRow = {
@@ -750,76 +838,70 @@ function buildSquareMagazineTree(article, bgDataUri) {
     },
   };
 
-  // ── Bottom section: headline + footer ────────────────────────────────
-  const bottomSection = {
+  // ── Footer row: scoopfeeds.com left, "Source · Date" right ───────────
+  const footerRow = {
     type: "div",
     props: {
       style: {
         display: "flex",
-        flexDirection: "column",
+        justifyContent: "space-between",
+        alignItems: "center",
         width: "100%",
-        gap: 24,
       },
       children: [
-        // Headline — large, bold, white. Bigger size now that the social-
-        // icon row is gone — gives the headline more visual real estate.
         {
           type: "div",
           props: {
-            style: {
-              display: "flex",
-              fontSize: 88,
-              fontWeight: 700,
-              lineHeight: 1.05,
-              letterSpacing: -2.3,
-              color: "#FFFFFF",
-              width: "100%",
-            },
-            children: headline,
+            style: { display: "flex", fontSize: 24, fontWeight: 700, color: "#FFFFFF", letterSpacing: -0.2 },
+            children: "scoopfeeds.com",
           },
         },
-        // Footer row: scoopfeeds.com left, "via Source · Date" right.
-        // Clean, editorial — no platform-icon clutter.
         {
           type: "div",
           props: {
-            style: {
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              width: "100%",
-            },
-            children: [
-              {
-                type: "div",
-                props: {
-                  style: {
-                    display: "flex",
-                    fontSize: 24,
-                    fontWeight: 700,
-                    color: "#FFFFFF",
-                    letterSpacing: -0.2,
-                  },
-                  children: "scoopfeeds.com",
-                },
-              },
-              {
-                type: "div",
-                props: {
-                  style: {
-                    display: "flex",
-                    fontSize: 22,
-                    fontWeight: 600,
-                    color: "rgba(255,255,255,0.65)",
-                    letterSpacing: 0.2,
-                  },
-                  children: [source, dateStr].filter(Boolean).join(" · "),
-                },
-              },
-            ],
+            style: { display: "flex", fontSize: 22, fontWeight: 600, color: "rgba(255,255,255,0.65)", letterSpacing: 0.2 },
+            children: [source, dateStr].filter(Boolean).join(" · "),
           },
         },
       ],
+    },
+  };
+
+  // ── Headline section — flex-wrap of per-word nodes so highlighted tokens
+  // can carry a background pill independently. Uses a slightly smaller font
+  // when a photo is the focal point (88px) vs. typographic-only (94px).
+  const headlineFontSize = bgDataUri ? 86 : 94;
+  const headlineNodes = buildHighlightedHeadlineNodes(headline, highlights, {
+    fontSize: headlineFontSize,
+    color: "#FFFFFF",
+    // For the no-photo path we use the category color as the highlight bg
+    // (more visually energetic than plain white). For the photo path we use
+    // white because category-color highlights would compete with the photo.
+    highlightBg: bgDataUri ? "#FFFFFF" : color,
+    highlightFg: bgDataUri ? "#0A0A0C" : "#FFFFFF",
+  });
+
+  const headlineSection = {
+    type: "div",
+    props: {
+      style: {
+        display: "flex",
+        flexWrap: "wrap",
+        width: "100%",
+        rowGap: 8,
+        columnGap: 18,
+        alignItems: "center",
+      },
+      children: headlineNodes,
+    },
+  };
+
+  // ── Bottom section: headline + footer (used in both render paths) ─────
+  const bottomSection = {
+    type: "div",
+    props: {
+      style: { display: "flex", flexDirection: "column", width: "100%", gap: 28 },
+      children: [headlineSection, footerRow],
     },
   };
 
@@ -915,8 +997,12 @@ function buildSquareMagazineTree(article, bgDataUri) {
     };
   }
 
-  // Fallback (no article photo): dark typographic card but with the magazine
-  // layout (large headline, social icons, no description teaser).
+  // Typographic-only path (no photo): vibrant category-coloured gradient
+  // background. Three layered gradients give the card depth and brand
+  // identity while keeping headline contrast readable:
+  //   1. Bottom-anchored radial bloom in category colour — hero of the card
+  //   2. Top-left subtle bloom — adds depth on the upper half
+  //   3. Vertical near-black fade — keeps the top-bar pills legible
   return {
     type: "div",
     props: {
@@ -928,8 +1014,9 @@ function buildSquareMagazineTree(article, bgDataUri) {
         justifyContent: "space-between",
         backgroundColor: "#0A0A0C",
         backgroundImage:
-          `radial-gradient(ellipse 70% 60% at 92% 0%, ${color}33 0%, ${color}10 35%, transparent 70%),` +
-          ` linear-gradient(180deg, #0A0A0C 0%, #111114 60%, #16161B 100%)`,
+          `radial-gradient(ellipse 110% 75% at 50% 105%, ${color}AA 0%, ${color}55 28%, ${color}1A 55%, transparent 80%),` +
+          `radial-gradient(ellipse 70% 55% at 18% 12%, ${color}40 0%, ${color}10 40%, transparent 70%),` +
+          `linear-gradient(180deg, #0A0A0C 0%, #0E0E13 40%, #14141B 100%)`,
         paddingTop: PAD,
         paddingBottom: PAD,
         paddingLeft: PAD,
@@ -1388,15 +1475,6 @@ async function renderPng(article, preset, opts = {}) {
   const renderOnce = async (treeOpts) => {
     const tree = buildTree(article, preset, treeOpts);
     const svg = await satori(tree, { width: dims.width, height: dims.height, fonts });
-    // Diagnostic: log SVG length + whether the data URI made it in. Big
-    // discrepancy between input image bytes and SVG length tells us satori
-    // dropped the image (the most likely culprit for invisible photos on
-    // production while local renders work fine).
-    if (treeOpts.bgDataUri) {
-      const dataUriPresent = svg.includes("data:image/jpeg") || svg.includes("data:image/png");
-      const inputBytes = treeOpts.bgDataUri.length;
-      logger.info(`card renderer: render ${article.id} preset=${preset} svgBytes=${svg.length} inputDataUriBytes=${inputBytes} satoriEmbedded=${dataUriPresent}`);
-    }
     return new Resvg(svg, { background: "#0B0B0D", fitTo: { mode: "original" } }).render().asPng();
   };
 

@@ -1127,7 +1127,7 @@ export function findFreshUnpostedArticles({ platform, minCredibility = 7, within
   // Also filter is_duplicate = 0 so we never auto-post a near-duplicate story
   // to social — only the highest-credibility version of each story gets posted.
   return getDb().prepare(`
-    SELECT a.id, a.title, a.description, a.content, a.category, a.source_name, a.published_at, a.credibility, a.url, a.image_url, a.ig_summary
+    SELECT a.id, a.title, a.description, a.content, a.category, a.source_name, a.published_at, a.credibility, a.url, a.image_url, a.ig_summary, a.tags
     FROM articles a
     LEFT JOIN social_posts s ON s.article_id = a.id AND s.platform = ? AND s.status = 'posted'
     WHERE s.article_id IS NULL
