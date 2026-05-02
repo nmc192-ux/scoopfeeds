@@ -322,6 +322,7 @@ export function autoApproveReadyJobs({
   limit         = 10,
 } = {}) {
   const cutoff = Date.now() - maxAgeHours * 60 * 60 * 1000;
+  const allowSilent = process.env.VIDEO_AUTO_APPROVE_ALLOW_SILENT === "1";
   const candidates = getDb().prepare(`
     SELECT j.id, j.article_id, j.output_path, j.created_at, j.has_audio,
            a.title, a.category, a.credibility, a.published_at
@@ -329,9 +330,11 @@ export function autoApproveReadyJobs({
     LEFT JOIN articles a ON a.id = j.article_id
     WHERE j.status = 'ready'
       AND j.output_path IS NOT NULL
-    ORDER BY j.created_at ASC
+      ${allowSilent ? "" : "AND j.has_audio = 1"}
+      AND j.created_at > ?
+    ORDER BY j.created_at DESC
     LIMIT ?
-  `).all(limit * 3); // fetch a bit more so we can filter and still hit limit
+  `).all(cutoff, limit * 3); // newest first so fresh articles aren't crowded out by stale ones
 
   const approved = [];
   const skipped  = [];
