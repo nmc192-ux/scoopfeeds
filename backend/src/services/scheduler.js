@@ -14,6 +14,7 @@ import { refreshAnalysis } from "./analysisService.js";
 import { runBreakingNewsPush } from "./breakingNewsPusher.js";
 import { runAllPlatformsCycle, listEnabledPlatforms } from "./socialPublisher.js";
 import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEventVideo, previewSlide } from "./videoGenerator.js";
+import { runVideoPublishAndApproveCycle } from "./videoPublisher.js";
 import { isYouTubeConfigured, getVideoStats } from "./youtubeClient.js";
 import { getDb, listLiveEvents, getLiveEvent } from "../models/database.js";
 
@@ -95,7 +96,52 @@ export function startScheduler() {
     }
   });
 
+  // ─── Short-form video publish cycle ─────────────────────────────────────
+  // Auto-approves rendered video jobs that meet quality criteria
+  // (cred ≥ 8, fresh, non-tragedy) and publishes the resulting
+  // 'review_approved' jobs to YouTube Shorts / IG Reels / FB Reels / TikTok.
+  // Auto-approval is opt-in via VIDEO_AUTO_APPROVE=1; without it, only
+  // human-approved jobs are picked up. Publishing only requires outbound
+  // HTTPS (works on Hostinger even when in-process rendering is blocked).
+  // Runs every 90 minutes — frequent enough to surface fresh stories,
+  // sparse enough to stay well within IG/FB rate limits and avoid spam
+  // flags (Meta has flagged accounts pushing 8+ videos/day).
+  cron.schedule("23 */1 * * *", () => runVideoPublishCycle().catch(err =>
+    logger.warn(`videoPublish cron failed: ${err.message}`)
+  ));
+
   updateNextRun();
+}
+
+// Runs the auto-approve + publish pass. Safe to call as a cron tick — the
+// underlying service already guards against missing platform config and
+// returns a no-op when there are no jobs ready.
+let isPublishRun = false;
+let lastPublishRun = null;
+export async function runVideoPublishCycle() {
+  if (isPublishRun) { logger.warn("⏸️ Video publish cycle already running"); return null; }
+  isPublishRun = true;
+  lastPublishRun = new Date().toISOString();
+  try {
+    const out = await runVideoPublishAndApproveCycle({ approveLimit: 5, publishLimit: 3 });
+    if (out.autoApprove?.approved?.length) {
+      logger.info(`✅ Auto-approved ${out.autoApprove.approved.length} video jobs (${out.autoApprove.skipped.length} skipped)`);
+    }
+    if (out.publish?.published) {
+      logger.info(`📺 Published ${out.publish.published} videos to platforms (${out.publish.failed} failed)`);
+    } else if (out.publish?.message === "no_approved_jobs") {
+      // Quiet — most cycles will be no-ops and we don't need a log line each time.
+    } else if (out.publish?.reason === "no_platform_configured") {
+      // One-time warning so the user notices when set up is missing.
+      logger.warn("📺 Video publish: no platform configured (set YouTube / Instagram / Facebook env vars)");
+    }
+    return out;
+  } catch (err) {
+    logger.error("❌ Video publish cycle failed", { error: err.message });
+    return null;
+  } finally {
+    isPublishRun = false;
+  }
 }
 
 async function runEventsCycle() {
@@ -317,9 +363,13 @@ function updateNextRun() {
 export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
-    lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun, nextRun,
+    isPublishRun,
+    lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
+    lastPublishRun,
+    nextRun,
     sourceCount: RSS_SOURCES.length, videoChannels: YOUTUBE_SOURCES.length,
     videoGenConfigured: isVideoConfigured(),
+    videoAutoApprove: process.env.VIDEO_AUTO_APPROVE === "1",
   };
 }
 

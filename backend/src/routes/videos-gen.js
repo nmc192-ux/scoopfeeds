@@ -35,6 +35,7 @@ import {
   getVideoJobsReadyToPublish,
 } from "../models/database.js";
 import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEventVideo, previewSlide } from "../services/videoGenerator.js";
+import { autoApproveReadyJobs, publishApprovedVideos } from "../services/videoPublisher.js";
 import { isTtsConfigured, ttsProvider } from "../services/ttsService.js";
 import { isYouTubeConfigured, uploadToYouTube, getChannelInfo } from "../services/youtubeClient.js";
 import { isTikTokConfigured, uploadToTikTok } from "../services/tiktokClient.js";
@@ -690,6 +691,43 @@ router.post("/publish", requireAdmin, express.json({ limit: "8kb" }), async (req
   const okCount   = results.filter(r => r.ok).length;
   const failCount = results.filter(r => !r.ok).length;
   res.json({ ok: okCount > 0 || dryRun, published: okCount, failed: failCount, dryRun, results });
+});
+
+// ─── Auto-approve "ready" jobs that meet quality criteria ───────────────────
+// Manual trigger for the auto-approval pass. Promotes 'ready' video jobs to
+// 'review_approved' when they pass the credibility / freshness / non-tragedy
+// filters. Same logic the scheduler runs on cron (when VIDEO_AUTO_APPROVE=1),
+// but lets ops kick it on demand without waiting for the next tick.
+//
+// POST /scoop-ops/videos-gen/auto-approve?key=<ADMIN_KEY>
+//   { "limit": 5, "minCredibility": 8, "maxAgeHours": 24 }   // all optional
+router.post("/auto-approve", requireAdmin, express.json({ limit: "8kb" }), (req, res) => {
+  const limit          = parseInt(req.body?.limit          || "5",  10);
+  const minCredibility = parseInt(req.body?.minCredibility || "8",  10);
+  const maxAgeHours    = parseInt(req.body?.maxAgeHours    || "24", 10);
+  const out = autoApproveReadyJobs({ limit, minCredibility, maxAgeHours });
+  res.json({ ok: true, ...out });
+});
+
+// ─── Run the full auto-approve + publish cycle on demand ───────────────────
+// Convenience endpoint that runs both passes in one call. Useful for the
+// first deploy after enabling VIDEO_AUTO_APPROVE — flushes the backlog of
+// `ready` jobs without waiting for the next cron tick (default 23 past hour).
+//
+// POST /scoop-ops/videos-gen/run-publish?key=<ADMIN_KEY>
+//   { "approveLimit": 5, "publishLimit": 3, "dryRun": false }   // all optional
+router.post("/run-publish", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
+  const approveLimit = parseInt(req.body?.approveLimit || "5", 10);
+  const publishLimit = parseInt(req.body?.publishLimit || "3", 10);
+  const dryRun       = Boolean(req.body?.dryRun);
+  const autoApproveOn = process.env.VIDEO_AUTO_APPROVE === "1";
+
+  const result = { autoApproveEnabled: autoApproveOn, autoApprove: null, publish: null };
+  if (autoApproveOn) {
+    result.autoApprove = autoApproveReadyJobs({ limit: approveLimit });
+  }
+  result.publish = await publishApprovedVideos({ maxBatch: publishLimit, dryRun });
+  res.json({ ok: true, ...result });
 });
 
 // ─── YouTube channel info ────────────────────────────────────────────────────
