@@ -20,12 +20,36 @@ import { getStockPhotoForArticle, stockPhotoAsDataUri, isStockPhotoEnabled } fro
 // Used by the magazine-style square card. Fetches the article's own image_url,
 // converts it to a base64 data URI, and caches it on disk so re-renders are fast.
 // Returns null on any failure (network error, non-image, too large, etc.).
+//
+// Many news CDNs (BBC, Reuters, etc.) block fetches with non-browser UAs or
+// expose only thumbnail-size images at the URL the RSS feed advertises. We
+// therefore: (1) send a realistic browser User-Agent + Accept headers, (2)
+// rewrite known thumbnail URL patterns to high-res variants before fetching.
+function upscaleKnownThumbnailUrl(url) {
+  // BBC: https://ichef.bbci.co.uk/images/ic/240x135/p0xyz.jpg → swap to /1024x576/
+  // The BBC CDN serves the same image at multiple sizes via a path segment.
+  let out = url.replace(
+    /(\/images\/ic\/)\d{2,4}x\d{2,4}(\/[a-z0-9]+\.(?:jpg|jpeg|png|webp))/i,
+    "$11024x576$2"
+  );
+  // CNN: i2.cdn.turner.com/.../{w}x{h}/... — leave alone (works as-is at any res)
+  // Reuters: cloudfront-us-east-2.images.arcpublishing.com/reuters/.../resize/{w}/{h}/quality/.../format/jpg
+  // Generic: ?w=240 / &width=240 query params → bump to 1080
+  if (out === url) {
+    out = url.replace(/([?&](?:w|width|size))=\d{2,3}\b/gi, "$1=1080");
+  }
+  return out;
+}
+
 async function fetchArticlePhotoDataUri(imageUrl, imgCacheDir) {
   if (!imageUrl || typeof imageUrl !== "string") return null;
   // Only absolute HTTP(S) URLs.
   if (!imageUrl.startsWith("http://") && !imageUrl.startsWith("https://")) return null;
 
-  const urlHash = createHash("sha1").update(imageUrl).digest("hex").slice(0, 20);
+  const finalUrl = upscaleKnownThumbnailUrl(imageUrl);
+  // Cache key includes the upscaled URL so changing the upscaler in the
+  // future invalidates old cached low-res images.
+  const urlHash = createHash("sha1").update(finalUrl).digest("hex").slice(0, 20);
   if (!existsSync(imgCacheDir)) mkdirSync(imgCacheDir, { recursive: true });
 
   // Return cached version if present (any image extension).
@@ -43,26 +67,55 @@ async function fetchArticlePhotoDataUri(imageUrl, imgCacheDir) {
     }
   }
 
-  // Fetch with a tight timeout so a slow CDN doesn't hang the card render.
-  try {
+  // Fetch with browser-like headers (some CDNs reject non-browser UAs) and a
+  // generous timeout (Hostinger outbound to remote CDNs can be slow).
+  const tryFetch = async (urlToFetch) => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 7000);
-    const res = await fetch(imageUrl, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "ScoopFeeds/1.0 (+https://scoopfeeds.com)",
-        "Accept": "image/*",
-      },
-    });
-    clearTimeout(timer);
+    const timer = setTimeout(() => controller.abort(), 12000);
+    try {
+      const res = await fetch(urlToFetch, {
+        signal: controller.signal,
+        redirect: "follow",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Referer": (() => {
+            try { return new URL(urlToFetch).origin + "/"; } catch { return "https://www.google.com/"; }
+          })(),
+        },
+      });
+      return res;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
-    if (!res.ok) return null;
+  try {
+    let res = await tryFetch(finalUrl);
+    // If upscaled URL fails (e.g. CDN doesn't have that resolution), fall
+    // back to the original thumbnail URL.
+    if ((!res.ok || !(res.headers.get("content-type") || "").toLowerCase().startsWith("image/"))
+        && finalUrl !== imageUrl) {
+      res = await tryFetch(imageUrl);
+    }
+
+    if (!res.ok) {
+      logger.warn(`card renderer: article image HTTP ${res.status} for ${imageUrl.slice(0, 80)}`);
+      return null;
+    }
     const ct = (res.headers.get("content-type") || "").toLowerCase();
-    if (!ct.startsWith("image/")) return null;
+    if (!ct.startsWith("image/")) {
+      logger.warn(`card renderer: article image non-image type "${ct}" for ${imageUrl.slice(0, 80)}`);
+      return null;
+    }
 
     const buf = Buffer.from(await res.arrayBuffer());
     // Skip suspiciously small (broken) or enormous images.
-    if (buf.length < 2000 || buf.length > 12 * 1024 * 1024) return null;
+    if (buf.length < 2000 || buf.length > 12 * 1024 * 1024) {
+      logger.warn(`card renderer: article image size ${buf.length}b out of range for ${imageUrl.slice(0, 80)}`);
+      return null;
+    }
 
     let ext = ".jpg";
     let mime = "image/jpeg";
@@ -75,6 +128,8 @@ async function fetchArticlePhotoDataUri(imageUrl, imgCacheDir) {
   } catch (err) {
     if (!String(err.name || "").includes("Abort")) {
       logger.warn(`card renderer: article image fetch failed for ${imageUrl.slice(0, 80)}: ${err.message}`);
+    } else {
+      logger.warn(`card renderer: article image fetch timed out for ${imageUrl.slice(0, 80)}`);
     }
     return null;
   }
@@ -487,7 +542,7 @@ function buildCarouselTree(article, slide) {
 // changes — or when the card design version bumps (CARD_DESIGN_VER).
 // Bump CARD_DESIGN_VER whenever the visual layout changes so stale cached
 // PNGs are never served alongside the new design.
-const CARD_DESIGN_VER = "v3"; // bumped: magazine square redesign — article-photo background
+const CARD_DESIGN_VER = "v4"; // bumped: magazine — no social icons, stronger photo fetch, Pexels fallback
 
 function contentHash(article, preset) {
   const h = createHash("sha1");
@@ -544,33 +599,9 @@ function buildSquareMagazineTree(article, bgDataUri) {
   const source = article.source_name || "";
 
   // Headline: larger font than the standard square, tight letter-spacing.
-  // Up to 110 chars — at 86px Inter Bold, ~3 lines at 1080px width.
+  // Up to 110 chars — at 88px Inter Bold, ~3 lines at 1080px width.
   const headline = truncate(article.title, 110);
-
-  // ── Social platform icon row ──────────────────────────────────────────
-  // Rendered as small circular outlined boxes so they're recognisable at a
-  // glance without needing actual icon SVGs. All white/semi-transparent so
-  // they read cleanly over the dark gradient.
-  const ICON_LABELS = ["f", "ig", "X", "in", "www"];
-  const socialIconNodes = ICON_LABELS.map((lbl) => ({
-    type: "div",
-    props: {
-      style: {
-        display: "flex",
-        width: 46,
-        height: 46,
-        borderRadius: 999,
-        border: "2px solid rgba(255,255,255,0.40)",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: lbl === "ig" ? 15 : lbl === "www" ? 14 : 18,
-        fontWeight: 700,
-        color: "rgba(255,255,255,0.72)",
-        flexShrink: 0,
-      },
-      children: lbl,
-    },
-  }));
+  const dateStr = formatShortDate(article.published_at);
 
   // ── Top row: wordmark left, category pill right ───────────────────────
   const topRow = {
@@ -638,23 +669,25 @@ function buildSquareMagazineTree(article, bgDataUri) {
         gap: 24,
       },
       children: [
-        // Headline — large, bold, white
+        // Headline — large, bold, white. Bigger size now that the social-
+        // icon row is gone — gives the headline more visual real estate.
         {
           type: "div",
           props: {
             style: {
               display: "flex",
-              fontSize: 82,
+              fontSize: 88,
               fontWeight: 700,
-              lineHeight: 1.07,
-              letterSpacing: -2,
+              lineHeight: 1.05,
+              letterSpacing: -2.3,
               color: "#FFFFFF",
               width: "100%",
             },
             children: headline,
           },
         },
-        // Footer row: social icons left, source attribution right
+        // Footer row: scoopfeeds.com left, "via Source · Date" right.
+        // Clean, editorial — no platform-icon clutter.
         {
           type: "div",
           props: {
@@ -665,15 +698,19 @@ function buildSquareMagazineTree(article, bgDataUri) {
               width: "100%",
             },
             children: [
-              // Social icon row
               {
                 type: "div",
                 props: {
-                  style: { display: "flex", gap: 10 },
-                  children: socialIconNodes,
+                  style: {
+                    display: "flex",
+                    fontSize: 24,
+                    fontWeight: 700,
+                    color: "#FFFFFF",
+                    letterSpacing: -0.2,
+                  },
+                  children: "scoopfeeds.com",
                 },
               },
-              // Source / site attribution
               {
                 type: "div",
                 props: {
@@ -681,10 +718,10 @@ function buildSquareMagazineTree(article, bgDataUri) {
                     display: "flex",
                     fontSize: 22,
                     fontWeight: 600,
-                    color: "rgba(255,255,255,0.60)",
+                    color: "rgba(255,255,255,0.65)",
                     letterSpacing: 0.2,
                   },
-                  children: source ? `via ${source}` : "scoopfeeds.com",
+                  children: [source, dateStr].filter(Boolean).join(" · "),
                 },
               },
             ],
@@ -1282,14 +1319,23 @@ export async function ensureCard(article, preset = "og", opts = {}) {
 
   if (wantsPhoto) {
     if (preset === "square") {
-      // Magazine square card: use the article's own image_url.
-      // Cached under CARDS_DIR/img-cache/ keyed by URL hash.
+      // Magazine square card: prefer the article's own image_url, fall back
+      // to a Pexels stock photo if the article fetch fails (or the article
+      // has no image_url).  Cached under CARDS_DIR/img-cache/ keyed by URL.
       const imgCacheDir = path.join(CARDS_DIR, "img-cache");
       if (article.image_url) {
         try {
           bgDataUri = await fetchArticlePhotoDataUri(article.image_url, imgCacheDir);
         } catch (e) {
           logger.warn(`card renderer: article photo fetch failed for ${article.id}: ${e.message}`);
+        }
+      }
+      if (!bgDataUri && isStockPhotoEnabled()) {
+        try {
+          const stock = await getStockPhotoForArticle(article, { orientation: "square" });
+          if (stock) bgDataUri = stockPhotoAsDataUri(stock.path);
+        } catch (e) {
+          logger.warn(`card renderer: stock photo fallback failed for ${article.id}: ${e.message}`);
         }
       }
     } else if (isStockPhotoEnabled()) {
