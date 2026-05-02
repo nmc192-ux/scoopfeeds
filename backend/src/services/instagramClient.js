@@ -198,6 +198,91 @@ export async function postReelToInstagram({ videoUrl, caption = "" }) {
   return { id: publish.id, url };
 }
 
+// Public: post a multi-image carousel with caption. Returns { id, url }.
+//
+// IG carousel API is a 4-step dance per Meta's docs:
+//   1. POST /{ig-user-id}/media for EACH child image with `is_carousel_item=true`,
+//      `media_type=IMAGE`, `image_url=<public-url>`, optional `alt_text=<...>`
+//      → returns child creation_id per call
+//   2. Wait until each child container reports status_code=FINISHED
+//   3. POST /{ig-user-id}/media with `media_type=CAROUSEL_ALBUM`, `caption=<text>`,
+//      `children=<comma-separated child IDs>` → returns parent creation_id
+//   4. Poll parent until FINISHED, then POST /media_publish { creation_id }
+//
+// Carousels can carry up to 10 children. We expect exactly 3 here (Scoop's
+// cover/key-points/CTA pattern), but the function handles any 2-10.
+//
+//   imageUrls — array of 2-10 public image URLs (Meta fetches them server-side)
+//   altTexts  — optional parallel array of alt texts (one per slide)
+export async function postCarouselToInstagram({ text, imageUrls, altTexts = [] }) {
+  const t = _loadToken();
+  if (!t) throw new Error("instagram not configured");
+  if (!Array.isArray(imageUrls) || imageUrls.length < 2 || imageUrls.length > 10) {
+    throw new Error("postCarouselToInstagram requires 2-10 image URLs");
+  }
+
+  // Step 1: create a child media container for each slide. Sequential calls
+  // (rather than parallel) make error attribution clearer when Meta complains
+  // about a specific image — and IG rate-limits concurrent media-container
+  // creates on the same user anyway.
+  const childIds = [];
+  for (let i = 0; i < imageUrls.length; i++) {
+    const childParams = {
+      image_url: imageUrls[i],
+      is_carousel_item: "true",
+      media_type: "IMAGE",
+    };
+    if (altTexts[i]) childParams.alt_text = String(altTexts[i]).slice(0, 100);
+    const child = await _call(`/${t.userId}/media`, { method: "POST", params: childParams });
+    if (!child?.id) {
+      throw new Error(`instagram carousel child #${i + 1} returned no id: ${JSON.stringify(child).slice(0, 200)}`);
+    }
+    childIds.push(child.id);
+  }
+
+  // Step 2: wait for each child to finish Meta-side processing.
+  for (const id of childIds) {
+    await _waitForFinished(id);
+  }
+
+  // Step 3: create the parent CAROUSEL_ALBUM container with all child IDs.
+  const parent = await _call(`/${t.userId}/media`, {
+    method: "POST",
+    params: {
+      media_type: "CAROUSEL_ALBUM",
+      caption: text || "",
+      children: childIds.join(","),
+    },
+  });
+  if (!parent?.id) {
+    throw new Error(`instagram carousel parent returned no id: ${JSON.stringify(parent).slice(0, 200)}`);
+  }
+
+  // Step 4: wait for parent processing, then publish.
+  await _waitForFinished(parent.id);
+  const publish = await _call(`/${t.userId}/media_publish`, {
+    method: "POST",
+    params: { creation_id: parent.id },
+  });
+  if (!publish?.id) {
+    throw new Error(`instagram carousel publish returned no id: ${JSON.stringify(publish).slice(0, 200)}`);
+  }
+
+  // Best-effort permalink resolution.
+  let url = "";
+  const handle = getHandle();
+  if (handle) {
+    url = `https://www.instagram.com/${handle}/`;
+  } else {
+    try {
+      const lookup = await _call(`/${publish.id}`, { params: { fields: "permalink" } });
+      url = lookup?.permalink || "";
+    } catch { url = ""; }
+  }
+  logger.info(`📸 Instagram carousel published: ${publish.id} (${childIds.length} slides) — ${url}`);
+  return { id: publish.id, url };
+}
+
 // Public: post a single image with caption. Returns { id, url }.
 //   text     — caption text (max ~2200 chars; we leave that to the composer)
 //   imageUrl — publicly fetchable URL (Meta needs to GET it server-side)

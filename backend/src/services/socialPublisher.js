@@ -20,7 +20,7 @@ import { ensureCard } from "./cardRenderer.js";
 import { isBlueskyConfigured, postToBluesky } from "./blueskyClient.js";
 import { isThreadsConfigured, postToThreads } from "./threadsClient.js";
 import { isFacebookConfigured, postToFacebook } from "./facebookClient.js";
-import { isInstagramConfigured, postToInstagram } from "./instagramClient.js";
+import { isInstagramConfigured, postToInstagram, postCarouselToInstagram } from "./instagramClient.js";
 import { isLinkedinConfigured, postToLinkedin } from "./linkedinClient.js";
 import { isPinterestConfigured, postToPinterest } from "./pinterestClient.js";
 import { ensureIgSummary } from "./igSummaryService.js";
@@ -139,23 +139,30 @@ const ADAPTERS = {
     composeKey: "instagram_feed",
     enabled: isInstagramConfigured,
     async post(article, composed) {
-      // Always use our branded square card (1080×1080) — NEVER the raw
-      // article image_url. Raw news images: no text overlay, inconsistent
-      // aspect ratios, blurry thumbnails, no Scoop branding. Our card gives
-      // every post a consistent, professional look with headline text on the
-      // image, category badge, description teaser, and scoopfeeds.com URL.
+      // Post as a 3-slide CAROUSEL: cover (magazine photo card) → key points
+      // (typographic bullets from description) → CTA (scoopfeeds.com end card).
+      // News carousels see ~70% higher save rate than single images on IG;
+      // saves are the strongest algorithmic signal in the feed ranker.
       //
-      // Note: the square card is pre-rendered and served from our CDN path.
-      // If Meta's crawler can't reach scoopfeeds.com, check that the WAF
-      // allowlist includes Meta's IP ranges (see /scoop-ops/ig-discover for
-      // diagnostics). In practice, Meta has no trouble reaching Hostinger VPS.
-      const imageUrl = `${SITE}/api/cards/square/${encodeURIComponent(article.id)}.png`;
-      // Alt text = headline, capped at 100 chars (IG requirement).
-      const altText = String(article.title || "").slice(0, 100);
-      const out = await postToInstagram({
+      // All three slides are pre-rendered + cached at /api/cards/{preset}/{id}.png
+      // and served publicly so Meta's crawler can fetch them server-side.
+      const baseId = encodeURIComponent(article.id);
+      const imageUrls = [
+        `${SITE}/api/cards/square/${baseId}.png`,    // slide 1 — magazine cover
+        `${SITE}/api/cards/carousel2/${baseId}.png`, // slide 2 — key points
+        `${SITE}/api/cards/carousel3/${baseId}.png`, // slide 3 — read at scoopfeeds.com
+      ];
+      // Alt texts per slide. Slide 1 = headline (most important for SEO/access).
+      // Slides 2/3 carry their own descriptive alt text.
+      const altTexts = [
+        String(article.title || "").slice(0, 100),
+        `Key points from ${article.source_name || "the source"}`.slice(0, 100),
+        "Read the full story at scoopfeeds.com",
+      ];
+      const out = await postCarouselToInstagram({
         text: composed.caption,
-        imageUrl,
-        altText,
+        imageUrls,
+        altTexts,
       });
       return { url: out.url, platformPostId: out.id };
     },
@@ -275,6 +282,21 @@ export async function runPlatformCycle(platform, { dryRun = false, minCredibilit
   let thumbBuffer = null;
   try { thumbBuffer = (await ensureCard(article, "og")).buffer; }
   catch (err) { logger.warn(`socialPublisher: card render failed for ${article.id}: ${err.message}`); }
+
+  // For Instagram carousel: pre-render all 3 slides we'll post so Meta's
+  // image fetcher hits already-cached PNGs (avoids the 1–2s cold-render
+  // window that can race with IG's container creation).
+  if (platform === "instagram") {
+    try {
+      await Promise.all([
+        ensureCard(article, "square"),
+        ensureCard(article, "carousel2"),
+        ensureCard(article, "carousel3"),
+      ]);
+    } catch (err) {
+      logger.warn(`socialPublisher: carousel pre-render failed for ${article.id}: ${err.message}`);
+    }
+  }
 
   if (dryRun) {
     return {

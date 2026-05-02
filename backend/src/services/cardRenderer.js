@@ -15,6 +15,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
 import { getStockPhotoForArticle, stockPhotoAsDataUri, isStockPhotoEnabled } from "./stockPhoto.js";
+import axios from "axios";
 
 // ── Article-image fetcher ─────────────────────────────────────────────────────
 // Used by the magazine-style square card. Fetches the article's own image_url,
@@ -74,22 +75,125 @@ function detectImageMime(buf) {
   return null;
 }
 
-async function fetchArticlePhotoDataUri(imageUrl, imgCacheDir) {
-  if (!imageUrl || typeof imageUrl !== "string") return null;
-  // Only absolute HTTP(S) URLs.
-  if (!imageUrl.startsWith("http://") && !imageUrl.startsWith("https://")) return null;
+// Try fetching one URL — returns { buf, mime } or null. Uses axios because
+// the native fetch shipped with Node 18 on Hostinger's container wasn't
+// reliably reaching external CDNs (axios works through the same routing as
+// Gemini calls, which we know are reachable).
+async function tryFetchImage(urlToFetch, refererHint) {
+  try {
+    const referer = refererHint || "https://www.google.com/";
+    const { data, status, headers } = await axios.get(urlToFetch, {
+      responseType: "arraybuffer",
+      timeout: 12000,
+      maxRedirects: 5,
+      validateStatus: (s) => s >= 200 && s < 400,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": referer,
+      },
+    });
+    if (status >= 400) return null;
+    const buf = Buffer.from(data);
+    const mime = detectImageMime(buf);
+    // Magic-byte sniff catches 1-byte CDN placeholders that pass content-type checks.
+    if (!mime) return null;
+    if (buf.length < 2500 || buf.length > 12 * 1024 * 1024) return null;
+    return { buf, mime, contentType: headers?.["content-type"] || "" };
+  } catch (err) {
+    if (err.code !== "ECONNABORTED") {
+      logger.warn(`card renderer: image fetch error for ${urlToFetch.slice(0, 80)}: ${err.message}`);
+    }
+    return null;
+  }
+}
 
-  const finalUrl = upscaleKnownThumbnailUrl(imageUrl);
-  // Cache key includes the upscaled URL so changing the upscaler in the
-  // future invalidates old cached low-res images.
-  const urlHash = createHash("sha1").update(finalUrl).digest("hex").slice(0, 20);
+// ── Smart photo picker — extract image candidates from article HTML ──────────
+// Many articles ship a tiny RSS-thumbnail in image_url but embed a 1600px+
+// hero in the article body. We scan the body's <img> tags for higher-quality
+// candidates and return them in preference order.
+function extractImageCandidatesFromHtml(html) {
+  if (!html || typeof html !== "string") return [];
+  const candidates = [];
+  const seen = new Set();
+  const add = (url) => {
+    if (!url) return;
+    const u = String(url).trim();
+    if (!/^https?:\/\//i.test(u)) return;
+    // Skip data URIs, tiny tracking pixels, common spacer/ad assets.
+    if (/(?:^|\/)(?:1x1|spacer|pixel|blank|tracking|beacon)\b/i.test(u)) return;
+    if (/\.(svg|gif)(\?|$)/i.test(u)) return;
+    if (seen.has(u)) return;
+    seen.add(u);
+    candidates.push(u);
+  };
+
+  // <img src="..."> — most common
+  const imgRe = /<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
+  // srcset="url1 1x, url2 2x" or "url1 320w, url2 800w" — pick the largest descriptor
+  const srcsetRe = /<img\b[^>]*?\bsrcset\s*=\s*["']([^"']+)["'][^>]*>/gi;
+  // <picture> <source srcset="..."> — same shape
+  const sourceRe = /<source\b[^>]*?\bsrcset\s*=\s*["']([^"']+)["'][^>]*>/gi;
+  // <meta property="og:image" content="..."> — high quality publisher hero
+  const ogRe = /<meta\b[^>]*?\bproperty\s*=\s*["']og:image["'][^>]*?\bcontent\s*=\s*["']([^"']+)["']/gi;
+
+  let m;
+  while ((m = ogRe.exec(html))) add(m[1]);
+  while ((m = srcsetRe.exec(html))) {
+    // Pick the URL with the largest descriptor (e.g. "https://… 1600w").
+    const set = m[1].split(",").map(s => s.trim()).filter(Boolean);
+    let best = null;
+    let bestSize = -1;
+    for (const entry of set) {
+      const parts = entry.split(/\s+/);
+      const url = parts[0];
+      const desc = parts[1] || "";
+      const num = parseInt(desc, 10) || 0;
+      if (num > bestSize) { bestSize = num; best = url; }
+    }
+    add(best);
+  }
+  while ((m = sourceRe.exec(html))) {
+    const set = m[1].split(",").map(s => s.trim()).filter(Boolean);
+    let best = null, bestSize = -1;
+    for (const entry of set) {
+      const parts = entry.split(/\s+/);
+      const num = parseInt(parts[1] || "0", 10) || 0;
+      if (num > bestSize) { bestSize = num; best = parts[0]; }
+    }
+    add(best);
+  }
+  while ((m = imgRe.exec(html))) add(m[1]);
+
+  return candidates.slice(0, 6); // cap to avoid runaway fetches
+}
+
+async function fetchArticlePhotoDataUri(article, imgCacheDir) {
+  const primary = article.image_url;
+  // Build a candidate fetch list: original URL, upscaled variant, then HTML
+  // body candidates (smart photo picker). Tries each in order until one
+  // produces a valid image.
+  const candidates = [];
+  const pushUnique = (u) => { if (u && !candidates.includes(u)) candidates.push(u); };
+  if (primary && /^https?:\/\//i.test(primary)) {
+    const upscaled = upscaleKnownThumbnailUrl(primary);
+    if (upscaled !== primary) pushUnique(upscaled);
+    pushUnique(primary);
+  }
+  for (const c of extractImageCandidatesFromHtml(article.content || "")) pushUnique(c);
+  if (candidates.length === 0) return null;
+
   if (!existsSync(imgCacheDir)) mkdirSync(imgCacheDir, { recursive: true });
 
-  // Return cached version if present (any image extension).
+  // Cache key: hash of the full candidate list (so changes in candidates
+  // invalidate the cached photo on next render).
+  const urlHash = createHash("sha1").update(candidates.join("|")).digest("hex").slice(0, 20);
+
+  // Return cached version if present.
   for (const [ext, mime] of [
     [".jpg", "image/jpeg"],
     [".png", "image/png"],
-    [".webp", "image/webp"],
   ]) {
     const p = path.join(imgCacheDir, `${urlHash}${ext}`);
     if (existsSync(p)) {
@@ -100,69 +204,27 @@ async function fetchArticlePhotoDataUri(imageUrl, imgCacheDir) {
     }
   }
 
-  // Fetch with browser-like headers and an organic Referer. CDN hotlink
-  // protection rejects empty referers and referers pointing at the CDN itself,
-  // so we use google.com/ which mimics a search-result click. Generous timeout
-  // because Hostinger → remote CDN paths can be slow.
-  const tryFetch = async (urlToFetch) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12000);
-    try {
-      const res = await fetch(urlToFetch, {
-        signal: controller.signal,
-        redirect: "follow",
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-          "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Referer": "https://www.google.com/",
-        },
-      });
-      if (!res.ok) return null;
-      const buf = Buffer.from(await res.arrayBuffer());
-      // Magic-byte sniff — many CDNs return 200 + image/* content-type but
-      // a 1-byte body when the requested size variant doesn't exist.
-      // Validating the magic bytes guarantees satori actually has decodable
-      // pixels to render.
-      const mime = detectImageMime(buf);
-      if (!mime) return null;
-      // Reject suspiciously small (broken thumbnails) or huge bodies.
-      if (buf.length < 2500 || buf.length > 12 * 1024 * 1024) return null;
-      return { buf, mime };
-    } catch (err) {
-      if (!String(err.name || "").includes("Abort")) {
-        logger.warn(`card renderer: image fetch error for ${urlToFetch.slice(0, 80)}: ${err.message}`);
-      }
-      return null;
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-
-  // Try upscaled URL first; if it doesn't return a valid image (CDN gave a
-  // 1-byte placeholder, 404, or not-an-image type), fall back to the original
-  // thumbnail URL. Better a small valid image than no image at all.
-  let result = await tryFetch(finalUrl);
-  if (!result && finalUrl !== imageUrl) {
-    result = await tryFetch(imageUrl);
-  }
-  if (!result) {
-    logger.warn(`card renderer: article image unusable for ${imageUrl.slice(0, 80)}`);
-    return null;
+  // Use the article's source domain as Referer when possible — looks like
+  // organic on-site browsing and slips past most hotlink protections.
+  let referer = "https://www.google.com/";
+  if (article.url) {
+    try { referer = new URL(article.url).origin + "/"; } catch {}
   }
 
-  // Satori only handles JPEG / PNG natively. WebP and GIF inputs would render
-  // as broken images and trigger a 500 on the cards endpoint. Reject anything
-  // that isn't JPEG/PNG so the renderer falls through to no-photo mode.
-  if (result.mime !== "image/jpeg" && result.mime !== "image/png") {
-    logger.warn(`card renderer: unsupported image type ${result.mime} for ${imageUrl.slice(0, 80)}`);
-    return null;
+  for (const url of candidates) {
+    const result = await tryFetchImage(url, referer);
+    if (!result) continue;
+    // Satori only handles JPEG / PNG. Skip WebP/GIF/AVIF — try next candidate.
+    if (result.mime !== "image/jpeg" && result.mime !== "image/png") continue;
+    const ext = result.mime === "image/png" ? ".png" : ".jpg";
+    const cachePath = path.join(imgCacheDir, `${urlHash}${ext}`);
+    try { writeFileSync(cachePath, result.buf); } catch {}
+    logger.info(`card renderer: photo OK for ${article.id} via ${url.slice(0, 80)} (${result.buf.length}b ${result.mime})`);
+    return `data:${result.mime};base64,${result.buf.toString("base64")}`;
   }
 
-  const ext = result.mime === "image/png" ? ".png" : ".jpg";
-  const cachePath = path.join(imgCacheDir, `${urlHash}${ext}`);
-  try { writeFileSync(cachePath, result.buf); } catch {}
-  return `data:${result.mime};base64,${result.buf.toString("base64")}`;
+  logger.warn(`card renderer: no usable photo from ${candidates.length} candidate(s) for ${article.id} (primary=${(primary || "none").slice(0, 80)})`);
+  return null;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -572,7 +634,7 @@ function buildCarouselTree(article, slide) {
 // changes — or when the card design version bumps (CARD_DESIGN_VER).
 // Bump CARD_DESIGN_VER whenever the visual layout changes so stale cached
 // PNGs are never served alongside the new design.
-const CARD_DESIGN_VER = "v5"; // bumped: BBC ace pattern, magic-byte validation, signature-aware skip
+const CARD_DESIGN_VER = "v6"; // bumped: axios-based fetch, smart photo picker, carousel1 = magazine
 
 function contentHash(article, preset) {
   const h = createHash("sha1");
@@ -902,14 +964,16 @@ function buildSquareMagazineTree(article, bgDataUri) {
 //   - Footer divider hairline + small-caps source attribution + date
 //     reads as press-quality vs the old single-row attribution.
 function buildTree(article, preset, opts = {}) {
+  // Carousel slide 1 (cover) shares the magazine photo-background layout
+  // with the standalone square card so the cover slide visually matches the
+  // single-image post style. Slides 2 and 3 stay typographic for legibility
+  // of the bullet points and CTA.
+  if (preset === "carousel1" || preset === "square") {
+    return buildSquareMagazineTree(article, opts.bgDataUri || null);
+  }
   if (preset.startsWith("carousel")) {
     const slide = parseInt(preset.replace("carousel", ""), 10);
-    if (slide >= 1 && slide <= 3) return buildCarouselTree(article, slide);
-  }
-
-  // Square preset uses the magazine photo-background layout.
-  if (preset === "square") {
-    return buildSquareMagazineTree(article, opts.bgDataUri || null);
+    if (slide >= 2 && slide <= 3) return buildCarouselTree(article, slide);
   }
 
   const dims = PRESETS[preset];
@@ -1359,17 +1423,15 @@ export async function ensureCard(article, preset = "og", opts = {}) {
   let bgDataUri = null;
 
   if (wantsPhoto) {
-    if (preset === "square") {
-      // Magazine square card: prefer the article's own image_url, fall back
-      // to a Pexels stock photo if the article fetch fails (or the article
-      // has no image_url).  Cached under CARDS_DIR/img-cache/ keyed by URL.
+    if (preset === "square" || preset === "carousel1") {
+      // Magazine square / carousel cover: prefer the article's own image_url
+      // (with smart photo picker scanning article HTML for high-res variants),
+      // fall back to a Pexels stock photo if all candidates fail.
       const imgCacheDir = path.join(CARDS_DIR, "img-cache");
-      if (article.image_url) {
-        try {
-          bgDataUri = await fetchArticlePhotoDataUri(article.image_url, imgCacheDir);
-        } catch (e) {
-          logger.warn(`card renderer: article photo fetch failed for ${article.id}: ${e.message}`);
-        }
+      try {
+        bgDataUri = await fetchArticlePhotoDataUri(article, imgCacheDir);
+      } catch (e) {
+        logger.warn(`card renderer: article photo fetch failed for ${article.id}: ${e.message}`);
       }
       if (!bgDataUri && isStockPhotoEnabled()) {
         try {
