@@ -16,6 +16,70 @@ import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
 import { getStockPhotoForArticle, stockPhotoAsDataUri, isStockPhotoEnabled } from "./stockPhoto.js";
 
+// ── Article-image fetcher ─────────────────────────────────────────────────────
+// Used by the magazine-style square card. Fetches the article's own image_url,
+// converts it to a base64 data URI, and caches it on disk so re-renders are fast.
+// Returns null on any failure (network error, non-image, too large, etc.).
+async function fetchArticlePhotoDataUri(imageUrl, imgCacheDir) {
+  if (!imageUrl || typeof imageUrl !== "string") return null;
+  // Only absolute HTTP(S) URLs.
+  if (!imageUrl.startsWith("http://") && !imageUrl.startsWith("https://")) return null;
+
+  const urlHash = createHash("sha1").update(imageUrl).digest("hex").slice(0, 20);
+  if (!existsSync(imgCacheDir)) mkdirSync(imgCacheDir, { recursive: true });
+
+  // Return cached version if present (any image extension).
+  for (const [ext, mime] of [
+    [".jpg", "image/jpeg"],
+    [".png", "image/png"],
+    [".webp", "image/webp"],
+  ]) {
+    const p = path.join(imgCacheDir, `${urlHash}${ext}`);
+    if (existsSync(p)) {
+      try {
+        const buf = readFileSync(p);
+        return `data:${mime};base64,${buf.toString("base64")}`;
+      } catch { /* fall through */ }
+    }
+  }
+
+  // Fetch with a tight timeout so a slow CDN doesn't hang the card render.
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 7000);
+    const res = await fetch(imageUrl, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "ScoopFeeds/1.0 (+https://scoopfeeds.com)",
+        "Accept": "image/*",
+      },
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) return null;
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    if (!ct.startsWith("image/")) return null;
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    // Skip suspiciously small (broken) or enormous images.
+    if (buf.length < 2000 || buf.length > 12 * 1024 * 1024) return null;
+
+    let ext = ".jpg";
+    let mime = "image/jpeg";
+    if (ct.includes("png"))  { ext = ".png";  mime = "image/png"; }
+    else if (ct.includes("webp")) { ext = ".webp"; mime = "image/webp"; }
+
+    const cachePath = path.join(imgCacheDir, `${urlHash}${ext}`);
+    try { writeFileSync(cachePath, buf); } catch {}
+    return `data:${mime};base64,${buf.toString("base64")}`;
+  } catch (err) {
+    if (!String(err.name || "").includes("Abort")) {
+      logger.warn(`card renderer: article image fetch failed for ${imageUrl.slice(0, 80)}: ${err.message}`);
+    }
+    return null;
+  }
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const BACKEND_ROOT = path.resolve(__dirname, "../..");
@@ -423,9 +487,9 @@ function buildCarouselTree(article, slide) {
 // changes — or when the card design version bumps (CARD_DESIGN_VER).
 // Bump CARD_DESIGN_VER whenever the visual layout changes so stale cached
 // PNGs are never served alongside the new design.
-const CARD_DESIGN_VER = "v2"; // bumped: description teaser + scoopfeeds.com footer for square
+const CARD_DESIGN_VER = "v3"; // bumped: magazine square redesign — article-photo background
 
-function contentHash(article) {
+function contentHash(article, preset) {
   const h = createHash("sha1");
   h.update(CARD_DESIGN_VER);
   h.update("|");
@@ -438,12 +502,315 @@ function contentHash(article) {
   // Include first 80 chars of description so the teaser re-renders when
   // the description is corrected/enriched after first ingest.
   h.update(String(article.description || "").slice(0, 80));
+  // For the magazine square card, also hash the image URL so the card
+  // invalidates when the article's image changes (e.g. after enrichment).
+  if (preset === "square") {
+    h.update("|");
+    h.update(String(article.image_url || ""));
+  }
   return h.digest("hex").slice(0, 10);
 }
 
 function cachePath(articleId, preset, hash) {
   const safeId = String(articleId).replace(/[^a-z0-9_-]/gi, "_").slice(0, 120);
   return path.join(CARDS_DIR, `${safeId}-${preset}-${hash}.png`);
+}
+
+// ── Magazine-style square card ───────────────────────────────────────────────
+//
+// Instagram 1080×1080 card that looks like a polished editorial photo-post:
+//
+//   ┌──────────────────────────────────────────────┐
+//   │ scoopfeeds            [CATEGORY PILL]        │  ← top bar
+//   │                                              │
+//   │            article photo fills              │
+//   │               entire background             │
+//   │                                              │
+//   │████████████ gradient darkens ████████████████│
+//   │                                              │
+//   │  BIG BOLD WHITE HEADLINE GOES               │  ← headline
+//   │  HERE ACROSS UP TO THREE LINES              │
+//   │                                              │
+//   │  [f][ig][X][in][www]         via BBC News   │  ← footer icons
+//   └──────────────────────────────────────────────┘
+//
+// When the article has no usable image_url (fetch failed or absent), the card
+// falls back to the standard dark typographic layout (buildTree with no bgDataUri).
+function buildSquareMagazineTree(article, bgDataUri) {
+  const W = 1080, H = 1080;
+  const PAD = 60;
+  const color = colorFor(article.category);
+  const label = labelFor(article.category);
+  const source = article.source_name || "";
+
+  // Headline: larger font than the standard square, tight letter-spacing.
+  // Up to 110 chars — at 86px Inter Bold, ~3 lines at 1080px width.
+  const headline = truncate(article.title, 110);
+
+  // ── Social platform icon row ──────────────────────────────────────────
+  // Rendered as small circular outlined boxes so they're recognisable at a
+  // glance without needing actual icon SVGs. All white/semi-transparent so
+  // they read cleanly over the dark gradient.
+  const ICON_LABELS = ["f", "ig", "X", "in", "www"];
+  const socialIconNodes = ICON_LABELS.map((lbl) => ({
+    type: "div",
+    props: {
+      style: {
+        display: "flex",
+        width: 46,
+        height: 46,
+        borderRadius: 999,
+        border: "2px solid rgba(255,255,255,0.40)",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: lbl === "ig" ? 15 : lbl === "www" ? 14 : 18,
+        fontWeight: 700,
+        color: "rgba(255,255,255,0.72)",
+        flexShrink: 0,
+      },
+      children: lbl,
+    },
+  }));
+
+  // ── Top row: wordmark left, category pill right ───────────────────────
+  const topRow = {
+    type: "div",
+    props: {
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        width: "100%",
+      },
+      children: [
+        // scoopfeeds wordmark — pill background so it reads on any photo
+        {
+          type: "div",
+          props: {
+            style: {
+              display: "flex",
+              alignItems: "baseline",
+              backgroundColor: "rgba(0,0,0,0.50)",
+              paddingTop: 10,
+              paddingBottom: 10,
+              paddingLeft: 18,
+              paddingRight: 18,
+              borderRadius: 999,
+            },
+            children: [
+              { type: "span", props: { style: { display: "flex", fontSize: 26, fontWeight: 700, color: "#FFFFFF", letterSpacing: -0.3 }, children: "scoop" } },
+              { type: "span", props: { style: { display: "flex", fontSize: 26, fontWeight: 700, color: "rgba(255,255,255,0.65)" }, children: "feeds" } },
+            ],
+          },
+        },
+        // Category badge
+        {
+          type: "div",
+          props: {
+            style: {
+              display: "flex",
+              backgroundColor: color,
+              color: "#fff",
+              paddingTop: 10,
+              paddingBottom: 10,
+              paddingLeft: 22,
+              paddingRight: 22,
+              borderRadius: 999,
+              fontSize: 20,
+              fontWeight: 700,
+              letterSpacing: 2,
+            },
+            children: label,
+          },
+        },
+      ],
+    },
+  };
+
+  // ── Bottom section: headline + footer ────────────────────────────────
+  const bottomSection = {
+    type: "div",
+    props: {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        width: "100%",
+        gap: 24,
+      },
+      children: [
+        // Headline — large, bold, white
+        {
+          type: "div",
+          props: {
+            style: {
+              display: "flex",
+              fontSize: 82,
+              fontWeight: 700,
+              lineHeight: 1.07,
+              letterSpacing: -2,
+              color: "#FFFFFF",
+              width: "100%",
+            },
+            children: headline,
+          },
+        },
+        // Footer row: social icons left, source attribution right
+        {
+          type: "div",
+          props: {
+            style: {
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              width: "100%",
+            },
+            children: [
+              // Social icon row
+              {
+                type: "div",
+                props: {
+                  style: { display: "flex", gap: 10 },
+                  children: socialIconNodes,
+                },
+              },
+              // Source / site attribution
+              {
+                type: "div",
+                props: {
+                  style: {
+                    display: "flex",
+                    fontSize: 22,
+                    fontWeight: 600,
+                    color: "rgba(255,255,255,0.60)",
+                    letterSpacing: 0.2,
+                  },
+                  children: source ? `via ${source}` : "scoopfeeds.com",
+                },
+              },
+            ],
+          },
+        },
+      ],
+    },
+  };
+
+  // When we have a background photo, layer photo → gradient → content.
+  if (bgDataUri) {
+    return {
+      type: "div",
+      props: {
+        style: {
+          width: W,
+          height: H,
+          display: "flex",
+          position: "relative",
+          backgroundColor: "#0A0A0C",
+          fontFamily: "Inter",
+          color: "#FFFFFF",
+        },
+        children: [
+          // Layer 1: article photo (full bleed)
+          {
+            type: "img",
+            props: {
+              src: bgDataUri,
+              width: W,
+              height: H,
+              style: {
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: W,
+                height: H,
+                objectFit: "cover",
+              },
+            },
+          },
+          // Layer 2: gradient — heavy at bottom where text lives, very light at top
+          {
+            type: "div",
+            props: {
+              style: {
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: W,
+                height: H,
+                display: "flex",
+                backgroundImage:
+                  "linear-gradient(180deg," +
+                  "rgba(0,0,0,0.55) 0%," +
+                  "rgba(0,0,0,0.08) 28%," +
+                  "rgba(0,0,0,0.10) 42%," +
+                  "rgba(0,0,0,0.72) 62%," +
+                  "rgba(0,0,0,0.96) 100%)",
+              },
+            },
+          },
+          // Layer 3: thin category-colour accent line at very bottom edge
+          {
+            type: "div",
+            props: {
+              style: {
+                position: "absolute",
+                bottom: 0,
+                left: 0,
+                width: W,
+                height: 6,
+                display: "flex",
+                backgroundColor: color,
+              },
+            },
+          },
+          // Layer 4: content (topRow + bottomSection, space-between)
+          {
+            type: "div",
+            props: {
+              style: {
+                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "space-between",
+                width: W,
+                height: H,
+                paddingTop: PAD,
+                paddingBottom: PAD + 6, // clear the accent line
+                paddingLeft: PAD,
+                paddingRight: PAD,
+              },
+              children: [topRow, bottomSection],
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  // Fallback (no article photo): dark typographic card but with the magazine
+  // layout (large headline, social icons, no description teaser).
+  return {
+    type: "div",
+    props: {
+      style: {
+        width: W,
+        height: H,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
+        backgroundColor: "#0A0A0C",
+        backgroundImage:
+          `radial-gradient(ellipse 70% 60% at 92% 0%, ${color}33 0%, ${color}10 35%, transparent 70%),` +
+          ` linear-gradient(180deg, #0A0A0C 0%, #111114 60%, #16161B 100%)`,
+        paddingTop: PAD,
+        paddingBottom: PAD,
+        paddingLeft: PAD,
+        paddingRight: PAD,
+        fontFamily: "Inter",
+        color: "#FFFFFF",
+      },
+      children: [topRow, bottomSection],
+    },
+  };
 }
 
 // World-class card layout — typographic hero with editorial polish:
@@ -471,6 +838,11 @@ function buildTree(article, preset, opts = {}) {
   if (preset.startsWith("carousel")) {
     const slide = parseInt(preset.replace("carousel", ""), 10);
     if (slide >= 1 && slide <= 3) return buildCarouselTree(article, slide);
+  }
+
+  // Square preset uses the magazine photo-background layout.
+  if (preset === "square") {
+    return buildSquareMagazineTree(article, opts.bgDataUri || null);
   }
 
   const dims = PRESETS[preset];
@@ -889,14 +1261,15 @@ async function renderPng(article, preset, opts = {}) {
 
 // Public API: returns { path, buffer, contentType } — caches on disk.
 //
-// Photo-backed mode: when PEXELS_API_KEY is set, hero presets (og/square/story)
-// composite a Pexels stock photo behind the typography. Carousel slides stay
-// typography-only because they're a sequence and a unified clean look reads
-// better than three different photo backdrops.
+// Photo-backed mode:
+//   - square preset: always tries to fetch article.image_url as the background
+//     (magazine layout). Falls back to dark typographic card on failure.
+//   - og / story presets: uses PEXELS_API_KEY stock photo when configured.
+//   - carousel: always typographic-only (three slides look better with a
+//     unified dark background instead of three different photos).
 //
-// `opts.usePhoto` defaults to true for hero presets, false for carousel.
-// Pass `opts.usePhoto = false` to force the typographic-only fallback even
-// when a key is configured (useful for the admin preview "before" comparison).
+// `opts.usePhoto = false` forces the typographic-only fallback for any preset
+// (useful for admin preview "before" comparison).
 export async function ensureCard(article, preset = "og", opts = {}) {
   if (!isCardRendererReady()) throw new Error("card renderer not ready (missing fonts)");
   if (!PRESETS[preset]) throw new Error(`unknown preset: ${preset}`);
@@ -904,23 +1277,37 @@ export async function ensureCard(article, preset = "og", opts = {}) {
 
   const isHero = !preset.startsWith("carousel");
   const wantsPhoto = opts.usePhoto !== undefined ? Boolean(opts.usePhoto) : isHero;
-  const photoEnabled = wantsPhoto && isStockPhotoEnabled();
 
-  // Resolve the stock photo BEFORE hashing so the cache key reflects whether
-  // the card has a photo. If photo lookup fails the card still renders (just
-  // typographic-only); we don't want a stale photo-less card if the photo
-  // arrives on the next call, so we hash on photo presence.
-  let stockPhoto = null;
-  if (photoEnabled) {
-    try {
-      stockPhoto = await getStockPhotoForArticle(article);
-    } catch (e) {
-      logger.warn(`card renderer: stock photo lookup failed for ${article.id}: ${e.message}`);
+  let bgDataUri = null;
+
+  if (wantsPhoto) {
+    if (preset === "square") {
+      // Magazine square card: use the article's own image_url.
+      // Cached under CARDS_DIR/img-cache/ keyed by URL hash.
+      const imgCacheDir = path.join(CARDS_DIR, "img-cache");
+      if (article.image_url) {
+        try {
+          bgDataUri = await fetchArticlePhotoDataUri(article.image_url, imgCacheDir);
+        } catch (e) {
+          logger.warn(`card renderer: article photo fetch failed for ${article.id}: ${e.message}`);
+        }
+      }
+    } else if (isStockPhotoEnabled()) {
+      // OG / story: use Pexels stock photo when configured.
+      let stockPhoto = null;
+      try {
+        stockPhoto = await getStockPhotoForArticle(article);
+      } catch (e) {
+        logger.warn(`card renderer: stock photo lookup failed for ${article.id}: ${e.message}`);
+      }
+      bgDataUri = stockPhoto ? stockPhotoAsDataUri(stockPhoto.path) : null;
     }
   }
-  const bgDataUri = stockPhoto ? stockPhotoAsDataUri(stockPhoto.path) : null;
-  const hashSuffix = bgDataUri ? "p1" : "p0"; // photo present / absent
-  const hash = `${contentHash(article)}-${hashSuffix}`;
+
+  // Hash includes whether a photo is present so the cache distinguishes
+  // photo vs no-photo renders (they look very different).
+  const hashSuffix = bgDataUri ? "p1" : "p0";
+  const hash = `${contentHash(article, preset)}-${hashSuffix}`;
   const filePath = cachePath(article.id, preset, hash);
 
   if (existsSync(filePath)) {

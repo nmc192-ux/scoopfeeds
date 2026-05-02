@@ -23,6 +23,7 @@ import { isFacebookConfigured, postToFacebook } from "./facebookClient.js";
 import { isInstagramConfigured, postToInstagram } from "./instagramClient.js";
 import { isLinkedinConfigured, postToLinkedin } from "./linkedinClient.js";
 import { isPinterestConfigured, postToPinterest } from "./pinterestClient.js";
+import { ensureIgSummary } from "./igSummaryService.js";
 import { logger } from "./logger.js";
 
 const SITE = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
@@ -253,6 +254,13 @@ export async function runPlatformCycle(platform, { dryRun = false, minCredibilit
       reason: candidates.length ? "all_filtered" : "no_candidate",
       droppedAsBlock,
     };
+  }
+
+  // For Instagram: generate (or retrieve cached) AI summary before composing
+  // so composeInstagramFeed() picks it up as article.ig_summary.
+  if (platform === "instagram") {
+    try { await ensureIgSummary(article); }
+    catch (err) { logger.warn(`socialPublisher: ig_summary generation failed for ${article.id}: ${err.message}`); }
   }
 
   let composed;

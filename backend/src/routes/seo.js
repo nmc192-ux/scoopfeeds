@@ -8,6 +8,7 @@ import {
   incrementViewCount,
   listAlternateCoverage,
   listRelatedStories,
+  getRecentIgPosts,
 } from "../models/database.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1187,5 +1188,229 @@ router.get("/sponsor", (_req, res) => {
 function renderNotFound() {
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Not found — Scoopfeeds</title><meta name="robots" content="noindex"><style>body{font-family:system-ui;text-align:center;padding:80px 20px;color:#333}a{color:#2563EB}</style></head><body><h1>Story not found</h1><p>This article may have expired.</p><p><a href="/">← Back to Scoopfeeds</a></p></body></html>`;
 }
+
+// ── /ig — Instagram link-in-bio page ─────────────────────────────────────────
+// Mobile-optimised landing page that surfaces the last 12 stories we posted
+// to Instagram. The Instagram bio links here so followers can tap a story and
+// go straight to the full article.
+const CATEGORY_COLORS_IG = {
+  top: "#DC2626", politics: "#7C3AED", pakistan: "#059669",
+  international: "#2563EB", science: "#0891B2", medicine: "#DB2777",
+  "public-health": "#EA580C", health: "#F59E0B", environment: "#16A34A",
+  "self-help": "#9333EA", sports: "#EF4444", cars: "#475569", ai: "#0EA5E9",
+};
+const CATEGORY_LABELS_IG = {
+  top: "Top", politics: "Politics", pakistan: "Pakistan",
+  international: "World", science: "Science", medicine: "Medicine",
+  "public-health": "Public Health", health: "Health",
+  environment: "Environment", "self-help": "Self-Help",
+  sports: "Sports", cars: "Automotive", ai: "AI",
+};
+
+function igPageHtml(posts) {
+  const MONTH = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  function fmtDate(ts) {
+    if (!ts) return "";
+    const d = new Date(ts < 1e12 ? ts * 1000 : ts);
+    return `${MONTH[d.getMonth()]} ${d.getDate()}`;
+  }
+
+  const cards = posts.map((p) => {
+    const color = CATEGORY_COLORS_IG[p.category] || "#DC2626";
+    const label = CATEGORY_LABELS_IG[p.category] || String(p.category || "News").replace(/^\w/, c => c.toUpperCase());
+    const storyUrl = `${SITE}/article/${encodeURIComponent(p.id)}?utm_source=instagram&utm_medium=bio_link&utm_campaign=ig_linkinbio`;
+    const snippet = (p.ig_summary || p.description || "").trim().slice(0, 120).replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    const imageHtml = p.image_url
+      ? `<div class="thumb" style="background-image:url('${p.image_url.replace(/'/g, "\\'")}')">
+           <div class="thumb-overlay"></div>
+           <span class="cat-badge" style="background:${color}">${label}</span>
+         </div>`
+      : `<div class="thumb thumb-no-img" style="background:${color}22">
+           <span class="cat-badge" style="background:${color}">${label}</span>
+         </div>`;
+
+    return `
+    <a href="${storyUrl}" class="card" target="_blank" rel="noopener">
+      ${imageHtml}
+      <div class="card-body">
+        <p class="card-title">${(p.title || "").replace(/</g, "&lt;")}</p>
+        ${snippet ? `<p class="card-snippet">${snippet}${snippet.length >= 120 ? "…" : ""}</p>` : ""}
+        <div class="card-meta">
+          <span class="source">${(p.source_name || "").replace(/</g, "&lt;")}</span>
+          <span class="date">${fmtDate(p.published_at)}</span>
+        </div>
+      </div>
+      <div class="card-cta">Read story →</div>
+    </a>`;
+  }).join("");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Latest Stories — Scoop</title>
+  <meta name="description" content="The latest news stories from Scoop, as seen on Instagram.">
+  <meta name="robots" content="noindex">
+  <link rel="canonical" href="${SITE}/ig">
+  <meta property="og:title" content="Latest Stories — Scoop">
+  <meta property="og:description" content="News, sniffed out. Follow @scoop.feeds on Instagram.">
+  <meta property="og:image" content="${SITE}/scoopfeeds-profile.png">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0b0b0d;
+      --surface: #18181b;
+      --border: #27272a;
+      --text: #f4f4f5;
+      --muted: #a1a1aa;
+      --accent: #2563eb;
+    }
+    html { background: var(--bg); color: var(--text); -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      max-width: 480px;
+      margin: 0 auto;
+      min-height: 100vh;
+      padding-bottom: env(safe-area-inset-bottom, 20px);
+    }
+
+    /* ── Header ─────────────────────────────────────── */
+    .header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 36px 24px 24px;
+      gap: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo-mark {
+      width: 52px; height: 52px;
+      background: linear-gradient(135deg, #3B82F6, #1E3A8A);
+      border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px; color: white;
+      flex-shrink: 0;
+    }
+    .logo-text { display: flex; flex-direction: column; }
+    .logo-name {
+      font-size: 22px; font-weight: 800; letter-spacing: -0.5px;
+      color: var(--text);
+    }
+    .logo-tagline { font-size: 13px; color: var(--muted); font-weight: 500; }
+    .header-desc {
+      font-size: 14px; color: var(--muted); text-align: center; line-height: 1.5;
+      max-width: 320px;
+    }
+    .ig-handle {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: linear-gradient(135deg, #f58529, #dd2a7b, #8134af);
+      color: white; font-size: 14px; font-weight: 700;
+      padding: 8px 18px; border-radius: 999px; text-decoration: none;
+      transition: opacity .15s;
+    }
+    .ig-handle:active { opacity: .75; }
+
+    /* ── Story cards ─────────────────────────────────── */
+    .section-label {
+      font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
+      color: var(--muted); text-transform: uppercase;
+      padding: 20px 20px 8px;
+    }
+    .cards { display: flex; flex-direction: column; gap: 1px; background: var(--border); }
+
+    .card {
+      display: flex; flex-direction: column;
+      background: var(--surface);
+      text-decoration: none; color: var(--text);
+      overflow: hidden;
+      transition: background .12s;
+    }
+    .card:active { background: #1f1f23; }
+
+    .thumb {
+      width: 100%; height: 200px;
+      background-size: cover; background-position: center;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .thumb-no-img { height: 80px; }
+    .thumb-overlay {
+      position: absolute; inset: 0;
+      background: linear-gradient(180deg, transparent 30%, rgba(0,0,0,.55) 100%);
+    }
+    .cat-badge {
+      position: absolute; bottom: 10px; left: 12px;
+      font-size: 11px; font-weight: 700; letter-spacing: 1.2px;
+      text-transform: uppercase; color: white;
+      padding: 4px 10px; border-radius: 999px;
+    }
+    .thumb-no-img .cat-badge { position: static; display: inline-block; margin: 20px 16px; }
+
+    .card-body { padding: 14px 16px 10px; display: flex; flex-direction: column; gap: 6px; }
+    .card-title { font-size: 16px; font-weight: 700; line-height: 1.35; color: var(--text); }
+    .card-snippet { font-size: 13px; color: var(--muted); line-height: 1.5; }
+    .card-meta { display: flex; justify-content: space-between; align-items: center; }
+    .source { font-size: 12px; color: var(--muted); font-weight: 600; }
+    .date { font-size: 12px; color: #52525b; }
+
+    .card-cta {
+      padding: 12px 16px;
+      font-size: 14px; font-weight: 700; color: #60a5fa;
+      display: flex; align-items: center; gap: 4px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── Footer ─────────────────────────────────────── */
+    .footer {
+      padding: 28px 20px;
+      text-align: center;
+      display: flex; flex-direction: column; gap: 10px; align-items: center;
+    }
+    .footer a { color: #60a5fa; text-decoration: none; font-size: 14px; font-weight: 600; }
+    .footer-muted { font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="logo-row">
+      <div class="logo-mark">🦆</div>
+      <div class="logo-text">
+        <span class="logo-name">scoopfeeds</span>
+        <span class="logo-tagline">News, sniffed out.</span>
+      </div>
+    </div>
+    <p class="header-desc">Tap any story below to read the full article on Scoop.</p>
+    <a class="ig-handle" href="https://www.instagram.com/scoop.feeds/" target="_blank" rel="noopener">
+      📸 @scoop.feeds
+    </a>
+  </header>
+
+  <p class="section-label">Latest stories</p>
+  <div class="cards">
+    ${cards || '<p style="padding:32px 20px;color:#71717a;text-align:center">No stories yet — check back soon!</p>'}
+  </div>
+
+  <footer class="footer">
+    <a href="${SITE}">Browse all news on scoopfeeds.com →</a>
+    <span class="footer-muted">© ${new Date().getFullYear()} Scoop · News, sniffed out.</span>
+  </footer>
+</body>
+</html>`;
+}
+
+router.get("/ig", (_req, res) => {
+  try {
+    const posts = getRecentIgPosts(12);
+    res.type("html").send(igPageHtml(posts));
+  } catch (err) {
+    res.type("html").send(igPageHtml([]));
+  }
+});
 
 export default router;

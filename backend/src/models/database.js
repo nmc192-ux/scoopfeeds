@@ -389,6 +389,11 @@ function initializeSchema(db) {
       db.exec("CREATE INDEX IF NOT EXISTS idx_articles_dup ON articles(is_duplicate, published_at DESC)");
       logger.info("Migrated articles table: +is_duplicate");
     }
+    // Migration: AI-generated Instagram caption summary.
+    if (!cols.some((c) => c.name === "ig_summary")) {
+      db.exec("ALTER TABLE articles ADD COLUMN ig_summary TEXT");
+      logger.info("Migrated articles table: +ig_summary");
+    }
   } catch (err) {
     logger.warn("Migration check failed", { error: err.message });
   }
@@ -1122,7 +1127,7 @@ export function findFreshUnpostedArticles({ platform, minCredibility = 7, within
   // Also filter is_duplicate = 0 so we never auto-post a near-duplicate story
   // to social — only the highest-credibility version of each story gets posted.
   return getDb().prepare(`
-    SELECT a.id, a.title, a.description, a.category, a.source_name, a.published_at, a.credibility, a.url, a.image_url
+    SELECT a.id, a.title, a.description, a.content, a.category, a.source_name, a.published_at, a.credibility, a.url, a.image_url, a.ig_summary
     FROM articles a
     LEFT JOIN social_posts s ON s.article_id = a.id AND s.platform = ? AND s.status = 'posted'
     WHERE s.article_id IS NULL
@@ -1132,6 +1137,22 @@ export function findFreshUnpostedArticles({ platform, minCredibility = 7, within
     ORDER BY a.credibility DESC, a.published_at DESC
     LIMIT ?
   `).all(platform, cutoff, minCredibility, limit);
+}
+
+// Returns the last N Instagram posts with their associated article data.
+// Used by the /ig link-in-bio page to show a feed of recently-posted stories.
+export function getRecentIgPosts(limit = 12) {
+  return getDb().prepare(`
+    SELECT
+      a.id, a.title, a.description, a.ig_summary, a.category,
+      a.image_url, a.source_name, a.published_at, a.url AS article_source_url,
+      sp.url AS post_url, sp.posted_at
+    FROM social_posts sp
+    JOIN articles a ON a.id = sp.article_id
+    WHERE sp.platform = 'instagram' AND sp.status = 'posted'
+    ORDER BY sp.posted_at DESC
+    LIMIT ?
+  `).all(limit);
 }
 
 export function socialPostStats({ withinMs = 24 * 60 * 60 * 1000 } = {}) {

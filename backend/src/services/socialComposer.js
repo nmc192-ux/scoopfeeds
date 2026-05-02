@@ -507,9 +507,10 @@ function composeInstagramFeed(article) {
   // Hook line — emoji + cleaned headline, stays above the "more" fold.
   const hook = `${emoji} ${cleanTitle}`;
 
-  // Body — first 2-3 sentences of description, sentence-aware truncation so
-  // it reads as a complete thought rather than a cut-off string.
-  const body = desc ? truncateBySentence(desc, 300) : "";
+  // Body — prefer the AI-generated ig_summary (2-3 sentences, punchy); fall
+  // back to sentence-aware truncation of the raw description.
+  const igSummaryText = String(article.ig_summary || "").trim();
+  const body = igSummaryText || (desc ? truncateBySentence(desc, 300) : "");
 
   // Engagement CTA — category-aware, avoids tragedy topics.
   const engagement = pickIgEngagement(article, cleanTitle);
