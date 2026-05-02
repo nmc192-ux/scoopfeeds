@@ -130,10 +130,13 @@ async function call(pathPart, { method = "GET", params = {}, body } = {}) {
 // avoid hanging the cron tail step.
 async function waitForFinished(creationId, { maxAttempts = 8, gapMs = 1500 } = {}) {
   for (let i = 0; i < maxAttempts; i++) {
-    const out = await call(`/${creationId}`, { params: { fields: "status_code" } });
-    if (out.status_code === "FINISHED") return true;
-    if (out.status_code === "ERROR" || out.status_code === "EXPIRED") {
-      throw new Error(`threads container ${creationId} → ${out.status_code}`);
+    const out = await call(`/${creationId}`, { params: { fields: "status,error_message" } });
+    // Threads API returns `status`; some older docs called it `status_code` — handle both.
+    const s = out.status || out.status_code;
+    if (s === "FINISHED") return true;
+    if (s === "ERROR" || s === "EXPIRED") {
+      const detail = out.error_message ? ` (${out.error_message})` : "";
+      throw new Error(`threads container ${creationId} → ${s}${detail}`);
     }
     await new Promise((r) => setTimeout(r, gapMs));
   }
