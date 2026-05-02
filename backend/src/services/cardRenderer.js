@@ -634,7 +634,7 @@ function buildCarouselTree(article, slide) {
 // changes — or when the card design version bumps (CARD_DESIGN_VER).
 // Bump CARD_DESIGN_VER whenever the visual layout changes so stale cached
 // PNGs are never served alongside the new design.
-const CARD_DESIGN_VER = "v7"; // bumped: smarter cache with fallback detection + diagnostic headers
+const CARD_DESIGN_VER = "v8"; // bumped: SVG embed diagnostic + cache-bust for satori probe
 
 function contentHash(article, preset) {
   const h = createHash("sha1");
@@ -1385,17 +1385,21 @@ async function renderPng(article, preset, opts = {}) {
     { name: "Inter", data: FONT_BOLD,     weight: 700, style: "normal" },
   ];
 
-  const renderOnce = (treeOpts) => {
+  const renderOnce = async (treeOpts) => {
     const tree = buildTree(article, preset, treeOpts);
-    return satori(tree, { width: dims.width, height: dims.height, fonts })
-      .then(svg => new Resvg(svg, { background: "#0B0B0D", fitTo: { mode: "original" } }).render().asPng());
+    const svg = await satori(tree, { width: dims.width, height: dims.height, fonts });
+    // Diagnostic: log SVG length + whether the data URI made it in. Big
+    // discrepancy between input image bytes and SVG length tells us satori
+    // dropped the image (the most likely culprit for invisible photos on
+    // production while local renders work fine).
+    if (treeOpts.bgDataUri) {
+      const dataUriPresent = svg.includes("data:image/jpeg") || svg.includes("data:image/png");
+      const inputBytes = treeOpts.bgDataUri.length;
+      logger.info(`card renderer: render ${article.id} preset=${preset} svgBytes=${svg.length} inputDataUriBytes=${inputBytes} satoriEmbedded=${dataUriPresent}`);
+    }
+    return new Resvg(svg, { background: "#0B0B0D", fitTo: { mode: "original" } }).render().asPng();
   };
 
-  // First attempt: with the bgDataUri we got. If satori/resvg throw (e.g.
-  // malformed image bytes that the magic-byte sniff didn't catch — corrupt
-  // JPEG headers, truncated PNGs, exotic colour profiles), retry without the
-  // photo so we still produce a valid card. Loud log so we can spot the bad
-  // image in deploy logs and harden the fetcher.
   try {
     const buffer = await renderOnce(opts);
     return { buffer, photoEmbedded: Boolean(opts.bgDataUri) };
