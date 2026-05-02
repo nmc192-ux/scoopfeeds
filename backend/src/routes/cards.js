@@ -53,6 +53,12 @@ router.get("/:preset/:id.png", async (req, res) => {
     // Helmet sets CORP: same-origin globally; override it here so social
     // platforms can download these assets server-side for post previews.
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    // Diagnostic headers — let us tell at a glance from `curl -I` whether the
+    // photo fetch succeeded for this card and whether it was a fresh render
+    // or a cache hit.
+    res.setHeader("X-Card-Photo", card.withPhoto ? "embedded" : "absent");
+    res.setHeader("X-Card-Cache", card.hit ? "hit" : "miss");
+    if (card.photoSource) res.setHeader("X-Card-Photo-Source", card.photoSource);
     // Use the cache filename's hash chunk as the etag — invalidates when
     // headline/category/source changes.
     const etag = `"${card.path.split("-").slice(-1)[0].replace(/\.png$/, "")}"`;

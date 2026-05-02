@@ -634,7 +634,7 @@ function buildCarouselTree(article, slide) {
 // changes — or when the card design version bumps (CARD_DESIGN_VER).
 // Bump CARD_DESIGN_VER whenever the visual layout changes so stale cached
 // PNGs are never served alongside the new design.
-const CARD_DESIGN_VER = "v6"; // bumped: axios-based fetch, smart photo picker, carousel1 = magazine
+const CARD_DESIGN_VER = "v7"; // bumped: smarter cache with fallback detection + diagnostic headers
 
 function contentHash(article, preset) {
   const h = createHash("sha1");
@@ -1375,6 +1375,9 @@ function buildTree(article, preset, opts = {}) {
   };
 }
 
+// Renders the satori → SVG → PNG pipeline for a single article + preset.
+// Returns { buffer, photoEmbedded } so callers can tell whether the photo
+// actually made it into the rendered output (vs. fell back to no-photo).
 async function renderPng(article, preset, opts = {}) {
   const dims = PRESETS[preset];
   const fonts = [
@@ -1382,20 +1385,25 @@ async function renderPng(article, preset, opts = {}) {
     { name: "Inter", data: FONT_BOLD,     weight: 700, style: "normal" },
   ];
 
-  // First attempt: with whatever bgDataUri we got. If satori or resvg throw
-  // (e.g. malformed image bytes that magic-byte sniff didn't catch — corrupt
-  // JPEG headers, truncated PNGs), retry without the photo so we still
-  // produce a valid card instead of 500'ing the cards endpoint.
+  const renderOnce = (treeOpts) => {
+    const tree = buildTree(article, preset, treeOpts);
+    return satori(tree, { width: dims.width, height: dims.height, fonts })
+      .then(svg => new Resvg(svg, { background: "#0B0B0D", fitTo: { mode: "original" } }).render().asPng());
+  };
+
+  // First attempt: with the bgDataUri we got. If satori/resvg throw (e.g.
+  // malformed image bytes that the magic-byte sniff didn't catch — corrupt
+  // JPEG headers, truncated PNGs, exotic colour profiles), retry without the
+  // photo so we still produce a valid card. Loud log so we can spot the bad
+  // image in deploy logs and harden the fetcher.
   try {
-    const tree = buildTree(article, preset, opts);
-    const svg = await satori(tree, { width: dims.width, height: dims.height, fonts });
-    return new Resvg(svg, { background: "#0B0B0D", fitTo: { mode: "original" } }).render().asPng();
+    const buffer = await renderOnce(opts);
+    return { buffer, photoEmbedded: Boolean(opts.bgDataUri) };
   } catch (err) {
     if (opts.bgDataUri) {
-      logger.warn(`card renderer: render failed with photo for ${article.id} — retrying without: ${err.message}`);
-      const tree = buildTree(article, preset, { ...opts, bgDataUri: null });
-      const svg = await satori(tree, { width: dims.width, height: dims.height, fonts });
-      return new Resvg(svg, { background: "#0B0B0D", fitTo: { mode: "original" } }).render().asPng();
+      logger.error(`card renderer: SATORI FAILED with photo for ${article.id} (preset=${preset}): ${err.message} — retrying typographic-only`);
+      const buffer = await renderOnce({ ...opts, bgDataUri: null });
+      return { buffer, photoEmbedded: false };
     }
     throw err;
   }
@@ -1454,20 +1462,35 @@ export async function ensureCard(article, preset = "og", opts = {}) {
   }
 
   // Hash includes whether a photo is present so the cache distinguishes
-  // photo vs no-photo renders (they look very different).
-  const hashSuffix = bgDataUri ? "p1" : "p0";
-  const hash = `${contentHash(article, preset)}-${hashSuffix}`;
-  const filePath = cachePath(article.id, preset, hash);
+  // photo vs no-photo renders (they look very different). We check BOTH
+  // possible filenames (p0 and p1) on cache lookup — that way, if a previous
+  // render fell back to typographic-only after a satori failure, we don't
+  // re-attempt the bad photo on every request.
+  const baseHash = contentHash(article, preset);
+  const intendedSuffix = bgDataUri ? "p1" : "p0";
+  const intendedPath = cachePath(article.id, preset, `${baseHash}-${intendedSuffix}`);
+  const fallbackPath = cachePath(article.id, preset, `${baseHash}-p0`);
 
-  if (existsSync(filePath)) {
-    return { path: filePath, buffer: readFileSync(filePath), contentType: "image/png", hit: true, withPhoto: Boolean(bgDataUri) };
+  if (existsSync(intendedPath)) {
+    return { path: intendedPath, buffer: readFileSync(intendedPath), contentType: "image/png", hit: true, withPhoto: intendedSuffix === "p1" };
+  }
+  // If a typographic-only render is already cached, prefer it over re-trying
+  // a known-bad photo (only applies when we have a bgDataUri but the previous
+  // render fell back). This avoids the "fetch + retry satori" cost on each request.
+  if (bgDataUri && existsSync(fallbackPath)) {
+    return { path: fallbackPath, buffer: readFileSync(fallbackPath), contentType: "image/png", hit: true, withPhoto: false };
   }
 
-  const buffer = await renderPng(article, preset, { bgDataUri });
-  try { writeFileSync(filePath, buffer); } catch (e) {
-    logger.warn(`card renderer: failed to cache to ${filePath}: ${e.message}`);
+  const { buffer, photoEmbedded } = await renderPng(article, preset, { bgDataUri });
+  // If satori had to fall back (photo bytes were malformed even after our
+  // magic-byte check), persist under the p0 filename — that way subsequent
+  // requests skip the broken-photo render entirely.
+  const finalSuffix = photoEmbedded ? "p1" : "p0";
+  const finalPath = cachePath(article.id, preset, `${baseHash}-${finalSuffix}`);
+  try { writeFileSync(finalPath, buffer); } catch (e) {
+    logger.warn(`card renderer: failed to cache to ${finalPath}: ${e.message}`);
   }
-  return { path: filePath, buffer, contentType: "image/png", hit: false, withPhoto: Boolean(bgDataUri) };
+  return { path: finalPath, buffer, contentType: "image/png", hit: false, withPhoto: photoEmbedded };
 }
 
 export function cardUrl(articleId, preset = "og", siteUrl = "") {
