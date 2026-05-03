@@ -337,6 +337,24 @@ export function initRealityIndex(db) {
     logger.warn(`events geo migration skipped: ${err.message}`);
   }
 
+  // ── Phase 7: Public API keys ────────────────────────────────────────────
+  // Per plan §5N: opens /api/v1/* with API-key auth. Owner is free-text
+  // (email or org name) for now; tier controls rate limits.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS api_keys (
+      key            TEXT PRIMARY KEY,             -- 64-char hex token
+      owner          TEXT NOT NULL,                -- "alice@x.com" or "ACME Corp"
+      tier           TEXT NOT NULL DEFAULT 'free', -- 'free' | 'pro' | 'enterprise'
+      rpm            INTEGER NOT NULL DEFAULT 60,  -- requests-per-minute cap
+      created_at     INTEGER NOT NULL,
+      last_used_at   INTEGER,
+      revoked_at     INTEGER,
+      meta           TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_apikeys_owner ON api_keys(owner);
+    CREATE INDEX IF NOT EXISTS idx_apikeys_active ON api_keys(revoked_at);
+  `);
+
   // ── Phase 6: Synthetic markets (constant-product AMM) ──────────────────
   // For questions Polymarket doesn't cover, we run our own play-money
   // markets per plan §6. AMM = x*y=k. yes_price = no_pool / (yes+no).

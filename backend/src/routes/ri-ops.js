@@ -26,6 +26,7 @@ import { runAnalystBriefCycle } from "../realityIndex/generation/analystBriefGen
 import { createMarket as createSyntheticMarket, getMarket as getSyntheticMarket } from "../realityIndex/dal/syntheticMarketsDao.js";
 import { resolveMarket as resolveSyntheticMarket } from "../realityIndex/syntheticMarkets/resolver.js";
 import { runQuestionExtractor } from "../realityIndex/syntheticMarkets/questionExtractor.js";
+import { createApiKey, listApiKeys, revokeApiKey } from "../realityIndex/dal/apiKeysDao.js";
 import { logger } from "../services/logger.js";
 
 const router = Router();
@@ -210,6 +211,26 @@ router.post("/synthetic/extract", requireAdmin, async (req, res) => {
     logger.error(`question extractor failed: ${err.message}`);
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// ─── Public API key management (Phase 7) ──────────────────────────────────
+router.get("/api-keys", requireAdmin, (_req, res) => {
+  res.json({ items: listApiKeys() });
+});
+
+router.post("/api-keys/create", requireAdmin, (req, res) => {
+  const { owner, tier } = req.body || {};
+  if (!owner) return res.status(400).json({ ok: false, error: "owner required" });
+  if (tier && !["free", "pro", "enterprise"].includes(tier)) {
+    return res.status(400).json({ ok: false, error: "tier must be free|pro|enterprise" });
+  }
+  const out = createApiKey({ owner, tier: tier || "free" });
+  res.json({ ok: true, ...out });
+});
+
+router.post("/api-keys/:key/revoke", requireAdmin, (req, res) => {
+  const removed = revokeApiKey(req.params.key);
+  res.json({ ok: true, removed });
 });
 
 function safeCount(db, sql) {

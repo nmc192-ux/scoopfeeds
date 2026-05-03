@@ -39,6 +39,7 @@ import briefsRouter      from "./src/routes/briefs.js";
 import embedRouter       from "./src/routes/embed.js";
 import macroRouter       from "./src/routes/macro.js";
 import syntheticMarketsRouter from "./src/routes/syntheticMarkets.js";
+import v1Router            from "./src/routes/v1.js";
 import { initRealityIndex } from "./src/realityIndex/schema.js";
 import { detectCountry } from "./src/services/geolocation.js";
 import { skimlinksPublisherId, amazonInfoForCountry } from "./src/config/affiliates.js";
@@ -166,6 +167,7 @@ app.use("/api/briefs",     cacheMiddleware("short"), briefsRouter);      // Real
 app.use("/embed",          embedRouter);                                 // Phase 5: public iframe embeds for blogs/Substacks (no auth, frame-ancestors *)
 app.use("/api/macro",      cacheMiddleware("medium"), macroRouter);     // Phase 5: macro indicators (FRED today; WB/IMF later)
 app.use("/api/synthetic-markets", syntheticMarketsRouter);              // Phase 6 foundation: x*y=k AMM markets (no caching — trades mutate)
+app.use("/api/v1",         cacheMiddleware("medium"), v1Router);        // Phase 7: public read-only API, key-authed + per-key rate-limited
 app.use("/scoop-ops",       socialRouter);     // /scoop-ops/social-queue — preview auto-generated social captions (renamed from /admin to bypass host WAF)
 app.use("/scoop-ops/videos-gen", videoGenRouter); // video generation queue: /queue, /run, /approve/:id, /reject/:id
 app.use("/scoop-ops/newsletter", newsletterOpsRouter); // newsletter ops: /status, /welcome/run, /welcome/test
