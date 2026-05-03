@@ -21,7 +21,10 @@ import { Router } from "express";
 import { getDb } from "../models/database.js";
 import { getQueueStatus } from "../realityIndex/llmQueue.js";
 import { getSchedulerStatus } from "../services/scheduler.js";
-import { listBriefs, getBriefById, setBriefStatus } from "../realityIndex/dal/briefsDao.js";
+import {
+  listBriefs, getBriefById, setBriefStatus,
+  getBriefApprovalRates, getOverallApprovalRate,
+} from "../realityIndex/dal/briefsDao.js";
 import { runAnalystBriefCycle } from "../realityIndex/generation/analystBriefGenerator.js";
 import { createMarket as createSyntheticMarket, getMarket as getSyntheticMarket } from "../realityIndex/dal/syntheticMarketsDao.js";
 import { resolveMarket as resolveSyntheticMarket } from "../realityIndex/syntheticMarkets/resolver.js";
@@ -165,6 +168,23 @@ router.post("/briefs/run", requireAdmin, async (req, res) => {
     res.json({ ok: true, ...out });
   } catch (err) {
     logger.error(`brief generation failed: ${err.message}`);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Per-category approval rate over the last N days. Foundation for the
+// Phase 7 self-improvement loop (plan §5J #5): once a category clears the
+// 100-decided / ≥0.7-rate bar we'll consider auto-publication for high
+// confidence drafts in that bucket. Today this endpoint is purely
+// observational — used by /scoop-ops/reality-index to show calibration.
+router.get("/briefs/approval-rates", requireAdmin, (req, res) => {
+  try {
+    const days = Math.max(1, Math.min(parseInt(req.query.days ?? "90", 10), 365));
+    const overall    = getOverallApprovalRate({ daysBack: days });
+    const byCategory = getBriefApprovalRates({ daysBack: days });
+    res.json({ ok: true, days_back: days, overall, by_category: byCategory });
+  } catch (err) {
+    logger.error(`brief approval rates failed: ${err.message}`);
     res.status(500).json({ ok: false, error: err.message });
   }
 });

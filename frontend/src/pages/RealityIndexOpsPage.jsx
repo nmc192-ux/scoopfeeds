@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useState, useCallback } from "react";
-import { Activity, Database, Zap, AlertTriangle, RefreshCw, Key, ExternalLink } from "lucide-react";
+import { Activity, BarChart3, Database, Zap, AlertTriangle, RefreshCw, Key, ExternalLink } from "lucide-react";
 
 const KEY_STORAGE = "scoop_admin_key";
 
@@ -91,11 +91,25 @@ export default function RealityIndexOpsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const [calibration, setCalibration] = useState(null);
+  const fetchCalibration = useCallback(async () => {
+    try {
+      const url = key
+        ? `/scoop-ops/ri-ops/briefs/approval-rates?days=90&key=${encodeURIComponent(key)}`
+        : "/scoop-ops/ri-ops/briefs/approval-rates?days=90";
+      const res = await fetch(url);
+      if (!res.ok) return;          // silent — calibration is non-critical
+      const json = await res.json();
+      if (json.ok) setCalibration(json);
+    } catch { /* silent */ }
+  }, [key]);
+  useEffect(() => { fetchCalibration(); }, [fetchCalibration]);
+
   // Auto-refresh every 60s while page is open.
   useEffect(() => {
-    const id = setInterval(fetchData, 60_000);
+    const id = setInterval(() => { fetchData(); fetchCalibration(); }, 60_000);
     return () => clearInterval(id);
-  }, [fetchData]);
+  }, [fetchData, fetchCalibration]);
 
   const saveKey = (e) => {
     e.preventDefault();
@@ -161,7 +175,7 @@ export default function RealityIndexOpsPage() {
           </p>
         </div>
         <button
-          onClick={fetchData}
+          onClick={() => { fetchData(); fetchCalibration(); }}
           className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-full border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors"
         >
           <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
@@ -290,6 +304,77 @@ export default function RealityIndexOpsPage() {
           )}
         </Card>
       </div>
+
+      {/* Brief calibration — Phase 7 self-improvement foundation (plan §5J #5).
+          Until a category clears 100 decided briefs and ≥0.7 approval rate,
+          everything publishes via manual review. This card shows progress. */}
+      {calibration && (
+        <Card title="Brief calibration (90d)" icon={BarChart3} className="mt-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4 pb-4 border-b border-[var(--color-border)]">
+            <Stat
+              label="Overall approval"
+              value={calibration.overall.approval_rate != null
+                ? `${(calibration.overall.approval_rate * 100).toFixed(1)}%`
+                : "—"}
+              hint={`${fmtNum(calibration.overall.published)} pub / ${fmtNum(calibration.overall.rejected)} rej`}
+            />
+            <Stat label="Pending review"  value={fmtNum(calibration.overall.pending)} />
+            <Stat label="Decided briefs"  value={fmtNum(calibration.overall.decided)} hint="of 100 needed for auto-promote" />
+            <Stat
+              label="Avg confidence (pub)"
+              value={calibration.overall.avg_confidence_published != null
+                ? `${(calibration.overall.avg_confidence_published * 100).toFixed(0)}%`
+                : "—"}
+            />
+          </div>
+          {!calibration.by_category.length ? (
+            <p className="text-xs text-[var(--color-text-secondary)]">No briefs decided yet — generate some via /scoop-ops/briefs.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)] text-left border-b border-[var(--color-border)]">
+                    <th className="py-1.5 pr-2">Category</th>
+                    <th className="py-1.5 px-2 text-right">Published</th>
+                    <th className="py-1.5 px-2 text-right">Rejected</th>
+                    <th className="py-1.5 px-2 text-right">Pending</th>
+                    <th className="py-1.5 px-2 text-right">Approval</th>
+                    <th className="py-1.5 pl-2 text-right">Auto-publish ready?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {calibration.by_category.map(row => {
+                    const ready = row.decided >= 100 && (row.approval_rate ?? 0) >= 0.7;
+                    return (
+                      <tr key={row.category} className="border-b border-[var(--color-border)] last:border-0">
+                        <td className="py-1.5 pr-2 capitalize text-[var(--color-text)]">{row.category}</td>
+                        <td className="py-1.5 px-2 text-right tabular-nums text-[var(--color-text)]">{fmtNum(row.published)}</td>
+                        <td className="py-1.5 px-2 text-right tabular-nums text-[var(--color-text-secondary)]">{fmtNum(row.rejected)}</td>
+                        <td className="py-1.5 px-2 text-right tabular-nums text-[var(--color-text-tertiary)]">{fmtNum(row.pending)}</td>
+                        <td className="py-1.5 px-2 text-right tabular-nums">
+                          {row.approval_rate != null
+                            ? <span className={row.approval_rate >= 0.7 ? "text-green-600 dark:text-green-400 font-semibold" : "text-[var(--color-text)]"}>
+                                {(row.approval_rate * 100).toFixed(0)}%
+                              </span>
+                            : <span className="text-[var(--color-text-tertiary)]">—</span>}
+                        </td>
+                        <td className="py-1.5 pl-2 text-right">
+                          {ready
+                            ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300 font-semibold">READY</span>
+                            : <span className="text-[10px] text-[var(--color-text-tertiary)]">{row.decided}/100</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-3">
+            Per plan §5J: auto-publication unlocked when a category has ≥100 decided briefs AND ≥70% approval rate. Until then, every brief ships through manual review.
+          </p>
+        </Card>
+      )}
 
       <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-6 text-center">
         Snapshot at {fmtTs(new Date(data.now).toISOString())}
