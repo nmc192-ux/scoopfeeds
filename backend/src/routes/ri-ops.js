@@ -23,6 +23,7 @@ import { getQueueStatus } from "../realityIndex/llmQueue.js";
 import { getSchedulerStatus } from "../services/scheduler.js";
 import { listBriefs, getBriefById, setBriefStatus } from "../realityIndex/dal/briefsDao.js";
 import { runAnalystBriefCycle } from "../realityIndex/generation/analystBriefGenerator.js";
+import { createMarket as createSyntheticMarket, getMarket as getSyntheticMarket } from "../realityIndex/dal/syntheticMarketsDao.js";
 import { logger } from "../services/logger.js";
 
 const router = Router();
@@ -160,6 +161,50 @@ router.post("/briefs/run", requireAdmin, async (req, res) => {
     res.json({ ok: true, ...out });
   } catch (err) {
     logger.error(`brief generation failed: ${err.message}`);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Synthetic markets (Phase 6) admin ─────────────────────────────────────
+//
+// Editor creates markets manually (LLM-driven question extraction is Phase 6.5).
+// Resolution flips a market to outcome={yes|no|cancel}; payout logic for share
+// holders is computed lazily by the leaderboard worker (Phase 6.5).
+
+router.post("/synthetic/create", requireAdmin, (req, res) => {
+  try {
+    const { question, description, cluster_id, event_id, end_date, initial_liquidity } = req.body || {};
+    if (!question) return res.status(400).json({ ok: false, error: "question required" });
+    const m = createSyntheticMarket({
+      question, description, cluster_id, event_id,
+      generated_by: "editor",
+      end_date: end_date ? Number(end_date) : null,
+      initial_liquidity: Number(initial_liquidity) || 100,
+    });
+    res.json({ ok: true, market: m });
+  } catch (err) {
+    logger.error(`synthetic create failed: ${err.message}`);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post("/synthetic/:id/resolve", requireAdmin, (req, res) => {
+  try {
+    const { outcome } = req.body || {};
+    if (!["yes", "no", "cancel"].includes(outcome)) {
+      return res.status(400).json({ ok: false, error: "outcome must be yes|no|cancel" });
+    }
+    const m = getSyntheticMarket(req.params.id);
+    if (!m) return res.status(404).json({ ok: false, error: "market not found" });
+    if (m.resolved) return res.json({ ok: true, alreadyResolved: true });
+    getDb().prepare(`
+      UPDATE synthetic_markets
+      SET resolved = 1, outcome = ?, resolved_at = ?
+      WHERE id = ?
+    `).run(outcome, Date.now(), req.params.id);
+    res.json({ ok: true, market_id: req.params.id, outcome });
+  } catch (err) {
+    logger.error(`synthetic resolve failed: ${err.message}`);
     res.status(500).json({ ok: false, error: err.message });
   }
 });

@@ -337,6 +337,62 @@ export function initRealityIndex(db) {
     logger.warn(`events geo migration skipped: ${err.message}`);
   }
 
+  // ── Phase 6: Synthetic markets (constant-product AMM) ──────────────────
+  // For questions Polymarket doesn't cover, we run our own play-money
+  // markets per plan §6. AMM = x*y=k. yes_price = no_pool / (yes+no).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS synthetic_markets (
+      id           TEXT PRIMARY KEY,         -- UUID v4
+      question     TEXT NOT NULL,
+      description  TEXT,
+      cluster_id   TEXT,                     -- optional binding to story_cluster
+      event_id     TEXT,                     -- optional binding to event
+      generated_by TEXT NOT NULL DEFAULT 'editor',  -- 'llm' | 'editor' | 'user'
+      yes_pool     REAL NOT NULL DEFAULT 100,
+      no_pool      REAL NOT NULL DEFAULT 100,
+      k            REAL NOT NULL DEFAULT 10000,     -- invariant; updated only by liquidity events
+      yes_price    REAL NOT NULL DEFAULT 0.5,       -- cached for read paths; recomputed on every trade
+      total_volume REAL NOT NULL DEFAULT 0,         -- cumulative trade value
+      resolved     INTEGER NOT NULL DEFAULT 0,
+      outcome      TEXT,                            -- 'yes' | 'no' | 'cancel' | NULL
+      resolved_at  INTEGER,
+      created_by   TEXT,                            -- user_id of creator (for editor trail)
+      created_at   INTEGER NOT NULL,
+      end_date     INTEGER,                         -- when the market closes for trading
+      meta         TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_smarkets_open    ON synthetic_markets(resolved, end_date);
+    CREATE INDEX IF NOT EXISTS idx_smarkets_cluster ON synthetic_markets(cluster_id);
+    CREATE INDEX IF NOT EXISTS idx_smarkets_event   ON synthetic_markets(event_id);
+
+    CREATE TABLE IF NOT EXISTS synthetic_market_trades (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      market_id    TEXT NOT NULL,
+      user_id      TEXT,                            -- nullable for AI-agent trades
+      agent_id     TEXT,                            -- 'skeptic' | 'optimist' | 'contrarian' | NULL
+      side         TEXT NOT NULL,                   -- 'yes' | 'no'
+      amount       REAL NOT NULL,                   -- play-money in
+      shares       REAL NOT NULL,                   -- shares received
+      avg_price    REAL NOT NULL,                   -- amount / shares
+      yes_price_after REAL NOT NULL,
+      ts           INTEGER NOT NULL,
+      rationale    TEXT,                            -- optional (esp. for AI trades)
+      FOREIGN KEY (market_id) REFERENCES synthetic_markets(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_strades_market ON synthetic_market_trades(market_id, ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_strades_user   ON synthetic_market_trades(user_id, ts DESC) WHERE user_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS user_reputation (
+      user_id          TEXT PRIMARY KEY,
+      brier_score      REAL,                        -- lower is better; null until first resolved trade
+      trades_resolved  INTEGER NOT NULL DEFAULT 0,
+      reputation       REAL NOT NULL DEFAULT 0.5,   -- 0..1 derived score for ranking
+      updated_at       INTEGER,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_reputation ON user_reputation(reputation DESC);
+  `);
+
   // ── Phase 5: Macro indicators (FRED / WB / IMF) ─────────────────────────
   // Curated economic series. Two snapshots per cycle (latest + previous) so
   // the UI can show a delta + sparkline source. provider is the free-text
