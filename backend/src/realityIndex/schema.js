@@ -175,6 +175,9 @@ export function initRealityIndex(db) {
       status            TEXT NOT NULL DEFAULT 'active', -- active | dormant | resolved
       severity          REAL DEFAULT 0.5,            -- 0..1 composite signal strength
       geo_country_codes TEXT,                        -- JSON array of ISO-2 codes
+      geo_lat           REAL,                        -- WGS84 latitude (Phase 5: USGS quakes etc.)
+      geo_lng           REAL,                        -- WGS84 longitude
+      geo_polygon       TEXT,                        -- GeoJSON polygon (optional)
       hero_image_url    TEXT,
       started_at        INTEGER NOT NULL,
       last_activity_at  INTEGER NOT NULL,
@@ -189,6 +192,7 @@ export function initRealityIndex(db) {
     -- Partial index allows multiple NULLs for future multi-cluster events.
     CREATE UNIQUE INDEX IF NOT EXISTS idx_events_cluster ON events(cluster_id) WHERE cluster_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_events_slug           ON events(slug);
+    -- (idx_events_geo created post-migration below — depends on geo_lat)
 
     -- Chronological feed: articles, market moves, statements, etc.
     CREATE TABLE IF NOT EXISTS event_timeline (
@@ -321,6 +325,17 @@ export function initRealityIndex(db) {
     CREATE INDEX IF NOT EXISTS idx_watchlists_user ON user_watchlists(user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_watchlists_item ON user_watchlists(item_type, item_id);
   `);
+
+  // ── Phase 5 migration: add geo_lat/lng/polygon to events on existing DBs ──
+  try {
+    const cols = db.prepare("PRAGMA table_info(events)").all().map(c => c.name);
+    if (!cols.includes("geo_lat"))     db.exec("ALTER TABLE events ADD COLUMN geo_lat REAL");
+    if (!cols.includes("geo_lng"))     db.exec("ALTER TABLE events ADD COLUMN geo_lng REAL");
+    if (!cols.includes("geo_polygon")) db.exec("ALTER TABLE events ADD COLUMN geo_polygon TEXT");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_events_geo ON events(status, geo_lat, geo_lng) WHERE geo_lat IS NOT NULL");
+  } catch (err) {
+    logger.warn(`events geo migration skipped: ${err.message}`);
+  }
 
   // ── Phase 4 leftover: Analyst briefs (drafts-only, manual review queue) ──
   // Per plan §5J: status always starts 'draft', editor manually approves.
