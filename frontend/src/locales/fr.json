@@ -1,0 +1,47 @@
+{
+  "brand.name": "Reality Index",
+  "brand.tagline": "Une estimation fondée sur les données, pas une certitude.",
+  "brand.disclaimer": "Probabilité implicite du marché. Aucune garantie de prédiction.",
+  "brand.briefBadge": "Rédigé par l'IA, relu par la rédaction",
+
+  "nav.reality_index": "Reality Index",
+  "nav.markets_live": "Marchés & données en direct",
+  "nav.predictions": "Prévisions",
+  "nav.event_tracker": "Suivi des événements",
+  "nav.truth_gap": "Truth Gap",
+  "nav.anomalies": "Anomalies",
+  "nav.analyst_briefs": "Notes d'analystes",
+  "nav.synthetic_markets": "Marchés synthétiques",
+  "nav.leaderboard": "Classement",
+  "nav.my_dashboard": "Mon tableau de bord",
+  "nav.finance": "Finance",
+  "nav.macro": "Macro",
+  "nav.markets": "Marchés",
+  "nav.world_map": "Carte du monde",
+  "nav.weather": "Météo",
+  "nav.live_tv": "TV en direct",
+
+  "mobile.home": "Accueil",
+  "mobile.events": "Événements",
+  "mobile.markets": "Marchés",
+  "mobile.search": "Rechercher",
+  "mobile.saved": "Enregistrés",
+
+  "events.empty": "Aucun événement actif pour le moment — ils apparaissent automatiquement dès qu'une histoire gagne en couverture.",
+  "events.tagline": "Les grandes histoires suivies en temps réel avec des probabilités implicites du marché.",
+
+  "predictions.empty": "Aucun marché actif pour le moment — la synchronisation Polymarket s'effectue toutes les 15 min.",
+
+  "truthgap.tooltip": "Écart entre le ton médiatique et la probabilité implicite du marché. Signal utile, pas un verdict.",
+  "truthgap.over": "Les marchés valorisent cela plus haut que ne le suggère le ton médiatique.",
+  "truthgap.under": "Les médias affichent plus de confiance que les marchés.",
+
+  "dashboard.empty_watchlist": "Vous ne suivez encore aucun élément.",
+  "dashboard.empty_activity": "Aucune anomalie sur vos éléments suivis au cours des 7 derniers jours.",
+
+  "confidence.label": "Confiance",
+  "common.refresh": "Actualiser",
+  "common.see_all": "Voir tout →",
+  "common.signin": "Se connecter",
+  "common.live": "En direct"
+}

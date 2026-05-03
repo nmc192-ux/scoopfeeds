@@ -1,0 +1,47 @@
+{
+  "brand.name": "Reality Index",
+  "brand.tagline": "Eine datengestützte Schätzung – keine Gewissheit.",
+  "brand.disclaimer": "Marktimplizierte Wahrscheinlichkeit. Keine Vorhersagegarantie.",
+  "brand.briefBadge": "KI-verfasst, redaktionell geprüft",
+
+  "nav.reality_index": "Reality Index",
+  "nav.markets_live": "Märkte & Live-Daten",
+  "nav.predictions": "Prognosen",
+  "nav.event_tracker": "Ereignis-Tracker",
+  "nav.truth_gap": "Truth Gap",
+  "nav.anomalies": "Anomalien",
+  "nav.analyst_briefs": "Analystenberichte",
+  "nav.synthetic_markets": "Synthetische Märkte",
+  "nav.leaderboard": "Rangliste",
+  "nav.my_dashboard": "Mein Dashboard",
+  "nav.finance": "Finanzen",
+  "nav.macro": "Makro",
+  "nav.markets": "Märkte",
+  "nav.world_map": "Weltkarte",
+  "nav.weather": "Wetter",
+  "nav.live_tv": "Live-TV",
+
+  "mobile.home": "Startseite",
+  "mobile.events": "Ereignisse",
+  "mobile.markets": "Märkte",
+  "mobile.search": "Suchen",
+  "mobile.saved": "Gespeichert",
+
+  "events.empty": "Noch keine aktiven Ereignisse – sie erscheinen automatisch, sobald eine Meldung an Berichterstattung gewinnt.",
+  "events.tagline": "Wichtige Meldungen als Live-Ereignisse verfolgt, mit marktimplizierten Wahrscheinlichkeiten.",
+
+  "predictions.empty": "Noch keine Live-Märkte – die Polymarket-Synchronisation läuft alle 15 Min.",
+
+  "truthgap.tooltip": "Differenz zwischen Medientenor und marktimplizierter Wahrscheinlichkeit. Als Signal nützlich, kein Urteil.",
+  "truthgap.over": "Märkte bewerten dies höher als der Medientenor nahelegt.",
+  "truthgap.under": "Die Medien sind zuversichtlicher als die Märkte.",
+
+  "dashboard.empty_watchlist": "Sie beobachten noch keine Einträge.",
+  "dashboard.empty_activity": "Keine Anomalien bei Ihren beobachteten Einträgen in den letzten 7 Tagen.",
+
+  "confidence.label": "Konfidenz",
+  "common.refresh": "Aktualisieren",
+  "common.see_all": "Alle anzeigen →",
+  "common.signin": "Anmelden",
+  "common.live": "Live"
+}

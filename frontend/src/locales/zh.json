@@ -1,0 +1,47 @@
+{
+  "brand.name": "Reality Index",
+  "brand.tagline": "数据驱动的估算，而非定论。",
+  "brand.disclaimer": "市场隐含概率，不构成预测保证。",
+  "brand.briefBadge": "AI起草，编辑审核",
+
+  "nav.reality_index": "Reality Index",
+  "nav.markets_live": "市场与实时数据",
+  "nav.predictions": "预测",
+  "nav.event_tracker": "事件追踪",
+  "nav.truth_gap": "Truth Gap",
+  "nav.anomalies": "异常信号",
+  "nav.analyst_briefs": "分析师简报",
+  "nav.synthetic_markets": "合成市场",
+  "nav.leaderboard": "排行榜",
+  "nav.my_dashboard": "我的仪表板",
+  "nav.finance": "金融",
+  "nav.macro": "宏观",
+  "nav.markets": "市场",
+  "nav.world_map": "世界地图",
+  "nav.weather": "天气",
+  "nav.live_tv": "直播电视",
+
+  "mobile.home": "首页",
+  "mobile.events": "事件",
+  "mobile.markets": "市场",
+  "mobile.search": "搜索",
+  "mobile.saved": "已收藏",
+
+  "events.empty": "暂无活跃事件——随着报道增加，事件将自动出现。",
+  "events.tagline": "重大新闻以实时事件形式追踪，附市场隐含概率。",
+
+  "predictions.empty": "暂无实时市场——Polymarket同步每15分钟运行一次。",
+
+  "truthgap.tooltip": "媒体基调与市场隐含概率之间的差值。作为参考信号，而非定论。",
+  "truthgap.over": "市场对此的定价高于媒体基调所示。",
+  "truthgap.under": "媒体的信心高于市场。",
+
+  "dashboard.empty_watchlist": "您尚未关注任何内容。",
+  "dashboard.empty_activity": "过去7天内，您关注的条目未出现异常。",
+
+  "confidence.label": "置信度",
+  "common.refresh": "刷新",
+  "common.see_all": "查看全部 →",
+  "common.signin": "登录",
+  "common.live": "直播"
+}

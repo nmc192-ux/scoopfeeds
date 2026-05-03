@@ -1,0 +1,47 @@
+{
+  "brand.name": "Reality Index",
+  "brand.tagline": "データに基づく推定であり、確実性ではありません。",
+  "brand.disclaimer": "市場の織り込み確率です。予測の保証ではありません。",
+  "brand.briefBadge": "AI執筆・編集者確認済み",
+
+  "nav.reality_index": "Reality Index",
+  "nav.markets_live": "マーケット＆ライブデータ",
+  "nav.predictions": "予測",
+  "nav.event_tracker": "イベントトラッカー",
+  "nav.truth_gap": "Truth Gap",
+  "nav.anomalies": "異常シグナル",
+  "nav.analyst_briefs": "アナリストレポート",
+  "nav.synthetic_markets": "合成市場",
+  "nav.leaderboard": "ランキング",
+  "nav.my_dashboard": "マイダッシュボード",
+  "nav.finance": "金融",
+  "nav.macro": "マクロ",
+  "nav.markets": "マーケット",
+  "nav.world_map": "世界地図",
+  "nav.weather": "天気",
+  "nav.live_tv": "ライブTV",
+
+  "mobile.home": "ホーム",
+  "mobile.events": "イベント",
+  "mobile.markets": "マーケット",
+  "mobile.search": "検索",
+  "mobile.saved": "保存済み",
+
+  "events.empty": "現在アクティブなイベントはありません — 報道が増えると自動的に表示されます。",
+  "events.tagline": "主要ニュースを市場の織り込み確率付きでライブイベントとして追跡。",
+
+  "predictions.empty": "現在ライブ市場はありません — Polymarketの同期は15分ごとに実行されます。",
+
+  "truthgap.tooltip": "メディアのトーンと市場の織り込み確率との差。判断ではなく、シグナルとして活用してください。",
+  "truthgap.over": "市場はメディアのトーンが示すよりも高く評価しています。",
+  "truthgap.under": "メディアは市場よりも強気です。",
+
+  "dashboard.empty_watchlist": "まだウォッチしているアイテムはありません。",
+  "dashboard.empty_activity": "過去7日間、ウォッチ中のアイテムに異常は検出されていません。",
+
+  "confidence.label": "信頼度",
+  "common.refresh": "更新",
+  "common.see_all": "すべて見る →",
+  "common.signin": "サインイン",
+  "common.live": "ライブ"
+}

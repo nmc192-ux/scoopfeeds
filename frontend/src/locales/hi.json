@@ -1,0 +1,47 @@
+{
+  "brand.name": "Reality Index",
+  "brand.tagline": "डेटा पर आधारित अनुमान, निश्चितता नहीं।",
+  "brand.disclaimer": "बाज़ार-निहित संभावना। पूर्वानुमान की कोई गारंटी नहीं।",
+  "brand.briefBadge": "AI द्वारा लिखित, संपादक द्वारा समीक्षित",
+
+  "nav.reality_index": "Reality Index",
+  "nav.markets_live": "बाज़ार और लाइव डेटा",
+  "nav.predictions": "पूर्वानुमान",
+  "nav.event_tracker": "घटना ट्रैकर",
+  "nav.truth_gap": "Truth Gap",
+  "nav.anomalies": "विसंगतियाँ",
+  "nav.analyst_briefs": "विश्लेषक रिपोर्ट",
+  "nav.synthetic_markets": "सिंथेटिक बाज़ार",
+  "nav.leaderboard": "लीडरबोर्ड",
+  "nav.my_dashboard": "मेरा डैशबोर्ड",
+  "nav.finance": "वित्त",
+  "nav.macro": "मैक्रो",
+  "nav.markets": "बाज़ार",
+  "nav.world_map": "विश्व मानचित्र",
+  "nav.weather": "मौसम",
+  "nav.live_tv": "लाइव टीवी",
+
+  "mobile.home": "होम",
+  "mobile.events": "घटनाएँ",
+  "mobile.markets": "बाज़ार",
+  "mobile.search": "खोजें",
+  "mobile.saved": "सहेजे गए",
+
+  "events.empty": "अभी कोई सक्रिय घटना नहीं — जैसे-जैसे खबरें कवरेज पाती हैं, वे स्वतः प्रकट होती हैं।",
+  "events.tagline": "प्रमुख खबरें लाइव घटनाओं के रूप में ट्रैक की जाती हैं, जिनमें बाज़ार-निहित संभावनाएँ शामिल हैं।",
+
+  "predictions.empty": "अभी कोई लाइव बाज़ार नहीं — Polymarket सिंक हर 15 मिनट में चलता है।",
+
+  "truthgap.tooltip": "मीडिया के स्वर और बाज़ार-निहित संभावना के बीच का अंतर। एक संकेत के रूप में उपयोगी, निर्णय नहीं।",
+  "truthgap.over": "बाज़ार इसे मीडिया के स्वर से अधिक आँकता है।",
+  "truthgap.under": "मीडिया बाज़ारों से अधिक आश्वस्त है।",
+
+  "dashboard.empty_watchlist": "आप अभी कुछ भी नहीं देख रहे हैं।",
+  "dashboard.empty_activity": "पिछले 7 दिनों में आपके देखे गए आइटम पर कोई विसंगति नहीं।",
+
+  "confidence.label": "विश्वसनीयता",
+  "common.refresh": "रीफ्रेश करें",
+  "common.see_all": "सभी देखें →",
+  "common.signin": "साइन इन करें",
+  "common.live": "लाइव"
+}

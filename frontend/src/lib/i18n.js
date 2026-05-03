@@ -1,8 +1,9 @@
 /**
- * i18n.js — no-deps i18n hook + helpers for the 4-language starter set.
+ * i18n.js — no-deps i18n hook + helpers for the 10-language set.
  *
  * Architecture:
- *  • LANGUAGES is the canonical list (en, ur, es, ar) with rtl flags.
+ *  • LANGUAGES is the canonical list (en, ur, es, ar, fr, de, pt, hi, zh, ja)
+ *    with rtl flags.
  *  • Locale dictionaries are lazy-loaded via dynamic import() on first use
  *    and cached in module scope so subsequent calls are synchronous.
  *  • useT() subscribes to newsStore.language so consumers re-render on
@@ -22,6 +23,12 @@ export const LANGUAGES = [
   { code: "ur", label: "اردو",      rtl: true  },
   { code: "es", label: "Español",   rtl: false },
   { code: "ar", label: "العربية",   rtl: true  },
+  { code: "fr", label: "Français",  rtl: false },
+  { code: "de", label: "Deutsch",   rtl: false },
+  { code: "pt", label: "Português", rtl: false },
+  { code: "hi", label: "हिन्दी",    rtl: false },
+  { code: "zh", label: "中文",       rtl: false },
+  { code: "ja", label: "日本語",     rtl: false },
 ];
 
 export const LANG_CODES = new Set(LANGUAGES.map((l) => l.code));

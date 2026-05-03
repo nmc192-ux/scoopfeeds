@@ -1,0 +1,47 @@
+{
+  "brand.name": "Reality Index",
+  "brand.tagline": "Uma estimativa baseada em dados, não uma certeza.",
+  "brand.disclaimer": "Probabilidade implícita de mercado. Sem garantia de previsão.",
+  "brand.briefBadge": "Redigido por IA, revisado pela redação",
+
+  "nav.reality_index": "Reality Index",
+  "nav.markets_live": "Mercados & dados ao vivo",
+  "nav.predictions": "Previsões",
+  "nav.event_tracker": "Rastreamento de eventos",
+  "nav.truth_gap": "Truth Gap",
+  "nav.anomalies": "Anomalias",
+  "nav.analyst_briefs": "Notas de analistas",
+  "nav.synthetic_markets": "Mercados sintéticos",
+  "nav.leaderboard": "Classificação",
+  "nav.my_dashboard": "Meu painel",
+  "nav.finance": "Finanças",
+  "nav.macro": "Macro",
+  "nav.markets": "Mercados",
+  "nav.world_map": "Mapa-múndi",
+  "nav.weather": "Clima",
+  "nav.live_tv": "TV ao vivo",
+
+  "mobile.home": "Início",
+  "mobile.events": "Eventos",
+  "mobile.markets": "Mercados",
+  "mobile.search": "Buscar",
+  "mobile.saved": "Salvos",
+
+  "events.empty": "Nenhum evento ativo ainda — eles aparecem automaticamente conforme as notícias ganham cobertura.",
+  "events.tagline": "Grandes histórias rastreadas como eventos ao vivo com probabilidades implícitas de mercado.",
+
+  "predictions.empty": "Nenhum mercado ao vivo ainda — a sincronização com o Polymarket ocorre a cada 15 min.",
+
+  "truthgap.tooltip": "Diferença entre o tom da mídia e a probabilidade implícita do mercado. Útil como sinal, não como veredicto.",
+  "truthgap.over": "Os mercados precificam isso acima do que o tom da mídia sugere.",
+  "truthgap.under": "A mídia está mais confiante do que os mercados.",
+
+  "dashboard.empty_watchlist": "Você ainda não está monitorando nada.",
+  "dashboard.empty_activity": "Nenhuma anomalia nos seus itens monitorados nos últimos 7 dias.",
+
+  "confidence.label": "Confiança",
+  "common.refresh": "Atualizar",
+  "common.see_all": "Ver tudo →",
+  "common.signin": "Entrar",
+  "common.live": "Ao vivo"
+}
