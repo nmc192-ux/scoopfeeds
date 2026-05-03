@@ -14,11 +14,13 @@
 import { ExternalLink, Activity } from "lucide-react";
 import { useArticlePredictions } from "../../hooks/usePredictions";
 import { COPY } from "../../lib/copyGuide";
+import { useT } from "../../lib/i18n";
 import { formatMoney, formatDistanceToEnd } from "../../lib/predictionFormat";
 import ProbabilityBar from "./ProbabilityBar";
 import ConfidenceDots from "./ConfidenceDots";
 
 export default function RealityIndexPanel({ articleId }) {
+  const { t } = useT();
   const { data, isLoading, error } = useArticlePredictions(articleId);
 
   if (isLoading) {
@@ -42,11 +44,11 @@ export default function RealityIndexPanel({ articleId }) {
         <div className="flex items-center gap-2">
           <Activity size={16} className="text-[var(--color-accent)]" aria-hidden="true" />
           <h3 id="reality-index-title" className="font-editorial italic text-base sm:text-lg text-[var(--color-text)]">
-            {COPY.panelTitle}
+            {COPY.panelTitle(t)}
           </h3>
         </div>
         <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-tertiary)]">
-          {COPY.brandTagline}
+          {COPY.brandTagline(t)}
         </span>
       </header>
       <p className="text-xs text-[var(--color-text-secondary)] mb-4">
@@ -58,7 +60,7 @@ export default function RealityIndexPanel({ articleId }) {
       </ul>
 
       <p className="mt-4 text-[10px] text-[var(--color-text-tertiary)] italic">
-        {COPY.probabilityNote}
+        {COPY.probabilityNote(t)}
       </p>
     </section>
   );

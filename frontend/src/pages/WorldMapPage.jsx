@@ -11,6 +11,7 @@ import { Globe2, RefreshCw } from "lucide-react";
 import { useWorldMap } from "../hooks/useEvents";
 import WorldMap from "../components/charts/WorldMap";
 import { COPY } from "../lib/copyGuide";
+import { useT } from "../lib/i18n";
 
 const CATEGORY_FILTERS = [
   { id: "",            label: "All" },
@@ -31,6 +32,7 @@ const SEVERITY_FILTERS = [
 ];
 
 export default function WorldMapPage() {
+  const { t } = useT();
   const [category, setCategory]       = useState("");
   const [minSeverity, setMinSeverity] = useState(0);
   const { data, isLoading, refetch } = useWorldMap({ category: category || undefined, minSeverity, limit: 500 });
@@ -48,7 +50,7 @@ export default function WorldMapPage() {
             </span>
           </div>
           <p className="text-sm text-[var(--color-text-secondary)]">
-            {COPY.brandTagline} Active events with known coordinates — earthquakes (USGS) plus any geocoded story.
+            {COPY.brandTagline(t)} Active events with known coordinates — earthquakes (USGS) plus any geocoded story.
           </p>
         </div>
         <button

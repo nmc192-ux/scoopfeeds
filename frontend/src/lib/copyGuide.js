@@ -12,15 +12,18 @@
 
 export const COPY = {
   // Brand and core lexicon
-  brandName:        "Reality Index",
-  brandTagline:     "A data-backed estimate, not a certainty.",
+  // These accept an optional `t` function from useT() for i18n.
+  // Callers that don't need i18n can still call them as plain strings
+  // by reading COPY.brandName("en") or using the legacy string path.
+  brandName:        (t) => (typeof t === "function" ? t("brand.name", "Reality Index") : "Reality Index"),
+  brandTagline:     (t) => (typeof t === "function" ? t("brand.tagline", "A data-backed estimate, not a certainty.") : "A data-backed estimate, not a certainty."),
 
   // Probability cards / bars
   probabilityLabel: "Market-implied probability",
-  probabilityNote:  "Market-implied probability. Not a prediction guarantee.",
+  probabilityNote:  (t) => (typeof t === "function" ? t("brand.disclaimer", "Market-implied probability. Not a prediction guarantee.") : "Market-implied probability. Not a prediction guarantee."),
 
   // Reality Index panel header
-  panelTitle:       "Reality Index",
+  panelTitle:       (t) => (typeof t === "function" ? t("nav.reality_index", "Reality Index") : "Reality Index"),
   panelSubtitle:    "What prediction markets are pricing in for this story.",
 
   // Confidence indicator
@@ -31,14 +34,14 @@ export const COPY = {
     `spread (${pct(components?.spread)}), history (${pct(components?.history)}).`,
 
   // Truth gap (Phase 3)
-  truthGapTitle:    "Truth Gap",
-  truthGapTooltip:  "Difference between media tone and market-implied probability. Useful as a signal, not a verdict.",
-  truthGapOver:     "Markets price this higher than media tone suggests.",
-  truthGapUnder:    "Media is more confident than markets.",
+  truthGapTitle:    (t) => (typeof t === "function" ? t("nav.truth_gap", "Truth Gap") : "Truth Gap"),
+  truthGapTooltip:  (t) => (typeof t === "function" ? t("truthgap.tooltip", "Difference between media tone and market-implied probability. Useful as a signal, not a verdict.") : "Difference between media tone and market-implied probability. Useful as a signal, not a verdict."),
+  truthGapOver:     (t) => (typeof t === "function" ? t("truthgap.over", "Markets price this higher than media tone suggests.") : "Markets price this higher than media tone suggests."),
+  truthGapUnder:    (t) => (typeof t === "function" ? t("truthgap.under", "Media is more confident than markets.") : "Media is more confident than markets."),
   truthGapNarrow:   "Media and markets roughly agree.",
 
   // Reality Index gauge (Phase 3)
-  gaugeTitle:       "Reality Index",
+  gaugeTitle:       (t) => (typeof t === "function" ? t("nav.reality_index", "Reality Index") : "Reality Index"),
   gaugeSubtitle:    "Composite of market, media, and social signals.",
 
   // Anomaly chip (Phase 3)
@@ -57,7 +60,7 @@ export const COPY = {
   noMatchBody:      "We haven't found a prediction market that captures this story's outcome yet. Check back as coverage develops.",
 
   // AI brief disclosure (Phase 4)
-  briefBadge:       "AI-drafted, editor-reviewed",
+  briefBadge:       (t) => (typeof t === "function" ? t("brand.briefBadge", "AI-drafted, editor-reviewed") : "AI-drafted, editor-reviewed"),
 };
 
 function pct(v) {

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
+import { LANGUAGES as I18N_LANGUAGES, getCurrentLang } from "./lib/i18n";
 import Header from "./components/layout/Header";
 import TopicNav from "./components/layout/TopicNav";
 import BreakingBanner from "./components/news/BreakingBanner";
@@ -72,6 +73,8 @@ export default function App() {
   const { data: health, isError: isOffline } = useHealth();
   const { data: publicConfig } = usePublicConfig();
   const location = useLocation();
+  // isRtl: check the i18n LANGUAGES list (covers ar + ur in the starter set).
+  const isRtlLang = I18N_LANGUAGES.find((l) => l.code === language)?.rtl ?? false;
   const isUrdu = language === "ur";
 
   const hideTopicNav = HIDE_TOPICNAV_ON.some(p => location.pathname.startsWith(p));

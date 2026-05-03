@@ -13,6 +13,7 @@
 
 import { formatProbability, probabilityColor } from "../../lib/predictionFormat";
 import { COPY } from "../../lib/copyGuide";
+import { useT } from "../../lib/i18n";
 
 export default function ProbabilityBar({
   yesPrice,
@@ -22,6 +23,7 @@ export default function ProbabilityBar({
   showDisclaimer = false,
   className = "",
 }) {
+  const { t } = useT();
   const yes = Number.isFinite(yesPrice) ? yesPrice : null;
   const no  = Number.isFinite(noPrice)  ? noPrice  : (yes != null ? 1 - yes : null);
 
@@ -70,7 +72,7 @@ export default function ProbabilityBar({
       </div>
       {showDisclaimer && (
         <p className="mt-1 text-[10px] text-[var(--color-text-tertiary)] italic">
-          {COPY.probabilityNote}
+          {COPY.probabilityNote(t)}
         </p>
       )}
     </div>

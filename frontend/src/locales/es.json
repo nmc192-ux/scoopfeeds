@@ -1,0 +1,47 @@
+{
+  "brand.name": "Índice de Realidad",
+  "brand.tagline": "Una estimación respaldada por datos, no una certeza.",
+  "brand.disclaimer": "Probabilidad implícita del mercado. No es una garantía de predicción.",
+  "brand.briefBadge": "Redactado por IA, revisado por editores",
+
+  "nav.reality_index": "Índice de Realidad",
+  "nav.markets_live": "Mercados y Datos en Vivo",
+  "nav.predictions": "Predicciones",
+  "nav.event_tracker": "Seguimiento de Eventos",
+  "nav.truth_gap": "Brecha de Verdad",
+  "nav.anomalies": "Anomalías",
+  "nav.analyst_briefs": "Informes de Analistas",
+  "nav.synthetic_markets": "Mercados Sintéticos",
+  "nav.leaderboard": "Clasificación",
+  "nav.my_dashboard": "Mi Panel",
+  "nav.finance": "Finanzas",
+  "nav.macro": "Macro",
+  "nav.markets": "Mercados",
+  "nav.world_map": "Mapa Mundial",
+  "nav.weather": "Clima",
+  "nav.live_tv": "TV en Vivo",
+
+  "mobile.home": "Inicio",
+  "mobile.events": "Eventos",
+  "mobile.markets": "Mercados",
+  "mobile.search": "Buscar",
+  "mobile.saved": "Guardado",
+
+  "events.empty": "Aún no hay eventos activos — aparecen automáticamente cuando las noticias cobran relevancia.",
+  "events.tagline": "Noticias principales rastreadas como eventos en vivo con probabilidades implícitas del mercado.",
+
+  "predictions.empty": "Aún no hay mercados en vivo — la sincronización con Polymarket se ejecuta cada 15 min.",
+
+  "truthgap.tooltip": "Diferencia entre el tono mediático y la probabilidad implícita del mercado. Útil como señal, no como veredicto.",
+  "truthgap.over": "Los mercados valoran esto por encima de lo que el tono mediático sugiere.",
+  "truthgap.under": "Los medios expresan más confianza que los mercados.",
+
+  "dashboard.empty_watchlist": "Aún no estás siguiendo nada.",
+  "dashboard.empty_activity": "Sin anomalías en tus elementos seguidos en los últimos 7 días.",
+
+  "confidence.label": "Confianza",
+  "common.refresh": "Actualizar",
+  "common.see_all": "Ver todo →",
+  "common.signin": "Iniciar sesión",
+  "common.live": "En vivo"
+}

@@ -15,6 +15,7 @@ import { Link } from "react-router-dom";
 import { ExternalLink, Activity } from "lucide-react";
 import { usePredictions } from "../hooks/usePredictions";
 import { COPY } from "../lib/copyGuide";
+import { useT } from "../lib/i18n";
 import { formatMoney, formatDistanceToEnd } from "../lib/predictionFormat";
 import ProbabilityBar from "../components/predictions/ProbabilityBar";
 import ConfidenceDots from "../components/predictions/ConfidenceDots";
@@ -30,6 +31,7 @@ const CATEGORIES = [
 ];
 
 export default function PredictionsPage() {
+  const { t } = useT();
   const [category, setCategory] = useState("");
   const { data, isLoading, error } = usePredictions({
     category: category || undefined,
@@ -45,11 +47,11 @@ export default function PredictionsPage() {
         <div className="flex items-center gap-2 mb-1">
           <Activity size={18} className="text-[var(--color-accent)]" />
           <h1 className="font-editorial italic text-2xl sm:text-3xl text-[var(--color-text)]">
-            {COPY.panelTitle}
+            {COPY.panelTitle(t)}
           </h1>
         </div>
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {COPY.brandTagline} {COPY.panelSubtitle}
+          {COPY.brandTagline(t)} {COPY.panelSubtitle}
         </p>
       </header>
 
@@ -91,7 +93,7 @@ export default function PredictionsPage() {
       )}
 
       <p className="mt-8 text-[11px] text-[var(--color-text-tertiary)] italic">
-        {COPY.probabilityNote} Data refreshes every 15 minutes.
+        {COPY.probabilityNote(t)} Data refreshes every 15 minutes.
       </p>
     </div>
   );

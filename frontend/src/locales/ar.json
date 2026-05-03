@@ -1,0 +1,47 @@
+{
+  "brand.name": "مؤشر الواقع",
+  "brand.tagline": "تقدير مستند إلى البيانات، لا يقين مطلق.",
+  "brand.disclaimer": "احتمالية مستنبطة من السوق. ليست ضماناً للتنبؤ.",
+  "brand.briefBadge": "صيغته الذكاء الاصطناعي، راجعه المحررون",
+
+  "nav.reality_index": "مؤشر الواقع",
+  "nav.markets_live": "الأسواق والبيانات المباشرة",
+  "nav.predictions": "التوقعات",
+  "nav.event_tracker": "متتبع الأحداث",
+  "nav.truth_gap": "فجوة الحقيقة",
+  "nav.anomalies": "الشذوذات",
+  "nav.analyst_briefs": "تقارير المحللين",
+  "nav.synthetic_markets": "الأسواق الاصطناعية",
+  "nav.leaderboard": "قائمة المتصدرين",
+  "nav.my_dashboard": "لوحة التحكم",
+  "nav.finance": "المال والأعمال",
+  "nav.macro": "الاقتصاد الكلي",
+  "nav.markets": "الأسواق",
+  "nav.world_map": "خريطة العالم",
+  "nav.weather": "الطقس",
+  "nav.live_tv": "البث المباشر",
+
+  "mobile.home": "الرئيسية",
+  "mobile.events": "الأحداث",
+  "mobile.markets": "الأسواق",
+  "mobile.search": "بحث",
+  "mobile.saved": "المحفوظات",
+
+  "events.empty": "لا أحداث نشطة بعد — تظهر تلقائياً مع تصاعد التغطية الإعلامية.",
+  "events.tagline": "أبرز الأخبار مرصودة كأحداث مباشرة مع احتماليات السوق.",
+
+  "predictions.empty": "لا أسواق حية بعد — تتم المزامنة مع Polymarket كل ١٥ دقيقة.",
+
+  "truthgap.tooltip": "الفارق بين نبرة الإعلام والاحتمالية المستنبطة من السوق. مفيد كإشارة لا كحكم قاطع.",
+  "truthgap.over": "يُسعّر السوق هذا الحدث أعلى مما تُشير إليه نبرة الإعلام.",
+  "truthgap.under": "الإعلام أكثر ثقة من الأسواق.",
+
+  "dashboard.empty_watchlist": "لا تتابع أي شيء حتى الآن.",
+  "dashboard.empty_activity": "لا شذوذات في العناصر التي تتابعها خلال الأيام السبعة الماضية.",
+
+  "confidence.label": "الثقة",
+  "common.refresh": "تحديث",
+  "common.see_all": "عرض الكل →",
+  "common.signin": "تسجيل الدخول",
+  "common.live": "مباشر"
+}

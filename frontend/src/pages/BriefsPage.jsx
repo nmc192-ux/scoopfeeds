@@ -11,6 +11,7 @@ import { Link } from "react-router-dom";
 import { FileText, ShieldCheck } from "lucide-react";
 import { useBriefs } from "../hooks/useBriefs";
 import { COPY } from "../lib/copyGuide";
+import { useT } from "../lib/i18n";
 
 function relTime(ms) {
   if (!ms) return "";
@@ -22,6 +23,7 @@ function relTime(ms) {
 }
 
 export default function BriefsPage() {
+  const { t } = useT();
   const { data, isLoading } = useBriefs({ limit: 30 });
   const items = data?.items ?? [];
 
@@ -32,7 +34,7 @@ export default function BriefsPage() {
           <FileText size={18} className="text-[var(--color-accent)]" />
           <h1 className="font-editorial italic text-2xl text-[var(--color-text)]">Analyst Briefs</h1>
           <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--color-accent)]/10 text-[var(--color-accent)]">
-            <ShieldCheck size={10} /> {COPY.briefBadge}
+            <ShieldCheck size={10} /> {COPY.briefBadge(t)}
           </span>
         </div>
         <p className="text-sm text-[var(--color-text-secondary)]">
@@ -68,7 +70,7 @@ export default function BriefsPage() {
         </div>
       )}
 
-      <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-8 text-center">{COPY.brandTagline}</p>
+      <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-8 text-center">{COPY.brandTagline(t)}</p>
     </div>
   );
 }

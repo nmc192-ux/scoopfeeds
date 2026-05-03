@@ -10,6 +10,7 @@ import { useState } from "react";
 import { Trophy, Crown, Star, Bot, User } from "lucide-react";
 import { useLeaderboard, useAgentLeaderboard } from "../hooks/useSyntheticMarkets";
 import { COPY } from "../lib/copyGuide";
+import { useT } from "../lib/i18n";
 
 function fmtBrier(b) {
   if (b == null) return "—";
@@ -54,6 +55,7 @@ function LeaderRow({ idx, name, label, sub, brier, trades, reputation }) {
 }
 
 export default function LeaderboardPage() {
+  const { t } = useT();
   const [tab, setTab] = useState("humans");
   const { data: humansData, isLoading: humansLoading } = useLeaderboard({ limit: 100 });
   const { data: agentsData, isLoading: agentsLoading } = useAgentLeaderboard();
@@ -71,7 +73,7 @@ export default function LeaderboardPage() {
           <h1 className="font-editorial italic text-2xl text-[var(--color-text)]">Leaderboard</h1>
         </div>
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {COPY.brandTagline} Top forecasters by Brier score on Scoopfeeds Synthetic markets. Lower Brier = better calibrated.
+          {COPY.brandTagline(t)} Top forecasters by Brier score on Scoopfeeds Synthetic markets. Lower Brier = better calibrated.
         </p>
       </header>
 

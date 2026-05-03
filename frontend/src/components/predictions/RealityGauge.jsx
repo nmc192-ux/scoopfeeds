@@ -13,6 +13,7 @@
  */
 
 import { COPY } from "../../lib/copyGuide";
+import { useT } from "../../lib/i18n";
 
 const LANE_COLOR = {
   market: "var(--color-accent)",
@@ -69,6 +70,7 @@ function Lane({ name, label, weight, value, sublabel }) {
 }
 
 export default function RealityGauge({ snapshot }) {
+  const { t } = useT();
   if (!snapshot) return null;
   const {
     reality_score, confidence, truth_gap,
@@ -84,7 +86,7 @@ export default function RealityGauge({ snapshot }) {
       {/* Header + composite score */}
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="font-semibold text-sm text-[var(--color-text)]">{COPY.gaugeTitle}</h3>
+          <h3 className="font-semibold text-sm text-[var(--color-text)]">{COPY.gaugeTitle(t)}</h3>
           <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">{COPY.gaugeSubtitle}</p>
         </div>
         <div className="text-right">
@@ -143,7 +145,7 @@ export default function RealityGauge({ snapshot }) {
       </div>
 
       <p className="text-[10px] text-[var(--color-text-tertiary)] italic">
-        {COPY.brandTagline}
+        {COPY.brandTagline(t)}
       </p>
     </div>
   );

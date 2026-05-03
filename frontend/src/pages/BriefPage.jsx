@@ -8,6 +8,7 @@ import { Link, useParams } from "react-router-dom";
 import { ChevronLeft, ShieldCheck, Activity } from "lucide-react";
 import { useBrief } from "../hooks/useBriefs";
 import { COPY } from "../lib/copyGuide";
+import { useT } from "../lib/i18n";
 
 function citationKindLabel(k) {
   switch (k) {
@@ -55,6 +56,7 @@ function renderMd(md) {
 }
 
 export default function BriefPage() {
+  const { t } = useT();
   const { slug } = useParams();
   const { data: b, isLoading, error } = useBrief(slug);
 
@@ -73,7 +75,7 @@ export default function BriefPage() {
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--color-accent)]/10 text-[var(--color-accent)]">
-          <ShieldCheck size={10} /> {COPY.briefBadge}
+          <ShieldCheck size={10} /> {COPY.briefBadge(t)}
         </span>
         {b.confidence != null && (
           <span className="text-[10px] text-[var(--color-text-secondary)] tabular-nums">
@@ -109,7 +111,7 @@ export default function BriefPage() {
         </section>
       )}
 
-      <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-8 text-center">{COPY.brandTagline}</p>
+      <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-8 text-center">{COPY.brandTagline(t)}</p>
     </article>
   );
 }

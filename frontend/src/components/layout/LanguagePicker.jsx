@@ -12,7 +12,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Check, Globe2, Languages } from "lucide-react";
 import { useNewsStore } from "../../store/newsStore";
-import { LANGUAGES, LANG_BY_CODE } from "../../lib/languages";
+import { LANGUAGES as I18N_LANGUAGES } from "../../lib/i18n";
+import { LANG_BY_CODE } from "../../lib/languages";
+
+// Merge i18n starter languages (the 4 we ship locale files for) with the full
+// LANG_BY_CODE registry so native names, flags, and fonts are available.
+const LANGUAGES = I18N_LANGUAGES.map((l) => ({
+  ...l,
+  native: LANG_BY_CODE[l.code]?.native ?? l.label,
+  flag:   LANG_BY_CODE[l.code]?.flag   ?? "🌐",
+  font:   LANG_BY_CODE[l.code]?.font   ?? undefined,
+}));
 
 export default function LanguagePicker() {
   const { language, setLanguage, autoLanguage, setAutoLanguage } = useNewsStore();

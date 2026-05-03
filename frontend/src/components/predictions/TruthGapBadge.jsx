@@ -10,6 +10,7 @@
  */
 
 import { COPY } from "../../lib/copyGuide";
+import { useT } from "../../lib/i18n";
 
 function bucket(gap) {
   if (gap == null || !Number.isFinite(gap)) return null;
@@ -31,17 +32,18 @@ const LABEL = {
 };
 
 export default function TruthGapBadge({ gap, size = "md" }) {
+  const { t } = useT();
   const b = bucket(gap);
   if (!b) return null;
   const s = STYLE[b];
   const txt = { sm: "text-[10px] px-1.5 py-0.5", md: "text-xs px-2 py-0.5", lg: "text-sm px-2.5 py-1" }[size];
   return (
     <span
-      title={`${LABEL[b]} • ${gap.toFixed(2)} • ${COPY.truthGapTooltip}`}
+      title={`${LABEL[b]} • ${gap.toFixed(2)} • ${COPY.truthGapTooltip(t)}`}
       className={`inline-flex items-center gap-1 rounded-full ${s.bg} ${s.text} ${txt} font-semibold tabular-nums`}
     >
       <span className="font-mono">{s.arrow}</span>
-      <span className="uppercase tracking-wide">{COPY.truthGapTitle}</span>
+      <span className="uppercase tracking-wide">{COPY.truthGapTitle(t)}</span>
       <span>{gap > 0 ? "+" : ""}{gap.toFixed(2)}</span>
     </span>
   );

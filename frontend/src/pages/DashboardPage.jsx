@@ -15,6 +15,7 @@ import TruthGapBadge       from "../components/predictions/TruthGapBadge";
 import AnomalyChip         from "../components/predictions/AnomalyChip";
 import WatchlistPushPanel  from "../components/predictions/WatchlistPushPanel";
 import { COPY }            from "../lib/copyGuide";
+import { useT }           from "../lib/i18n";
 
 function fmtPct(v) { return Number.isFinite(v) ? `${Math.round(v * 100)}%` : "—"; }
 
@@ -107,6 +108,7 @@ function AnomalyRow({ a }) {
 }
 
 export default function DashboardPage() {
+  const { t } = useT();
   const { data: wlData, isLoading: loadingWl, error: wlError } = useWatchlists();
   const { data: actData, isLoading: loadingAct, error: actError } = useWatchlistActivity({ limit: 30 });
 
@@ -214,7 +216,7 @@ export default function DashboardPage() {
       </div>
 
       <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-8 text-center">
-        {COPY.brandTagline}
+        {COPY.brandTagline(t)}
       </p>
     </div>
   );

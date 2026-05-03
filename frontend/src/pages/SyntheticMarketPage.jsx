@@ -11,10 +11,12 @@ import { ChevronLeft, Trophy, ShieldCheck, LogIn } from "lucide-react";
 import { useSyntheticMarket, useTradeQuote, useExecuteTrade } from "../hooks/useSyntheticMarkets";
 import ProbabilityBar from "../components/predictions/ProbabilityBar";
 import { COPY } from "../lib/copyGuide";
+import { useT } from "../lib/i18n";
 
 const PRESET_AMOUNTS = [5, 10, 25, 100];
 
 export default function SyntheticMarketPage() {
+  const { t } = useT();
   const { id } = useParams();
   const { data, isLoading, error } = useSyntheticMarket(id);
   const [side, setSide] = useState("yes");
@@ -181,7 +183,7 @@ export default function SyntheticMarketPage() {
         </section>
       )}
 
-      <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-6 text-center">{COPY.brandTagline}</p>
+      <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-6 text-center">{COPY.brandTagline(t)}</p>
     </article>
   );
 }

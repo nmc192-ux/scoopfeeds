@@ -15,37 +15,41 @@ import {
   ChevronDown, Activity, Briefcase, Globe2, FileText, AlertTriangle,
   ArrowUpDown, Star, Tv, CloudSun, Newspaper, Database, Trophy, Dice5,
 } from "lucide-react";
-
-const SECTIONS = [
-  {
-    title: "Reality Index",
-    items: [
-      { to: "/predictions", label: "Predictions",       icon: Activity },
-      { to: "/events",      label: "Event Tracker",     icon: Newspaper },
-      { to: "/truth-gap",   label: "Truth Gap",         icon: ArrowUpDown },
-      { to: "/anomalies",   label: "Anomalies",         icon: AlertTriangle },
-      { to: "/briefs",      label: "Analyst Briefs",    icon: FileText },
-      { to: "/synthetic",   label: "Synthetic Markets", icon: Dice5 },
-      { to: "/leaderboard", label: "Leaderboard",       icon: Trophy },
-      { to: "/dashboard",   label: "My Dashboard",      icon: Star },
-    ],
-  },
-  {
-    title: "Markets & Live Data",
-    items: [
-      { to: "/finance",     label: "Finance",       icon: Briefcase },
-      { to: "/macro",       label: "Macro",         icon: Database },
-      { to: "/markets",     label: "Markets",       icon: Briefcase },
-      { to: "/world-map",   label: "World Map",     icon: Globe2 },
-      { to: "/weather",     label: "Weather",       icon: CloudSun },
-      { to: "/live-tv",     label: "Live TV",       icon: Tv },
-    ],
-  },
-];
+import { useT } from "../../lib/i18n";
+import { COPY } from "../../lib/copyGuide";
 
 export default function MoreMenu() {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
+
+  // Build sections inside render so section titles + item labels are reactive.
+  const SECTIONS = [
+    {
+      titleKey: "nav.reality_index",
+      items: [
+        { to: "/predictions", labelKey: "nav.predictions",        icon: Activity },
+        { to: "/events",      labelKey: "nav.event_tracker",      icon: Newspaper },
+        { to: "/truth-gap",   labelKey: "nav.truth_gap",          icon: ArrowUpDown },
+        { to: "/anomalies",   labelKey: "nav.anomalies",          icon: AlertTriangle },
+        { to: "/briefs",      labelKey: "nav.analyst_briefs",     icon: FileText },
+        { to: "/synthetic",   labelKey: "nav.synthetic_markets",  icon: Dice5 },
+        { to: "/leaderboard", labelKey: "nav.leaderboard",        icon: Trophy },
+        { to: "/dashboard",   labelKey: "nav.my_dashboard",       icon: Star },
+      ],
+    },
+    {
+      titleKey: "nav.markets_live",
+      items: [
+        { to: "/finance",     labelKey: "nav.finance",    icon: Briefcase },
+        { to: "/macro",       labelKey: "nav.macro",      icon: Database },
+        { to: "/markets",     labelKey: "nav.markets",    icon: Briefcase },
+        { to: "/world-map",   labelKey: "nav.world_map",  icon: Globe2 },
+        { to: "/weather",     labelKey: "nav.weather",    icon: CloudSun },
+        { to: "/live-tv",     labelKey: "nav.live_tv",    icon: Tv },
+      ],
+    },
+  ];
 
   useEffect(() => {
     if (!open) return;
@@ -77,9 +81,9 @@ export default function MoreMenu() {
         <div className="absolute right-0 mt-2 w-72 sm:w-80 max-h-[80vh] overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-lg z-50 p-3">
           <div className="space-y-4">
             {SECTIONS.map(s => (
-              <section key={s.title}>
+              <section key={s.titleKey}>
                 <h4 className="text-[10px] uppercase tracking-wide font-semibold text-[var(--color-text-secondary)] mb-1.5 px-2">
-                  {s.title}
+                  {t(s.titleKey)}
                 </h4>
                 <div className="grid grid-cols-2 gap-1">
                   {s.items.map(it => {
@@ -92,7 +96,7 @@ export default function MoreMenu() {
                         className="flex items-center gap-2 px-2 py-2 rounded text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors"
                       >
                         <Icon size={12} className="text-[var(--color-accent)] flex-shrink-0" />
-                        <span className="truncate">{it.label}</span>
+                        <span className="truncate">{t(it.labelKey)}</span>
                       </Link>
                     );
                   })}
@@ -102,7 +106,7 @@ export default function MoreMenu() {
           </div>
           <div className="border-t border-[var(--color-border)] mt-3 pt-2 px-2">
             <p className="text-[10px] text-[var(--color-text-tertiary)] italic">
-              A data-backed estimate, not a certainty.
+              {COPY.brandTagline(t)}
             </p>
           </div>
         </div>

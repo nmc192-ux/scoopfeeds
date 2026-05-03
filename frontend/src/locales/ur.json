@@ -1,0 +1,47 @@
+{
+  "brand.name": "ریئلٹی انڈیکس",
+  "brand.tagline": "ڈیٹا پر مبنی تخمینہ، یقین نہیں۔",
+  "brand.disclaimer": "بازار سے ماخوذ احتمال۔ پیش گوئی کی ضمانت نہیں۔",
+  "brand.briefBadge": "مصنوعی ذہانت کا مسودہ، ادارتی نظرثانی کے ساتھ",
+
+  "nav.reality_index": "ریئلٹی انڈیکس",
+  "nav.markets_live": "مارکیٹس اور لائیو ڈیٹا",
+  "nav.predictions": "پیشین گوئیاں",
+  "nav.event_tracker": "واقعات ٹریکر",
+  "nav.truth_gap": "سچائی کا فرق",
+  "nav.anomalies": "بے قاعدگیاں",
+  "nav.analyst_briefs": "تجزیہ کار رپورٹس",
+  "nav.synthetic_markets": "مصنوعی مارکیٹس",
+  "nav.leaderboard": "لیڈربورڈ",
+  "nav.my_dashboard": "میرا ڈیش بورڈ",
+  "nav.finance": "مالیات",
+  "nav.macro": "کلی معاشیات",
+  "nav.markets": "مارکیٹس",
+  "nav.world_map": "عالمی نقشہ",
+  "nav.weather": "موسم",
+  "nav.live_tv": "لائیو ٹی وی",
+
+  "mobile.home": "ہوم",
+  "mobile.events": "واقعات",
+  "mobile.markets": "مارکیٹس",
+  "mobile.search": "تلاش",
+  "mobile.saved": "محفوظ شدہ",
+
+  "events.empty": "ابھی کوئی فعال واقعہ نہیں — جیسے ہی خبریں زیادہ ہوں گی، یہ خودبخود ظاہر ہوں گے۔",
+  "events.tagline": "بڑی خبریں لائیو واقعات کے طور پر ٹریک کی جا رہی ہیں، بازار سے ماخوذ احتمالات کے ساتھ۔",
+
+  "predictions.empty": "ابھی کوئی لائیو مارکیٹ نہیں — Polymarket سے مطابقت ہر ۱۵ منٹ میں ہوتی ہے۔",
+
+  "truthgap.tooltip": "میڈیا کے لہجے اور بازار سے ماخوذ احتمال کے درمیان فرق۔ فیصلہ نہیں، اشارے کے طور پر مفید۔",
+  "truthgap.over": "بازار اس واقعے کو میڈیا کے مقابلے زیادہ اہم قرار دے رہا ہے۔",
+  "truthgap.under": "میڈیا بازار سے زیادہ پراعتماد ہے۔",
+
+  "dashboard.empty_watchlist": "آپ ابھی کچھ بھی نہیں دیکھ رہے۔",
+  "dashboard.empty_activity": "پچھلے ۷ دنوں میں آپ کے مشاہدہ شدہ آئٹمز میں کوئی بے قاعدگی نہیں۔",
+
+  "confidence.label": "اعتماد",
+  "common.refresh": "تازہ کریں",
+  "common.see_all": "سب دیکھیں ←",
+  "common.signin": "سائن ان کریں",
+  "common.live": "براہ راست"
+}

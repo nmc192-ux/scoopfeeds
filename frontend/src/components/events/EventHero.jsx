@@ -8,6 +8,7 @@ import ProbabilityBar from "../predictions/ProbabilityBar";
 import TruthGapBadge  from "../predictions/TruthGapBadge";
 import WatchButton    from "../predictions/WatchButton";
 import { COPY } from "../../lib/copyGuide";
+import { useT } from "../../lib/i18n";
 
 function relativeTime(ms) {
   if (!ms) return "";
@@ -33,6 +34,7 @@ function SeverityBar({ value = 0 }) {
 }
 
 export default function EventHero({ event, markets = [], truthGap }) {
+  const { t } = useT();
   const {
     id, title, category, severity = 0, summary,
     article_count = 0, market_count = 0, last_activity_at,
@@ -92,7 +94,7 @@ export default function EventHero({ event, markets = [], truthGap }) {
               <span className="ml-auto text-[10px]">Source: {topMarket.source ?? "Polymarket"}</span>
             </div>
             <ProbabilityBar yesPrice={topMarket.yes_price} noPrice={topMarket.no_price} />
-            <p className="text-[10px] text-[var(--color-text-secondary)]">{COPY.probabilityNote}</p>
+            <p className="text-[10px] text-[var(--color-text-secondary)]">{COPY.probabilityNote(t)}</p>
           </div>
         )}
 

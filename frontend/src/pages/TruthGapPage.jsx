@@ -13,6 +13,7 @@ import { ArrowUpDown, Activity } from "lucide-react";
 import { useTruthGap } from "../hooks/useTruthGap";
 import TruthGapBadge from "../components/predictions/TruthGapBadge";
 import { COPY } from "../lib/copyGuide";
+import { useT } from "../lib/i18n";
 
 const DIRECTIONS = [
   { id: "both",  label: "All divergences" },
@@ -80,6 +81,7 @@ function Row({ item }) {
 }
 
 export default function TruthGapPage() {
+  const { t } = useT();
   const [direction, setDirection] = useState("both");
   const [windowMs,  setWindowMs]  = useState(24 * 60 * 60 * 1000);
   const { data, isLoading } = useTruthGap({ direction, windowMs, limit: 50 });
@@ -91,10 +93,10 @@ export default function TruthGapPage() {
       <div className="mb-6">
         <div className="flex items-center gap-2 mb-2">
           <ArrowUpDown size={18} className="text-[var(--color-accent)]" />
-          <h1 className="font-editorial italic text-2xl text-[var(--color-text)]">{COPY.truthGapTitle}</h1>
+          <h1 className="font-editorial italic text-2xl text-[var(--color-text)]">{COPY.truthGapTitle(t)}</h1>
         </div>
         <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
-          {COPY.truthGapTooltip}
+          {COPY.truthGapTooltip(t)}
         </p>
       </div>
 
@@ -150,7 +152,7 @@ export default function TruthGapPage() {
       )}
 
       <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-6 text-center">
-        {COPY.brandTagline}
+        {COPY.brandTagline(t)}
       </p>
     </div>
   );

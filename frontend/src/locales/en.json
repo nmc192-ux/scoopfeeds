@@ -1,0 +1,47 @@
+{
+  "brand.name": "Reality Index",
+  "brand.tagline": "A data-backed estimate, not a certainty.",
+  "brand.disclaimer": "Market-implied probability. Not a prediction guarantee.",
+  "brand.briefBadge": "AI-drafted, editor-reviewed",
+
+  "nav.reality_index": "Reality Index",
+  "nav.markets_live": "Markets & Live Data",
+  "nav.predictions": "Predictions",
+  "nav.event_tracker": "Event Tracker",
+  "nav.truth_gap": "Truth Gap",
+  "nav.anomalies": "Anomalies",
+  "nav.analyst_briefs": "Analyst Briefs",
+  "nav.synthetic_markets": "Synthetic Markets",
+  "nav.leaderboard": "Leaderboard",
+  "nav.my_dashboard": "My Dashboard",
+  "nav.finance": "Finance",
+  "nav.macro": "Macro",
+  "nav.markets": "Markets",
+  "nav.world_map": "World Map",
+  "nav.weather": "Weather",
+  "nav.live_tv": "Live TV",
+
+  "mobile.home": "Home",
+  "mobile.events": "Events",
+  "mobile.markets": "Markets",
+  "mobile.search": "Search",
+  "mobile.saved": "Saved",
+
+  "events.empty": "No active events yet — they appear automatically as stories gain coverage.",
+  "events.tagline": "Major stories tracked as live events with market-implied probabilities.",
+
+  "predictions.empty": "No live markets yet — Polymarket sync runs every 15 min.",
+
+  "truthgap.tooltip": "Difference between media tone and market-implied probability. Useful as a signal, not a verdict.",
+  "truthgap.over": "Markets price this higher than media tone suggests.",
+  "truthgap.under": "Media is more confident than markets.",
+
+  "dashboard.empty_watchlist": "You're not watching anything yet.",
+  "dashboard.empty_activity": "No anomalies on your watched items in the last 7 days.",
+
+  "confidence.label": "Confidence",
+  "common.refresh": "Refresh",
+  "common.see_all": "See all →",
+  "common.signin": "Sign in",
+  "common.live": "Live"
+}

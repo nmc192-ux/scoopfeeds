@@ -12,6 +12,7 @@ import { Bell, Activity, AlertTriangle, TrendingUp, Zap, RefreshCw } from "lucid
 import { useAnomalies } from "../hooks/useTruthGap";
 import AnomalyChip from "../components/predictions/AnomalyChip";
 import { COPY } from "../lib/copyGuide";
+import { useT } from "../lib/i18n";
 
 const TYPES = [
   { id: "",                label: "All",            Icon: Bell },
@@ -84,6 +85,7 @@ function Row({ a }) {
 }
 
 export default function AnomaliesPage() {
+  const { t } = useT();
   const [type, setType]       = useState("");
   const [windowMs, setWindowMs] = useState(24 * 60 * 60 * 1000);
   const { data, isLoading } = useAnomalies({
@@ -162,7 +164,7 @@ export default function AnomaliesPage() {
       )}
 
       <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-6 text-center">
-        {COPY.brandTagline}
+        {COPY.brandTagline(t)}
       </p>
     </div>
   );
