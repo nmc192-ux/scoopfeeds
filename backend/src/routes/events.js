@@ -146,6 +146,42 @@ function safeJsonParse(s) {
 // ─── Routes ────────────────────────────────────────────────────────────────
 
 /**
+ * GET /api/events/world-map
+ * Returns active events that have geo coordinates, optionally filtered by
+ * category. Response is intentionally compact — the WorldMap component
+ * needs id/slug/title/severity/category/lat/lng + last_activity_at and
+ * nothing else. Capped at 500 events to keep the SVG manageable.
+ */
+router.get("/world-map", (req, res) => {
+  try {
+    const db = getDb();
+    const category = req.query.category ?? null;
+    const minSeverity = parseFloat(req.query.minSeverity ?? "0");
+    const limit = Math.min(parseInt(req.query.limit ?? "300", 10), 500);
+
+    let sql = `
+      SELECT id, slug, title, category, severity, geo_lat, geo_lng,
+             last_activity_at, status,
+             (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id) AS article_count
+      FROM events e
+      WHERE status = 'active'
+        AND geo_lat IS NOT NULL AND geo_lng IS NOT NULL
+        AND severity >= ?
+    `;
+    const params = [minSeverity];
+    if (category) { sql += " AND category = ?"; params.push(category); }
+    sql += " ORDER BY severity DESC, last_activity_at DESC LIMIT ?";
+    params.push(limit);
+
+    const rows = db.prepare(sql).all(...params);
+    res.json({ events: rows, count: rows.length });
+  } catch (err) {
+    logger.error(`GET /api/events/world-map error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
  * GET /api/events
  * Query params: category, status (default 'active'), limit (default 30), offset
  */

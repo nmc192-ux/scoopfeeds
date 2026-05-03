@@ -115,6 +115,20 @@ export function useEventSentiment(slug, { sinceMs, source } = {}) {
   });
 }
 
+export function useWorldMap({ category, minSeverity = 0, limit = 300 } = {}) {
+  return useQuery({
+    queryKey: ["world-map", { category, minSeverity, limit }],
+    queryFn: async () => {
+      const params = new URLSearchParams({ limit: String(limit), minSeverity: String(minSeverity) });
+      if (category) params.set("category", category);
+      const { data } = await api.get(`/events/world-map?${params}`);
+      return data;
+    },
+    staleTime:       2 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  });
+}
+
 export function useEventRealityIndex(slug, { history = false } = {}) {
   return useQuery({
     queryKey: ["event-reality-index", slug, { history }],
