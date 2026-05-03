@@ -131,6 +131,64 @@ export const RSS_SOURCES = [
   { name: "Smithsonian",        url: "https://www.smithsonianmag.com/rss/latest_articles/", category: "publications", credibility: 9, region: "global" },
   { name: "NY Times",           url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", category: "publications", credibility: 10, region: "us" },
   { name: "The New Yorker",     url: "https://www.newyorker.com/feed/everything",     category: "publications", credibility: 10, region: "global" },
+
+  // ═══ Phase 5: Global coverage expansion ═══════════════════════════
+  // ~30 curated additions selected for: regional balance (India, MENA,
+  // LatAm, AsiaPac, Africa), domain depth (finance, climate, defense,
+  // geopolitics, crypto). All free RSS, no auth.
+
+  // ─── INDIA ────────────────────────────────────────────────────────
+  { name: "The Hindu",          url: "https://www.thehindu.com/news/feeder/default.rss",         category: "international", credibility: 9, region: "in" },
+  { name: "Times of India",     url: "https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms", category: "international", credibility: 7, region: "in" },
+  { name: "Indian Express",     url: "https://indianexpress.com/feed/",                          category: "international", credibility: 8, region: "in" },
+
+  // ─── MENA ─────────────────────────────────────────────────────────
+  { name: "Times of Israel",    url: "https://www.timesofisrael.com/feed/",                      category: "international", credibility: 8, region: "il" },
+  { name: "Haaretz",            url: "https://www.haaretz.com/cmlink/1.628752",                  category: "international", credibility: 9, region: "il" },
+  { name: "Arab News",          url: "https://www.arabnews.com/rss.xml",                         category: "international", credibility: 7, region: "sa" },
+
+  // ─── EUROPE (non-UK) ──────────────────────────────────────────────
+  { name: "Le Monde (English)", url: "https://www.lemonde.fr/en/rss/une.xml",                    category: "international", credibility: 9, region: "fr" },
+  { name: "Der Spiegel (Eng)",  url: "https://www.spiegel.de/international/index.rss",           category: "international", credibility: 9, region: "de" },
+  { name: "Politico Europe",    url: "https://www.politico.eu/feed/",                            category: "international", credibility: 9, region: "eu" },
+  { name: "Euronews",           url: "https://www.euronews.com/rss",                             category: "international", credibility: 8, region: "eu" },
+
+  // ─── ASIA-PACIFIC ─────────────────────────────────────────────────
+  { name: "ABC Australia",      url: "https://www.abc.net.au/news/feed/45910/rss.xml",           category: "international", credibility: 9, region: "au" },
+  { name: "NHK World",          url: "https://www3.nhk.or.jp/nhkworld/en/news/feeds/",           category: "international", credibility: 9, region: "jp" },
+  { name: "Korea Herald",       url: "https://www.koreaherald.com/rss/0",                        category: "international", credibility: 7, region: "kr" },
+
+  // ─── LATIN AMERICA ────────────────────────────────────────────────
+  { name: "Folha (English)",    url: "https://www1.folha.uol.com.br/internacional/en/rss091.xml", category: "international", credibility: 8, region: "br" },
+  { name: "MercoPress",         url: "https://en.mercopress.com/rss/",                           category: "international", credibility: 7, region: "latam" },
+
+  // ─── AFRICA ───────────────────────────────────────────────────────
+  { name: "Mail & Guardian",    url: "https://mg.co.za/feed/",                                   category: "international", credibility: 8, region: "za" },
+  { name: "Daily Nation",       url: "https://nation.africa/kenya/rss",                          category: "international", credibility: 7, region: "ke" },
+
+  // ─── FINANCE (deeper) ─────────────────────────────────────────────
+  { name: "MarketWatch",        url: "https://feeds.marketwatch.com/marketwatch/topstories/",    category: "business", credibility: 8, region: "us" },
+  { name: "Yahoo Finance",      url: "https://finance.yahoo.com/news/rssindex",                  category: "business", credibility: 7, region: "us" },
+  { name: "Investing.com",      url: "https://www.investing.com/rss/news.rss",                   category: "business", credibility: 7, region: "global" },
+
+  // ─── CRYPTO ───────────────────────────────────────────────────────
+  { name: "CoinDesk",           url: "https://www.coindesk.com/arc/outboundfeeds/rss/",          category: "business", credibility: 8, region: "global" },
+  { name: "The Block",          url: "https://www.theblock.co/rss.xml",                          category: "business", credibility: 8, region: "global" },
+  { name: "Decrypt",            url: "https://decrypt.co/feed",                                  category: "business", credibility: 7, region: "global" },
+
+  // ─── CLIMATE / ENERGY ─────────────────────────────────────────────
+  { name: "Inside Climate News", url: "https://insideclimatenews.org/feed/",                     category: "environment", credibility: 9, region: "global" },
+  { name: "Grist",              url: "https://grist.org/feed/",                                  category: "environment", credibility: 8, region: "global" },
+  { name: "Climate Home News",  url: "https://www.climatechangenews.com/feed/",                  category: "environment", credibility: 8, region: "global" },
+
+  // ─── DEFENSE / GEOPOLITICS ────────────────────────────────────────
+  { name: "Defense News",       url: "https://www.defensenews.com/arc/outboundfeeds/rss/category/global/",       category: "international", credibility: 8, region: "global" },
+  { name: "War on the Rocks",   url: "https://warontherocks.com/feed/",                          category: "international", credibility: 9, region: "global" },
+  { name: "Foreign Policy",     url: "https://foreignpolicy.com/feed/",                          category: "publications", credibility: 9, region: "global" },
+
+  // ─── HEALTH (extended) ────────────────────────────────────────────
+  { name: "STAT News",          url: "https://www.statnews.com/feed/",                           category: "health", credibility: 9, region: "global" },
+  { name: "BMJ News",           url: "https://www.bmj.com/feed",                                 category: "health", credibility: 10, region: "global" },
 ];
 
 // ─── YouTube Channel Sources ──────────────────────────────────────────────
