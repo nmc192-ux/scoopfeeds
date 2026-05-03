@@ -51,6 +51,9 @@ import BriefsReviewPage     from "./pages/BriefsReviewPage";
 import WorldMapPage         from "./pages/WorldMapPage";
 import FinancePage          from "./pages/FinancePage";
 import MacroPage            from "./pages/MacroPage";
+import SyntheticMarketsPage from "./pages/SyntheticMarketsPage";
+import SyntheticMarketPage  from "./pages/SyntheticMarketPage";
+import LeaderboardPage      from "./pages/LeaderboardPage";
 import MobileBottomBar      from "./components/layout/MobileBottomBar";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
@@ -60,7 +63,7 @@ const HIDE_TOPICNAV_ON = [
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
-  "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/world-map", "/finance", "/macro",
+  "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/world-map", "/finance", "/macro", "/synthetic", "/leaderboard",
 ];
 
 export default function App() {
@@ -166,6 +169,9 @@ export default function App() {
           <Route path="/world-map"            element={<WorldMapPage />} />
           <Route path="/finance"              element={<FinancePage />} />
           <Route path="/macro"                element={<MacroPage />} />
+          <Route path="/synthetic"            element={<SyntheticMarketsPage />} />
+          <Route path="/synthetic/:id"        element={<SyntheticMarketPage />} />
+          <Route path="/leaderboard"          element={<LeaderboardPage />} />
           <Route path="*"                    element={<NotFound />} />
         </Routes>
       </main>

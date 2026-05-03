@@ -38,6 +38,7 @@ import { runAnalystBriefCycle } from "../realityIndex/generation/analystBriefGen
 import { syncUsgsCycle } from "../realityIndex/ingest/geo/usgsEarthquakeFetcher.js";
 import { syncNoaaCycle } from "../realityIndex/ingest/geo/noaaAlertsFetcher.js";
 import { syncFredCycle } from "../realityIndex/ingest/economic/fredFetcher.js";
+import { runQuestionExtractor } from "../realityIndex/syntheticMarkets/questionExtractor.js";
 
 let isRunning    = false;
 let isVideoRun   = false;   // YouTube ingestion
@@ -164,6 +165,9 @@ export function startScheduler() {
     cron.schedule("4,14,24,34,44,54 * * * *", () => runNoaaCycle());          // every 10 min, +4 offset
     // Phase 5 — FRED macro series (rates, CPI, unemployment, oil, VIX, etc.)
     cron.schedule("17 */6 * * *",       () => runFredCycle());                // every 6h
+    // Phase 6 — synthetic market question extractor (LLM, drafts only).
+    cron.schedule("47 */6 * * *",       () => runSyntheticExtractCycle());    // every 6h, +30m offset from FRED
+
 
     // Phase 4 leftover — Analyst briefs (drafts only). Every 4h on the 23rd
     // minute. Generator emits status='draft'; editor approves manually in
@@ -367,6 +371,23 @@ async function runFredCycle() {
     logger.error("❌ FRED cycle failed", { error: err.message });
     return null;
   } finally { isFredRun = false; }
+}
+
+let isSyntheticExtractRun = false;
+let lastSyntheticExtractRun = null;
+let lastSyntheticExtractResult = null;
+async function runSyntheticExtractCycle() {
+  if (isSyntheticExtractRun) { logger.warn("⏸️ Synth extract already running"); return null; }
+  isSyntheticExtractRun = true;
+  lastSyntheticExtractRun = new Date().toISOString();
+  try {
+    const out = await runQuestionExtractor();
+    lastSyntheticExtractResult = out;
+    return out;
+  } catch (err) {
+    logger.error("❌ Synth extract failed", { error: err.message });
+    return null;
+  } finally { isSyntheticExtractRun = false; }
 }
 async function runAnalystBriefCycleWrapped() {
   if (isBriefRun) { logger.warn("⏸️ Brief cycle already running"); return null; }
@@ -659,7 +680,7 @@ export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
     isPublishRun, isPolymarketRun, isMatcherRun,
-    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isFredRun,
+    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isFredRun, isSyntheticExtractRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
     lastPublishResult,
@@ -679,6 +700,8 @@ export function getSchedulerStatus() {
     lastNoaaResult,
     lastFredRun,
     lastFredResult,
+    lastSyntheticExtractRun,
+    lastSyntheticExtractResult,
     nextRun,
     sourceCount: RSS_SOURCES.length, videoChannels: YOUTUBE_SOURCES.length,
     videoGenConfigured: isVideoConfigured(),

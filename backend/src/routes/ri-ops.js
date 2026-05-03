@@ -24,6 +24,8 @@ import { getSchedulerStatus } from "../services/scheduler.js";
 import { listBriefs, getBriefById, setBriefStatus } from "../realityIndex/dal/briefsDao.js";
 import { runAnalystBriefCycle } from "../realityIndex/generation/analystBriefGenerator.js";
 import { createMarket as createSyntheticMarket, getMarket as getSyntheticMarket } from "../realityIndex/dal/syntheticMarketsDao.js";
+import { resolveMarket as resolveSyntheticMarket } from "../realityIndex/syntheticMarkets/resolver.js";
+import { runQuestionExtractor } from "../realityIndex/syntheticMarkets/questionExtractor.js";
 import { logger } from "../services/logger.js";
 
 const router = Router();
@@ -191,20 +193,21 @@ router.post("/synthetic/create", requireAdmin, (req, res) => {
 router.post("/synthetic/:id/resolve", requireAdmin, (req, res) => {
   try {
     const { outcome } = req.body || {};
-    if (!["yes", "no", "cancel"].includes(outcome)) {
-      return res.status(400).json({ ok: false, error: "outcome must be yes|no|cancel" });
-    }
-    const m = getSyntheticMarket(req.params.id);
-    if (!m) return res.status(404).json({ ok: false, error: "market not found" });
-    if (m.resolved) return res.json({ ok: true, alreadyResolved: true });
-    getDb().prepare(`
-      UPDATE synthetic_markets
-      SET resolved = 1, outcome = ?, resolved_at = ?
-      WHERE id = ?
-    `).run(outcome, Date.now(), req.params.id);
-    res.json({ ok: true, market_id: req.params.id, outcome });
+    const out = resolveSyntheticMarket({ market_id: req.params.id, outcome });
+    res.json({ ok: true, ...out });
   } catch (err) {
     logger.error(`synthetic resolve failed: ${err.message}`);
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+router.post("/synthetic/extract", requireAdmin, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit ?? req.body?.limit ?? "2", 10);
+    const out = await runQuestionExtractor({ limit });
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    logger.error(`question extractor failed: ${err.message}`);
     res.status(500).json({ ok: false, error: err.message });
   }
 });

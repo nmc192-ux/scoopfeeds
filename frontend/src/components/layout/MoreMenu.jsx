@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ChevronDown, Activity, Briefcase, Globe2, FileText, AlertTriangle,
-  ArrowUpDown, Star, Tv, CloudSun, Newspaper, Database,
+  ArrowUpDown, Star, Tv, CloudSun, Newspaper, Database, Trophy, Dice5,
 } from "lucide-react";
 
 const SECTIONS = [
@@ -25,6 +25,8 @@ const SECTIONS = [
       { to: "/truth-gap",   label: "Truth Gap",         icon: ArrowUpDown },
       { to: "/anomalies",   label: "Anomalies",         icon: AlertTriangle },
       { to: "/briefs",      label: "Analyst Briefs",    icon: FileText },
+      { to: "/synthetic",   label: "Synthetic Markets", icon: Dice5 },
+      { to: "/leaderboard", label: "Leaderboard",       icon: Trophy },
       { to: "/dashboard",   label: "My Dashboard",      icon: Star },
     ],
   },
