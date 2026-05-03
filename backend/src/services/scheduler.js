@@ -40,6 +40,8 @@ import { syncNoaaCycle } from "../realityIndex/ingest/geo/noaaAlertsFetcher.js";
 import { syncAcledCycle } from "../realityIndex/ingest/geo/acledFetcher.js";
 import { syncFredCycle } from "../realityIndex/ingest/economic/fredFetcher.js";
 import { syncWorldBankCycle } from "../realityIndex/ingest/economic/worldBankFetcher.js";
+import { syncSportsdbCycle } from "../realityIndex/ingest/sports/sportsdbFetcher.js";
+import { syncTmdbCycle } from "../realityIndex/ingest/entertainment/tmdbFetcher.js";
 import { runQuestionExtractor } from "../realityIndex/syntheticMarkets/questionExtractor.js";
 import { runAiAgentsCycle } from "../realityIndex/syntheticMarkets/aiAgents.js";
 import { runOutcomeResolverCycle } from "../realityIndex/syntheticMarkets/outcomeResolver.js";
@@ -174,6 +176,10 @@ export function startScheduler() {
     cron.schedule("17 */6 * * *",       () => runFredCycle());                // every 6h
     // World Bank — annual indicators per country, daily refresh (slow source).
     cron.schedule("9 5 * * *",          () => runWorldBankCycle());           // daily at 05:09
+    // Phase 5 — TheSportsDB soccer fixtures (today + tomorrow, free tier).
+    cron.schedule("13 */3 * * *",       () => runSportsdbCycle());            // every 3 hours
+    // Phase 5 — TMDB trending movies + TV (requires TMDB_API_KEY).
+    cron.schedule("27 */6 * * *",       () => runTmdbCycle());                // every 6 hours
     // Phase 6 — synthetic market question extractor (LLM, drafts only).
     cron.schedule("47 */6 * * *",       () => runSyntheticExtractCycle());    // every 6h, +30m offset from FRED
     // Phase 6 — AI trader agents (skeptic/optimist/contrarian) keep markets lively.
@@ -422,6 +428,40 @@ async function runWorldBankCycle() {
     logger.error("❌ WB cycle failed", { error: err.message });
     return null;
   } finally { isWorldBankRun = false; }
+}
+
+let isSportsdbRun = false;
+let lastSportsdbRun = null;
+let lastSportsdbResult = null;
+async function runSportsdbCycle() {
+  if (isSportsdbRun) { logger.warn("⏸️ SportsDB cycle already running"); return null; }
+  isSportsdbRun = true;
+  lastSportsdbRun = new Date().toISOString();
+  try {
+    const out = await syncSportsdbCycle();
+    lastSportsdbResult = out;
+    return out;
+  } catch (err) {
+    logger.error("❌ SportsDB cycle failed", { error: err.message });
+    return null;
+  } finally { isSportsdbRun = false; }
+}
+
+let isTmdbRun = false;
+let lastTmdbRun = null;
+let lastTmdbResult = null;
+async function runTmdbCycle() {
+  if (isTmdbRun) { logger.warn("⏸️ TMDB cycle already running"); return null; }
+  isTmdbRun = true;
+  lastTmdbRun = new Date().toISOString();
+  try {
+    const out = await syncTmdbCycle();
+    lastTmdbResult = out;
+    return out;
+  } catch (err) {
+    logger.error("❌ TMDB cycle failed", { error: err.message });
+    return null;
+  } finally { isTmdbRun = false; }
 }
 
 let isAiAgentsRun = false;
@@ -782,7 +822,7 @@ export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
     isPublishRun, isPolymarketRun, isMatcherRun,
-    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isAcledRun, isFredRun, isWorldBankRun, isSyntheticExtractRun, isAiAgentsRun, isOutcomeResolverRun, isBayesianRun,
+    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isAcledRun, isFredRun, isWorldBankRun, isSportsdbRun, isTmdbRun, isSyntheticExtractRun, isAiAgentsRun, isOutcomeResolverRun, isBayesianRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
     lastPublishResult,
@@ -806,6 +846,10 @@ export function getSchedulerStatus() {
     lastFredResult,
     lastWorldBankRun,
     lastWorldBankResult,
+    lastSportsdbRun,
+    lastSportsdbResult,
+    lastTmdbRun,
+    lastTmdbResult,
     lastSyntheticExtractRun,
     lastSyntheticExtractResult,
     lastAiAgentsRun,
