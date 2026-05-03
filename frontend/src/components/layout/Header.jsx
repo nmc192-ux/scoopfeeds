@@ -11,6 +11,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { ScoopLogo } from "../mascot/ScoopMascot";
 import CountryPicker from "./CountryPicker";
 import LanguagePicker from "./LanguagePicker";
+import MoreMenu from "./MoreMenu";
 import { isRtl } from "../../lib/languages";
 import clsx from "clsx";
 
@@ -226,6 +227,9 @@ export default function Header() {
                 <List size={14} />
               </button>
             </div>
+
+            {/* RI / category mega-menu */}
+            <MoreMenu />
 
             {/* Language picker (21 languages + auto) */}
             <LanguagePicker />
