@@ -14,6 +14,7 @@ import { Link } from "react-router-dom";
 import {
   ChevronDown, Activity, Briefcase, Globe2, FileText, AlertTriangle,
   ArrowUpDown, Star, Tv, CloudSun, Newspaper, Database, Trophy, Dice5,
+  Heart, CloudRain, Bitcoin, Cpu, Rocket,
 } from "lucide-react";
 import { useT } from "../../lib/i18n";
 import { COPY } from "../../lib/copyGuide";
@@ -47,6 +48,17 @@ export default function MoreMenu() {
         { to: "/world-map",   labelKey: "nav.world_map",  icon: Globe2 },
         { to: "/weather",     labelKey: "nav.weather",    icon: CloudSun },
         { to: "/live-tv",     labelKey: "nav.live_tv",    icon: Tv },
+      ],
+    },
+    {
+      titleKey: "nav.categories",
+      items: [
+        { to: "/health",  labelKey: "nav.health",  icon: Heart },
+        { to: "/climate", labelKey: "nav.climate", icon: CloudRain },
+        { to: "/sports",  labelKey: "nav.sports",  icon: Trophy },
+        { to: "/crypto",  labelKey: "nav.crypto",  icon: Bitcoin },
+        { to: "/ai",      labelKey: "nav.ai",      icon: Cpu },
+        { to: "/space",   labelKey: "nav.space",   icon: Rocket },
       ],
     },
   ];

@@ -58,6 +58,14 @@ import LeaderboardPage      from "./pages/LeaderboardPage";
 import SyntheticReviewPage  from "./pages/SyntheticReviewPage";
 import MobileBottomBar      from "./components/layout/MobileBottomBar";
 
+// Category alias pages — thin wrappers around EventsPage with locked filter.
+import HealthEventsPage  from "./pages/category/HealthEventsPage";
+import ClimateEventsPage from "./pages/category/ClimateEventsPage";
+import SportsEventsPage  from "./pages/category/SportsEventsPage";
+import CryptoEventsPage  from "./pages/category/CryptoEventsPage";
+import AIEventsPage      from "./pages/category/AIEventsPage";
+import SpaceEventsPage   from "./pages/category/SpaceEventsPage";
+
 // Routes that hide the sub-header topic strip (keeps focus on the page).
 const HIDE_TOPICNAV_ON = [
   "/live-tv", "/about", "/article", "/saved",
@@ -66,6 +74,7 @@ const HIDE_TOPICNAV_ON = [
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
   "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/world-map", "/finance", "/macro", "/synthetic", "/leaderboard",
+  "/health", "/climate", "/sports", "/crypto", "/ai", "/space",
 ];
 
 export default function App() {
@@ -163,6 +172,12 @@ export default function App() {
           <Route path="/predictions"         element={<PredictionsPage />} />
           <Route path="/events"             element={<EventsPage />} />
           <Route path="/events/:slug"       element={<EventPage />} />
+          <Route path="/health"             element={<HealthEventsPage />} />
+          <Route path="/climate"            element={<ClimateEventsPage />} />
+          <Route path="/sports"             element={<SportsEventsPage />} />
+          <Route path="/crypto"             element={<CryptoEventsPage />} />
+          <Route path="/ai"                 element={<AIEventsPage />} />
+          <Route path="/space"              element={<SpaceEventsPage />} />
           <Route path="/truth-gap"          element={<TruthGapPage />} />
           <Route path="/dashboard"          element={<DashboardPage />} />
           <Route path="/anomalies"          element={<AnomaliesPage />} />

@@ -20,6 +20,13 @@
   "nav.world_map": "World Map",
   "nav.weather": "Weather",
   "nav.live_tv": "Live TV",
+  "nav.categories": "Categories",
+  "nav.health":     "Health",
+  "nav.climate":    "Climate",
+  "nav.sports":     "Sports",
+  "nav.crypto":     "Crypto",
+  "nav.ai":         "AI",
+  "nav.space":      "Space",
 
   "mobile.home": "Home",
   "mobile.events": "Events",

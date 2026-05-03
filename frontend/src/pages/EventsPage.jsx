@@ -37,8 +37,14 @@ function SkeletonCard() {
   );
 }
 
-export default function EventsPage() {
-  const [category, setCategory] = useState("");
+export default function EventsPage({
+  fixedCategory = null,
+  pageTitle = "Event Tracker",
+  pageSubtitle = null,
+  pageIcon: PageIcon = Map,
+} = {}) {
+  const [chosen, setChosen] = useState("");
+  const category = fixedCategory ?? chosen;
   const { data, isLoading, error } = useEvents({ category: category || undefined, limit: 60 });
   const events = data?.events ?? [];
 
@@ -47,35 +53,37 @@ export default function EventsPage() {
       {/* Header */}
       <header className="mb-7">
         <div className="flex items-center gap-2 mb-1">
-          <Map size={18} className="text-[var(--color-accent)]" />
+          <PageIcon size={18} className="text-[var(--color-accent)]" />
           <h1 className="font-editorial italic text-2xl sm:text-3xl text-[var(--color-text)]">
-            Event Tracker
+            {pageTitle}
           </h1>
         </div>
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {COPY.brandTagline} Major stories tracked as live events with market-implied probabilities.
+          {pageSubtitle ?? `${COPY.brandTagline} Major stories tracked as live events with market-implied probabilities.`}
         </p>
       </header>
 
       {/* Trending now — recent unack anomalies on tracked events */}
       <LiveAnomaliesStrip />
 
-      {/* Category filter */}
-      <div className="flex flex-wrap gap-2 mb-7">
-        {CATEGORIES.map(c => (
-          <button
-            key={c.id}
-            onClick={() => setCategory(c.id)}
-            className={`text-sm px-3 py-1.5 rounded-full border transition-colors ${
-              category === c.id
-                ? "bg-[var(--color-accent)] text-white border-[var(--color-accent)]"
-                : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
-            }`}
-          >
-            {c.label}
-          </button>
-        ))}
-      </div>
+      {/* Category filter — hidden when a fixed category is locked in */}
+      {!fixedCategory && (
+        <div className="flex flex-wrap gap-2 mb-7">
+          {CATEGORIES.map(c => (
+            <button
+              key={c.id}
+              onClick={() => setChosen(c.id)}
+              className={`text-sm px-3 py-1.5 rounded-full border transition-colors ${
+                chosen === c.id
+                  ? "bg-[var(--color-accent)] text-white border-[var(--color-accent)]"
+                  : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Error */}
       {error && (
