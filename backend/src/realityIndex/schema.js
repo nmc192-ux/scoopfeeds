@@ -337,6 +337,30 @@ export function initRealityIndex(db) {
     logger.warn(`events geo migration skipped: ${err.message}`);
   }
 
+  // ── Phase 5: Macro indicators (FRED / WB / IMF) ─────────────────────────
+  // Curated economic series. Two snapshots per cycle (latest + previous) so
+  // the UI can show a delta + sparkline source. provider is the free-text
+  // backend label ("fred", "worldbank", "imf"); series_id is the upstream
+  // series code so we can dedupe + look up upstream metadata.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS macro_indicators (
+      provider     TEXT NOT NULL,        -- 'fred' | 'worldbank' | 'imf'
+      series_id    TEXT NOT NULL,        -- e.g. 'DFF', 'CPIAUCSL'
+      label        TEXT NOT NULL,
+      units        TEXT,                 -- e.g. '%', 'Index 1982-1984=100'
+      frequency    TEXT,                 -- daily | weekly | monthly | quarterly
+      observation_date TEXT NOT NULL,    -- ISO date string from upstream
+      value        REAL,
+      previous_value REAL,
+      previous_date TEXT,
+      delta_pct    REAL,                 -- % change from previous, computed at ingest
+      raw_meta     TEXT,                 -- JSON: source URL, last update etc.
+      updated_at   INTEGER NOT NULL,
+      PRIMARY KEY (provider, series_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_macro_updated ON macro_indicators(updated_at DESC);
+  `);
+
   // ── Phase 4 leftover: Analyst briefs (drafts-only, manual review queue) ──
   // Per plan §5J: status always starts 'draft', editor manually approves.
   // No auto-promotion in v1. Every claim in evidence_json must cite a

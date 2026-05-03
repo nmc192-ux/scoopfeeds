@@ -50,6 +50,7 @@ import BriefPage            from "./pages/BriefPage";
 import BriefsReviewPage     from "./pages/BriefsReviewPage";
 import WorldMapPage         from "./pages/WorldMapPage";
 import FinancePage          from "./pages/FinancePage";
+import MacroPage            from "./pages/MacroPage";
 import MobileBottomBar      from "./components/layout/MobileBottomBar";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
@@ -59,7 +60,7 @@ const HIDE_TOPICNAV_ON = [
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
-  "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/world-map", "/finance",
+  "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/world-map", "/finance", "/macro",
 ];
 
 export default function App() {
@@ -164,6 +165,7 @@ export default function App() {
           <Route path="/briefs/:slug"         element={<BriefPage />} />
           <Route path="/world-map"            element={<WorldMapPage />} />
           <Route path="/finance"              element={<FinancePage />} />
+          <Route path="/macro"                element={<MacroPage />} />
           <Route path="*"                    element={<NotFound />} />
         </Routes>
       </main>

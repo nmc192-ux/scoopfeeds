@@ -37,6 +37,7 @@ import { syncGdeltCycle } from "../realityIndex/ingest/newsAggregators/gdeltFetc
 import { runAnalystBriefCycle } from "../realityIndex/generation/analystBriefGenerator.js";
 import { syncUsgsCycle } from "../realityIndex/ingest/geo/usgsEarthquakeFetcher.js";
 import { syncNoaaCycle } from "../realityIndex/ingest/geo/noaaAlertsFetcher.js";
+import { syncFredCycle } from "../realityIndex/ingest/economic/fredFetcher.js";
 
 let isRunning    = false;
 let isVideoRun   = false;   // YouTube ingestion
@@ -161,6 +162,9 @@ export function startScheduler() {
     cron.schedule("*/10 * * * *",       () => runUsgsCycle());               // every 10 min
     // Phase 5 — NOAA active weather alerts (Severe + Extreme) → events
     cron.schedule("4,14,24,34,44,54 * * * *", () => runNoaaCycle());          // every 10 min, +4 offset
+    // Phase 5 — FRED macro series (rates, CPI, unemployment, oil, VIX, etc.)
+    cron.schedule("17 */6 * * *",       () => runFredCycle());                // every 6h
+
     // Phase 4 leftover — Analyst briefs (drafts only). Every 4h on the 23rd
     // minute. Generator emits status='draft'; editor approves manually in
     // /scoop-ops/briefs (plan §5J — no auto-promotion in v1).
@@ -346,6 +350,23 @@ async function runNoaaCycle() {
     logger.error("❌ NOAA cycle failed", { error: err.message });
     return null;
   } finally { isNoaaRun = false; }
+}
+
+let isFredRun = false;
+let lastFredRun = null;
+let lastFredResult = null;
+async function runFredCycle() {
+  if (isFredRun) { logger.warn("⏸️ FRED cycle already running"); return null; }
+  isFredRun = true;
+  lastFredRun = new Date().toISOString();
+  try {
+    const out = await syncFredCycle();
+    lastFredResult = out;
+    return out;
+  } catch (err) {
+    logger.error("❌ FRED cycle failed", { error: err.message });
+    return null;
+  } finally { isFredRun = false; }
 }
 async function runAnalystBriefCycleWrapped() {
   if (isBriefRun) { logger.warn("⏸️ Brief cycle already running"); return null; }
@@ -638,7 +659,7 @@ export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
     isPublishRun, isPolymarketRun, isMatcherRun,
-    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun,
+    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isFredRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
     lastPublishResult,
@@ -656,6 +677,8 @@ export function getSchedulerStatus() {
     lastUsgsResult,
     lastNoaaRun,
     lastNoaaResult,
+    lastFredRun,
+    lastFredResult,
     nextRun,
     sourceCount: RSS_SOURCES.length, videoChannels: YOUTUBE_SOURCES.length,
     videoGenConfigured: isVideoConfigured(),

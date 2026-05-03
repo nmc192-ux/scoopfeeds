@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ChevronDown, Activity, Briefcase, Globe2, FileText, AlertTriangle,
-  ArrowUpDown, Star, Tv, CloudSun, Newspaper,
+  ArrowUpDown, Star, Tv, CloudSun, Newspaper, Database,
 } from "lucide-react";
 
 const SECTIONS = [
@@ -32,6 +32,7 @@ const SECTIONS = [
     title: "Markets & Live Data",
     items: [
       { to: "/finance",     label: "Finance",       icon: Briefcase },
+      { to: "/macro",       label: "Macro",         icon: Database },
       { to: "/markets",     label: "Markets",       icon: Briefcase },
       { to: "/world-map",   label: "World Map",     icon: Globe2 },
       { to: "/weather",     label: "Weather",       icon: CloudSun },
