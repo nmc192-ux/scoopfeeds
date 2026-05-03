@@ -1,0 +1,307 @@
+/**
+ * /api/events — Reality Index Phase 2 read APIs.
+ *
+ * Routes:
+ *   GET  /api/events                     list active events (filterable)
+ *   GET  /api/events/:slug               full event dossier
+ *   GET  /api/events/:slug/timeline      chronological entries
+ *   GET  /api/events/:slug/markets       bound markets w/ live prices
+ *   GET  /api/events/:slug/articles      all articles, paginated
+ *   GET  /api/events/:slug/actors        key actors
+ *   GET  /api/events/:slug/perspectives  article sources for comparison
+ *
+ * All reads come from SQLite — no upstream API calls in the request path.
+ */
+
+import express from "express";
+import { getDb } from "../models/database.js";
+import { logger } from "../services/logger.js";
+
+const router = express.Router();
+
+// ─── Serializers ───────────────────────────────────────────────────────────
+
+function publicEvent(ev) {
+  if (!ev) return null;
+  return {
+    id:               ev.id,
+    slug:             ev.slug,
+    title:            ev.title,
+    summary:          ev.summary,
+    category:         ev.category,
+    status:           ev.status,
+    severity:         ev.severity,
+    hero_image_url:   ev.hero_image_url,
+    article_count:    ev.article_count ?? 0,
+    market_count:     ev.market_count ?? 0,
+    top_probability:  ev.top_probability ?? null,
+    started_at:       ev.started_at,
+    last_activity_at: ev.last_activity_at,
+    created_at:       ev.created_at,
+  };
+}
+
+function publicTimelineEntry(e) {
+  return {
+    id:          e.id,
+    ts:          e.ts,
+    kind:        e.kind,
+    ref_id:      e.ref_id,
+    headline:    e.headline,
+    body:        e.body,
+    source_name: e.source_name,
+    importance:  e.importance,
+  };
+}
+
+function publicMarket(m) {
+  return {
+    id:          m.id,
+    question:    m.question,
+    source:      m.source,
+    yes_price:   m.yes_price,
+    no_price:    m.no_price,
+    volume_24h:  m.volume_24h,
+    liquidity:   m.liquidity,
+    url:         m.url,
+    icon_url:    m.icon_url,
+    weight:      m.weight,
+    rank:        m.rank,
+    resolved:    m.resolved,
+    outcome:     m.outcome,
+  };
+}
+
+function publicActor(a) {
+  return {
+    actor_name: a.actor_name,
+    actor_type: a.actor_type,
+    role:       a.role,
+    mentions:   a.mentions,
+  };
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+function getEventBySlug(db, slug) {
+  return db.prepare(`
+    SELECT e.*,
+      (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)     AS article_count,
+      (SELECT COUNT(*) FROM event_market_links eml WHERE eml.event_id = e.id) AS market_count,
+      (SELECT pm.yes_price
+       FROM event_market_links eml
+       JOIN prediction_markets pm ON pm.id = eml.market_id
+       WHERE eml.event_id = e.id
+       ORDER BY eml.rank LIMIT 1)                                            AS top_probability
+    FROM events e
+    WHERE e.slug = ?
+  `).get(slug);
+}
+
+// ─── Routes ────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/events
+ * Query params: category, status (default 'active'), limit (default 30), offset
+ */
+router.get("/", (req, res) => {
+  try {
+    const db = getDb();
+    const status   = req.query.status   ?? "active";
+    const category = req.query.category ?? null;
+    const limit    = Math.min(parseInt(req.query.limit  ?? "30", 10), 100);
+    const offset   = parseInt(req.query.offset ?? "0", 10);
+
+    let sql = `
+      SELECT e.*,
+        (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)       AS article_count,
+        (SELECT COUNT(*) FROM event_market_links eml WHERE eml.event_id = e.id) AS market_count,
+        (SELECT pm.yes_price
+         FROM event_market_links eml
+         JOIN prediction_markets pm ON pm.id = eml.market_id
+         WHERE eml.event_id = e.id
+         ORDER BY eml.rank LIMIT 1)                                             AS top_probability
+      FROM events e
+      WHERE e.status = ?
+    `;
+    const params = [status];
+
+    if (category) {
+      sql += " AND e.category = ?";
+      params.push(category);
+    }
+
+    sql += " ORDER BY e.last_activity_at DESC LIMIT ? OFFSET ?";
+    params.push(limit, offset);
+
+    const rows = db.prepare(sql).all(...params);
+    res.json({ events: rows.map(publicEvent), limit, offset });
+  } catch (err) {
+    logger.error(`GET /api/events error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/events/:slug — full event dossier
+ */
+router.get("/:slug", (req, res) => {
+  try {
+    const db  = getDb();
+    const ev  = getEventBySlug(db, req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+    res.json(publicEvent(ev));
+  } catch (err) {
+    logger.error(`GET /api/events/:slug error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/events/:slug/timeline
+ * Query params: kind (filter by 'article'|'market_move'), limit, offset
+ */
+router.get("/:slug/timeline", (req, res) => {
+  try {
+    const db  = getDb();
+    const ev  = db.prepare("SELECT id FROM events WHERE slug = ?").get(req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+
+    const kind   = req.query.kind ?? null;
+    const limit  = Math.min(parseInt(req.query.limit  ?? "50", 10), 200);
+    const offset = parseInt(req.query.offset ?? "0", 10);
+
+    let sql = "SELECT * FROM event_timeline WHERE event_id = ?";
+    const params = [ev.id];
+    if (kind) { sql += " AND kind = ?"; params.push(kind); }
+    sql += " ORDER BY ts DESC LIMIT ? OFFSET ?";
+    params.push(limit, offset);
+
+    const rows = db.prepare(sql).all(...params);
+    res.json({ timeline: rows.map(publicTimelineEntry), limit, offset });
+  } catch (err) {
+    logger.error(`GET /api/events/:slug/timeline error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/events/:slug/markets
+ */
+router.get("/:slug/markets", (req, res) => {
+  try {
+    const db  = getDb();
+    const ev  = db.prepare("SELECT id FROM events WHERE slug = ?").get(req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+
+    const markets = db.prepare(`
+      SELECT pm.*, eml.weight, eml.rank
+      FROM event_market_links eml
+      JOIN prediction_markets pm ON pm.id = eml.market_id
+      WHERE eml.event_id = ?
+      ORDER BY eml.rank
+    `).all(ev.id);
+
+    res.json({ markets: markets.map(publicMarket) });
+  } catch (err) {
+    logger.error(`GET /api/events/:slug/markets error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/events/:slug/articles
+ * Query params: limit, offset
+ */
+router.get("/:slug/articles", (req, res) => {
+  try {
+    const db  = getDb();
+    const ev  = db.prepare("SELECT id FROM events WHERE slug = ?").get(req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+
+    const limit  = Math.min(parseInt(req.query.limit  ?? "30", 10), 100);
+    const offset = parseInt(req.query.offset ?? "0", 10);
+
+    const articles = db.prepare(`
+      SELECT a.id, a.title, a.url, a.image_url, a.source_name, a.published_at,
+             a.summary, a.credibility_score, a.category, ea.relevance
+      FROM event_articles ea
+      JOIN articles a ON a.id = ea.article_id
+      WHERE ea.event_id = ?
+      ORDER BY a.published_at DESC
+      LIMIT ? OFFSET ?
+    `).all(ev.id, limit, offset);
+
+    const total = db.prepare(
+      "SELECT COUNT(*) AS c FROM event_articles WHERE event_id = ?"
+    ).get(ev.id)?.c ?? 0;
+
+    res.json({ articles, total, limit, offset });
+  } catch (err) {
+    logger.error(`GET /api/events/:slug/articles error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/events/:slug/actors
+ */
+router.get("/:slug/actors", (req, res) => {
+  try {
+    const db  = getDb();
+    const ev  = db.prepare("SELECT id FROM events WHERE slug = ?").get(req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+
+    const actors = db.prepare(`
+      SELECT * FROM event_actors WHERE event_id = ?
+      ORDER BY mentions DESC LIMIT 20
+    `).all(ev.id);
+
+    res.json({ actors: actors.map(publicActor) });
+  } catch (err) {
+    logger.error(`GET /api/events/:slug/actors error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/events/:slug/perspectives
+ * Returns articles grouped by source for multi-outlet comparison.
+ */
+router.get("/:slug/perspectives", (req, res) => {
+  try {
+    const db  = getDb();
+    const ev  = db.prepare("SELECT id FROM events WHERE slug = ?").get(req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+
+    const articles = db.prepare(`
+      SELECT a.id, a.title, a.url, a.source_name, a.published_at,
+             a.summary, a.credibility_score
+      FROM event_articles ea
+      JOIN articles a ON a.id = ea.article_id
+      WHERE ea.event_id = ?
+      ORDER BY a.published_at DESC
+      LIMIT 60
+    `).all(ev.id);
+
+    // Group by source_name, take top 3 articles each
+    const bySource = {};
+    for (const a of articles) {
+      const key = a.source_name ?? "Unknown";
+      if (!bySource[key]) bySource[key] = [];
+      if (bySource[key].length < 3) bySource[key].push(a);
+    }
+
+    const perspectives = Object.entries(bySource)
+      .map(([source, arts]) => ({ source, articles: arts }))
+      .sort((a, b) => b.articles.length - a.articles.length)
+      .slice(0, 12);
+
+    res.json({ perspectives });
+  } catch (err) {
+    logger.error(`GET /api/events/:slug/perspectives error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+export default router;

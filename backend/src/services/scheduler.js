@@ -20,6 +20,13 @@ import { isInstagramConfigured } from "./instagramClient.js";
 import { isFacebookConfigured } from "./facebookClient.js";
 import { isTikTokConfigured } from "./tiktokClient.js";
 import { getDb, listLiveEvents, getLiveEvent } from "../models/database.js";
+import { syncPolymarketMarkets } from "../realityIndex/ingest/predictionMarkets/polymarketFetcher.js";
+import { snapshotActiveMarkets } from "../realityIndex/ingest/predictionMarkets/polymarketSnapshotter.js";
+import { runMarketMatcherCycle } from "../realityIndex/intelligence/marketMatcher.js";
+import { runSnapshotDownsampler } from "../realityIndex/jobs/snapshotDownsampler.js";
+import { runEventTracker } from "../realityIndex/intelligence/eventTracker.js";
+import { runEventTimelineBuilder } from "../realityIndex/intelligence/eventTimelineBuilder.js";
+import { runEventActorExtractor } from "../realityIndex/intelligence/eventActorExtractor.js";
 
 let isRunning    = false;
 let isVideoRun   = false;   // YouTube ingestion
@@ -29,6 +36,10 @@ let isLiveVidRun = false;   // 6h live-event video
 let isEnrichRun  = false;
 let isEventsRun   = false;
 let isAnalysisRun = false;
+let isPolymarketRun   = false;  // Reality Index Phase 1
+let isMatcherRun      = false;  // Reality Index Phase 1
+let isEventTrackerRun = false;  // Reality Index Phase 2
+let isActorRun        = false;  // Reality Index Phase 2
 let lastRun       = null;
 let lastVideoRun = null;
 let lastGenRun   = null;
@@ -37,6 +48,8 @@ let lastLiveVidRun = null;
 let lastEnrichRun = null;
 let lastEventsRun   = null;
 let lastAnalysisRun = null;
+let lastPolymarketRun = null;
+let lastMatcherRun    = null;
 let nextRun         = null;
 
 export function startScheduler() {
@@ -113,8 +126,96 @@ export function startScheduler() {
     logger.warn(`videoPublish cron failed: ${err.message}`)
   ));
 
+  // ─── Reality Index — Phase 1 crons ──────────────────────────────────────
+  // Polymarket fetch-and-snapshot every 15 min. Disable with
+  // ENABLE_REALITY_INDEX=false (e.g. on a cold deploy you don't want chatty).
+  if (String(process.env.ENABLE_REALITY_INDEX ?? "true").toLowerCase() !== "false") {
+    cron.schedule("*/15 * * * *", () => runPolymarketCycle());
+    cron.schedule("7,37 * * * *", () => runMarketMatcherCronCycle());       // every 30 min, offset
+    cron.schedule("0 4 * * *",    () => runSnapshotDownsamplerCycle());     // daily 4 AM
+    // Phase 2 — Event Tracker
+    cron.schedule("13,43 * * * *", () => runEventTrackerCronCycle());       // every 30 min, offset
+    cron.schedule("19 * * * *",    () => runEventTimelineBuilderCycle());   // every 1 hr
+    cron.schedule("49 * * * *",    () => runActorExtractorCycle());         // every 1 hr, offset
+    // First run shortly after boot — Polymarket cold start.
+    setTimeout(() => runPolymarketCycle(), 30_000);
+    setTimeout(() => runMarketMatcherCronCycle(), 5 * 60 * 1000);
+    setTimeout(() => runEventTrackerCronCycle(), 8 * 60 * 1000);
+    logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventTracker 30m, timeline+actors hourly, downsample daily)");
+  } else {
+    logger.info("🧠 Reality Index crons disabled via ENABLE_REALITY_INDEX=false");
+  }
+
   updateNextRun();
 }
+
+// ─── Reality Index cycles ──────────────────────────────────────────────────
+
+async function runPolymarketCycle() {
+  if (isPolymarketRun) { logger.warn("⏸️ Polymarket cycle already running"); return null; }
+  isPolymarketRun = true;
+  lastPolymarketRun = new Date().toISOString();
+  try {
+    const out = await syncPolymarketMarkets({ activeOnly: true });
+    return out;
+  } catch (err) {
+    logger.error("❌ Polymarket cycle failed", { error: err.message });
+    return null;
+  } finally {
+    isPolymarketRun = false;
+  }
+}
+
+async function runMarketMatcherCronCycle() {
+  if (isMatcherRun) { logger.warn("⏸️ Market matcher already running"); return null; }
+  isMatcherRun = true;
+  lastMatcherRun = new Date().toISOString();
+  try {
+    return await runMarketMatcherCycle();
+  } catch (err) {
+    logger.error("❌ Market matcher failed", { error: err.message });
+    return null;
+  } finally {
+    isMatcherRun = false;
+  }
+}
+
+async function runSnapshotDownsamplerCycle() {
+  try { return await runSnapshotDownsampler(); }
+  catch (err) { logger.error("❌ Snapshot downsampler failed", { error: err.message }); return null; }
+}
+
+async function runEventTrackerCronCycle() {
+  if (isEventTrackerRun) { logger.warn("⏸️ Event tracker already running"); return null; }
+  isEventTrackerRun = true;
+  try {
+    const out = await runEventTracker();
+    await runEventTimelineBuilder();
+    return out;
+  } catch (err) {
+    logger.error("❌ Event tracker failed", { error: err.message });
+    return null;
+  } finally {
+    isEventTrackerRun = false;
+  }
+}
+
+async function runEventTimelineBuilderCycle() {
+  try { return await runEventTimelineBuilder(); }
+  catch (err) { logger.error("❌ Event timeline builder failed", { error: err.message }); return null; }
+}
+
+async function runActorExtractorCycle() {
+  if (isActorRun) { logger.warn("⏸️ Actor extractor already running"); return null; }
+  isActorRun = true;
+  try { return await runEventActorExtractor(); }
+  catch (err) { logger.error("❌ Actor extractor failed", { error: err.message }); return null; }
+  finally { isActorRun = false; }
+}
+
+// Suppress unused-warning while exposing for ad-hoc /scoop-ops triggers later.
+export { runPolymarketCycle, runMarketMatcherCronCycle, runSnapshotDownsamplerCycle, snapshotActiveMarkets,
+         runEventTrackerCronCycle, runActorExtractorCycle };
 
 // Runs the auto-approve + publish pass. Safe to call as a cron tick — the
 // underlying service already guards against missing platform config and
@@ -381,10 +482,12 @@ function updateNextRun() {
 export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
-    isPublishRun,
+    isPublishRun, isPolymarketRun, isMatcherRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
     lastPublishResult,
+    lastPolymarketRun,
+    lastMatcherRun,
     nextRun,
     sourceCount: RSS_SOURCES.length, videoChannels: YOUTUBE_SOURCES.length,
     videoGenConfigured: isVideoConfigured(),
@@ -396,6 +499,7 @@ export function getSchedulerStatus() {
       tiktok:    isTikTokConfigured(),
       any: isYouTubeConfigured() || isInstagramConfigured() || isFacebookConfigured() || isTikTokConfigured(),
     },
+    realityIndexEnabled: String(process.env.ENABLE_REALITY_INDEX ?? "true").toLowerCase() !== "false",
   };
 }
 

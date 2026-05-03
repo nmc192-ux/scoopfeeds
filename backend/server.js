@@ -30,6 +30,9 @@ import videoGenRouter    from "./src/routes/videos-gen.js";
 import newsletterOpsRouter from "./src/routes/newsletter-ops.js";
 import meterRouter       from "./src/routes/meter.js";
 import analysisRouter    from "./src/routes/analysis.js";
+import predictionsRouter from "./src/routes/predictions.js";
+import eventsRouter      from "./src/routes/events.js";
+import { initRealityIndex } from "./src/realityIndex/schema.js";
 import { detectCountry } from "./src/services/geolocation.js";
 import { skimlinksPublisherId, amazonInfoForCountry } from "./src/config/affiliates.js";
 import { isStripeConfigured } from "./src/routes/tips.js";
@@ -148,6 +151,8 @@ app.use("/api/auth",        authRouter);       // magic-link auth: /request, /ve
 app.use("/api/tips",        tipsRouter);       // Stripe tip jar: /create-session, /webhook, /stats
 app.use("/api/meter",       meterRouter);      // metered paywall: /open (gate check + record), /status
 app.use("/api/analysis",   cacheMiddleware("short"), analysisRouter); // AI-powered news analysis: stories, trends, deep-dive, explained
+app.use("/api/predictions", cacheMiddleware("short"), predictionsRouter); // Reality Index: Polymarket markets bound to news clusters
+app.use("/api/ri/events",  cacheMiddleware("short"), eventsRouter);      // Reality Index Phase 2: event tracker (dossier, timeline, actors)
 app.use("/scoop-ops",       socialRouter);     // /scoop-ops/social-queue — preview auto-generated social captions (renamed from /admin to bypass host WAF)
 app.use("/scoop-ops/videos-gen", videoGenRouter); // video generation queue: /queue, /run, /approve/:id, /reject/:id
 app.use("/scoop-ops/newsletter", newsletterOpsRouter); // newsletter ops: /status, /welcome/run, /welcome/test
@@ -279,6 +284,12 @@ app.listen(PORT, () => {
   logger.info(`🚀 NewsFlow API → http://localhost:${PORT}`);
   logger.info(`📰 RSS sources: ${RSS_SOURCES.length}  |  📺 YouTube channels: ${YOUTUBE_SOURCES.length}`);
   logger.info(`⏰ Refresh: news every 30 min, videos every 60 min`);
+
+  // Reality Index Phase 1 — schema + sqlite-vec extension. Idempotent.
+  // Safe to call before scheduler starts; only initializes new tables.
+  try { initRealityIndex(getDb()); }
+  catch (err) { logger.warn(`Reality Index init failed: ${err.message}`); }
+
   if (String(process.env.ENABLE_SCHEDULER ?? "true").toLowerCase() !== "false") {
     startScheduler();
   } else {
