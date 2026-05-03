@@ -361,9 +361,7 @@ export default function ReaderModal() {
               {/* Reality Index — markets bound to this article's cluster.
                   Self-hides when no markets are matched, so it adds noise only
                   when it has something useful to say. */}
-              {(!meterResult || meterResult.allowed) && article?.id && (
-                <RealityIndexPanel articleId={article.id} />
-              )}
+              {article?.id && <RealityIndexPanel articleId={article.id} />}
 
               {/* AI Deep Dive — lazy analysis panel, only fires when expanded */}
               {html && article && (
