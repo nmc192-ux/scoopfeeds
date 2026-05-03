@@ -27,6 +27,14 @@ const router = express.Router();
 
 function publicEvent(ev) {
   if (!ev) return null;
+  // Inline freshest unack anomaly for the EventCard chip (Phase 4f).
+  const latestAnomaly = ev.anom_id ? {
+    id:          ev.anom_id,
+    type:        ev.anom_type,
+    severity:    ev.anom_severity,
+    detected_at: ev.anom_detected_at,
+    payload:     safeJsonParse(ev.anom_payload),
+  } : null;
   return {
     id:               ev.id,
     slug:             ev.slug,
@@ -39,6 +47,9 @@ function publicEvent(ev) {
     article_count:    ev.article_count ?? 0,
     market_count:     ev.market_count ?? 0,
     top_probability:  ev.top_probability ?? null,
+    truth_gap:        ev.truth_gap ?? null,
+    reality_score:    ev.reality_score ?? null,
+    latest_anomaly:   latestAnomaly,
     started_at:       ev.started_at,
     last_activity_at: ev.last_activity_at,
     created_at:       ev.created_at,
@@ -87,7 +98,13 @@ function publicActor(a) {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
+// Freshest non-acknowledged anomaly per event (last 6h) — used to populate
+// the AnomalyChip on cards/headers. Older anomalies live in the dedicated
+// /api/ri/anomalies feed.
+const ANOM_FRESH_MS = 6 * 60 * 60 * 1000;
+
 function getEventBySlug(db, slug) {
+  const cutoff = Date.now() - ANOM_FRESH_MS;
   return db.prepare(`
     SELECT e.*,
       (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)     AS article_count,
@@ -96,10 +113,34 @@ function getEventBySlug(db, slug) {
        FROM event_market_links eml
        JOIN prediction_markets pm ON pm.id = eml.market_id
        WHERE eml.event_id = e.id
-       ORDER BY eml.rank LIMIT 1)                                            AS top_probability
+       ORDER BY eml.rank LIMIT 1)                                            AS top_probability,
+      (SELECT r.truth_gap     FROM reality_index_snapshots r
+       WHERE r.scope='event' AND r.scope_id = e.id ORDER BY r.ts DESC LIMIT 1) AS truth_gap,
+      (SELECT r.reality_score FROM reality_index_snapshots r
+       WHERE r.scope='event' AND r.scope_id = e.id ORDER BY r.ts DESC LIMIT 1) AS reality_score,
+      (SELECT a.id           FROM anomaly_alerts a
+       WHERE a.event_id = e.id AND a.acknowledged = 0 AND a.detected_at >= ?
+       ORDER BY a.detected_at DESC LIMIT 1) AS anom_id,
+      (SELECT a.type         FROM anomaly_alerts a
+       WHERE a.event_id = e.id AND a.acknowledged = 0 AND a.detected_at >= ?
+       ORDER BY a.detected_at DESC LIMIT 1) AS anom_type,
+      (SELECT a.severity     FROM anomaly_alerts a
+       WHERE a.event_id = e.id AND a.acknowledged = 0 AND a.detected_at >= ?
+       ORDER BY a.detected_at DESC LIMIT 1) AS anom_severity,
+      (SELECT a.detected_at  FROM anomaly_alerts a
+       WHERE a.event_id = e.id AND a.acknowledged = 0 AND a.detected_at >= ?
+       ORDER BY a.detected_at DESC LIMIT 1) AS anom_detected_at,
+      (SELECT a.payload      FROM anomaly_alerts a
+       WHERE a.event_id = e.id AND a.acknowledged = 0 AND a.detected_at >= ?
+       ORDER BY a.detected_at DESC LIMIT 1) AS anom_payload
     FROM events e
     WHERE e.slug = ?
-  `).get(slug);
+  `).get(cutoff, cutoff, cutoff, cutoff, cutoff, slug);
+}
+
+function safeJsonParse(s) {
+  if (!s) return null;
+  try { return JSON.parse(s); } catch { return null; }
 }
 
 // ─── Routes ────────────────────────────────────────────────────────────────
@@ -116,6 +157,7 @@ router.get("/", (req, res) => {
     const limit    = Math.min(parseInt(req.query.limit  ?? "30", 10), 100);
     const offset   = parseInt(req.query.offset ?? "0", 10);
 
+    const cutoff = Date.now() - ANOM_FRESH_MS;
     let sql = `
       SELECT e.*,
         (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)       AS article_count,
@@ -124,11 +166,30 @@ router.get("/", (req, res) => {
          FROM event_market_links eml
          JOIN prediction_markets pm ON pm.id = eml.market_id
          WHERE eml.event_id = e.id
-         ORDER BY eml.rank LIMIT 1)                                             AS top_probability
+         ORDER BY eml.rank LIMIT 1)                                             AS top_probability,
+        (SELECT r.truth_gap     FROM reality_index_snapshots r
+         WHERE r.scope='event' AND r.scope_id = e.id ORDER BY r.ts DESC LIMIT 1) AS truth_gap,
+        (SELECT r.reality_score FROM reality_index_snapshots r
+         WHERE r.scope='event' AND r.scope_id = e.id ORDER BY r.ts DESC LIMIT 1) AS reality_score,
+        (SELECT a.id           FROM anomaly_alerts a
+         WHERE a.event_id = e.id AND a.acknowledged = 0 AND a.detected_at >= ?
+         ORDER BY a.detected_at DESC LIMIT 1) AS anom_id,
+        (SELECT a.type         FROM anomaly_alerts a
+         WHERE a.event_id = e.id AND a.acknowledged = 0 AND a.detected_at >= ?
+         ORDER BY a.detected_at DESC LIMIT 1) AS anom_type,
+        (SELECT a.severity     FROM anomaly_alerts a
+         WHERE a.event_id = e.id AND a.acknowledged = 0 AND a.detected_at >= ?
+         ORDER BY a.detected_at DESC LIMIT 1) AS anom_severity,
+        (SELECT a.detected_at  FROM anomaly_alerts a
+         WHERE a.event_id = e.id AND a.acknowledged = 0 AND a.detected_at >= ?
+         ORDER BY a.detected_at DESC LIMIT 1) AS anom_detected_at,
+        (SELECT a.payload      FROM anomaly_alerts a
+         WHERE a.event_id = e.id AND a.acknowledged = 0 AND a.detected_at >= ?
+         ORDER BY a.detected_at DESC LIMIT 1) AS anom_payload
       FROM events e
       WHERE e.status = ?
     `;
-    const params = [status];
+    const params = [cutoff, cutoff, cutoff, cutoff, cutoff, status];
 
     if (category) {
       sql += " AND e.category = ?";
@@ -342,11 +403,6 @@ router.get("/:slug/reality-index", (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
-function safeJsonParse(s) {
-  if (!s) return null;
-  try { return JSON.parse(s); } catch { return null; }
-}
 
 /**
  * GET /api/events/:slug/perspectives

@@ -6,6 +6,8 @@
 import { Link } from "react-router-dom";
 import { Activity, FileText, Clock } from "lucide-react";
 import ProbabilityBar from "../predictions/ProbabilityBar";
+import TruthGapBadge  from "../predictions/TruthGapBadge";
+import AnomalyChip    from "../predictions/AnomalyChip";
 
 const CATEGORY_COLORS = {
   politics:    "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
@@ -37,6 +39,7 @@ export default function EventCard({ event }) {
   const {
     slug, title, summary, category, severity = 0,
     article_count = 0, market_count = 0, top_probability,
+    truth_gap, latest_anomaly,
     hero_image_url, last_activity_at,
   } = event;
 
@@ -61,16 +64,24 @@ export default function EventCard({ event }) {
       )}
 
       <div className="flex flex-col gap-3 p-4 flex-1">
-        {/* Header row: category badge + severity dot */}
-        <div className="flex items-center justify-between gap-2">
+        {/* Header row: category badge + truth-gap + severity dot */}
+        <div className="flex items-center gap-2 flex-wrap">
           <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${catColor}`}>
             {category ?? "General"}
           </span>
+          {Number.isFinite(truth_gap) && Math.abs(truth_gap) > 0.15 && (
+            <TruthGapBadge gap={truth_gap} size="sm" />
+          )}
           <span
-            className={`w-2 h-2 rounded-full flex-shrink-0 ${severityColor(severity)}`}
+            className={`w-2 h-2 rounded-full flex-shrink-0 ml-auto ${severityColor(severity)}`}
             title={`Severity: ${(severity * 100).toFixed(0)}%`}
           />
         </div>
+
+        {/* Inline anomaly chip — surfaces fresh activity at a glance */}
+        {latest_anomaly && (
+          <AnomalyChip anomaly={latest_anomaly} size="sm" />
+        )}
 
         {/* Title */}
         <h3 className="font-semibold text-[var(--color-text)] text-sm leading-snug line-clamp-3 group-hover:text-[var(--color-accent)] transition-colors">
