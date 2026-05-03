@@ -322,5 +322,34 @@ export function initRealityIndex(db) {
     CREATE INDEX IF NOT EXISTS idx_watchlists_item ON user_watchlists(item_type, item_id);
   `);
 
+  // ── Phase 4c: Watchlist push fan-out ────────────────────────────────────
+  // Migrate push_subscriptions to carry an optional user_id so we can fan
+  // out anomaly alerts to the right subscribers. Anonymous subscriptions
+  // (user_id NULL) continue to receive only the global broadcast feed.
+  try {
+    const cols = db.prepare("PRAGMA table_info(push_subscriptions)").all();
+    if (!cols.some(c => c.name === "user_id")) {
+      db.exec("ALTER TABLE push_subscriptions ADD COLUMN user_id TEXT");
+      logger.info("🔔 Migrated push_subscriptions: +user_id");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id, disabled_at)");
+  } catch (err) {
+    logger.warn(`push_subscriptions migration skipped: ${err.message}`);
+  }
+
+  // Dedupe table for the per-anomaly per-user fan-out. PK guarantees we
+  // never push the same anomaly to the same user twice.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pushed_anomalies (
+      anomaly_id  INTEGER NOT NULL,
+      user_id     TEXT NOT NULL,
+      pushed_at   INTEGER NOT NULL,
+      sent        INTEGER NOT NULL DEFAULT 0,    -- # of subscriptions reached
+      failed      INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (anomaly_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pushed_anom_user ON pushed_anomalies(user_id, pushed_at DESC);
+  `);
+
   logger.info("🧠 Reality Index schema ready");
 }

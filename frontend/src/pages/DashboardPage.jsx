@@ -11,9 +11,10 @@
 import { Link } from "react-router-dom";
 import { Star, Bell, LogIn, Activity, FileText } from "lucide-react";
 import { useWatchlists, useWatchlistActivity } from "../hooks/useWatchlists";
-import TruthGapBadge from "../components/predictions/TruthGapBadge";
-import AnomalyChip   from "../components/predictions/AnomalyChip";
-import { COPY }      from "../lib/copyGuide";
+import TruthGapBadge       from "../components/predictions/TruthGapBadge";
+import AnomalyChip         from "../components/predictions/AnomalyChip";
+import WatchlistPushPanel  from "../components/predictions/WatchlistPushPanel";
+import { COPY }            from "../lib/copyGuide";
 
 function fmtPct(v) { return Number.isFinite(v) ? `${Math.round(v * 100)}%` : "—"; }
 
@@ -184,8 +185,10 @@ export default function DashboardPage() {
           )}
         </section>
 
-        {/* Right: activity stream */}
-        <aside>
+        {/* Right: push opt-in + activity stream */}
+        <aside className="space-y-5">
+          <WatchlistPushPanel />
+
           <div className="flex items-center gap-2 mb-3">
             <Bell size={14} className="text-[var(--color-text-secondary)]" />
             <h2 className="font-semibold text-sm text-[var(--color-text)]">Recent activity</h2>

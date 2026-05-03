@@ -1018,12 +1018,14 @@ export function getLiveEvent(id) {
 
 // ─── Push Subscriptions ──────────────────────────────────────────────────
 
-export function upsertPushSubscription({ endpoint, p256dh, auth, topics, country, language, userAgent }) {
+export function upsertPushSubscription({ endpoint, p256dh, auth, topics, country, language, userAgent, userId = null }) {
   const now = Date.now();
   const topicsJson = JSON.stringify(Array.isArray(topics) ? topics : []);
+  // user_id is preserved on subsequent upserts unless a new userId is provided
+  // (don't unset a known association by accident).
   getDb().prepare(`
-    INSERT INTO push_subscriptions (endpoint, p256dh, auth, topics, country, language, user_agent, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO push_subscriptions (endpoint, p256dh, auth, topics, country, language, user_agent, created_at, user_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(endpoint) DO UPDATE SET
       p256dh = excluded.p256dh,
       auth = excluded.auth,
@@ -1032,8 +1034,21 @@ export function upsertPushSubscription({ endpoint, p256dh, auth, topics, country
       language = excluded.language,
       user_agent = excluded.user_agent,
       disabled_at = NULL,
-      failure_count = 0
-  `).run(endpoint, p256dh, auth, topicsJson, country || null, language || "en", (userAgent || "").slice(0, 200), now);
+      failure_count = 0,
+      user_id = COALESCE(excluded.user_id, push_subscriptions.user_id)
+  `).run(endpoint, p256dh, auth, topicsJson, country || null, language || "en", (userAgent || "").slice(0, 200), now, userId);
+}
+
+// Active push subscriptions for a set of user_ids — used by the watchlist
+// push dispatcher (Phase 4c). Empty input → empty output (no broadcast leak).
+export function listSubscriptionsForUsers(userIds) {
+  if (!Array.isArray(userIds) || userIds.length === 0) return [];
+  const placeholders = userIds.map(() => "?").join(",");
+  return getDb().prepare(`
+    SELECT id, endpoint, p256dh, auth, topics, country, language, user_id
+    FROM push_subscriptions
+    WHERE disabled_at IS NULL AND user_id IN (${placeholders})
+  `).all(...userIds);
 }
 
 export function deletePushSubscription(endpoint) {

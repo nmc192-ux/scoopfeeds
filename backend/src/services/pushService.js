@@ -128,3 +128,26 @@ export async function sendTestPush(endpoint, payload) {
   if (!sub) return { ok: false, reason: "subscription not found" };
   return sendToOne(sub, payload);
 }
+
+/**
+ * Send the same payload to a specific list of subscriptions (e.g. all push
+ * endpoints belonging to a single watchlisted user). Used by the watchlist
+ * push dispatcher; broadcastPush handles the global feed.
+ *
+ * Concurrency-bounded so a user with many devices doesn't ratelimit us.
+ */
+export async function sendToSubscriptions(subs, payload, { concurrency = 5 } = {}) {
+  ensurePushReady();
+  if (!Array.isArray(subs) || subs.length === 0) return { sent: 0, failed: 0, expired: 0, total: 0 };
+  let sent = 0, failed = 0, expired = 0;
+  for (let i = 0; i < subs.length; i += concurrency) {
+    const slice = subs.slice(i, i + concurrency);
+    const results = await Promise.all(slice.map((s) => sendToOne(s, payload)));
+    for (const r of results) {
+      if (r.ok) sent += 1;
+      else if (r.reason === "expired") expired += 1;
+      else failed += 1;
+    }
+  }
+  return { sent, failed, expired, total: subs.length };
+}

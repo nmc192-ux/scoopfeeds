@@ -31,6 +31,7 @@ import { runMediaSentimentForActiveEvents } from "../realityIndex/intelligence/m
 import { runSentimentCycle } from "../realityIndex/intelligence/sentimentScorer.js";
 import { runRealityIndexCycle } from "../realityIndex/intelligence/realityIndex.js";
 import { runAnomalyDetector } from "../realityIndex/intelligence/anomalyDetector.js";
+import { runWatchlistPushDispatcher } from "../realityIndex/jobs/watchlistPushDispatcher.js";
 
 let isRunning    = false;
 let isVideoRun   = false;   // YouTube ingestion
@@ -145,12 +146,15 @@ export function startScheduler() {
     cron.schedule("21,51 * * * *", () => runRealityIndexComposeCycle());    // every 30 min, offset
     cron.schedule("27 * * * *",    () => runSentimentScoreCycle());         // every 1 hr
     cron.schedule("3,18,33,48 * * * *", () => runAnomalyScanCycle());       // every 15 min
+    // Phase 4c — Watchlist push fan-out (runs 2 min after each anomaly scan
+    // so newly-detected alerts are dispatched promptly to watching users).
+    cron.schedule("5,20,35,50 * * * *", () => runWatchlistPushCycle());     // every 15 min, +2m offset
     // First run shortly after boot — Polymarket cold start.
     setTimeout(() => runPolymarketCycle(), 30_000);
     setTimeout(() => runMarketMatcherCronCycle(), 5 * 60 * 1000);
     setTimeout(() => runEventTrackerCronCycle(), 8 * 60 * 1000);
     setTimeout(() => runRealityIndexComposeCycle(), 9 * 60 * 1000);
-    logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventTracker 30m, timeline+actors hourly, downsample daily, sentiment hourly, RI compose 30m, anomaly 15m)");
+    logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventTracker 30m, timeline+actors hourly, downsample daily, sentiment hourly, RI compose 30m, anomaly 15m, watchlist-push 15m)");
   } else {
     logger.info("🧠 Reality Index crons disabled via ENABLE_REALITY_INDEX=false");
   }
@@ -262,10 +266,22 @@ async function runAnomalyScanCycle() {
   finally { isAnomalyRun = false; }
 }
 
+let isWatchlistPushRun = false;
+let lastWatchlistPushRun = null;
+async function runWatchlistPushCycle() {
+  if (isWatchlistPushRun) { logger.warn("⏸️ Watchlist push already running"); return null; }
+  isWatchlistPushRun = true;
+  lastWatchlistPushRun = new Date().toISOString();
+  try { return await runWatchlistPushDispatcher(); }
+  catch (err) { logger.error("❌ Watchlist push failed", { error: err.message }); return null; }
+  finally { isWatchlistPushRun = false; }
+}
+
 // Suppress unused-warning while exposing for ad-hoc /scoop-ops triggers later.
 export { runPolymarketCycle, runMarketMatcherCronCycle, runSnapshotDownsamplerCycle, snapshotActiveMarkets,
          runEventTrackerCronCycle, runActorExtractorCycle,
-         runSentimentScoreCycle, runRealityIndexComposeCycle, runAnomalyScanCycle };
+         runSentimentScoreCycle, runRealityIndexComposeCycle, runAnomalyScanCycle,
+         runWatchlistPushCycle };
 
 // Runs the auto-approve + publish pass. Safe to call as a cron tick — the
 // underlying service already guards against missing platform config and
@@ -533,7 +549,7 @@ export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
     isPublishRun, isPolymarketRun, isMatcherRun,
-    isSentimentRun, isRealityComposeRun, isAnomalyRun,
+    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
     lastPublishResult,
@@ -542,6 +558,7 @@ export function getSchedulerStatus() {
     lastSentimentRun,
     lastRealityComposeRun,
     lastAnomalyRun,
+    lastWatchlistPushRun,
     nextRun,
     sourceCount: RSS_SOURCES.length, videoChannels: YOUTUBE_SOURCES.length,
     videoGenConfigured: isVideoConfigured(),

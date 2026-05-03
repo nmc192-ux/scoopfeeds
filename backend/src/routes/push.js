@@ -8,6 +8,7 @@ import {
   upsertPushSubscription,
   deletePushSubscription,
   pushSubscriptionStats,
+  getUserBySession,
 } from "../models/database.js";
 import {
   getPublicKey,
@@ -37,6 +38,19 @@ router.post("/subscribe", (req, res) => {
   if (!endpoint || !keys?.p256dh || !keys?.auth) {
     return res.status(400).json({ ok: false, error: "invalid subscription payload" });
   }
+  // Phase 4c: when the caller has an authed session, link the subscription
+  // to the user so the watchlist dispatcher can fan out anomalies to them.
+  // Anonymous subscribers continue to receive the global broadcast feed only.
+  let userId = null;
+  try {
+    const cookieHeader = req.headers.cookie || "";
+    const m = cookieHeader.match(/(?:^|;\s*)scoop_session=([^;]+)/);
+    if (m) {
+      const u = getUserBySession(m[1]);
+      if (u?.id) userId = u.id;
+    }
+  } catch { /* anonymous fallthrough */ }
+
   try {
     upsertPushSubscription({
       endpoint,
@@ -46,8 +60,9 @@ router.post("/subscribe", (req, res) => {
       country: detectCountry(req),
       language: language || "en",
       userAgent: req.get("user-agent") || "",
+      userId,
     });
-    res.json({ ok: true });
+    res.json({ ok: true, linked: !!userId });
   } catch (err) {
     logger.error(`push subscribe failed: ${err.message}`);
     res.status(500).json({ ok: false, error: "subscribe failed" });
