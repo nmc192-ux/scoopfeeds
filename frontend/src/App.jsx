@@ -44,6 +44,7 @@ import EventPage            from "./pages/EventPage";
 import TruthGapPage         from "./pages/TruthGapPage";
 import DashboardPage        from "./pages/DashboardPage";
 import AnomaliesPage        from "./pages/AnomaliesPage";
+import RealityIndexOpsPage  from "./pages/RealityIndexOpsPage";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
 const HIDE_TOPICNAV_ON = [
@@ -52,7 +53,7 @@ const HIDE_TOPICNAV_ON = [
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
-  "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard", "/anomalies",
+  "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops",
 ];
 
 export default function App() {
@@ -151,6 +152,7 @@ export default function App() {
           <Route path="/truth-gap"          element={<TruthGapPage />} />
           <Route path="/dashboard"          element={<DashboardPage />} />
           <Route path="/anomalies"          element={<AnomaliesPage />} />
+          <Route path="/scoop-ops/reality-index" element={<RealityIndexOpsPage />} />
           <Route path="*"                    element={<NotFound />} />
         </Routes>
       </main>
