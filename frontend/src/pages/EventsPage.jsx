@@ -9,6 +9,7 @@ import { useState } from "react";
 import { Map, Activity } from "lucide-react";
 import { useEvents } from "../hooks/useEvents";
 import EventCard from "../components/events/EventCard";
+import LiveAnomaliesStrip from "../components/predictions/LiveAnomaliesStrip";
 import { COPY } from "../lib/copyGuide";
 
 const CATEGORIES = [
@@ -55,6 +56,9 @@ export default function EventsPage() {
           {COPY.brandTagline} Major stories tracked as live events with market-implied probabilities.
         </p>
       </header>
+
+      {/* Trending now — recent unack anomalies on tracked events */}
+      <LiveAnomaliesStrip />
 
       {/* Category filter */}
       <div className="flex flex-wrap gap-2 mb-7">
