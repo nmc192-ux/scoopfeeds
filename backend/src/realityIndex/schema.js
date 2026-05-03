@@ -241,5 +241,66 @@ export function initRealityIndex(db) {
     CREATE INDEX IF NOT EXISTS idx_eml_market ON event_market_links(market_id);
   `);
 
+  // ── Phase 3: Sentiment + Reality Index composite + anomalies ────────────
+  db.exec(`
+    -- Per-source sentiment time-series. scope is the bucket the metric is
+    -- attached to (event/cluster/article/topic); scope_id its identifier.
+    -- source = 'media' | 'bluesky' | 'reddit' | 'mastodon' | 'hn' | 'wikipedia' | 'x' | 'threads'
+    -- polarity in [-1, +1]; intensity in [0, 1]; volume = mention count.
+    CREATE TABLE IF NOT EXISTS sentiment_snapshots (
+      scope       TEXT NOT NULL,
+      scope_id    TEXT NOT NULL,
+      ts          INTEGER NOT NULL,
+      source      TEXT NOT NULL,
+      polarity    REAL,
+      intensity   REAL,
+      volume      INTEGER NOT NULL DEFAULT 0,
+      raw_meta    TEXT,                          -- JSON, optional
+      PRIMARY KEY (scope, scope_id, ts, source)
+    );
+    CREATE INDEX IF NOT EXISTS idx_sent_scope_ts ON sentiment_snapshots(scope, scope_id, ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_sent_source   ON sentiment_snapshots(source, ts DESC);
+
+    -- Composite Reality Index time-series. One row per scope per ts with
+    -- the four components separated so the UI can show a breakdown.
+    CREATE TABLE IF NOT EXISTS reality_index_snapshots (
+      scope               TEXT NOT NULL,         -- 'event' | 'cluster'
+      scope_id            TEXT NOT NULL,
+      ts                  INTEGER NOT NULL,
+      market_probability  REAL,                  -- 0..1 (weighted top-market avg)
+      media_sentiment     REAL,                  -- -1..+1
+      social_sentiment    REAL,                  -- -1..+1 (avg across enabled sources)
+      economic_signal     REAL,                  -- -1..+1 (placeholder for Phase 5)
+      truth_gap           REAL,                  -- signed: market_norm - media_norm
+      reality_score       REAL,                  -- 0..1 composite
+      confidence          REAL,                  -- 0..1
+      components          TEXT,                  -- JSON: per-component detail
+      PRIMARY KEY (scope, scope_id, ts)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ris_scope_ts  ON reality_index_snapshots(scope, scope_id, ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_ris_truth_gap ON reality_index_snapshots(scope, ts DESC, truth_gap);
+
+    -- Anomaly alerts surfaced to the UI / push channel.
+    -- type:
+    --   odds_shift       — market YES moved >= threshold pp in the window
+    --   viral_no_react   — social volume spiked but market did not move
+    --   sentiment_flip   — per-source polarity flipped sign with high intensity
+    --   truth_gap_spike  — |truth_gap| jumped >= threshold in the window
+    CREATE TABLE IF NOT EXISTS anomaly_alerts (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id      TEXT,
+      cluster_id    TEXT,
+      market_id     TEXT,
+      type          TEXT NOT NULL,
+      severity      REAL NOT NULL,               -- 0..1
+      payload       TEXT NOT NULL,               -- JSON: details for the UI
+      detected_at   INTEGER NOT NULL,
+      acknowledged  INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_anom_event   ON anomaly_alerts(event_id, detected_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_anom_unack   ON anomaly_alerts(acknowledged, detected_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_anom_type    ON anomaly_alerts(type, detected_at DESC);
+  `);
+
   logger.info("🧠 Reality Index schema ready");
 }

@@ -1,14 +1,16 @@
 /**
- * /api/events — Reality Index Phase 2 read APIs.
+ * /api/events — Reality Index Phase 2 + 3 read APIs.
  *
  * Routes:
- *   GET  /api/events                     list active events (filterable)
- *   GET  /api/events/:slug               full event dossier
- *   GET  /api/events/:slug/timeline      chronological entries
- *   GET  /api/events/:slug/markets       bound markets w/ live prices
- *   GET  /api/events/:slug/articles      all articles, paginated
- *   GET  /api/events/:slug/actors        key actors
- *   GET  /api/events/:slug/perspectives  article sources for comparison
+ *   GET  /api/events                          list active events (filterable)
+ *   GET  /api/events/:slug                    full event dossier
+ *   GET  /api/events/:slug/timeline           chronological entries
+ *   GET  /api/events/:slug/markets            bound markets w/ live prices
+ *   GET  /api/events/:slug/articles           all articles, paginated
+ *   GET  /api/events/:slug/actors             key actors
+ *   GET  /api/events/:slug/perspectives       article sources for comparison
+ *   GET  /api/events/:slug/sentiment          per-source sentiment time-series   (Phase 3)
+ *   GET  /api/events/:slug/reality-index      composite + breakdown              (Phase 3)
  *
  * All reads come from SQLite — no upstream API calls in the request path.
  */
@@ -16,6 +18,8 @@
 import express from "express";
 import { getDb } from "../models/database.js";
 import { logger } from "../services/logger.js";
+import { latestSnapshotsByScope, snapshotHistory } from "../realityIndex/dal/sentimentDao.js";
+import { latestRealityIndex, realityIndexHistory } from "../realityIndex/dal/realityIndexDao.js";
 
 const router = express.Router();
 
@@ -224,7 +228,7 @@ router.get("/:slug/articles", (req, res) => {
 
     const articles = db.prepare(`
       SELECT a.id, a.title, a.url, a.image_url, a.source_name, a.published_at,
-             a.summary, a.credibility_score, a.category, ea.relevance
+             a.description AS summary, a.credibility, a.category, ea.relevance
       FROM event_articles ea
       JOIN articles a ON a.id = ea.article_id
       WHERE ea.event_id = ?
@@ -265,6 +269,86 @@ router.get("/:slug/actors", (req, res) => {
 });
 
 /**
+ * GET /api/events/:slug/sentiment — per-source sentiment time-series.
+ * Query params: sinceMs (default 7d back), source (optional filter), limit (default 500)
+ */
+router.get("/:slug/sentiment", (req, res) => {
+  try {
+    const db = getDb();
+    const ev = db.prepare("SELECT id FROM events WHERE slug = ?").get(req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+
+    const sinceMs = parseInt(req.query.sinceMs ?? String(Date.now() - 7 * 24 * 60 * 60 * 1000), 10);
+    const source  = req.query.source ?? null;
+    const limit   = Math.min(parseInt(req.query.limit ?? "500", 10), 2000);
+
+    const latest  = latestSnapshotsByScope("event", ev.id);
+    const history = snapshotHistory("event", ev.id, { sinceMs, source, limit });
+
+    res.json({
+      latest:  latest.map(s => ({ source: s.source, polarity: s.polarity, intensity: s.intensity, volume: s.volume, ts: s.ts })),
+      history: history.map(s => ({ source: s.source, ts: s.ts, polarity: s.polarity, intensity: s.intensity, volume: s.volume })),
+    });
+  } catch (err) {
+    logger.error(`GET /api/events/:slug/sentiment error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/events/:slug/reality-index — composite + breakdown.
+ * Query params: history (default false; if true, returns last 100 snapshots)
+ */
+router.get("/:slug/reality-index", (req, res) => {
+  try {
+    const db = getDb();
+    const ev = db.prepare("SELECT id FROM events WHERE slug = ?").get(req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+
+    const latest = latestRealityIndex("event", ev.id);
+    const wantHistory = String(req.query.history ?? "false").toLowerCase() === "true";
+
+    let payload = {
+      latest: latest ? {
+        ts:                 latest.ts,
+        market_probability: latest.market_probability,
+        media_sentiment:    latest.media_sentiment,
+        social_sentiment:   latest.social_sentiment,
+        economic_signal:    latest.economic_signal,
+        truth_gap:          latest.truth_gap,
+        reality_score:      latest.reality_score,
+        confidence:         latest.confidence,
+        components:         safeJsonParse(latest.components),
+      } : null,
+    };
+
+    if (wantHistory) {
+      const sinceMs = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      payload.history = realityIndexHistory("event", ev.id, { sinceMs, limit: 200 })
+        .map(r => ({
+          ts:                 r.ts,
+          market_probability: r.market_probability,
+          media_sentiment:    r.media_sentiment,
+          social_sentiment:   r.social_sentiment,
+          truth_gap:          r.truth_gap,
+          reality_score:      r.reality_score,
+          confidence:         r.confidence,
+        }));
+    }
+
+    res.json(payload);
+  } catch (err) {
+    logger.error(`GET /api/events/:slug/reality-index error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+function safeJsonParse(s) {
+  if (!s) return null;
+  try { return JSON.parse(s); } catch { return null; }
+}
+
+/**
  * GET /api/events/:slug/perspectives
  * Returns articles grouped by source for multi-outlet comparison.
  */
@@ -276,7 +360,7 @@ router.get("/:slug/perspectives", (req, res) => {
 
     const articles = db.prepare(`
       SELECT a.id, a.title, a.url, a.source_name, a.published_at,
-             a.summary, a.credibility_score
+             a.description AS summary, a.credibility
       FROM event_articles ea
       JOIN articles a ON a.id = ea.article_id
       WHERE ea.event_id = ?

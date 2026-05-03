@@ -289,6 +289,33 @@ function buildPostRecord({ text, externalUrl, externalTitle, externalDescription
   return record;
 }
 
+/**
+ * Search Bluesky for posts via the AppView (api.bsky.app). Requires the
+ * authenticated bearer token; the public unauth path returns 403.
+ *
+ * Returns the raw `posts` array (`AppBskyFeedDefs.PostView[]`) — caller
+ * normalizes. Returns `[]` when unconfigured or the search fails so the
+ * sentiment pipeline degrades gracefully.
+ */
+export async function searchBlueskyPosts(query, { limit = 30 } = {}) {
+  if (!isBlueskyConfigured() || !query) return [];
+  try {
+    const s = await ensureSession();
+    const url = `https://api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=${encodeURIComponent(query)}&limit=${Math.min(limit, 100)}&sort=latest`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${s.accessJwt}` } });
+    if (!res.ok) {
+      // 401 → token stale; ensureSession will refresh on the next call.
+      logger.warn(`blueskyClient.searchPosts: HTTP ${res.status}`);
+      return [];
+    }
+    const data = await res.json();
+    return Array.isArray(data?.posts) ? data.posts : [];
+  } catch (err) {
+    logger.warn(`blueskyClient.searchPosts: ${err.message}`);
+    return [];
+  }
+}
+
 export async function postToBluesky({ text, externalUrl, externalTitle, externalDescription, thumbBuffer }) {
   if (!isBlueskyConfigured()) throw new Error("bluesky not configured");
   const s = await ensureSession();

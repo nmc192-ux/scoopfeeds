@@ -27,6 +27,10 @@ import { runSnapshotDownsampler } from "../realityIndex/jobs/snapshotDownsampler
 import { runEventTracker } from "../realityIndex/intelligence/eventTracker.js";
 import { runEventTimelineBuilder } from "../realityIndex/intelligence/eventTimelineBuilder.js";
 import { runEventActorExtractor } from "../realityIndex/intelligence/eventActorExtractor.js";
+import { runMediaSentimentForActiveEvents } from "../realityIndex/intelligence/mediaSentimentScorer.js";
+import { runSentimentCycle } from "../realityIndex/intelligence/sentimentScorer.js";
+import { runRealityIndexCycle } from "../realityIndex/intelligence/realityIndex.js";
+import { runAnomalyDetector } from "../realityIndex/intelligence/anomalyDetector.js";
 
 let isRunning    = false;
 let isVideoRun   = false;   // YouTube ingestion
@@ -137,11 +141,16 @@ export function startScheduler() {
     cron.schedule("13,43 * * * *", () => runEventTrackerCronCycle());       // every 30 min, offset
     cron.schedule("19 * * * *",    () => runEventTimelineBuilderCycle());   // every 1 hr
     cron.schedule("49 * * * *",    () => runActorExtractorCycle());         // every 1 hr, offset
+    // Phase 3 — Sentiment + Composite + Anomalies
+    cron.schedule("21,51 * * * *", () => runRealityIndexComposeCycle());    // every 30 min, offset
+    cron.schedule("27 * * * *",    () => runSentimentScoreCycle());         // every 1 hr
+    cron.schedule("3,18,33,48 * * * *", () => runAnomalyScanCycle());       // every 15 min
     // First run shortly after boot — Polymarket cold start.
     setTimeout(() => runPolymarketCycle(), 30_000);
     setTimeout(() => runMarketMatcherCronCycle(), 5 * 60 * 1000);
     setTimeout(() => runEventTrackerCronCycle(), 8 * 60 * 1000);
-    logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventTracker 30m, timeline+actors hourly, downsample daily)");
+    setTimeout(() => runRealityIndexComposeCycle(), 9 * 60 * 1000);
+    logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventTracker 30m, timeline+actors hourly, downsample daily, sentiment hourly, RI compose 30m, anomaly 15m)");
   } else {
     logger.info("🧠 Reality Index crons disabled via ENABLE_REALITY_INDEX=false");
   }
@@ -213,9 +222,50 @@ async function runActorExtractorCycle() {
   finally { isActorRun = false; }
 }
 
+// ─── Phase 3 cycles ────────────────────────────────────────────────────────
+// All cheap (no LLM in hot path); guarded by run-locks to prevent overlap.
+let isSentimentRun = false;
+let isRealityComposeRun = false;
+let isAnomalyRun = false;
+let lastSentimentRun = null;
+let lastRealityComposeRun = null;
+let lastAnomalyRun = null;
+
+async function runSentimentScoreCycle() {
+  if (isSentimentRun) { logger.warn("⏸️ Sentiment cycle already running"); return null; }
+  isSentimentRun = true;
+  lastSentimentRun = new Date().toISOString();
+  try { return await runSentimentCycle(); }
+  catch (err) { logger.error("❌ Sentiment cycle failed", { error: err.message }); return null; }
+  finally { isSentimentRun = false; }
+}
+
+async function runRealityIndexComposeCycle() {
+  if (isRealityComposeRun) { logger.warn("⏸️ RI compose already running"); return null; }
+  isRealityComposeRun = true;
+  lastRealityComposeRun = new Date().toISOString();
+  try {
+    runMediaSentimentForActiveEvents();      // synchronous, no LLM, no network
+    return runRealityIndexCycle();
+  } catch (err) {
+    logger.error("❌ RI compose failed", { error: err.message });
+    return null;
+  } finally { isRealityComposeRun = false; }
+}
+
+async function runAnomalyScanCycle() {
+  if (isAnomalyRun) { logger.warn("⏸️ Anomaly scan already running"); return null; }
+  isAnomalyRun = true;
+  lastAnomalyRun = new Date().toISOString();
+  try { return runAnomalyDetector(); }
+  catch (err) { logger.error("❌ Anomaly scan failed", { error: err.message }); return null; }
+  finally { isAnomalyRun = false; }
+}
+
 // Suppress unused-warning while exposing for ad-hoc /scoop-ops triggers later.
 export { runPolymarketCycle, runMarketMatcherCronCycle, runSnapshotDownsamplerCycle, snapshotActiveMarkets,
-         runEventTrackerCronCycle, runActorExtractorCycle };
+         runEventTrackerCronCycle, runActorExtractorCycle,
+         runSentimentScoreCycle, runRealityIndexComposeCycle, runAnomalyScanCycle };
 
 // Runs the auto-approve + publish pass. Safe to call as a cron tick — the
 // underlying service already guards against missing platform config and
@@ -483,11 +533,15 @@ export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
     isPublishRun, isPolymarketRun, isMatcherRun,
+    isSentimentRun, isRealityComposeRun, isAnomalyRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
     lastPublishResult,
     lastPolymarketRun,
     lastMatcherRun,
+    lastSentimentRun,
+    lastRealityComposeRun,
+    lastAnomalyRun,
     nextRun,
     sourceCount: RSS_SOURCES.length, videoChannels: YOUTUBE_SOURCES.length,
     videoGenConfigured: isVideoConfigured(),
