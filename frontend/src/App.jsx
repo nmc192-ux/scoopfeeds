@@ -38,6 +38,9 @@ import ContactPage         from "./pages/ContactPage";
 import SponsorPage         from "./pages/SponsorPage";
 import AnalysisPage        from "./pages/AnalysisPage";
 import AnalysisExplainedPage from "./pages/AnalysisExplainedPage";
+import PredictionsPage      from "./pages/PredictionsPage";
+import EventsPage           from "./pages/EventsPage";
+import EventPage            from "./pages/EventPage";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
 const HIDE_TOPICNAV_ON = [
@@ -46,7 +49,7 @@ const HIDE_TOPICNAV_ON = [
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
-  "/analysis",
+  "/analysis", "/predictions", "/events",
 ];
 
 export default function App() {
@@ -139,6 +142,9 @@ export default function App() {
           <Route path="/sponsor"             element={<SponsorPage />} />
           <Route path="/analysis"            element={<AnalysisPage />} />
           <Route path="/analysis/explained/:slug" element={<AnalysisExplainedPage />} />
+          <Route path="/predictions"         element={<PredictionsPage />} />
+          <Route path="/events"             element={<EventsPage />} />
+          <Route path="/events/:slug"       element={<EventPage />} />
           <Route path="*"                    element={<NotFound />} />
         </Routes>
       </main>
@@ -189,6 +195,10 @@ function Footer({ health }) {
           <a href="/live-tv"           className="hover:text-[var(--color-text)] transition-colors">Live TV</a>
           <span>·</span>
           <a href="/markets"           className="hover:text-[var(--color-text)] transition-colors">Markets</a>
+          <span>·</span>
+          <a href="/predictions"       className="hover:text-[var(--color-text)] transition-colors">Reality Index</a>
+          <span>·</span>
+          <a href="/events"            className="hover:text-[var(--color-text)] transition-colors">Event Tracker</a>
           <span>·</span>
           <a href="/weather"           className="hover:text-[var(--color-text)] transition-colors">Weather</a>
           <span>·</span>

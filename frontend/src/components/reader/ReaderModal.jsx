@@ -22,6 +22,7 @@ import NewsletterSignup, { readSubToken } from "../newsletter/NewsletterSignup";
 import { AdSenseUnit } from "../ads/AdSense";
 import SafeImage from "../ui/SafeImage";
 import ArticleDeepDive from "../analysis/ArticleDeepDive";
+import RealityIndexPanel from "../predictions/RealityIndexPanel";
 
 // Fetches 4 related stories in the same category, used by the recirculation
 // block at the bottom of the reader. Cached per category to avoid re-fetching
@@ -355,6 +356,13 @@ export default function ReaderModal() {
                 <div className="mt-8 pt-6 border-t border-[var(--color-border)]">
                   <NewsletterSignup compact source="reader_modal" />
                 </div>
+              )}
+
+              {/* Reality Index — markets bound to this article's cluster.
+                  Self-hides when no markets are matched, so it adds noise only
+                  when it has something useful to say. */}
+              {(!meterResult || meterResult.allowed) && article?.id && (
+                <RealityIndexPanel articleId={article.id} />
               )}
 
               {/* AI Deep Dive — lazy analysis panel, only fires when expanded */}
