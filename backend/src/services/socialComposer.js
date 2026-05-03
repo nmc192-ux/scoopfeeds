@@ -6,6 +6,17 @@
 // Output is a plain object keyed by platform name. Each caption embeds the
 // canonical scoopfeeds.com URL with UTM tags so downstream clicks attribute
 // back to the right social channel.
+//
+// Reality Index (Phase 4b): when the article is bound to a tracked event
+// with a recent market-implied probability, the composers below splice in
+// a one-line callout from socialCaptionEnricher. Disabled cleanly when
+// the import or DB read fails — caption falls back to the original layout.
+
+import { realityIndexCallout as _riCallout } from "../realityIndex/generation/socialCaptionEnricher.js";
+
+function safeRiCallout(articleId) {
+  try { return _riCallout(articleId); } catch { return null; }
+}
 
 const SITE = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 
@@ -523,9 +534,15 @@ function composeInstagramFeed(article) {
   // on mobile — keeps the main caption clean while preserving discovery value.
   const hashtags = buildIgHashtags(article);
 
+  // Reality Index callout — slipped in between the body and the engagement
+  // CTA so it reads as evidence backing the story, not as a tag-on. Skipped
+  // automatically when the article isn't bound to a tracked event.
+  const riLine = safeRiCallout(article.id);
+
   const parts = [
     hook,
     body || null,
+    riLine || null,
     engagement || null,
     linkCta,
     ".\n.\n.",
@@ -537,7 +554,10 @@ function composeInstagramFeed(article) {
     caption,
     url,
     characterCount: caption.length,
-    meta: { note: `Link goes in bio (@${igHandle}). Hashtags after the dot-separator.` },
+    meta: {
+      note: `Link goes in bio (@${igHandle}). Hashtags after the dot-separator.`,
+      realityIndex: riLine ? "included" : "absent",
+    },
   };
 }
 
@@ -644,8 +664,17 @@ function composeBluesky(article) {
     }
   }
 
-  let caption = `${body}${tail}`;
-  if (caption.length > 300) caption = truncateBySentence(caption, 300);
+  // Reality Index callout — only added when the running budget can fit it
+  // without forcing a re-truncate of the body. Plays nicely with Bluesky's
+  // 300-grapheme cap.
+  const riLine    = safeRiCallout(article.id);
+  const riSegment = riLine ? `\n\n${riLine}` : "";
+  let caption = `${body}${riSegment}${tail}`;
+  if (caption.length > 300) {
+    // Drop the RI line first if we overflowed, then truncate body if still over.
+    caption = `${body}${tail}`;
+    if (caption.length > 300) caption = truncateBySentence(caption, 300);
+  }
 
   return { caption, url, characterCount: caption.length };
 }
