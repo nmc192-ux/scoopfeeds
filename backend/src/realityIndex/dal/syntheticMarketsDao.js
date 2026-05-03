@@ -118,3 +118,12 @@ export function leaderboard({ limit = 50 } = {}) {
     LIMIT ?
   `).all(limit);
 }
+
+export function agentLeaderboard({ limit = 20 } = {}) {
+  return getDb().prepare(`
+    SELECT agent_id, brier_score, trades_resolved, reputation, updated_at
+    FROM agent_reputation
+    ORDER BY reputation DESC, brier_score ASC
+    LIMIT ?
+  `).all(limit);
+}

@@ -15,7 +15,7 @@ import { Router } from "express";
 import { getUserBySession } from "../models/database.js";
 import { logger } from "../services/logger.js";
 import {
-  listMarkets, getMarket, listTrades, executeTrade, leaderboard,
+  listMarkets, getMarket, listTrades, executeTrade, leaderboard, agentLeaderboard,
 } from "../realityIndex/dal/syntheticMarketsDao.js";
 import { quote as ammQuote } from "../realityIndex/syntheticMarkets/ammEngine.js";
 
@@ -65,6 +65,10 @@ router.get("/leaderboard", (req, res) => {
     updated_at: r.updated_at,
   }));
   res.json({ items: rows });
+});
+
+router.get("/agent-leaderboard", (_req, res) => {
+  res.json({ items: agentLeaderboard({ limit: 20 }) });
 });
 
 router.get("/:id", (req, res) => {

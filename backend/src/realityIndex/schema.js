@@ -409,6 +409,18 @@ export function initRealityIndex(db) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_reputation ON user_reputation(reputation DESC);
+
+    -- Same shape as user_reputation but for AI personas (skeptic / optimist /
+    -- contrarian). Kept in a separate table so the FK to users() stays clean
+    -- and agent + human leaderboards never cross-contaminate.
+    CREATE TABLE IF NOT EXISTS agent_reputation (
+      agent_id         TEXT PRIMARY KEY,            -- 'skeptic' | 'optimist' | 'contrarian'
+      brier_score      REAL,
+      trades_resolved  INTEGER NOT NULL DEFAULT 0,
+      reputation       REAL NOT NULL DEFAULT 0.5,
+      updated_at       INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_reputation ON agent_reputation(reputation DESC);
   `);
 
   // ── Phase 5: Macro indicators (FRED / WB / IMF) ─────────────────────────

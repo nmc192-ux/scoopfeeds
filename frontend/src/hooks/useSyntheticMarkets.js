@@ -33,6 +33,14 @@ export function useLeaderboard({ limit = 50 } = {}) {
   });
 }
 
+export function useAgentLeaderboard() {
+  return useQuery({
+    queryKey: ["synth-agent-leaderboard"],
+    queryFn: async () => (await api.get(`/agent-leaderboard`)).data,
+    staleTime: 5 * 60_000,
+  });
+}
+
 export function useTradeQuote(id) {
   // Mutation, not query — caller fires it on slider change.
   return useMutation({

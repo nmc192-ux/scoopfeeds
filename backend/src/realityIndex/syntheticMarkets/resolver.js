@@ -34,7 +34,8 @@ export function resolveMarket({ market_id, outcome }) {
 
     const trades = db.prepare("SELECT * FROM synthetic_market_trades WHERE market_id = ?").all(market_id);
 
-    const perUser = new Map();   // user_id → { trades: [], pnl: 0 }
+    const perUser  = new Map();   // user_id → { trades, pnl, brierSum, brierCount }
+    const perAgent = new Map();   // agent_id → same
     let totalPaid = 0;
 
     for (const t of trades) {
@@ -53,6 +54,13 @@ export function resolveMarket({ market_id, outcome }) {
       if (t.user_id) {
         if (!perUser.has(t.user_id)) perUser.set(t.user_id, { trades: 0, pnl: 0, brierSum: 0, brierCount: 0 });
         const r = perUser.get(t.user_id);
+        r.trades += 1;
+        r.pnl    += payout - t.amount;
+        if (brier != null) { r.brierSum += brier; r.brierCount += 1; }
+      }
+      if (t.agent_id) {
+        if (!perAgent.has(t.agent_id)) perAgent.set(t.agent_id, { trades: 0, pnl: 0, brierSum: 0, brierCount: 0 });
+        const r = perAgent.get(t.agent_id);
         r.trades += 1;
         r.pnl    += payout - t.amount;
         if (brier != null) { r.brierSum += brier; r.brierCount += 1; }
@@ -82,15 +90,7 @@ export function resolveMarket({ market_id, outcome }) {
 
     for (const [user_id, r] of perUser.entries()) {
       const existing = fetchRep.get(user_id);
-      const oldCount = existing?.trades_resolved ?? 0;
-      const oldBrier = existing?.brier_score ?? null;
-      const newCount = oldCount + r.trades;
-      // Weighted Brier average. Maximum-likelihood-style.
-      const oldSum = (oldBrier != null ? oldBrier * oldCount : 0);
-      const newBrier = newCount > 0 ? (oldSum + r.brierSum) / newCount : null;
-      const reputation = newBrier != null
-        ? Math.max(0, Math.min(1, 0.5 + (1 - newBrier) * 0.5))
-        : 0.5;
+      const { newBrier, reputation } = blendReputation(existing, r);
       const now = Date.now();
       upsertRep.run(
         user_id, newBrier, r.trades, reputation, now,
@@ -98,10 +98,48 @@ export function resolveMarket({ market_id, outcome }) {
       );
     }
 
-    logger.info(`🎲 synth resolve ${market_id}: outcome=${outcome}, paid=$${totalPaid.toFixed(2)}, users=${perUser.size}`);
+    // Mirror the same Brier+reputation update for AI agents into a separate
+    // table so leaderboards never cross-contaminate.
+    const upsertAgent = db.prepare(`
+      INSERT INTO agent_reputation (agent_id, brier_score, trades_resolved, reputation, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(agent_id) DO UPDATE SET
+        brier_score      = ?,
+        trades_resolved  = trades_resolved + ?,
+        reputation       = ?,
+        updated_at       = excluded.updated_at
+    `);
+    const fetchAgentRep = db.prepare("SELECT brier_score, trades_resolved FROM agent_reputation WHERE agent_id = ?");
+    for (const [agent_id, r] of perAgent.entries()) {
+      const existing = fetchAgentRep.get(agent_id);
+      const { newBrier, reputation } = blendReputation(existing, r);
+      const now = Date.now();
+      upsertAgent.run(
+        agent_id, newBrier, r.trades, reputation, now,
+        newBrier, r.trades, reputation,
+      );
+    }
+
+    logger.info(`🎲 synth resolve ${market_id}: outcome=${outcome}, paid=$${totalPaid.toFixed(2)}, users=${perUser.size}, agents=${perAgent.size}`);
     return {
       market_id, outcome, paid: Number(totalPaid.toFixed(2)),
-      trades_settled: trades.length, users_updated: perUser.size,
+      trades_settled: trades.length,
+      users_updated:  perUser.size,
+      agents_updated: perAgent.size,
     };
   })();
+}
+
+// Weighted Brier-average + smooth reputation, shared by the user and agent
+// reputation update paths.
+function blendReputation(existing, r) {
+  const oldCount = existing?.trades_resolved ?? 0;
+  const oldBrier = existing?.brier_score ?? null;
+  const newCount = oldCount + r.trades;
+  const oldSum = (oldBrier != null ? oldBrier * oldCount : 0);
+  const newBrier = newCount > 0 ? (oldSum + r.brierSum) / newCount : null;
+  const reputation = newBrier != null
+    ? Math.max(0, Math.min(1, 0.5 + (1 - newBrier) * 0.5))
+    : 0.5;
+  return { newBrier, reputation };
 }
