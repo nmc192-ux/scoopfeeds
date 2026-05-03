@@ -32,6 +32,7 @@ import { runSentimentCycle } from "../realityIndex/intelligence/sentimentScorer.
 import { runRealityIndexCycle } from "../realityIndex/intelligence/realityIndex.js";
 import { runAnomalyDetector } from "../realityIndex/intelligence/anomalyDetector.js";
 import { runWatchlistPushDispatcher } from "../realityIndex/jobs/watchlistPushDispatcher.js";
+import { pickTopReelCandidates } from "../realityIndex/generation/reelTopicSelector.js";
 
 let isRunning    = false;
 let isVideoRun   = false;   // YouTube ingestion
@@ -428,7 +429,12 @@ export async function runVideoGenCycle({ batchSize = 3 } = {}) {
   logger.info(`🎬 Video gen batch (size=${batchSize})`);
 
   try {
-    const toRender = findArticlesForVideoQueue({ minCredibility: 7, limit: batchSize });
+    // Opt-in to the RI-aware ranker via REEL_USE_RI_SELECTOR=1.
+    // Falls back to the base credibility selector when off or no RI signals.
+    const useRi = String(process.env.REEL_USE_RI_SELECTOR ?? "").toLowerCase() === "1";
+    const toRender = useRi
+      ? pickTopReelCandidates({ limit: batchSize, minCredibility: 7 })
+      : findArticlesForVideoQueue({ minCredibility: 7, limit: batchSize });
     if (!toRender.length) { logger.info("🎬 No candidates for video gen"); return; }
 
     for (const article of toRender) {
