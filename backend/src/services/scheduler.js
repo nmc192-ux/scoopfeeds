@@ -33,6 +33,7 @@ import { runRealityIndexCycle } from "../realityIndex/intelligence/realityIndex.
 import { runAnomalyDetector } from "../realityIndex/intelligence/anomalyDetector.js";
 import { runWatchlistPushDispatcher } from "../realityIndex/jobs/watchlistPushDispatcher.js";
 import { pickTopReelCandidates } from "../realityIndex/generation/reelTopicSelector.js";
+import { syncGdeltCycle } from "../realityIndex/ingest/newsAggregators/gdeltFetcher.js";
 
 let isRunning    = false;
 let isVideoRun   = false;   // YouTube ingestion
@@ -150,12 +151,16 @@ export function startScheduler() {
     // Phase 4c — Watchlist push fan-out (runs 2 min after each anomaly scan
     // so newly-detected alerts are dispatched promptly to watching users).
     cron.schedule("5,20,35,50 * * * *", () => runWatchlistPushCycle());     // every 15 min, +2m offset
+    // Phase 5 — GDELT global news multiplier. New articles inserted here flow
+    // through the same cluster→event→matcher pipeline as RSS-ingested ones.
+    cron.schedule("8,38 * * * *",       () => runGdeltCycle());             // every 30 min, between RSS ticks
     // First run shortly after boot — Polymarket cold start.
     setTimeout(() => runPolymarketCycle(), 30_000);
     setTimeout(() => runMarketMatcherCronCycle(), 5 * 60 * 1000);
     setTimeout(() => runEventTrackerCronCycle(), 8 * 60 * 1000);
     setTimeout(() => runRealityIndexComposeCycle(), 9 * 60 * 1000);
-    logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventTracker 30m, timeline+actors hourly, downsample daily, sentiment hourly, RI compose 30m, anomaly 15m, watchlist-push 15m)");
+    setTimeout(() => runGdeltCycle(), 2 * 60 * 1000);                       // first GDELT pull 2 min after boot
+    logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventTracker 30m, timeline+actors hourly, downsample daily, sentiment hourly, RI compose 30m, anomaly 15m, watchlist-push 15m, GDELT 30m)");
   } else {
     logger.info("🧠 Reality Index crons disabled via ENABLE_REALITY_INDEX=false");
   }
@@ -269,6 +274,9 @@ async function runAnomalyScanCycle() {
 
 let isWatchlistPushRun = false;
 let lastWatchlistPushRun = null;
+let isGdeltRun = false;
+let lastGdeltRun = null;
+let lastGdeltResult = null;
 async function runWatchlistPushCycle() {
   if (isWatchlistPushRun) { logger.warn("⏸️ Watchlist push already running"); return null; }
   isWatchlistPushRun = true;
@@ -278,11 +286,25 @@ async function runWatchlistPushCycle() {
   finally { isWatchlistPushRun = false; }
 }
 
+async function runGdeltCycle() {
+  if (isGdeltRun) { logger.warn("⏸️ GDELT cycle already running"); return null; }
+  isGdeltRun = true;
+  lastGdeltRun = new Date().toISOString();
+  try {
+    const out = await syncGdeltCycle();
+    lastGdeltResult = out;
+    return out;
+  } catch (err) {
+    logger.error("❌ GDELT cycle failed", { error: err.message });
+    return null;
+  } finally { isGdeltRun = false; }
+}
+
 // Suppress unused-warning while exposing for ad-hoc /scoop-ops triggers later.
 export { runPolymarketCycle, runMarketMatcherCronCycle, runSnapshotDownsamplerCycle, snapshotActiveMarkets,
          runEventTrackerCronCycle, runActorExtractorCycle,
          runSentimentScoreCycle, runRealityIndexComposeCycle, runAnomalyScanCycle,
-         runWatchlistPushCycle };
+         runWatchlistPushCycle, runGdeltCycle };
 
 // Runs the auto-approve + publish pass. Safe to call as a cron tick — the
 // underlying service already guards against missing platform config and
@@ -555,7 +577,7 @@ export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
     isPublishRun, isPolymarketRun, isMatcherRun,
-    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun,
+    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
     lastPublishResult,
@@ -565,6 +587,8 @@ export function getSchedulerStatus() {
     lastRealityComposeRun,
     lastAnomalyRun,
     lastWatchlistPushRun,
+    lastGdeltRun,
+    lastGdeltResult,
     nextRun,
     sourceCount: RSS_SOURCES.length, videoChannels: YOUTUBE_SOURCES.length,
     videoGenConfigured: isVideoConfigured(),
