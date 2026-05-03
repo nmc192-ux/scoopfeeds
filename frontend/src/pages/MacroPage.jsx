@@ -9,9 +9,16 @@
  * green/red coloring · units · last observation date · source link.
  */
 
+import { useState } from "react";
 import { ArrowDown, ArrowUp, Minus, Database, ExternalLink } from "lucide-react";
 import { useMacroIndicators } from "../hooks/useMacro";
 import { COPY } from "../lib/copyGuide";
+
+const PROVIDERS = [
+  { id: "",   label: "All" },
+  { id: "fred", label: "FRED (US)" },
+  { id: "wb",   label: "World Bank" },
+];
 
 function fmtVal(v, units) {
   if (v == null || !Number.isFinite(v)) return "—";
@@ -62,8 +69,8 @@ function IndicatorCard({ ind }) {
           {ind.previous_date && <span className="ml-1">({ind.previous_date})</span>}
         </span>
         {url ? (
-          <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-[var(--color-accent)] inline-flex items-center gap-0.5">
-            FRED <ExternalLink size={9} />
+          <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-[var(--color-accent)] inline-flex items-center gap-0.5 uppercase">
+            {ind.provider === "wb" ? "WB" : ind.provider} <ExternalLink size={9} />
           </a>
         ) : (
           <span>{ind.frequency || ""}</span>
@@ -77,7 +84,8 @@ function IndicatorCard({ ind }) {
 }
 
 export default function MacroPage() {
-  const { data, isLoading } = useMacroIndicators();
+  const [provider, setProvider] = useState("");
+  const { data, isLoading } = useMacroIndicators({ provider: provider || undefined });
   const indicators = data?.indicators ?? [];
 
   return (
@@ -91,9 +99,25 @@ export default function MacroPage() {
           </span>
         </div>
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {COPY.brandTagline} Curated rates, inflation, labour, commodities, FX from St. Louis Fed (FRED).
+          {COPY.brandTagline} Curated rates, inflation, labour, commodities, FX from St. Louis Fed (FRED) and World Bank Open Data.
         </p>
       </header>
+
+      <div className="flex flex-wrap gap-2 mb-4">
+        {PROVIDERS.map(p => (
+          <button
+            key={p.id}
+            onClick={() => setProvider(p.id)}
+            className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+              provider === p.id
+                ? "bg-[var(--color-accent)] text-white border-[var(--color-accent)]"
+                : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-accent)]"
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
 
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

@@ -39,6 +39,7 @@ import { syncUsgsCycle } from "../realityIndex/ingest/geo/usgsEarthquakeFetcher.
 import { syncNoaaCycle } from "../realityIndex/ingest/geo/noaaAlertsFetcher.js";
 import { syncAcledCycle } from "../realityIndex/ingest/geo/acledFetcher.js";
 import { syncFredCycle } from "../realityIndex/ingest/economic/fredFetcher.js";
+import { syncWorldBankCycle } from "../realityIndex/ingest/economic/worldBankFetcher.js";
 import { runQuestionExtractor } from "../realityIndex/syntheticMarkets/questionExtractor.js";
 import { runAiAgentsCycle } from "../realityIndex/syntheticMarkets/aiAgents.js";
 import { runBayesianUpdater } from "../realityIndex/intelligence/bayesianUpdater.js";
@@ -170,6 +171,8 @@ export function startScheduler() {
     cron.schedule("33 */6 * * *",       () => runAcledCycle());               // every 6h
     // Phase 5 — FRED macro series (rates, CPI, unemployment, oil, VIX, etc.)
     cron.schedule("17 */6 * * *",       () => runFredCycle());                // every 6h
+    // World Bank — annual indicators per country, daily refresh (slow source).
+    cron.schedule("9 5 * * *",          () => runWorldBankCycle());           // daily at 05:09
     // Phase 6 — synthetic market question extractor (LLM, drafts only).
     cron.schedule("47 */6 * * *",       () => runSyntheticExtractCycle());    // every 6h, +30m offset from FRED
     // Phase 6 — AI trader agents (skeptic/optimist/contrarian) keep markets lively.
@@ -399,6 +402,23 @@ async function runFredCycle() {
     logger.error("❌ FRED cycle failed", { error: err.message });
     return null;
   } finally { isFredRun = false; }
+}
+
+let isWorldBankRun = false;
+let lastWorldBankRun = null;
+let lastWorldBankResult = null;
+async function runWorldBankCycle() {
+  if (isWorldBankRun) { logger.warn("⏸️ WB cycle already running"); return null; }
+  isWorldBankRun = true;
+  lastWorldBankRun = new Date().toISOString();
+  try {
+    const out = await syncWorldBankCycle();
+    lastWorldBankResult = out;
+    return out;
+  } catch (err) {
+    logger.error("❌ WB cycle failed", { error: err.message });
+    return null;
+  } finally { isWorldBankRun = false; }
 }
 
 let isAiAgentsRun = false;
@@ -742,7 +762,7 @@ export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
     isPublishRun, isPolymarketRun, isMatcherRun,
-    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isAcledRun, isFredRun, isSyntheticExtractRun, isAiAgentsRun, isBayesianRun,
+    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isAcledRun, isFredRun, isWorldBankRun, isSyntheticExtractRun, isAiAgentsRun, isBayesianRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
     lastPublishResult,
@@ -764,6 +784,8 @@ export function getSchedulerStatus() {
     lastAcledResult,
     lastFredRun,
     lastFredResult,
+    lastWorldBankRun,
+    lastWorldBankResult,
     lastSyntheticExtractRun,
     lastSyntheticExtractResult,
     lastAiAgentsRun,
