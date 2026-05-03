@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sun, Moon, Search, X, RefreshCw,
-  Activity, Grid3x3, List, UserCircle, Tv, Sparkles
+  Activity, Grid3x3, List, UserCircle, Tv, Sparkles,
+  Rows3, Rows4
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useNewsStore } from "../../store/newsStore";
@@ -18,6 +19,7 @@ import clsx from "clsx";
 export default function Header() {
   const {
     darkMode, toggleDarkMode,
+    density, toggleDensity,
     searchQuery, setSearchQuery,
     viewMode, setViewMode,
     language, setAuthOpen,
@@ -246,6 +248,14 @@ export default function Header() {
                 size={16}
                 className={isLoggedIn ? "text-electric-600" : undefined}
               />
+            </HeaderBtn>
+
+            {/* Density toggle (Comfortable ↔ Compact / Pro mode) */}
+            <HeaderBtn
+              onClick={toggleDensity}
+              title={density === "compact" ? "Switch to comfortable spacing" : "Switch to compact (Pro) spacing"}
+            >
+              {density === "compact" ? <Rows3 size={16} /> : <Rows4 size={16} />}
             </HeaderBtn>
 
             {/* Dark mode */}

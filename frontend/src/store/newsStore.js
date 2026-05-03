@@ -13,6 +13,24 @@ export const useNewsStore = create(
         document.documentElement.classList.toggle("dark", next);
       },
 
+      // ─── Density (Comfortable / Compact "Pro" mode) ────────────────
+      // Sets a `data-density="compact"` attribute on <html>; tiny global
+      // CSS rules in index.css then compress padding + font sizes across
+      // common Tailwind utilities. No per-page edits required.
+      density: "comfortable",
+      toggleDensity: () => {
+        const next = get().density === "compact" ? "comfortable" : "compact";
+        set({ density: next });
+        if (next === "compact") document.documentElement.setAttribute("data-density", "compact");
+        else                    document.documentElement.removeAttribute("data-density");
+      },
+      setDensity: (v) => {
+        const next = v === "compact" ? "compact" : "comfortable";
+        set({ density: next });
+        if (next === "compact") document.documentElement.setAttribute("data-density", "compact");
+        else                    document.documentElement.removeAttribute("data-density");
+      },
+
       // ─── Language ───────────────────────────────────────────────────
       // `language` is the user's chosen target (ISO 639-1). When
       // `autoLanguage` is true, each article is shown in its source language
@@ -166,6 +184,7 @@ export const useNewsStore = create(
       },
       partialize: (state) => ({
         darkMode:            state.darkMode,
+        density:             state.density,
         language:            state.language,
         autoLanguage:        state.autoLanguage,
         activeTopics:        state.activeTopics,
@@ -183,7 +202,8 @@ export const useNewsStore = create(
 );
 
 // Apply persisted settings on init
-const { darkMode, language } = useNewsStore.getState();
+const { darkMode, language, density } = useNewsStore.getState();
 document.documentElement.classList.toggle("dark", darkMode);
 document.documentElement.setAttribute("lang",  language || "en");
 document.documentElement.setAttribute("dir",   isRtl(language) ? "rtl" : "ltr");
+if (density === "compact") document.documentElement.setAttribute("data-density", "compact");

@@ -336,6 +336,41 @@
   to { transform: rotate(360deg); }
 }
 
+/* ─── Density: compact "Pro" mode ─────────────────────────────────────────
+   Toggled via Header → newsStore.toggleDensity. Sets [data-density="compact"]
+   on <html>. Overrides the most common Tailwind spacing + font utilities so
+   list-heavy pages (Predictions, Events, Markets, Truth-Gap, Anomalies,
+   Saved, Briefs) gain ~30% more rows per viewport without per-page edits.
+   We deliberately do NOT touch headings, hero spacing, or the typography
+   in articles — just chrome around lists and rows. */
+
+[data-density="compact"] .text-base  { font-size: 0.8125rem; line-height: 1.125rem; }
+[data-density="compact"] .text-sm    { font-size: 0.75rem;   line-height: 1rem;     }
+[data-density="compact"] .text-xs    { font-size: 0.6875rem; line-height: 0.9rem;   }
+
+[data-density="compact"] .py-2  { padding-top: 0.25rem;   padding-bottom: 0.25rem;   }
+[data-density="compact"] .py-3  { padding-top: 0.375rem;  padding-bottom: 0.375rem;  }
+[data-density="compact"] .py-4  { padding-top: 0.5rem;    padding-bottom: 0.5rem;    }
+[data-density="compact"] .py-5  { padding-top: 0.625rem;  padding-bottom: 0.625rem;  }
+[data-density="compact"] .py-6  { padding-top: 0.75rem;   padding-bottom: 0.75rem;   }
+[data-density="compact"] .p-3   { padding: 0.5rem;   }
+[data-density="compact"] .p-4   { padding: 0.625rem; }
+[data-density="compact"] .p-5   { padding: 0.75rem;  }
+
+[data-density="compact"] .gap-2 { gap: 0.25rem;   }
+[data-density="compact"] .gap-3 { gap: 0.375rem;  }
+[data-density="compact"] .gap-4 { gap: 0.5rem;    }
+
+[data-density="compact"] .mb-3  { margin-bottom: 0.5rem;   }
+[data-density="compact"] .mb-4  { margin-bottom: 0.625rem; }
+[data-density="compact"] .mb-5  { margin-bottom: 0.75rem;  }
+[data-density="compact"] .mb-6  { margin-bottom: 1rem;     }
+[data-density="compact"] .mb-8  { margin-bottom: 1.25rem;  }
+
+[data-density="compact"] .space-y-2 > * + * { margin-top: 0.25rem;   }
+[data-density="compact"] .space-y-3 > * + * { margin-top: 0.375rem;  }
+[data-density="compact"] .space-y-4 > * + * { margin-top: 0.5rem;    }
+
 /* ─── Loading Screen ──────────────────────────────────────────────────────── */
 #loading-screen {
   position: fixed;
