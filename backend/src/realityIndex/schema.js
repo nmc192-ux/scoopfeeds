@@ -302,5 +302,25 @@ export function initRealityIndex(db) {
     CREATE INDEX IF NOT EXISTS idx_anom_type    ON anomaly_alerts(type, detected_at DESC);
   `);
 
+  // ── Phase 4: User watchlists ────────────────────────────────────────────
+  // Per-user follow list of events / markets / topics. Powers /dashboard
+  // and (future) push fan-out for watchlisted item anomalies.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_watchlists (
+      user_id          TEXT NOT NULL,
+      item_type        TEXT NOT NULL,             -- 'event' | 'market' | 'topic' | 'ticker'
+      item_id          TEXT NOT NULL,             -- event_id / market_id / topic-slug / ticker-symbol
+      alert_threshold  REAL,                      -- per-item override (e.g. min severity)
+      alert_types      TEXT DEFAULT '[]',         -- JSON: which anomaly types to alert on, [] = all
+      notify_push      INTEGER NOT NULL DEFAULT 1,
+      notify_email     INTEGER NOT NULL DEFAULT 0,
+      created_at       INTEGER NOT NULL,
+      PRIMARY KEY (user_id, item_type, item_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_watchlists_user ON user_watchlists(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_watchlists_item ON user_watchlists(item_type, item_id);
+  `);
+
   logger.info("🧠 Reality Index schema ready");
 }

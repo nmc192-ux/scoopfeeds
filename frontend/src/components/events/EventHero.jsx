@@ -6,6 +6,7 @@
 import { Activity, Clock, FileText, TrendingUp } from "lucide-react";
 import ProbabilityBar from "../predictions/ProbabilityBar";
 import TruthGapBadge  from "../predictions/TruthGapBadge";
+import WatchButton    from "../predictions/WatchButton";
 import { COPY } from "../../lib/copyGuide";
 
 function relativeTime(ms) {
@@ -33,7 +34,7 @@ function SeverityBar({ value = 0 }) {
 
 export default function EventHero({ event, markets = [], truthGap }) {
   const {
-    title, category, severity = 0, summary,
+    id, title, category, severity = 0, summary,
     article_count = 0, market_count = 0, last_activity_at,
     hero_image_url, status,
   } = event;
@@ -64,6 +65,7 @@ export default function EventHero({ event, markets = [], truthGap }) {
           {Number.isFinite(truthGap) && Math.abs(truthGap) > 0.15 && (
             <TruthGapBadge gap={truthGap} size="sm" />
           )}
+          {id && <WatchButton itemType="event" itemId={id} size="sm" className="ml-auto" />}
         </div>
 
         {/* Title */}

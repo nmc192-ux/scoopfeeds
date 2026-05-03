@@ -42,6 +42,7 @@ import PredictionsPage      from "./pages/PredictionsPage";
 import EventsPage           from "./pages/EventsPage";
 import EventPage            from "./pages/EventPage";
 import TruthGapPage         from "./pages/TruthGapPage";
+import DashboardPage        from "./pages/DashboardPage";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
 const HIDE_TOPICNAV_ON = [
@@ -50,7 +51,7 @@ const HIDE_TOPICNAV_ON = [
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
-  "/analysis", "/predictions", "/events", "/truth-gap",
+  "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard",
 ];
 
 export default function App() {
@@ -147,6 +148,7 @@ export default function App() {
           <Route path="/events"             element={<EventsPage />} />
           <Route path="/events/:slug"       element={<EventPage />} />
           <Route path="/truth-gap"          element={<TruthGapPage />} />
+          <Route path="/dashboard"          element={<DashboardPage />} />
           <Route path="*"                    element={<NotFound />} />
         </Routes>
       </main>
@@ -203,6 +205,8 @@ function Footer({ health }) {
           <a href="/events"            className="hover:text-[var(--color-text)] transition-colors">Event Tracker</a>
           <span>·</span>
           <a href="/truth-gap"         className="hover:text-[var(--color-text)] transition-colors">Truth Gap</a>
+          <span>·</span>
+          <a href="/dashboard"         className="hover:text-[var(--color-text)] transition-colors">Dashboard</a>
           <span>·</span>
           <a href="/weather"           className="hover:text-[var(--color-text)] transition-colors">Weather</a>
           <span>·</span>
