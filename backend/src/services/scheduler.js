@@ -37,6 +37,7 @@ import { syncGdeltCycle } from "../realityIndex/ingest/newsAggregators/gdeltFetc
 import { runAnalystBriefCycle } from "../realityIndex/generation/analystBriefGenerator.js";
 import { syncUsgsCycle } from "../realityIndex/ingest/geo/usgsEarthquakeFetcher.js";
 import { syncNoaaCycle } from "../realityIndex/ingest/geo/noaaAlertsFetcher.js";
+import { syncAcledCycle } from "../realityIndex/ingest/geo/acledFetcher.js";
 import { syncFredCycle } from "../realityIndex/ingest/economic/fredFetcher.js";
 import { runQuestionExtractor } from "../realityIndex/syntheticMarkets/questionExtractor.js";
 import { runAiAgentsCycle } from "../realityIndex/syntheticMarkets/aiAgents.js";
@@ -165,6 +166,8 @@ export function startScheduler() {
     cron.schedule("*/10 * * * *",       () => runUsgsCycle());               // every 10 min
     // Phase 5 — NOAA active weather alerts (Severe + Extreme) → events
     cron.schedule("4,14,24,34,44,54 * * * *", () => runNoaaCycle());          // every 10 min, +4 offset
+    // Phase 5 — ACLED conflict events (last 24h, ≥1 fatality) → events.
+    cron.schedule("33 */6 * * *",       () => runAcledCycle());               // every 6h
     // Phase 5 — FRED macro series (rates, CPI, unemployment, oil, VIX, etc.)
     cron.schedule("17 */6 * * *",       () => runFredCycle());                // every 6h
     // Phase 6 — synthetic market question extractor (LLM, drafts only).
@@ -362,6 +365,23 @@ async function runNoaaCycle() {
     logger.error("❌ NOAA cycle failed", { error: err.message });
     return null;
   } finally { isNoaaRun = false; }
+}
+
+let isAcledRun = false;
+let lastAcledRun = null;
+let lastAcledResult = null;
+async function runAcledCycle() {
+  if (isAcledRun) { logger.warn("⏸️ ACLED cycle already running"); return null; }
+  isAcledRun = true;
+  lastAcledRun = new Date().toISOString();
+  try {
+    const out = await syncAcledCycle();
+    lastAcledResult = out;
+    return out;
+  } catch (err) {
+    logger.error("❌ ACLED cycle failed", { error: err.message });
+    return null;
+  } finally { isAcledRun = false; }
 }
 
 let isFredRun = false;
@@ -722,7 +742,7 @@ export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
     isPublishRun, isPolymarketRun, isMatcherRun,
-    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isFredRun, isSyntheticExtractRun, isAiAgentsRun, isBayesianRun,
+    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isAcledRun, isFredRun, isSyntheticExtractRun, isAiAgentsRun, isBayesianRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
     lastPublishResult,
@@ -740,6 +760,8 @@ export function getSchedulerStatus() {
     lastUsgsResult,
     lastNoaaRun,
     lastNoaaResult,
+    lastAcledRun,
+    lastAcledResult,
     lastFredRun,
     lastFredResult,
     lastSyntheticExtractRun,

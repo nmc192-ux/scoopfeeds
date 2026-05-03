@@ -15,6 +15,8 @@ import { COPY } from "../lib/copyGuide";
 const CATEGORY_FILTERS = [
   { id: "",            label: "All" },
   { id: "geo",         label: "Earthquakes" },
+  { id: "weather",     label: "Weather" },
+  { id: "conflict",    label: "Conflict" },
   { id: "politics",    label: "Politics" },
   { id: "geopolitics", label: "Geopolitics" },
   { id: "climate",     label: "Climate" },
