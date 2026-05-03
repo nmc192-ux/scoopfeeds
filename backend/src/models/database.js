@@ -2,6 +2,8 @@ import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import { runMigrations } from "../db/migrate.js";
+import { timedQuery } from "../db/queryTiming.js";
 import { logger } from "../services/logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,7 +33,9 @@ export function getDb() {
     db.pragma("synchronous = NORMAL");
     db.pragma("cache_size = 10000");
     db.pragma("temp_store = MEMORY");
+    db.pragma("busy_timeout = 5000");
     initializeSchema(db);
+    runMigrations(db);
     logger.info("Database initialized", { path: DB_PATH });
   }
   return db;
@@ -39,7 +43,7 @@ export function getDb() {
 
 export function getDbStatus() {
   const database = getDb();
-  database.prepare("SELECT 1 AS ok").get();
+  timedQuery("db:status", () => database.prepare("SELECT 1 AS ok").get(), { warnMs: 20 });
   return {
     ok: true,
     path: DB_PATH,
@@ -156,6 +160,34 @@ function initializeSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_background_job_runs_created ON background_job_runs(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_background_job_runs_queue ON background_job_runs(queue, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_background_job_runs_job_id ON background_job_runs(job_id);
+
+    CREATE TABLE IF NOT EXISTS api_slow_logs (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      method        TEXT NOT NULL,
+      path          TEXT NOT NULL,
+      status        INTEGER NOT NULL,
+      duration_ms   INTEGER NOT NULL,
+      request_id    TEXT NOT NULL,
+      process_role  TEXT,
+      created_at    INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_slow_logs_created ON api_slow_logs(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_api_slow_logs_request ON api_slow_logs(request_id);
+
+    CREATE TABLE IF NOT EXISTS job_idempotency_keys (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope           TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'active',
+      created_at      INTEGER NOT NULL,
+      expires_at      INTEGER,
+      metadata        TEXT DEFAULT '{}',
+      UNIQUE(scope, idempotency_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_idempotency_scope_status
+      ON job_idempotency_keys(scope, status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_job_idempotency_expires
+      ON job_idempotency_keys(expires_at);
 
     CREATE TABLE IF NOT EXISTS subscribers (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1033,6 +1065,42 @@ export function updateBackgroundJobRun(id, {
         error_stack = ?
     WHERE id = ?
   `).run(status, attempts, startedAt, finishedAt, durationMs, errorMessage, errorStack, id);
+}
+
+export function insertApiSlowLog({
+  method,
+  path,
+  status,
+  durationMs,
+  requestId,
+  processRole = null,
+  createdAt = Date.now(),
+}) {
+  const result = getDb().prepare(`
+    INSERT INTO api_slow_logs
+      (method, path, status, duration_ms, request_id, process_role, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(method, path, status, durationMs, requestId, processRole, createdAt);
+  return result.lastInsertRowid;
+}
+
+export function listRecentFailedBackgroundJobs(limit = 10) {
+  return getDb().prepare(`
+    SELECT queue, job_name, job_id, status, attempts, started_at, finished_at, duration_ms, error_message, created_at
+    FROM background_job_runs
+    WHERE status = 'failed'
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(limit);
+}
+
+export function listRecentSlowApis(limit = 20) {
+  return getDb().prepare(`
+    SELECT method, path, status, duration_ms, request_id, process_role, created_at
+    FROM api_slow_logs
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(limit);
 }
 
 export function getAnalyticsSummary() {

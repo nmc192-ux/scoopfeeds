@@ -1,4 +1,5 @@
 import crypto from "crypto";
+export { requestIdMiddleware } from "../config/observability.js";
 import { insertAdminAuditLog } from "../models/database.js";
 
 const TEMP_QUERY_KEY_FLAG = "ALLOW_LEGACY_ADMIN_QUERY_KEY";
@@ -51,14 +52,6 @@ function isPublicScoopOpsPath(pathname = "") {
 function hashValue(value) {
   if (!value) return null;
   return crypto.createHash("sha256").update(String(value)).digest("hex");
-}
-
-export function requestIdMiddleware(req, res, next) {
-  const inbound = String(req.get("x-request-id") || "").trim();
-  const requestId = inbound || crypto.randomUUID();
-  req.requestId = requestId;
-  res.setHeader("X-Request-Id", requestId);
-  next();
 }
 
 export function adminAuth(req, res, next) {

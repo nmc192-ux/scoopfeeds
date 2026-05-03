@@ -1,5 +1,11 @@
 import "../config/env.js";
 import { Worker } from "bullmq";
+import {
+  captureException,
+  captureWorkerFailure,
+  flushObservability,
+  initObservability,
+} from "../config/observability.js";
 import { getDbStatus } from "../models/database.js";
 import { logger } from "../services/logger.js";
 import { runEnrichCycle, runIngestionCycle, runVideoCycle } from "../services/scheduler.js";
@@ -10,12 +16,14 @@ import { assertRedisAvailable, assertRedisStartup, closeRedisConnections, create
 const PROCESS_ROLE = "worker";
 const idleHeartbeat = setInterval(() => {}, 60_000);
 const workers = [];
+initObservability({ role: PROCESS_ROLE });
 
 async function shutdown(signal) {
   logger.info(`[${PROCESS_ROLE}] received ${signal}, shutting down...`);
   clearInterval(idleHeartbeat);
   await Promise.allSettled(workers.map((worker) => worker.close()));
   await closeRedisConnections();
+  await flushObservability();
   process.exit(0);
 }
 
@@ -34,10 +42,12 @@ function registerWorker(queueName, name, concurrency, processor) {
     logger.info(`[${PROCESS_ROLE}] completed ${job.name}`, { queue: queueName, jobId: job.id });
   });
   worker.on("failed", (job, error) => {
-    logger.error(`[${PROCESS_ROLE}] failed ${job?.name || name}`, {
+    captureWorkerFailure(error, {
+      role: PROCESS_ROLE,
       queue: queueName,
+      jobName: job?.name || name,
       jobId: job?.id || null,
-      error: error.message,
+      attempts: job?.attemptsMade || 0,
     });
   });
 
@@ -81,17 +91,29 @@ try {
     });
   }
 } catch (error) {
-  logger.error(`[${PROCESS_ROLE}] failed to initialize`, { error: error.message });
+  captureException(error, {
+    role: PROCESS_ROLE,
+    message: `[${PROCESS_ROLE}] failed to initialize`,
+  });
   process.exit(1);
 }
 
 process.on("SIGTERM", () => { shutdown("SIGTERM"); });
 process.on("SIGINT", () => { shutdown("SIGINT"); });
-process.on("uncaughtException", (error) => {
-  logger.error(`[${PROCESS_ROLE}] uncaught exception`, { error: error.message });
+process.on("uncaughtException", async (error) => {
+  captureException(error, {
+    role: PROCESS_ROLE,
+    message: `[${PROCESS_ROLE}] uncaught exception`,
+  });
+  await flushObservability();
   process.exit(1);
 });
-process.on("unhandledRejection", (error) => {
-  logger.error(`[${PROCESS_ROLE}] unhandled rejection`, { error: error?.message || String(error) });
+process.on("unhandledRejection", async (error) => {
+  const rejectionError = error instanceof Error ? error : new Error(String(error));
+  captureException(rejectionError, {
+    role: PROCESS_ROLE,
+    message: `[${PROCESS_ROLE}] unhandled rejection`,
+  });
+  await flushObservability();
   process.exit(1);
 });

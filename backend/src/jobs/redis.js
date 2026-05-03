@@ -46,6 +46,37 @@ export function assertRedisStartup({ role = "process" } = {}) {
   return assertRedisAvailable({ role });
 }
 
+export async function getRedisStatus({ connectionName = "status" } = {}) {
+  if (!isRedisConfigured()) {
+    return {
+      enabled: false,
+      ok: true,
+      status: "disabled",
+    };
+  }
+
+  const startedAt = Date.now();
+
+  try {
+    const connection = createRedisConnection(connectionName, { maxRetriesPerRequest: 1 });
+    await connection.ping();
+
+    return {
+      enabled: true,
+      ok: true,
+      status: "ready",
+      latency_ms: Date.now() - startedAt,
+    };
+  } catch (error) {
+    return {
+      enabled: true,
+      ok: false,
+      status: "error",
+      error: error.message,
+    };
+  }
+}
+
 export function createRedisConnection(name, { maxRetriesPerRequest = null } = {}) {
   const redisUrl = getRedisUrl();
   if (!redisUrl) return null;

@@ -30,6 +30,7 @@ import tipsRouter        from "./src/routes/tips.js";
 import videoGenRouter    from "./src/routes/videos-gen.js";
 import newsletterOpsRouter from "./src/routes/newsletter-ops.js";
 import queueOpsRouter    from "./src/routes/queue-ops.js";
+import diagnosticsOpsRouter from "./src/routes/diagnostics-ops.js";
 import meterRouter       from "./src/routes/meter.js";
 import analysisRouter    from "./src/routes/analysis.js";
 import predictionsRouter from "./src/routes/predictions.js";
@@ -47,10 +48,18 @@ import { detectCountry } from "./src/services/geolocation.js";
 import { skimlinksPublisherId, amazonInfoForCountry } from "./src/config/affiliates.js";
 import { isStripeConfigured } from "./src/routes/tips.js";
 import { cacheMiddleware } from "./src/middleware/cache.js";
-import { adminAuth, adminAuditLogger, requestIdMiddleware } from "./src/middleware/adminAuth.js";
+import { adminAuth, adminAuditLogger } from "./src/middleware/adminAuth.js";
+import {
+  apiRequestLoggingMiddleware,
+  captureException,
+  flushObservability,
+  getProcessMemoryUsage,
+  initObservability,
+  requestIdMiddleware,
+} from "./src/config/observability.js";
 import { getDb, getDbStatus } from "./src/models/database.js";
 import { RSS_SOURCES, YOUTUBE_SOURCES } from "./src/config/sources.js";
-import { assertRedisStartup } from "./src/jobs/redis.js";
+import { assertRedisStartup, getRedisStatus } from "./src/jobs/redis.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,6 +67,7 @@ const PORT = Number.parseInt(process.env.PORT || "", 10) || 3000;
 const app  = express();
 const PROCESS_ROLE = "web";
 
+initObservability({ role: PROCESS_ROLE });
 assertRedisStartup({ role: PROCESS_ROLE });
 
 function isTruthyEnv(value) {
@@ -119,6 +129,7 @@ app.use("/api/tips/webhook", express.raw({ type: "application/json" }));
 app.use("/api/tips/kofi-webhook", express.urlencoded({ extended: false }));
 app.use(express.json({ limit: "1mb" }));
 app.use(requestIdMiddleware);
+app.use(apiRequestLoggingMiddleware({ role: PROCESS_ROLE }));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 500,
@@ -132,12 +143,6 @@ app.use((req, res, next) => {
   if (shouldRedirectHost(host)) {
     return res.redirect(301, `${PRIMARY_SITE_URL}${req.originalUrl}`);
   }
-
-  const t = Date.now();
-  res.on("finish", () => {
-    if (!req.path.includes("health") && !req.path.includes("events"))
-      logger.info(`${req.method} ${req.path} ${res.statusCode} ${Date.now()-t}ms`);
-  });
   next();
 });
 
@@ -174,6 +179,7 @@ app.use("/scoop-ops",       socialRouter);     // /scoop-ops/social-queue — pr
 app.use("/scoop-ops/videos-gen", videoGenRouter); // video generation queue: /queue, /run, /approve/:id, /reject/:id
 app.use("/scoop-ops/newsletter", newsletterOpsRouter); // newsletter ops: /status, /welcome/run, /welcome/test
 app.use("/scoop-ops/queues", queueOpsRouter); // BullMQ / Redis queue diagnostics
+app.use("/scoop-ops/diagnostics", diagnosticsOpsRouter); // prod-safe DB/Redis/process diagnostics
 app.use("/scoop-ops/ri-ops",     riOpsRouter);          // Reality Index live provider/queue diag: /provider
 
 // Health
@@ -196,6 +202,32 @@ app.get("/api/health", (req, res) => {
       used:  Math.floor(process.memoryUsage().heapUsed  / 1024 / 1024) + "MB",
       total: Math.floor(process.memoryUsage().heapTotal / 1024 / 1024) + "MB",
     },
+  });
+});
+
+app.get("/api/healthz", (_req, res) => {
+  res.json({
+    ok: true,
+    status: "alive",
+    processRole: PROCESS_ROLE,
+    uptime: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/api/readyz", async (_req, res) => {
+  const db = getDbStatus();
+  const redis = await getRedisStatus({ connectionName: "readyz" });
+  const ready = db.ok && (!redis.enabled || redis.ok);
+
+  res.status(ready ? 200 : 503).json({
+    ok: ready,
+    status: ready ? "ready" : "degraded",
+    processRole: PROCESS_ROLE,
+    db: { ok: db.ok, type: "sqlite" },
+    redis,
+    uptime: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -300,11 +332,20 @@ if (existsSync(distDir)) {
 // API 404
 app.use((req, res) => res.status(404).json({ success: false, error: `Route ${req.path} not found 🤷` }));
 app.use((err, req, res, next) => {
-  logger.error("Unhandled error", { error: err.message });
+  captureException(err, {
+    role: PROCESS_ROLE,
+    requestId: req.requestId || null,
+    message: "Unhandled Express error",
+    tags: {
+      method: req.method,
+      path: req.originalUrl || req.path,
+      status_code: 500,
+    },
+  });
   res.status(500).json({ success: false, error: "Internal server error" });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   logger.info(`🚀 NewsFlow API (${PROCESS_ROLE}) → http://localhost:${PORT}`);
   logger.info(`📰 RSS sources: ${RSS_SOURCES.length}  |  📺 YouTube channels: ${YOUTUBE_SOURCES.length}`);
   logger.info(`⏰ Refresh: news every 30 min, videos every 60 min`);
@@ -323,5 +364,30 @@ app.listen(PORT, () => {
   }
 });
 
-process.on("SIGTERM", () => { logger.info(`Shutting down ${PROCESS_ROLE} process...`); process.exit(0); });
-process.on("SIGINT",  () => { logger.info(`Shutting down ${PROCESS_ROLE} process...`); process.exit(0); });
+async function shutdown(signal) {
+  logger.info(`Shutting down ${PROCESS_ROLE} process...`, {
+    signal,
+    memory: getProcessMemoryUsage(),
+  });
+  server.close(async () => {
+    await flushObservability();
+    process.exit(0);
+  });
+}
+
+async function exitFatal(kind, error) {
+  captureException(error, {
+    role: PROCESS_ROLE,
+    message: `${PROCESS_ROLE} ${kind}`,
+  });
+  await flushObservability();
+  process.exit(1);
+}
+
+process.on("SIGTERM", () => { shutdown("SIGTERM"); });
+process.on("SIGINT",  () => { shutdown("SIGINT"); });
+process.on("uncaughtException", (error) => { exitFatal("uncaughtException", error); });
+process.on("unhandledRejection", (error) => {
+  const rejectionError = error instanceof Error ? error : new Error(String(error));
+  exitFatal("unhandledRejection", rejectionError);
+});

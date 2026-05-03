@@ -48,6 +48,7 @@ import { runOutcomeResolverCycle } from "../realityIndex/syntheticMarkets/outcom
 import { runBayesianUpdater } from "../realityIndex/intelligence/bayesianUpdater.js";
 import { enqueueSingletonJob, JOB_NAMES, QUEUE_NAMES } from "../jobs/queues.js";
 import { assertRedisAvailable, shouldUseBullMQ } from "../jobs/redis.js";
+import { runDatabaseMaintenance } from "../db/maintenance.js";
 
 let isRunning    = false;
 let isVideoRun   = false;   // YouTube ingestion
@@ -162,6 +163,13 @@ export function startScheduler() {
     logger.info("🧹 Pruning...");
     const n = pruneOldArticles(7);
     logger.info(`🧹 Pruned ${n} records`);
+  });
+  cron.schedule("35 4 * * *", async () => {
+    try {
+      runDatabaseMaintenance();
+    } catch (err) {
+      logger.warn(`database maintenance failed: ${err.message}`);
+    }
   });
 
   // YouTube video metrics sync — runs at 14:00 daily (8h after typical upload

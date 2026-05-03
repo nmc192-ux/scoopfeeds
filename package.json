@@ -11,7 +11,8 @@
     "start:worker": "node backend/src/jobs/workerProcess.js",
     "dev:web": "npm run dev:web --prefix backend",
     "dev:scheduler": "npm run dev:scheduler --prefix backend",
-    "dev:worker": "npm run dev:worker --prefix backend"
+    "dev:worker": "npm run dev:worker --prefix backend",
+    "db:backup": "npm run db:backup --prefix backend"
   },
   "dependencies": {
     "express": "^4.18.2"

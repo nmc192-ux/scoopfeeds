@@ -13,12 +13,16 @@
     "dev:web": "ENABLE_SCHEDULER=false nodemon server.js",
     "dev:scheduler": "nodemon src/jobs/schedulerProcess.js",
     "dev:worker": "nodemon src/jobs/workerProcess.js",
-    "test:admin-auth": "node scripts/test-admin-auth.mjs"
+    "test:admin-auth": "node scripts/test-admin-auth.mjs",
+    "db:backup": "node scripts/db-backup.mjs",
+    "db:migrate": "node src/db/migrate.js"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@mozilla/readability": "^0.6.0",
     "@resvg/resvg-js": "^2.6.2",
+    "@sentry/node": "^10.51.0",
+    "@sentry/profiling-node": "^10.51.0",
     "axios": "^1.6.7",
     "better-sqlite3": "^11.10.0",
     "bullmq": "^5.76.5",
