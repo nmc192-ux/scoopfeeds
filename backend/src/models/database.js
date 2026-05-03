@@ -20,6 +20,10 @@ if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const DB_PATH = path.join(dataDir, "news.db");
 let db;
 
+export function getDbPath() {
+  return DB_PATH;
+}
+
 export function getDb() {
   if (!db) {
     db = new Database(DB_PATH);
@@ -31,6 +35,15 @@ export function getDb() {
     logger.info("Database initialized", { path: DB_PATH });
   }
   return db;
+}
+
+export function getDbStatus() {
+  const database = getDb();
+  database.prepare("SELECT 1 AS ok").get();
+  return {
+    ok: true,
+    path: DB_PATH,
+  };
 }
 
 function initializeSchema(db) {
@@ -112,6 +125,37 @@ function initializeSchema(db) {
       metadata    TEXT DEFAULT '{}',
       created_at  INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS admin_audit_logs (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      method          TEXT NOT NULL,
+      path            TEXT NOT NULL,
+      request_id      TEXT NOT NULL,
+      actor_type      TEXT NOT NULL,
+      ip_hash         TEXT,
+      user_agent_hash TEXT,
+      created_at      INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_logs(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_admin_audit_request ON admin_audit_logs(request_id);
+
+    CREATE TABLE IF NOT EXISTS background_job_runs (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      queue         TEXT NOT NULL,
+      job_name      TEXT NOT NULL,
+      job_id        TEXT,
+      status        TEXT NOT NULL,
+      attempts      INTEGER DEFAULT 0,
+      started_at    INTEGER,
+      finished_at   INTEGER,
+      duration_ms   INTEGER,
+      error_message TEXT,
+      error_stack   TEXT,
+      created_at    INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_background_job_runs_created ON background_job_runs(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_background_job_runs_queue ON background_job_runs(queue, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_background_job_runs_job_id ON background_job_runs(job_id);
 
     CREATE TABLE IF NOT EXISTS subscribers (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -918,6 +962,77 @@ export function trackEvent(eventType, data = {}) {
     INSERT INTO analytics (event_type, article_id, category, ip_hash, user_agent_hash, metadata, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(eventType, data.articleId||null, data.category||null, data.ipHash||null, data.uaHash||null, JSON.stringify(data.metadata||{}), Date.now());
+}
+
+export function insertAdminAuditLog({
+  method,
+  path,
+  requestId,
+  actorType,
+  ipHash = null,
+  userAgentHash = null,
+  createdAt = Date.now(),
+}) {
+  getDb().prepare(`
+    INSERT INTO admin_audit_logs
+      (method, path, request_id, actor_type, ip_hash, user_agent_hash, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(method, path, requestId, actorType, ipHash, userAgentHash, createdAt);
+}
+
+export function insertBackgroundJobRun({
+  queue,
+  jobName,
+  jobId = null,
+  status = "running",
+  attempts = 0,
+  startedAt = null,
+  finishedAt = null,
+  durationMs = null,
+  errorMessage = null,
+  errorStack = null,
+  createdAt = Date.now(),
+}) {
+  const result = getDb().prepare(`
+    INSERT INTO background_job_runs
+      (queue, job_name, job_id, status, attempts, started_at, finished_at, duration_ms, error_message, error_stack, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    queue,
+    jobName,
+    jobId,
+    status,
+    attempts,
+    startedAt,
+    finishedAt,
+    durationMs,
+    errorMessage,
+    errorStack,
+    createdAt,
+  );
+  return result.lastInsertRowid;
+}
+
+export function updateBackgroundJobRun(id, {
+  status,
+  attempts,
+  startedAt,
+  finishedAt,
+  durationMs,
+  errorMessage = null,
+  errorStack = null,
+}) {
+  getDb().prepare(`
+    UPDATE background_job_runs
+    SET status = ?,
+        attempts = ?,
+        started_at = ?,
+        finished_at = ?,
+        duration_ms = ?,
+        error_message = ?,
+        error_stack = ?
+    WHERE id = ?
+  `).run(status, attempts, startedAt, finishedAt, durationMs, errorMessage, errorStack, id);
 }
 
 export function getAnalyticsSummary() {

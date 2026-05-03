@@ -1,9 +1,10 @@
 // Web push subscription endpoints. Public ones (key, subscribe, unsubscribe)
 // are unauthenticated — the subscription's own endpoint URL is the secret.
-// The admin send endpoints sit behind ADMIN_KEY since they fan out to every
-// subscriber.
+// The admin send endpoints are protected by shared bearer-token auth because
+// they fan out to every subscriber.
 
 import { Router } from "express";
+import { adminAuth, adminAuditLogger } from "../middleware/adminAuth.js";
 import {
   upsertPushSubscription,
   deletePushSubscription,
@@ -21,7 +22,6 @@ import { detectCountry } from "../services/geolocation.js";
 import { logger } from "../services/logger.js";
 
 const router = Router();
-const ADMIN_KEY = process.env.ADMIN_KEY || "";
 
 // Initialize on module load so VAPID keys are generated/loaded eagerly. If
 // this throws we fail loudly at boot rather than on first request.
@@ -76,19 +76,13 @@ router.post("/unsubscribe", (req, res) => {
   res.json({ ok: true, removed });
 });
 
-// ── Admin send (gated by ADMIN_KEY in production) ─────────────────────────
+router.use(["/stats", "/broadcast", "/breaking", "/test"], adminAuth, adminAuditLogger);
 
-function requireAdmin(req, res, next) {
-  if (!ADMIN_KEY) return next(); // dev mode: open
-  if (req.query.key === ADMIN_KEY || req.body?.key === ADMIN_KEY) return next();
-  return res.status(404).json({ ok: false, error: "not found" });
-}
-
-router.get("/stats", requireAdmin, (_req, res) => {
+router.get("/stats", (_req, res) => {
   res.json({ ok: true, stats: pushSubscriptionStats() });
 });
 
-router.post("/broadcast", requireAdmin, async (req, res) => {
+router.post("/broadcast", async (req, res) => {
   const { title, body, url, topic, icon } = req.body || {};
   if (!title || !body) return res.status(400).json({ ok: false, error: "title + body required" });
   const payload = {
@@ -111,7 +105,7 @@ router.post("/broadcast", requireAdmin, async (req, res) => {
 // Trigger the breaking-news worker on demand. Pass ?dry=1 to preview the
 // candidate without actually broadcasting — useful when verifying that the
 // dedupe + safety filters are picking the right story.
-router.post("/breaking", requireAdmin, async (req, res) => {
+router.post("/breaking", async (req, res) => {
   const dryRun = req.query.dry === "1" || req.body?.dry === true;
   const opts = {
     dryRun,
@@ -127,7 +121,7 @@ router.post("/breaking", requireAdmin, async (req, res) => {
   }
 });
 
-router.post("/test", requireAdmin, async (req, res) => {
+router.post("/test", async (req, res) => {
   const { endpoint, title, body, url } = req.body || {};
   if (!endpoint) return res.status(400).json({ ok: false, error: "endpoint required" });
   const payload = {

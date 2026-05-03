@@ -1,8 +1,8 @@
 /**
  * /api/videos-gen — video generation job queue admin API.
  *
- * All routes are WAF-protected via the /scoop-ops/* prefix configured in
- * server.js. No external auth beyond the shared OPS_SECRET header.
+ * Admin routes are mounted under /scoop-ops/videos-gen and protected
+ * centrally in server.js. The published video file endpoint remains public.
  *
  * GET  /api/videos-gen/status       — pipeline + queue stats
  * GET  /api/videos-gen/queue        — list jobs (filterable by status)
@@ -44,20 +44,6 @@ import { isFacebookConfigured, postReelToFacebook } from "../services/facebookCl
 import { logger } from "../services/logger.js";
 
 const router = Router();
-
-// ─── Admin guard (shared with social.js + newsletter-ops) ──────────────────
-// Same pattern as the rest of /scoop-ops: opt-in gating via ADMIN_KEY env.
-// When ADMIN_KEY is unset (dev / first boot) the routes are open. When set,
-// every request must include ?key=<value>. The 404 response (vs 401) keeps
-// the URL undiscoverable on the public web.
-const ADMIN_KEY = process.env.ADMIN_KEY || "";
-function requireAdmin(req, res, next) {
-  if (!ADMIN_KEY) return next();
-  if (req.query.key === ADMIN_KEY) return next();
-  res.status(404).type("html").send(
-    `<!doctype html><html><head><title>Not found</title></head><body><h1>404</h1></body></html>`
-  );
-}
 
 // ─── Filesystem paths (mirrored from videoGenerator.js) ─────────────────────
 const __dirname    = path.dirname(fileURLToPath(import.meta.url));
@@ -112,7 +98,7 @@ router.get("/queue", (req, res) => {
 });
 
 // ─── Manually enqueue ────────────────────────────────────────────────────────
-router.post("/enqueue", requireAdmin, (req, res) => {
+router.post("/enqueue", (req, res) => {
   const { articleId } = req.body || {};
   if (!articleId) return res.status(400).json({ error: "articleId required" });
   const article = getArticleById(articleId);
@@ -122,7 +108,7 @@ router.post("/enqueue", requireAdmin, (req, res) => {
 });
 
 // ─── Approve / reject ─────────────────────────────────────────────────────────
-router.post("/approve/:id", requireAdmin, (req, res) => {
+router.post("/approve/:id", (req, res) => {
   const job = getVideoJobById(parseInt(req.params.id));
   if (!job) return res.status(404).json({ error: "job not found" });
   if (!["ready", "review_approved"].includes(job.status)) {
@@ -132,7 +118,7 @@ router.post("/approve/:id", requireAdmin, (req, res) => {
   res.json({ ok: true, jobId: job.id, status: "review_approved" });
 });
 
-router.post("/reject/:id", requireAdmin, (req, res) => {
+router.post("/reject/:id", (req, res) => {
   const job = getVideoJobById(parseInt(req.params.id));
   if (!job) return res.status(404).json({ error: "job not found" });
   rejectVideoJob(job.id);
@@ -159,7 +145,7 @@ router.get("/preview/:id", async (req, res) => {
 // ─── Run batch ───────────────────────────────────────────────────────────────
 // Picks up to `batchSize` queued jobs, renders them, marks ready for review.
 // This is safe to call from a cron (idempotent, serial within request).
-router.post("/run", requireAdmin, async (req, res) => {
+router.post("/run", async (req, res) => {
   if (!isVideoConfigured()) {
     return res.json({ ok: false, reason: "ffmpeg not configured", processed: 0 });
   }
@@ -237,7 +223,7 @@ router.post("/run", requireAdmin, async (req, res) => {
 // requested window — daily Top 5 by default, optionally filtered to a category
 // for "This week in AI / Cars / Pakistan" weekly recaps. Output lands in
 // data/videos/ and the path is returned for manual review.
-router.post("/recap", requireAdmin, async (req, res) => {
+router.post("/recap", async (req, res) => {
   if (!isVideoConfigured()) {
     return res.json({ ok: false, reason: "ffmpeg/fonts not configured" });
   }
@@ -302,7 +288,7 @@ router.post("/recap", requireAdmin, async (req, res) => {
 // Renders a 60s vertical MP4 from a synthesized live-event dossier (4 points
 // from `brief` + a metrics tile). Output lands in data/videos/live-{eventId}-
 // {date}.mp4 and is suitable for direct upload to Shorts/TikTok/Reels.
-router.post("/live-event", requireAdmin, async (req, res) => {
+router.post("/live-event", async (req, res) => {
   if (!isVideoConfigured()) {
     return res.json({ ok: false, reason: "ffmpeg/fonts not configured" });
   }
@@ -352,7 +338,7 @@ router.post("/live-event", requireAdmin, async (req, res) => {
 //
 // POST /scoop-ops/videos-gen/next-batch?size=5
 //   → { ok: true, jobs: [ { jobId, articleId, article: {...} }, ... ] }
-router.post("/next-batch", requireAdmin, express.json({ limit: "8kb" }), (req, res) => {
+router.post("/next-batch", express.json({ limit: "8kb" }), (req, res) => {
   const batchSize = Math.min(parseInt(req.query.size || req.body?.size || "3", 10), 10);
 
   // 1. Look at currently queued jobs.
@@ -410,7 +396,7 @@ router.post("/next-batch", requireAdmin, express.json({ limit: "8kb" }), (req, r
 // POST /scoop-ops/videos-gen/upload?jobId=N&durationSecs=37&hasAudio=false
 //   Content-Type: video/mp4   (or application/octet-stream)
 //   Body: <raw MP4 bytes, max 50 MB>
-router.post("/upload", requireAdmin, mp4Parser, (req, res) => {
+router.post("/upload", mp4Parser, (req, res) => {
   const jobId = parseInt(req.query.jobId, 10);
   if (!jobId) return res.status(400).json({ ok: false, error: "jobId query param required" });
 
@@ -459,7 +445,7 @@ router.post("/upload", requireAdmin, mp4Parser, (req, res) => {
 //   Body: { reason?: string }
 // Used by the GH Actions worker when a render fails — moves the job out of
 // the 'rendering' state so it doesn't block subsequent batch picks.
-router.post("/mark-failed", requireAdmin, express.json({ limit: "8kb" }), (req, res) => {
+router.post("/mark-failed", express.json({ limit: "8kb" }), (req, res) => {
   const jobId = parseInt(req.query.jobId || req.body?.jobId, 10);
   if (!jobId) return res.status(400).json({ ok: false, error: "jobId required" });
   const job = getVideoJobById(jobId);
@@ -481,7 +467,7 @@ router.post("/mark-failed", requireAdmin, express.json({ limit: "8kb" }), (req, 
 // Requires: YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET + YOUTUBE_REFRESH_TOKEN
 // One-time setup: run `node scripts/youtube-auth.mjs` locally to get the
 // refresh token, then set all three in Hostinger env panel.
-router.post("/publish", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
+router.post("/publish", express.json({ limit: "8kb" }), async (req, res) => {
   const ytConfigured  = isYouTubeConfigured();
   const tikConfigured = isTikTokConfigured();
   const igConfigured  = isInstagramConfigured();
@@ -699,9 +685,9 @@ router.post("/publish", requireAdmin, express.json({ limit: "8kb" }), async (req
 // filters. Same logic the scheduler runs on cron (when VIDEO_AUTO_APPROVE=1),
 // but lets ops kick it on demand without waiting for the next tick.
 //
-// POST /scoop-ops/videos-gen/auto-approve?key=<ADMIN_KEY>
+// POST /scoop-ops/videos-gen/auto-approve
 //   { "limit": 5, "minCredibility": 8, "maxAgeHours": 24 }   // all optional
-router.post("/auto-approve", requireAdmin, express.json({ limit: "8kb" }), (req, res) => {
+router.post("/auto-approve", express.json({ limit: "8kb" }), (req, res) => {
   const limit          = parseInt(req.body?.limit          || "5",  10);
   const minCredibility = parseInt(req.body?.minCredibility || "8",  10);
   const maxAgeHours    = parseInt(req.body?.maxAgeHours    || "24", 10);
@@ -714,9 +700,9 @@ router.post("/auto-approve", requireAdmin, express.json({ limit: "8kb" }), (req,
 // first deploy after enabling VIDEO_AUTO_APPROVE — flushes the backlog of
 // `ready` jobs without waiting for the next cron tick (default 23 past hour).
 //
-// POST /scoop-ops/videos-gen/run-publish?key=<ADMIN_KEY>
+// POST /scoop-ops/videos-gen/run-publish
 //   { "approveLimit": 5, "publishLimit": 3, "dryRun": false }   // all optional
-router.post("/run-publish", requireAdmin, express.json({ limit: "8kb" }), async (req, res) => {
+router.post("/run-publish", express.json({ limit: "8kb" }), async (req, res) => {
   const approveLimit = parseInt(req.body?.approveLimit || "5", 10);
   const publishLimit = parseInt(req.body?.publishLimit || "3", 10);
   const dryRun       = Boolean(req.body?.dryRun);
@@ -734,7 +720,7 @@ router.post("/run-publish", requireAdmin, express.json({ limit: "8kb" }), async 
 // GET /scoop-ops/videos-gen/youtube-channel
 //   Returns subscriber count, video count, and channel URL.
 //   Useful for checking if YouTube Partner Program thresholds have been hit.
-router.get("/youtube-channel", requireAdmin, async (_req, res) => {
+router.get("/youtube-channel", async (_req, res) => {
   if (!isYouTubeConfigured()) {
     return res.json({
       ok: false,
@@ -759,7 +745,7 @@ router.get("/youtube-channel", requireAdmin, async (_req, res) => {
 // ffmpeg is available) and uploads them here. The server writes the MP4 to
 // data/videos/{slug}.mp4, inserts a video_job row as 'ready', and returns the
 // job ID for the admin review UI.
-router.post("/upload-recap", requireAdmin, mp4Parser, (req, res) => {
+router.post("/upload-recap", mp4Parser, (req, res) => {
   const slug = String(req.query.slug || "").replace(/[^a-z0-9_-]/gi, "_").slice(0, 80);
   if (!slug) return res.status(400).json({ ok: false, error: "slug query param required" });
 
@@ -821,7 +807,7 @@ router.post("/upload-recap", requireAdmin, mp4Parser, (req, res) => {
 // Resets jobs from 'failed' → 'queued' so the GitHub Actions worker can pick
 // them up on the next render run.  Safe to call repeatedly — only affects
 // failed jobs, never touches ready/published/rendering jobs.
-router.post("/reset-failed", requireAdmin, express.json({ limit: "8kb" }), (req, res) => {
+router.post("/reset-failed", express.json({ limit: "8kb" }), (req, res) => {
   const resetAll = Boolean(req.body?.all);
   const db = getDb();
 

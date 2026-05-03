@@ -46,6 +46,8 @@ import { runQuestionExtractor } from "../realityIndex/syntheticMarkets/questionE
 import { runAiAgentsCycle } from "../realityIndex/syntheticMarkets/aiAgents.js";
 import { runOutcomeResolverCycle } from "../realityIndex/syntheticMarkets/outcomeResolver.js";
 import { runBayesianUpdater } from "../realityIndex/intelligence/bayesianUpdater.js";
+import { enqueueSingletonJob, JOB_NAMES, QUEUE_NAMES } from "../jobs/queues.js";
+import { assertRedisAvailable, shouldUseBullMQ } from "../jobs/redis.js";
 
 let isRunning    = false;
 let isVideoRun   = false;   // YouTube ingestion
@@ -70,19 +72,60 @@ let lastAnalysisRun = null;
 let lastPolymarketRun = null;
 let lastMatcherRun    = null;
 let nextRun         = null;
+let schedulerStarted = false;
+
+function bullmqEnabledForScheduler() {
+  if (!shouldUseBullMQ()) return false;
+  return assertRedisAvailable({ role: "scheduler" });
+}
+
+async function dispatchIngestionCycle() {
+  if (!bullmqEnabledForScheduler()) {
+    return runIngestionCycle();
+  }
+  return enqueueSingletonJob(QUEUE_NAMES.ingestion, JOB_NAMES.newsIngestAll);
+}
+
+async function dispatchVideoCycle() {
+  if (!bullmqEnabledForScheduler()) {
+    return runVideoCycle();
+  }
+  return enqueueSingletonJob(QUEUE_NAMES.video, JOB_NAMES.videosIngestAll);
+}
+
+async function dispatchEnrichCycle(options = { batchSize: 40, concurrency: 4 }) {
+  if (!bullmqEnabledForScheduler()) {
+    return runEnrichCycle(options);
+  }
+  return enqueueSingletonJob(QUEUE_NAMES.enrichment, JOB_NAMES.articlesEnrichBatch, options);
+}
+
+function runDispatch(task, label) {
+  Promise.resolve()
+    .then(task)
+    .catch((error) => {
+      logger.error(`❌ ${label} dispatch failed`, { error: error.message });
+    });
+}
 
 export function startScheduler() {
+  if (schedulerStarted) {
+    logger.warn("⏰ Scheduler already started in this process");
+    return false;
+  }
+
+  schedulerStarted = true;
   logger.info("⏰ Scheduler initialized — 30 min news, 60 min video, 15 min enrich, 60 min events, 2 AM video gen");
-  runIngestionCycle();
-  runVideoCycle();
-  setTimeout(runEnrichCycle, 60_000);
+  runDispatch(() => dispatchIngestionCycle(), "news ingestion");
+  runDispatch(() => dispatchVideoCycle(), "video ingestion");
+  setTimeout(() => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"), 60_000);
   // Delay first events pass — it needs some ingested articles to work with.
   setTimeout(runEventsCycle, 90_000);
   // Delay first analysis pass — 5 min after startup, needs ingested articles.
   setTimeout(runAnalysisCycle, 5 * 60 * 1000);
-  cron.schedule("*/30 * * * *", () => runIngestionCycle());
-  cron.schedule("0 * * * *",    () => runVideoCycle());
-  cron.schedule("*/15 * * * *", () => runEnrichCycle());
+  cron.schedule("*/30 * * * *", () => runDispatch(() => dispatchIngestionCycle(), "news ingestion"));
+  cron.schedule("0 * * * *",    () => runDispatch(() => dispatchVideoCycle(), "video ingestion"));
+  cron.schedule("*/15 * * * *", () => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"));
   cron.schedule("0 * * * *",    () => runEventsCycle());
   cron.schedule("0 */2 * * *",  () => runAnalysisCycle()); // every 2 hours
   // ─── Video generation crons (in-process) ───────────────────────────────
@@ -208,6 +251,7 @@ export function startScheduler() {
   }
 
   updateNextRun();
+  return true;
 }
 
 // ─── Reality Index cycles ──────────────────────────────────────────────────
@@ -623,12 +667,12 @@ async function runAnalysisCycle() {
   }
 }
 
-async function runEnrichCycle() {
+export async function runEnrichCycle({ batchSize = 40, concurrency = 4 } = {}) {
   if (isEnrichRun) return;
   isEnrichRun = true;
   lastEnrichRun = new Date().toISOString();
   try {
-    await enrichBatch({ batchSize: 40, concurrency: 4 });
+    await enrichBatch({ batchSize, concurrency });
   } catch (err) {
     logger.error("❌ Enrich failed", { error: err.message });
   } finally {
@@ -636,7 +680,7 @@ async function runEnrichCycle() {
   }
 }
 
-async function runIngestionCycle() {
+export async function runIngestionCycle() {
   if (isRunning) { logger.warn("⏸️ News already running"); return; }
   isRunning = true;
   lastRun   = new Date().toISOString();
@@ -669,7 +713,7 @@ async function runIngestionCycle() {
   }
 }
 
-async function runVideoCycle() {
+export async function runVideoCycle() {
   if (isVideoRun) { logger.warn("⏸️ Videos already running"); return; }
   isVideoRun   = true;
   lastVideoRun = new Date().toISOString();
@@ -820,6 +864,7 @@ function updateNextRun() {
 
 export function getSchedulerStatus() {
   return {
+    started: schedulerStarted,
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
     isPublishRun, isPolymarketRun, isMatcherRun,
     isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isAcledRun, isFredRun, isWorldBankRun, isSportsdbRun, isTmdbRun, isSyntheticExtractRun, isAiAgentsRun, isOutcomeResolverRun, isBayesianRun,

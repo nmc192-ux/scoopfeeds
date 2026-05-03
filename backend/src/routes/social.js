@@ -1,6 +1,6 @@
 // Admin preview for the auto-generated social captions. Not linked from the
-// public site — access by typing the URL directly. Optionally gated by the
-// ADMIN_KEY env var: if set, requires `?key=<value>` on each request.
+// public site — access by typing the URL directly. Auth is enforced centrally
+// for /scoop-ops in server.js.
 //
 // Two endpoints:
 //   GET /admin/social-queue.json  — machine-readable, for future cron/API posting
@@ -16,16 +16,6 @@ import { updateStoredFbToken } from "../services/facebookClient.js";
 const SITE_URL = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 
 const router = Router();
-
-const ADMIN_KEY = process.env.ADMIN_KEY || "";
-
-function requireAdmin(req, res, next) {
-  if (!ADMIN_KEY) return next();
-  if (req.query.key === ADMIN_KEY) return next();
-  res.status(404).type("html").send(
-    `<!doctype html><html><head><title>Not found</title></head><body><h1>404</h1></body></html>`
-  );
-}
 
 // Pick the day's top N articles — same logic the frontend uses for the
 // featured rail, but capped at 12 so the admin page stays scannable.
@@ -52,7 +42,7 @@ function pickArticles(limit = 12) {
   `).all(cutoff, limit);
 }
 
-router.get("/social-queue.json", requireAdmin, (_req, res) => {
+router.get("/social-queue.json", (_req, res) => {
   const articles = pickArticles(12);
   const composed = articles.map((a) => {
     try { return composeAllPlatforms(a); } catch { return null; }
@@ -60,7 +50,7 @@ router.get("/social-queue.json", requireAdmin, (_req, res) => {
   res.json({ generatedAt: new Date().toISOString(), count: composed.length, items: composed });
 });
 
-router.get("/social-queue", requireAdmin, (_req, res) => {
+router.get("/social-queue", (_req, res) => {
   const articles = pickArticles(12);
   const composed = articles.map((a) => {
     try { return composeAllPlatforms(a); } catch { return null; }
@@ -73,7 +63,7 @@ router.get("/social-queue", requireAdmin, (_req, res) => {
 // JSON middleware needed for POST bodies; the queue routes above are GETs.
 const jsonParser = express.json({ limit: "8kb" });
 
-router.get("/auto-status", requireAdmin, (_req, res) => {
+router.get("/auto-status", (_req, res) => {
   res.json({
     ok: true,
     enabled: listEnabledPlatforms(),
@@ -100,7 +90,7 @@ router.get("/auto-status", requireAdmin, (_req, res) => {
 
 // GET /scoop-ops/auto-errors — recent failed social posts with error messages.
 // Used to diagnose why a platform stopped posting (token expiry, API error, etc).
-router.get("/auto-errors", requireAdmin, async (_req, res) => {
+router.get("/auto-errors", async (_req, res) => {
   try {
     const db = getDb();
     const rows = db.prepare(`
@@ -161,7 +151,7 @@ router.get("/auto-errors", requireAdmin, async (_req, res) => {
 });
 
 // POST /admin/auto-post?platform=bluesky&dry=1
-router.post("/auto-post", requireAdmin, jsonParser, async (req, res) => {
+router.post("/auto-post", jsonParser, async (req, res) => {
   const platform = (req.query.platform || req.body?.platform || "").toString();
   const dryRun = req.query.dry === "1" || req.body?.dry === true;
   try {
@@ -188,7 +178,7 @@ router.post("/auto-post", requireAdmin, jsonParser, async (req, res) => {
 //                    known to need a long clear period).
 //   failCount      — seed the new cooldown's fail counter so the
 //                    exponential backoff picks the right step.
-router.get("/bluesky-reset", requireAdmin, async (req, res) => {
+router.get("/bluesky-reset", async (req, res) => {
   try {
     const fs = await import("fs");
     const path = await import("path");
@@ -241,7 +231,7 @@ router.get("/bluesky-reset", requireAdmin, async (req, res) => {
 // GET /scoop-ops/bluesky-diag
 // Shows the state of the persisted session and cooldown files so we can
 // debug the "session not persisting → repeated createSession → 429" loop.
-router.get("/bluesky-diag", requireAdmin, async (_req, res) => {
+router.get("/bluesky-diag", async (_req, res) => {
   const path = await import("path");
   const fs   = await import("fs");
   const url  = await import("url");
@@ -306,7 +296,7 @@ router.get("/bluesky-diag", requireAdmin, async (_req, res) => {
 //
 // Returns the IG User ID (and handle) ready to be pasted into Hostinger
 // as INSTAGRAM_USER_ID. Also shows whether INSTAGRAM_USER_ID is already set.
-router.get("/ig-discover", requireAdmin, async (req, res) => {
+router.get("/ig-discover", async (req, res) => {
   const pageId    = (process.env.FACEBOOK_PAGE_ID    || "").trim();
   const pageToken = (process.env.FACEBOOK_PAGE_TOKEN || "").trim();
   const currentId = (process.env.INSTAGRAM_USER_ID   || "").trim();
@@ -366,7 +356,7 @@ router.get("/ig-discover", requireAdmin, async (req, res) => {
 });
 
 // ── Facebook token refresh ────────────────────────────────────────────────
-// GET /scoop-ops/refresh-fb-token?key=ADMIN_KEY&user_token=SHORT_LIVED_TOKEN
+// GET /scoop-ops/refresh-fb-token?user_token=SHORT_LIVED_TOKEN
 //
 // Exchanges a short-lived Graph API user token for a long-lived one (60 days),
 // then fetches the Page access token derived from it. A page token from a
@@ -379,9 +369,11 @@ router.get("/ig-discover", requireAdmin, async (req, res) => {
 // after clicking "Generate Access Token" with pages_manage_posts +
 // publish_to_groups + instagram_basic + instagram_content_publish permissions.
 //   const t = document.querySelector('input').value; // the user token
-//   fetch(`https://scoopfeeds.com/scoop-ops/refresh-fb-token?key=ADMIN_KEY&user_token=${t}`)
+//   fetch("https://scoopfeeds.com/scoop-ops/refresh-fb-token?user_token=" + t, {
+//     headers: { Authorization: "Bearer <ADMIN_TOKEN>" },
+//   })
 //     .then(r=>r.json()).then(console.log);
-router.get("/refresh-fb-token", requireAdmin, async (req, res) => {
+router.get("/refresh-fb-token", async (req, res) => {
   // Accept either plain user_token or hex_user_token (hex-encoded to survive browser security filters).
   let userToken = (req.query.user_token || "").trim();
   if (!userToken && req.query.hex_user_token) {
@@ -440,7 +432,7 @@ router.get("/refresh-fb-token", requireAdmin, async (req, res) => {
 });
 
 // ── Bluesky session bootstrap ─────────────────────────────────────────────
-// GET /scoop-ops/set-bluesky-session?key=ADMIN&hex_did=...&hex_access=...&hex_refresh=...
+// GET /scoop-ops/set-bluesky-session?hex_did=...&hex_access=...&hex_refresh=...
 //
 // Bypasses createSession (rate-limited) by injecting valid tokens extracted
 // from an already-authenticated Bluesky web-app session. Tokens must be
@@ -449,9 +441,9 @@ router.get("/refresh-fb-token", requireAdmin, async (req, res) => {
 // Usage (run in the bsky.app browser tab):
 //   const s = JSON.parse(localStorage.BSKY_STORAGE)?.session?.accounts?.[0] || {};
 //   const hex = t => Array.from(t).map(c=>c.charCodeAt(0).toString(16).padStart(2,'0')).join('');
-//   window.location.href = `https://scoopfeeds.com/scoop-ops/set-bluesky-session?key=ADMIN_KEY
-//     &hex_did=${hex(s.did)}&hex_access=${hex(s.accessJwt)}&hex_refresh=${hex(s.refreshJwt)}&hex_handle=${hex(s.handle)}`;
-router.get("/set-bluesky-session", requireAdmin, async (req, res) => {
+//   window.location.href = `https://scoopfeeds.com/scoop-ops/set-bluesky-session
+//     ?hex_did=${hex(s.did)}&hex_access=${hex(s.accessJwt)}&hex_refresh=${hex(s.refreshJwt)}&hex_handle=${hex(s.handle)}`;
+router.get("/set-bluesky-session", async (req, res) => {
   const { existsSync, mkdirSync, writeFileSync } = await import("fs");
   const path = await import("path");
   const persistDir = process.env.SCOOP_PERSISTENT_DATA_DIR
@@ -487,7 +479,7 @@ router.get("/set-bluesky-session", requireAdmin, async (req, res) => {
 // GET /scoop-ops/attribution  — per-article stats: social posts, video job,
 //   analytics events (views/saves/shares last 7d), meter opens, credibility.
 //   Helps understand which article types/topics drive the most engagement.
-router.get("/attribution", requireAdmin, (_req, res) => {
+router.get("/attribution", (_req, res) => {
   const db = getDb();
 
   // Top 60 articles from the last 7 days

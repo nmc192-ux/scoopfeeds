@@ -21,17 +21,7 @@ import { logger } from "../services/logger.js";
 
 const router = Router();
 
-// Same admin guard pattern as social.js.
-const ADMIN_KEY = process.env.ADMIN_KEY || "";
-function requireAdmin(req, res, next) {
-  if (!ADMIN_KEY) return next();
-  if (req.query.key === ADMIN_KEY) return next();
-  res.status(404).type("html").send(
-    `<!doctype html><html><head><title>Not found</title></head><body><h1>404</h1></body></html>`
-  );
-}
-
-router.get("/status", requireAdmin, (_req, res) => {
+router.get("/status", (_req, res) => {
   const db = getDb();
   const t  = getTransport();
 
@@ -90,7 +80,7 @@ router.get("/status", requireAdmin, (_req, res) => {
 });
 
 // Manually run the welcome cycle once.
-router.post("/welcome/run", requireAdmin, async (req, res) => {
+router.post("/welcome/run", async (req, res) => {
   const maxPerStage = Math.min(Number(req.body?.maxPerStage) || 50, 500);
   try {
     const counts = await runWelcomeSequenceCycle({ maxPerStage });
@@ -103,7 +93,7 @@ router.post("/welcome/run", requireAdmin, async (req, res) => {
 
 // Send a test welcome email to an arbitrary address (does NOT subscribe them).
 // Useful as the first sanity-check after wiring up SMTP env vars.
-router.post("/welcome/test", requireAdmin, async (req, res) => {
+router.post("/welcome/test", async (req, res) => {
   const email = String(req.body?.email || "").trim();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ ok: false, error: "Provide a valid `email` in the body." });

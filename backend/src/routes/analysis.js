@@ -17,6 +17,7 @@
  */
 
 import express from "express";
+import { adminAuth, adminAuditLogger } from "../middleware/adminAuth.js";
 import {
   listStoryClusters,
   getStoryCluster,
@@ -31,7 +32,6 @@ import {
 import { logger } from "../services/logger.js";
 
 const router   = express.Router();
-const ADMIN_KEY = process.env.ADMIN_KEY || "";
 
 // GET /api/analysis/stories
 router.get("/stories", (req, res) => {
@@ -104,10 +104,7 @@ router.get("/explained/:slug", (req, res) => {
 });
 
 // POST /api/analysis/explained/refresh  — admin-only, fire-and-forget
-router.post("/explained/refresh", (req, res) => {
-  if (ADMIN_KEY && req.headers["x-admin-key"] !== ADMIN_KEY) {
-    return res.status(403).json({ success: false, error: "Forbidden" });
-  }
+router.post("/explained/refresh", adminAuth, adminAuditLogger, (req, res) => {
   refreshAnalysis().catch(err =>
     logger.error("Manual analysis refresh failed", { error: err.message })
   );

@@ -1,3 +1,4 @@
+import "./src/config/env.js";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -5,7 +6,7 @@ import compression from "compression";
 import rateLimit from "express-rate-limit";
 import path from "path";
 import { fileURLToPath } from "url";
-import { existsSync, readFileSync } from "fs";
+import { existsSync } from "fs";
 import { logger } from "./src/services/logger.js";
 import { startScheduler, getSchedulerStatus } from "./src/services/scheduler.js";
 import newsRouter      from "./src/routes/news.js";
@@ -28,6 +29,7 @@ import authRouter        from "./src/routes/auth.js";
 import tipsRouter        from "./src/routes/tips.js";
 import videoGenRouter    from "./src/routes/videos-gen.js";
 import newsletterOpsRouter from "./src/routes/newsletter-ops.js";
+import queueOpsRouter    from "./src/routes/queue-ops.js";
 import meterRouter       from "./src/routes/meter.js";
 import analysisRouter    from "./src/routes/analysis.js";
 import predictionsRouter from "./src/routes/predictions.js";
@@ -45,29 +47,27 @@ import { detectCountry } from "./src/services/geolocation.js";
 import { skimlinksPublisherId, amazonInfoForCountry } from "./src/config/affiliates.js";
 import { isStripeConfigured } from "./src/routes/tips.js";
 import { cacheMiddleware } from "./src/middleware/cache.js";
-import { getDb } from "./src/models/database.js";
+import { adminAuth, adminAuditLogger, requestIdMiddleware } from "./src/middleware/adminAuth.js";
+import { getDb, getDbStatus } from "./src/models/database.js";
 import { RSS_SOURCES, YOUTUBE_SOURCES } from "./src/config/sources.js";
+import { assertRedisStartup } from "./src/jobs/redis.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// ── Load backend/.env into process.env (won't override vars already set) ──
-{
-  const envFile = path.join(__dirname, ".env");
-  if (existsSync(envFile)) {
-    for (const line of readFileSync(envFile, "utf8").split("\n")) {
-      const t = line.trim();
-      if (!t || t.startsWith("#")) continue;
-      const eq = t.indexOf("=");
-      if (eq < 1) continue;
-      const key = t.slice(0, eq).trim();
-      const val = t.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-      if (key && !(key in process.env)) process.env[key] = val;
-    }
-  }
-}
-
 const PORT = Number.parseInt(process.env.PORT || "", 10) || 3000;
 const app  = express();
+const PROCESS_ROLE = "web";
+
+assertRedisStartup({ role: PROCESS_ROLE });
+
+function isTruthyEnv(value) {
+  return ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
+}
+
+function shouldStartEmbeddedScheduler() {
+  return isTruthyEnv(process.env.ENABLE_SCHEDULER);
+}
+
 function normalizeSiteUrl(input, fallback) {
   const raw = String(input || fallback).trim().replace(/\/+$/, "");
   const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
@@ -111,13 +111,14 @@ app.use(cors({
   ].join(","))
     .split(",").map(o => o.trim()),
   methods: ["GET","POST"],
-  allowedHeaders: ["Content-Type"],
+  allowedHeaders: ["Authorization", "Content-Type", "X-Request-Id"],
 }));
 // Stripe webhook needs raw body for signature verification — must be before express.json().
 app.use("/api/tips/webhook", express.raw({ type: "application/json" }));
 // Ko-fi webhook sends application/x-www-form-urlencoded with a `data` JSON field.
 app.use("/api/tips/kofi-webhook", express.urlencoded({ extended: false }));
 app.use(express.json({ limit: "1mb" }));
+app.use(requestIdMiddleware);
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 500,
@@ -168,19 +169,26 @@ app.use("/embed",          embedRouter);                                 // Phas
 app.use("/api/macro",      cacheMiddleware("medium"), macroRouter);     // Phase 5: macro indicators (FRED today; WB/IMF later)
 app.use("/api/synthetic-markets", syntheticMarketsRouter);              // Phase 6 foundation: x*y=k AMM markets (no caching — trades mutate)
 app.use("/api/v1",         cacheMiddleware("medium"), v1Router);        // Phase 7: public read-only API, key-authed + per-key rate-limited
+app.use("/scoop-ops",      adminAuth, adminAuditLogger);
 app.use("/scoop-ops",       socialRouter);     // /scoop-ops/social-queue — preview auto-generated social captions (renamed from /admin to bypass host WAF)
 app.use("/scoop-ops/videos-gen", videoGenRouter); // video generation queue: /queue, /run, /approve/:id, /reject/:id
 app.use("/scoop-ops/newsletter", newsletterOpsRouter); // newsletter ops: /status, /welcome/run, /welcome/test
+app.use("/scoop-ops/queues", queueOpsRouter); // BullMQ / Redis queue diagnostics
 app.use("/scoop-ops/ri-ops",     riOpsRouter);          // Reality Index live provider/queue diag: /provider
 
 // Health
 app.get("/api/health", (req, res) => {
   const scheduler = getSchedulerStatus();
   const db = getDb();
+  const dbStatus = getDbStatus();
+  const embeddedSchedulerEnabled = shouldStartEmbeddedScheduler();
   res.json({
     status: "ok",
+    processRole: PROCESS_ROLE,
+    schedulerEnabled: embeddedSchedulerEnabled,
     uptime: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
+    db: dbStatus,
     articles: db.prepare("SELECT COUNT(*) as n FROM articles").get().n,
     videos:   db.prepare("SELECT COUNT(*) as n FROM videos").get().n,
     scheduler,
@@ -297,7 +305,7 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  logger.info(`🚀 NewsFlow API → http://localhost:${PORT}`);
+  logger.info(`🚀 NewsFlow API (${PROCESS_ROLE}) → http://localhost:${PORT}`);
   logger.info(`📰 RSS sources: ${RSS_SOURCES.length}  |  📺 YouTube channels: ${YOUTUBE_SOURCES.length}`);
   logger.info(`⏰ Refresh: news every 30 min, videos every 60 min`);
 
@@ -306,12 +314,14 @@ app.listen(PORT, () => {
   try { initRealityIndex(getDb()); }
   catch (err) { logger.warn(`Reality Index init failed: ${err.message}`); }
 
-  if (String(process.env.ENABLE_SCHEDULER ?? "true").toLowerCase() !== "false") {
+  logger.info("⏸️ Embedded scheduler default is OFF for web processes");
+  if (shouldStartEmbeddedScheduler()) {
+    logger.warn("⚠️ Embedded scheduler enabled inside web process via ENABLE_SCHEDULER");
     startScheduler();
   } else {
-    logger.info("⏸️ Scheduler disabled via ENABLE_SCHEDULER=false");
+    logger.info("⏸️ Scheduler not started in web process (run start:scheduler for the recommended setup)");
   }
 });
 
-process.on("SIGTERM", () => { logger.info("Shutting down..."); process.exit(0); });
-process.on("SIGINT",  () => { logger.info("Shutting down..."); process.exit(0); });
+process.on("SIGTERM", () => { logger.info(`Shutting down ${PROCESS_ROLE} process...`); process.exit(0); });
+process.on("SIGINT",  () => { logger.info(`Shutting down ${PROCESS_ROLE} process...`); process.exit(0); });
