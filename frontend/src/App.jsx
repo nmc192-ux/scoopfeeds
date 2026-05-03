@@ -54,6 +54,7 @@ import MacroPage            from "./pages/MacroPage";
 import SyntheticMarketsPage from "./pages/SyntheticMarketsPage";
 import SyntheticMarketPage  from "./pages/SyntheticMarketPage";
 import LeaderboardPage      from "./pages/LeaderboardPage";
+import SyntheticReviewPage  from "./pages/SyntheticReviewPage";
 import MobileBottomBar      from "./components/layout/MobileBottomBar";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
@@ -172,6 +173,7 @@ export default function App() {
           <Route path="/synthetic"            element={<SyntheticMarketsPage />} />
           <Route path="/synthetic/:id"        element={<SyntheticMarketPage />} />
           <Route path="/leaderboard"          element={<LeaderboardPage />} />
+          <Route path="/scoop-ops/synthetic"  element={<SyntheticReviewPage />} />
           <Route path="*"                    element={<NotFound />} />
         </Routes>
       </main>

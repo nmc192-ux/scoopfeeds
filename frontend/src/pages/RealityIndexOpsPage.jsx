@@ -150,7 +150,7 @@ export default function RealityIndexOpsPage() {
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
       {/* Header */}
-      <header className="flex items-start justify-between gap-3 mb-6">
+      <header className="flex items-start justify-between gap-3 mb-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Activity size={18} className="text-[var(--color-accent)]" />
@@ -167,6 +167,12 @@ export default function RealityIndexOpsPage() {
           <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
         </button>
       </header>
+
+      {/* Admin nav strip */}
+      <div className="flex flex-wrap gap-2 mb-5 text-xs">
+        <a href="/scoop-ops/briefs"    className="px-3 py-1 rounded-full border border-[var(--color-border)] hover:border-[var(--color-accent)]">Briefs review →</a>
+        <a href="/scoop-ops/synthetic" className="px-3 py-1 rounded-full border border-[var(--color-border)] hover:border-[var(--color-accent)]">Synthetic markets →</a>
+      </div>
 
       {/* Provider line */}
       <Card title="Provider" icon={Zap} className="mb-5">
