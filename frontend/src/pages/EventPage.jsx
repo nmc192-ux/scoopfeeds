@@ -30,7 +30,6 @@ import EventTimeline from "../components/events/EventTimeline";
 import EventActorPanel from "../components/events/EventActorPanel";
 import ProbabilityBar  from "../components/predictions/ProbabilityBar";
 import RealityGauge    from "../components/predictions/RealityGauge";
-import TruthGapBadge   from "../components/predictions/TruthGapBadge";
 import SentimentSmallMultiples from "../components/predictions/SentimentSmallMultiples";
 
 function SectionHeader({ icon: Icon, label }) {
