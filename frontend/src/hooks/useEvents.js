@@ -98,3 +98,32 @@ export function useEventPerspectives(slug) {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+export function useEventSentiment(slug, { sinceMs, source } = {}) {
+  return useQuery({
+    queryKey: ["event-sentiment", slug, { sinceMs, source }],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (sinceMs) params.set("sinceMs", String(sinceMs));
+      if (source)  params.set("source", source);
+      const { data } = await api.get(`/events/${slug}/sentiment?${params}`);
+      return data;
+    },
+    enabled:         !!slug,
+    staleTime:       3 * 60 * 1000,
+    refetchInterval: 10 * 60 * 1000,
+  });
+}
+
+export function useEventRealityIndex(slug, { history = false } = {}) {
+  return useQuery({
+    queryKey: ["event-reality-index", slug, { history }],
+    queryFn: async () => {
+      const { data } = await api.get(`/events/${slug}/reality-index?history=${history}`);
+      return data;
+    },
+    enabled:         !!slug,
+    staleTime:       3 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  });
+}

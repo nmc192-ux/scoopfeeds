@@ -5,6 +5,7 @@
 
 import { Activity, Clock, FileText, TrendingUp } from "lucide-react";
 import ProbabilityBar from "../predictions/ProbabilityBar";
+import TruthGapBadge  from "../predictions/TruthGapBadge";
 import { COPY } from "../../lib/copyGuide";
 
 function relativeTime(ms) {
@@ -30,7 +31,7 @@ function SeverityBar({ value = 0 }) {
   );
 }
 
-export default function EventHero({ event, markets = [] }) {
+export default function EventHero({ event, markets = [], truthGap }) {
   const {
     title, category, severity = 0, summary,
     article_count = 0, market_count = 0, last_activity_at,
@@ -59,6 +60,9 @@ export default function EventHero({ event, markets = [] }) {
               <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
               LIVE
             </span>
+          )}
+          {Number.isFinite(truthGap) && Math.abs(truthGap) > 0.15 && (
+            <TruthGapBadge gap={truthGap} size="sm" />
           )}
         </div>
 

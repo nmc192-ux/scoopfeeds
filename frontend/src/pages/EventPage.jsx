@@ -3,15 +3,18 @@
  *
  * Sections:
  *  1. EventHero (title, severity, top market probability)
- *  2. Timeline (chronological articles + market moves)
- *  3. Key Actors
- *  4. Bound Markets
- *  5. All Articles
+ *  2. Reality Index gauge (4-component composite + truth gap)         [Phase 3]
+ *  3. Sentiment small-multiples (per-source polarity time-series)     [Phase 3]
+ *  4. Timeline (chronological articles + market moves)
+ *  5. Key Actors
+ *  6. Bound Markets
+ *  7. Perspectives (multi-outlet comparison)
+ *  8. All Articles
  */
 
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ChevronLeft, Activity, Users, Newspaper, Clock, Layers } from "lucide-react";
+import { ChevronLeft, Activity, Users, Newspaper, Clock, Layers, BarChart3, MessageCircle } from "lucide-react";
 import {
   useEvent,
   useEventTimeline,
@@ -19,11 +22,16 @@ import {
   useEventActors,
   useEventArticles,
   useEventPerspectives,
+  useEventSentiment,
+  useEventRealityIndex,
 } from "../hooks/useEvents";
 import EventHero     from "../components/events/EventHero";
 import EventTimeline from "../components/events/EventTimeline";
 import EventActorPanel from "../components/events/EventActorPanel";
 import ProbabilityBar  from "../components/predictions/ProbabilityBar";
+import RealityGauge    from "../components/predictions/RealityGauge";
+import TruthGapBadge   from "../components/predictions/TruthGapBadge";
+import SentimentSmallMultiples from "../components/predictions/SentimentSmallMultiples";
 
 function SectionHeader({ icon: Icon, label }) {
   return (
@@ -111,12 +119,15 @@ export default function EventPage() {
   const { data: actData, isLoading: loadingActors }    = useEventActors(slug);
   const { data: artData, isLoading: loadingArticles }  = useEventArticles(slug, { limit: 30 });
   const { data: pvData,  isLoading: loadingPerspectives } = useEventPerspectives(slug);
+  const { data: riData,  isLoading: loadingRI }        = useEventRealityIndex(slug);
+  const { data: sentData, isLoading: loadingSentiment } = useEventSentiment(slug);
 
   const timeline     = tlData?.timeline     ?? [];
   const markets      = mkData?.markets      ?? [];
   const actors       = actData?.actors      ?? [];
   const articles     = artData?.articles    ?? [];
   const perspectives = pvData?.perspectives ?? [];
+  const riSnapshot   = riData?.latest                 ?? null;
 
   if (loadingEvent) {
     return (
@@ -148,7 +159,27 @@ export default function EventPage() {
       </Link>
 
       {/* Hero */}
-      <EventHero event={event} markets={markets} />
+      <EventHero event={event} markets={markets} truthGap={riSnapshot?.truth_gap} />
+
+      {/* Reality Index gauge */}
+      {(riSnapshot || loadingRI) && (
+        <section className="mb-8">
+          <SectionHeader icon={BarChart3} label="Reality Index" />
+          {loadingRI ? (
+            <div className="h-44 rounded-xl bg-[var(--color-surface-2)] animate-pulse" />
+          ) : (
+            <RealityGauge snapshot={riSnapshot} />
+          )}
+        </section>
+      )}
+
+      {/* Sentiment small-multiples */}
+      {((sentData?.latest?.length ?? 0) > 0 || loadingSentiment) && (
+        <section className="mb-8">
+          <SectionHeader icon={MessageCircle} label="Sentiment streams" />
+          <SentimentSmallMultiples sentiment={sentData} isLoading={loadingSentiment} />
+        </section>
+      )}
 
       {/* Timeline */}
       <section className="mb-8">
