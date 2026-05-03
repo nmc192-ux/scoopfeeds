@@ -40,6 +40,7 @@ import { syncNoaaCycle } from "../realityIndex/ingest/geo/noaaAlertsFetcher.js";
 import { syncFredCycle } from "../realityIndex/ingest/economic/fredFetcher.js";
 import { runQuestionExtractor } from "../realityIndex/syntheticMarkets/questionExtractor.js";
 import { runAiAgentsCycle } from "../realityIndex/syntheticMarkets/aiAgents.js";
+import { runBayesianUpdater } from "../realityIndex/intelligence/bayesianUpdater.js";
 
 let isRunning    = false;
 let isVideoRun   = false;   // YouTube ingestion
@@ -170,6 +171,9 @@ export function startScheduler() {
     cron.schedule("47 */6 * * *",       () => runSyntheticExtractCycle());    // every 6h, +30m offset from FRED
     // Phase 6 — AI trader agents (skeptic/optimist/contrarian) keep markets lively.
     cron.schedule("23 * * * *",         () => runAiAgentsCronCycle());        // every 1h
+    // Phase 3 leftover — bayesianUpdater attributes market moves to the article
+    // most likely to have caused them. Runs hourly, +29m offset.
+    cron.schedule("29 * * * *",         () => runBayesianUpdaterCycle());     // every 1h
 
 
 
@@ -380,6 +384,23 @@ async function runFredCycle() {
 let isAiAgentsRun = false;
 let lastAiAgentsRun = null;
 let lastAiAgentsResult = null;
+let isBayesianRun = false;
+let lastBayesianRun = null;
+let lastBayesianResult = null;
+async function runBayesianUpdaterCycle() {
+  if (isBayesianRun) { logger.warn("⏸️ Bayesian updater already running"); return null; }
+  isBayesianRun = true;
+  lastBayesianRun = new Date().toISOString();
+  try {
+    const out = runBayesianUpdater();
+    lastBayesianResult = out;
+    return out;
+  } catch (err) {
+    logger.error("❌ Bayesian updater failed", { error: err.message });
+    return null;
+  } finally { isBayesianRun = false; }
+}
+
 async function runAiAgentsCronCycle() {
   if (isAiAgentsRun) { logger.warn("⏸️ AI agents already running"); return null; }
   isAiAgentsRun = true;
@@ -701,7 +722,7 @@ export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
     isPublishRun, isPolymarketRun, isMatcherRun,
-    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isFredRun, isSyntheticExtractRun, isAiAgentsRun,
+    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isFredRun, isSyntheticExtractRun, isAiAgentsRun, isBayesianRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
     lastPublishResult,
@@ -725,6 +746,8 @@ export function getSchedulerStatus() {
     lastSyntheticExtractResult,
     lastAiAgentsRun,
     lastAiAgentsResult,
+    lastBayesianRun,
+    lastBayesianResult,
     nextRun,
     sourceCount: RSS_SOURCES.length, videoChannels: YOUTUBE_SOURCES.length,
     videoGenConfigured: isVideoConfigured(),
