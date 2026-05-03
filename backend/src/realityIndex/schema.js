@@ -322,6 +322,36 @@ export function initRealityIndex(db) {
     CREATE INDEX IF NOT EXISTS idx_watchlists_item ON user_watchlists(item_type, item_id);
   `);
 
+  // ── Phase 4 leftover: Analyst briefs (drafts-only, manual review queue) ──
+  // Per plan §5J: status always starts 'draft', editor manually approves.
+  // No auto-promotion in v1. Every claim in evidence_json must cite a
+  // concrete market_id / article_id / sentiment snapshot.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS generated_briefs (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug            TEXT UNIQUE NOT NULL,
+      event_id        TEXT,
+      cluster_id      TEXT,
+      title           TEXT NOT NULL,
+      thesis          TEXT NOT NULL,
+      body_md         TEXT NOT NULL,
+      body_html       TEXT,
+      evidence_json   TEXT NOT NULL,          -- JSON: [{kind:'market'|'article'|'snapshot', ref_id, claim}]
+      confidence      REAL,                   -- 0..1, derived from RI snapshot at gen time
+      ri_snapshot_ts  INTEGER,                -- the RI snapshot the brief was grounded in
+      provider        TEXT,                   -- which LLM provider drafted it
+      model           TEXT,
+      status          TEXT NOT NULL DEFAULT 'draft', -- draft | reviewed | published | rejected
+      reviewer_note   TEXT,
+      reviewed_at     INTEGER,
+      published_at    INTEGER,
+      created_at      INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_briefs_status     ON generated_briefs(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_briefs_event      ON generated_briefs(event_id);
+    CREATE INDEX IF NOT EXISTS idx_briefs_published  ON generated_briefs(status, published_at DESC);
+  `);
+
   // ── Phase 4c: Watchlist push fan-out ────────────────────────────────────
   // Migrate push_subscriptions to carry an optional user_id so we can fan
   // out anomaly alerts to the right subscribers. Anonymous subscriptions

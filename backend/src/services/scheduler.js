@@ -34,6 +34,7 @@ import { runAnomalyDetector } from "../realityIndex/intelligence/anomalyDetector
 import { runWatchlistPushDispatcher } from "../realityIndex/jobs/watchlistPushDispatcher.js";
 import { pickTopReelCandidates } from "../realityIndex/generation/reelTopicSelector.js";
 import { syncGdeltCycle } from "../realityIndex/ingest/newsAggregators/gdeltFetcher.js";
+import { runAnalystBriefCycle } from "../realityIndex/generation/analystBriefGenerator.js";
 
 let isRunning    = false;
 let isVideoRun   = false;   // YouTube ingestion
@@ -154,6 +155,10 @@ export function startScheduler() {
     // Phase 5 — GDELT global news multiplier. New articles inserted here flow
     // through the same cluster→event→matcher pipeline as RSS-ingested ones.
     cron.schedule("8,38 * * * *",       () => runGdeltCycle());             // every 30 min, between RSS ticks
+    // Phase 4 leftover — Analyst briefs (drafts only). Every 4h on the 23rd
+    // minute. Generator emits status='draft'; editor approves manually in
+    // /scoop-ops/briefs (plan §5J — no auto-promotion in v1).
+    cron.schedule("23 */4 * * *",       () => runAnalystBriefCycleWrapped());
     // First run shortly after boot — Polymarket cold start.
     setTimeout(() => runPolymarketCycle(), 30_000);
     setTimeout(() => runMarketMatcherCronCycle(), 5 * 60 * 1000);
@@ -298,6 +303,23 @@ async function runGdeltCycle() {
     logger.error("❌ GDELT cycle failed", { error: err.message });
     return null;
   } finally { isGdeltRun = false; }
+}
+
+let isBriefRun = false;
+let lastBriefRun = null;
+let lastBriefResult = null;
+async function runAnalystBriefCycleWrapped() {
+  if (isBriefRun) { logger.warn("⏸️ Brief cycle already running"); return null; }
+  isBriefRun = true;
+  lastBriefRun = new Date().toISOString();
+  try {
+    const out = await runAnalystBriefCycle();
+    lastBriefResult = out;
+    return out;
+  } catch (err) {
+    logger.error("❌ Brief cycle failed", { error: err.message });
+    return null;
+  } finally { isBriefRun = false; }
 }
 
 // Suppress unused-warning while exposing for ad-hoc /scoop-ops triggers later.
@@ -577,7 +599,7 @@ export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
     isPublishRun, isPolymarketRun, isMatcherRun,
-    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun,
+    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
     lastPublishResult,
@@ -589,6 +611,8 @@ export function getSchedulerStatus() {
     lastWatchlistPushRun,
     lastGdeltRun,
     lastGdeltResult,
+    lastBriefRun,
+    lastBriefResult,
     nextRun,
     sourceCount: RSS_SOURCES.length, videoChannels: YOUTUBE_SOURCES.length,
     videoGenConfigured: isVideoConfigured(),

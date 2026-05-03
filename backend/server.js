@@ -35,6 +35,7 @@ import eventsRouter      from "./src/routes/events.js";
 import realityIndexRouter from "./src/routes/realityIndex.js";
 import watchlistsRouter  from "./src/routes/watchlists.js";
 import riOpsRouter       from "./src/routes/ri-ops.js";
+import briefsRouter      from "./src/routes/briefs.js";
 import { initRealityIndex } from "./src/realityIndex/schema.js";
 import { detectCountry } from "./src/services/geolocation.js";
 import { skimlinksPublisherId, amazonInfoForCountry } from "./src/config/affiliates.js";
@@ -158,6 +159,7 @@ app.use("/api/predictions", cacheMiddleware("short"), predictionsRouter); // Rea
 app.use("/api/ri/events",  cacheMiddleware("short"), eventsRouter);      // Reality Index Phase 2: event tracker (dossier, timeline, actors)
 app.use("/api/ri",         cacheMiddleware("short"), realityIndexRouter); // Reality Index Phase 3: /truth-gap, /anomalies
 app.use("/api/watchlists", watchlistsRouter);                            // Reality Index Phase 4: per-user follow lists (auth-gated; no caching)
+app.use("/api/briefs",     cacheMiddleware("short"), briefsRouter);      // Reality Index Phase 4: published analyst briefs (drafts in /scoop-ops)
 app.use("/scoop-ops",       socialRouter);     // /scoop-ops/social-queue — preview auto-generated social captions (renamed from /admin to bypass host WAF)
 app.use("/scoop-ops/videos-gen", videoGenRouter); // video generation queue: /queue, /run, /approve/:id, /reject/:id
 app.use("/scoop-ops/newsletter", newsletterOpsRouter); // newsletter ops: /status, /welcome/run, /welcome/test

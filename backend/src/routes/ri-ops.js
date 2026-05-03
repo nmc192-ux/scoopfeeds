@@ -21,6 +21,9 @@ import { Router } from "express";
 import { getDb } from "../models/database.js";
 import { getQueueStatus } from "../realityIndex/llmQueue.js";
 import { getSchedulerStatus } from "../services/scheduler.js";
+import { listBriefs, getBriefById, setBriefStatus } from "../realityIndex/dal/briefsDao.js";
+import { runAnalystBriefCycle } from "../realityIndex/generation/analystBriefGenerator.js";
+import { logger } from "../services/logger.js";
 
 const router = Router();
 const ADMIN_KEY = process.env.ADMIN_KEY || "";
@@ -110,6 +113,53 @@ router.get("/dashboard", requireAdmin, (_req, res) => {
       recentAnomalies,
     });
   } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Brief review queue ────────────────────────────────────────────────────
+//
+// All brief-mutation routes are admin-gated. v1 invariant: drafts can only
+// move to 'published' via this manual approval — no auto-promotion path
+// exists in the generator (plan §5J).
+
+router.get("/briefs", requireAdmin, (req, res) => {
+  const status = req.query.status ?? "draft";
+  const items  = listBriefs({ status, limit: 50 }).map(b => {
+    let evidence = [];
+    try { evidence = JSON.parse(b.evidence_json || "[]"); } catch {}
+    return { ...b, evidence };
+  });
+  res.json({ items, status });
+});
+
+router.post("/briefs/:id/approve", requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const b  = getBriefById(id);
+  if (!b) return res.status(404).json({ ok: false, error: "Brief not found" });
+  if (b.status === "published") return res.json({ ok: true, alreadyPublished: true });
+  const note = req.body?.note || req.query.note || null;
+  setBriefStatus(id, "published", { reviewer_note: note });
+  res.json({ ok: true, status: "published" });
+});
+
+router.post("/briefs/:id/reject", requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const b  = getBriefById(id);
+  if (!b) return res.status(404).json({ ok: false, error: "Brief not found" });
+  const note = req.body?.note || req.query.note || null;
+  setBriefStatus(id, "rejected", { reviewer_note: note });
+  res.json({ ok: true, status: "rejected" });
+});
+
+// On-demand generation for a one-off run (also fires on cron).
+router.post("/briefs/run", requireAdmin, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit ?? req.body?.limit ?? "2", 10);
+    const out = await runAnalystBriefCycle({ limit });
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    logger.error(`brief generation failed: ${err.message}`);
     res.status(500).json({ ok: false, error: err.message });
   }
 });

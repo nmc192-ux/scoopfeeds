@@ -45,6 +45,9 @@ import TruthGapPage         from "./pages/TruthGapPage";
 import DashboardPage        from "./pages/DashboardPage";
 import AnomaliesPage        from "./pages/AnomaliesPage";
 import RealityIndexOpsPage  from "./pages/RealityIndexOpsPage";
+import BriefsPage           from "./pages/BriefsPage";
+import BriefPage            from "./pages/BriefPage";
+import BriefsReviewPage     from "./pages/BriefsReviewPage";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
 const HIDE_TOPICNAV_ON = [
@@ -53,7 +56,7 @@ const HIDE_TOPICNAV_ON = [
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
-  "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops",
+  "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs",
 ];
 
 export default function App() {
@@ -153,6 +156,9 @@ export default function App() {
           <Route path="/dashboard"          element={<DashboardPage />} />
           <Route path="/anomalies"          element={<AnomaliesPage />} />
           <Route path="/scoop-ops/reality-index" element={<RealityIndexOpsPage />} />
+          <Route path="/scoop-ops/briefs"     element={<BriefsReviewPage />} />
+          <Route path="/briefs"               element={<BriefsPage />} />
+          <Route path="/briefs/:slug"         element={<BriefPage />} />
           <Route path="*"                    element={<NotFound />} />
         </Routes>
       </main>
@@ -211,6 +217,8 @@ function Footer({ health }) {
           <a href="/truth-gap"         className="hover:text-[var(--color-text)] transition-colors">Truth Gap</a>
           <span>·</span>
           <a href="/anomalies"         className="hover:text-[var(--color-text)] transition-colors">Anomalies</a>
+          <span>·</span>
+          <a href="/briefs"            className="hover:text-[var(--color-text)] transition-colors">Briefs</a>
           <span>·</span>
           <a href="/dashboard"         className="hover:text-[var(--color-text)] transition-colors">Dashboard</a>
           <span>·</span>
