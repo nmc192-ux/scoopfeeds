@@ -9,6 +9,7 @@ import { useSaveArticle } from "../../hooks/useSaveArticle";
 import { track, trackShare, trackSave, trackUnsave, trackOutboundClick } from "../../lib/track";
 import PaywallCTA from "../ads/PaywallCTA";
 import SafeImage from "../ui/SafeImage";
+import RIBadgeStrip from "../predictions/RIBadgeStrip";
 import { topicColor, topicLabel, topicEmoji, ELECTRIC_PRIMARY } from "../../lib/topicColors";
 import clsx from "clsx";
 
@@ -51,7 +52,7 @@ function CredibilityDots({ score }) {
   );
 }
 
-export default function NewsCard({ article, index = 0, size = "normal" }) {
+export default function NewsCard({ article, index = 0, size = "normal", riBadge = null }) {
   const { toggle: toggleSave, isSaved } = useSaveArticle();
   const openReader = useReaderStore(s => s.openReader);
   const saved = isSaved(article.id);
@@ -215,6 +216,9 @@ export default function NewsCard({ article, index = 0, size = "normal" }) {
               By {article.author}
             </p>
           )}
+
+          {/* Reality Index — markets / truth-gap / anomalies for bound articles. */}
+          <RIBadgeStrip badge={riBadge} />
         </div>
       </a>
 

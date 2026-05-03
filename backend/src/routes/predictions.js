@@ -5,6 +5,8 @@
  *   GET  /api/predictions                        list active markets
  *   GET  /api/predictions/movers                 biggest 24h price moves
  *   GET  /api/predictions/clusters/:clusterId    markets bound to a cluster
+ *   GET  /api/predictions/article/:articleId     markets bound to an article's cluster(s)
+ *   GET  /api/predictions/badges?ids=a,b,c       bulk per-article RI badges (Phase 4i)
  *   GET  /api/predictions/:id                    single market w/ confidence
  *   GET  /api/predictions/:id/history            time-series snapshots
  *
@@ -212,6 +214,99 @@ router.get("/clusters/:clusterId", (req, res) => {
 });
 
 // GET /api/predictions/:id
+// ─── GET /api/predictions/badges?ids=a,b,c ─────────────────────────────────
+//
+// Bulk per-article RI badges for the home news feed (Phase 4i). For each
+// article id, returns a compact payload — or null when the article isn't
+// bound to a tracked event/market — so the NewsCard can render
+// ProbabilityBar / TruthGapBadge / AnomalyChip inline:
+//
+//   {
+//     [articleId]: {
+//       event_slug, event_title, top_yes, source,
+//       truth_gap, latest_anomaly: { type, severity, payload }|null
+//     } | null
+//   }
+//
+// MUST be declared before the catch-all "/:id" route below or Express will
+// route /badges to the market-by-id handler.
+const BADGE_IDS_MAX = 60;
+const BADGE_ANOM_FRESH_MS = 6 * 60 * 60 * 1000;
+
+router.get("/badges", (req, res) => {
+  try {
+    const raw = String(req.query.ids ?? "").trim();
+    if (!raw) return res.json({ badges: {} });
+    const ids = raw.split(",").map(s => s.trim()).filter(Boolean).slice(0, BADGE_IDS_MAX);
+    if (!ids.length) return res.json({ badges: {} });
+
+    const db = getDb();
+    const cutoff = Date.now() - BADGE_ANOM_FRESH_MS;
+
+    // Per-article: find the most-recently-active event the article belongs to,
+    // then pull its top market + freshest unack anomaly + latest RI snapshot.
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = db.prepare(`
+      SELECT
+        a.id AS article_id,
+        e.slug AS event_slug, e.title AS event_title,
+        (SELECT pm.yes_price FROM event_market_links eml
+          JOIN prediction_markets pm ON pm.id = eml.market_id
+          WHERE eml.event_id = e.id ORDER BY eml.rank LIMIT 1) AS top_yes,
+        (SELECT pm.source    FROM event_market_links eml
+          JOIN prediction_markets pm ON pm.id = eml.market_id
+          WHERE eml.event_id = e.id ORDER BY eml.rank LIMIT 1) AS source,
+        (SELECT r.truth_gap FROM reality_index_snapshots r
+          WHERE r.scope='event' AND r.scope_id = e.id ORDER BY r.ts DESC LIMIT 1) AS truth_gap,
+        (SELECT al.id       FROM anomaly_alerts al
+          WHERE al.event_id = e.id AND al.acknowledged = 0 AND al.detected_at >= ?
+          ORDER BY al.detected_at DESC LIMIT 1) AS anom_id,
+        (SELECT al.type     FROM anomaly_alerts al
+          WHERE al.event_id = e.id AND al.acknowledged = 0 AND al.detected_at >= ?
+          ORDER BY al.detected_at DESC LIMIT 1) AS anom_type,
+        (SELECT al.severity FROM anomaly_alerts al
+          WHERE al.event_id = e.id AND al.acknowledged = 0 AND al.detected_at >= ?
+          ORDER BY al.detected_at DESC LIMIT 1) AS anom_severity,
+        (SELECT al.payload  FROM anomaly_alerts al
+          WHERE al.event_id = e.id AND al.acknowledged = 0 AND al.detected_at >= ?
+          ORDER BY al.detected_at DESC LIMIT 1) AS anom_payload
+      FROM articles a
+      JOIN event_articles ea ON ea.article_id = a.id
+      JOIN events e          ON e.id = ea.event_id AND e.status = 'active'
+      WHERE a.id IN (${placeholders})
+      ORDER BY a.id, e.last_activity_at DESC
+    `).all(cutoff, cutoff, cutoff, cutoff, ...ids);
+
+    const seen = new Set();
+    const badges = {};
+    for (const id of ids) badges[id] = null;
+    for (const r of rows) {
+      if (seen.has(r.article_id)) continue;
+      seen.add(r.article_id);
+      const hasMarket   = r.top_yes != null;
+      const hasAnomaly  = r.anom_id != null;
+      const hasTruthGap = Number.isFinite(r.truth_gap) && Math.abs(r.truth_gap) > 0.15;
+      if (!hasMarket && !hasAnomaly && !hasTruthGap) continue;
+      let payload = null;
+      if (r.anom_payload) { try { payload = JSON.parse(r.anom_payload); } catch { /* ignore */ } }
+      badges[r.article_id] = {
+        event_slug:    r.event_slug,
+        event_title:   r.event_title,
+        top_yes:       r.top_yes,
+        source:        r.source,
+        truth_gap:     hasTruthGap ? r.truth_gap : null,
+        latest_anomaly: hasAnomaly ? {
+          id: r.anom_id, type: r.anom_type, severity: r.anom_severity, payload,
+        } : null,
+      };
+    }
+    res.json({ badges });
+  } catch (err) {
+    logger.error("predictions badges failed", { error: err.message });
+    res.status(500).json({ success: false, error: "Failed to load badges" });
+  }
+});
+
 router.get("/:id", (req, res) => {
   try {
     const m = getMarketById(req.params.id);

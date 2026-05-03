@@ -9,6 +9,8 @@ import { AdSenseUnit } from "../ads/AdSense";
 import SponsorCard from "../ads/SponsorCard";
 import StoryBriefingCard from "../analysis/StoryBriefingCard";
 import { usePublicConfig } from "../../hooks/useNews";
+import { useArticleBadges } from "../../hooks/usePredictions";
+import RIBadgeStrip from "../predictions/RIBadgeStrip";
 import { topicColor } from "../../lib/topicColors";
 
 const AD_INTERVAL = 6;        // show an in-feed ad after every N cards
@@ -40,6 +42,13 @@ export default function NewsGrid({ articles = [], isLoading, error, onRefresh })
   const visibleArticles = dedupedArticles.slice(0, page * PAGE_SIZE);
   const hasMore = dedupedArticles.length > page * PAGE_SIZE;
 
+  // Phase 4i: bulk-fetch RI badges for visible cards (one round-trip).
+  // Falls back to {} on error so cards render unchanged when the endpoint
+  // is unreachable.
+  const visibleIds = useMemo(() => visibleArticles.map(a => a.id).slice(0, 60), [visibleArticles]);
+  const { data: badgeData } = useArticleBadges(visibleIds);
+  const badges = badgeData?.badges ?? {};
+
   if (isLoading && dedupedArticles.length === 0) {
     return <LoadingGrid count={9} />;
   }
@@ -63,7 +72,7 @@ export default function NewsGrid({ articles = [], isLoading, error, onRefresh })
             className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
           >
             {visibleArticles.flatMap((article, i) => {
-              const items = [<NewsCard key={article.id} article={article} index={i} />];
+              const items = [<NewsCard key={article.id} article={article} index={i} riBadge={badges[article.id]} />];
               // Native sponsor slot — appears once, near the top of the feed.
               if (i + 1 === SPONSOR_POSITION && sponsor?.enabled && i < visibleArticles.length - 1) {
                 items.push(<SponsorCard key="sponsor" sponsor={sponsor} />);
@@ -97,7 +106,7 @@ export default function NewsGrid({ articles = [], isLoading, error, onRefresh })
             className="flex flex-col gap-3"
           >
             {visibleArticles.map((article, i) => (
-              <ListCard key={article.id} article={article} index={i} />
+              <ListCard key={article.id} article={article} index={i} riBadge={badges[article.id]} />
             ))}
           </motion.div>
         )}
@@ -147,7 +156,7 @@ export default function NewsGrid({ articles = [], isLoading, error, onRefresh })
 }
 
 // Compact list view card
-function ListCard({ article, index }) {
+function ListCard({ article, index, riBadge }) {
   const [imgError, setImgError] = useState(false);
 
   return (
@@ -192,6 +201,7 @@ function ListCard({ article, index }) {
           <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
             {new Date(article.published_at).toLocaleDateString()}
           </p>
+          <RIBadgeStrip badge={riBadge} />
         </div>
       </a>
     </motion.article>

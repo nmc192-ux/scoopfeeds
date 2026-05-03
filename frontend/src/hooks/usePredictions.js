@@ -94,3 +94,29 @@ export function usePredictionMovers({ windowHours = 24, limit = 20 } = {}) {
     refetchInterval: 10 * 60 * 1000,
   });
 }
+
+/**
+ * Bulk RI badges for a set of article IDs (Phase 4i). Used by the home
+ * NewsGrid to surface ProbabilityBar / TruthGapBadge / AnomalyChip on
+ * cards bound to tracked events. One round-trip per render of the grid;
+ * cached 60s.
+ *
+ * Returns `{ badges: { [id]: badge|null } }` shaped to make the per-card
+ * lookup a single property access.
+ */
+export function useArticleBadges(articleIds = []) {
+  // Stable key from sorted ids so two equivalent lists hit the same cache.
+  const ids = (articleIds || []).filter(Boolean);
+  const key = ids.length ? [...ids].sort().join(",") : "";
+  return useQuery({
+    queryKey: ["predictions-badges", key],
+    queryFn: async () => {
+      if (!ids.length) return { badges: {} };
+      const { data } = await api.get(`/predictions/badges?ids=${encodeURIComponent(ids.join(","))}`);
+      return data;
+    },
+    enabled:    ids.length > 0,
+    staleTime:  60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  });
+}
