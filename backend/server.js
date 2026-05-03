@@ -213,7 +213,8 @@ app.get("/api/public-config", (req, res) => {
       membershipUrl: (process.env.KO_FI_MEMBERSHIP_URL || "").trim() || null,
     },
     meter: {
-      enabled: String(process.env.METER_ENABLED ?? "true").toLowerCase() !== "false",
+      // Meter is OFF by default — set METER_ENABLED=true to re-enable.
+      enabled: String(process.env.METER_ENABLED ?? "false").toLowerCase() === "true",
       freeLimit: parseInt(process.env.METER_FREE_LIMIT || "10", 10),
     },
     // ─── Native in-feed sponsor slot (Phase 4) ─────────────────────────

@@ -51,25 +51,7 @@ export default function ReaderModal() {
   const url = open ? article?.url : null;
   const { data, isLoading, isError, error } = useReaderArticle(url);
 
-  // ── Metered paywall gate ────────────────────────────────────────────────
-  // When meter is enabled, POST /api/meter/open on each article open.
-  // Over-limit: show a soft wall instead of the article body.
-  const meterEnabled  = publicConfig?.meter?.enabled !== false;
-  const meterLimit    = publicConfig?.meter?.freeLimit ?? 10;
-  const [meterResult, setMeterResult] = useState(null); // { allowed, count, limit, isPremium }
-  useEffect(() => {
-    if (!open || !article?.id) { setMeterResult(null); return; }
-    if (!meterEnabled) { setMeterResult({ allowed: true }); return; }
-    fetch("/api/meter/open", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ articleId: article.id }),
-    })
-      .then(r => r.ok ? r.json() : { allowed: true })
-      .then(d => setMeterResult(d))
-      .catch(() => setMeterResult({ allowed: true })); // fail open
-  }, [open, article?.id, meterEnabled]);
+  // Meter disabled — all readers have unlimited access.
 
   // Related stories — fetched only once the modal is open and we know the
   // article's category. Cached for 2 minutes to avoid thrashing when the user
@@ -250,40 +232,7 @@ export default function ReaderModal() {
                 </p>
               )}
 
-              {/* ── Metered soft wall ─────────────────────────────────── */}
-              {meterResult && !meterResult.allowed && !meterResult.isPremium && (
-                <div className="rounded-2xl border border-[var(--color-border)] p-8 text-center my-4">
-                  <div className="text-4xl mb-4">📰</div>
-                  <h3 className="text-xl font-bold text-[var(--color-text)] mb-2">
-                    You've read {meterLimit} free stories this month
-                  </h3>
-                  <p className="text-sm text-[var(--color-text-tertiary)] mb-6 max-w-sm mx-auto">
-                    Sign in for unlimited reading — it's free and takes 10 seconds.
-                  </p>
-                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                    <button
-                      onClick={() => { closeReader(); setAuthOpen(true); }}
-                      className="px-6 py-2.5 rounded-full bg-electric-600 text-white text-sm font-semibold hover:opacity-90"
-                    >
-                      Sign in free →
-                    </button>
-                    <a
-                      href={article.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={handleSourceClick}
-                      className="px-6 py-2.5 rounded-full border border-[var(--color-border)] text-sm font-semibold hover:bg-[var(--color-surface2)]"
-                    >
-                      Read on {new URL(article.url).hostname}
-                    </a>
-                  </div>
-                  <p className="text-xs text-[var(--color-text-tertiary)] mt-4">
-                    No password. Just your email. ✉️
-                  </p>
-                </div>
-              )}
-
-              {isLoading && (!meterResult || meterResult.allowed) && (
+              {isLoading && (
                 <div className="space-y-3 animate-pulse">
                   {Array.from({ length: 8 }).map((_, i) => (
                     <div key={i} className="h-4 rounded bg-[var(--color-surface2)]" style={{ width: `${80 + Math.random() * 20}%` }} />
@@ -291,7 +240,7 @@ export default function ReaderModal() {
                 </div>
               )}
 
-              {isError && (!meterResult || meterResult.allowed) && (
+              {isError && (
                 <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-6 text-center space-y-3">
                   <div className="text-3xl">🔒</div>
                   <p className="font-semibold text-amber-900 dark:text-amber-200">
@@ -314,7 +263,7 @@ export default function ReaderModal() {
               )}
 
               {/* Paywall preview banner — shown when backend fell back to meta-only */}
-              {data?.isMeta && (!meterResult || meterResult.allowed) && (
+              {data?.isMeta && (
                 <div className="flex items-start gap-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 mb-5 text-sm text-amber-800 dark:text-amber-300">
                   <span className="text-base shrink-0">🔒</span>
                   <div className="flex-1 min-w-0">
@@ -334,7 +283,7 @@ export default function ReaderModal() {
                 </div>
               )}
 
-              {html && (!meterResult || meterResult.allowed) && (
+              {html && (
                 <article
                   className="reader-body"
                   style={{ lineHeight: 1.7 }}
@@ -342,7 +291,7 @@ export default function ReaderModal() {
                 />
               )}
 
-              {data?.length > 0 && (!meterResult || meterResult.allowed) && (
+              {data?.length > 0 && (
                 <p className="text-xs opacity-50 mt-10 pt-6 border-t border-[var(--color-border)]">
                   Extracted from {new URL(article.url).hostname} · approx {Math.max(1, Math.round(data.length / 1100))} min read ·{" "}
                   <a href={article.url} target="_blank" rel="noopener noreferrer" onClick={handleSourceClick} className="underline">original</a>
@@ -351,7 +300,7 @@ export default function ReaderModal() {
 
               {/* After-article AdSense unit — highest-viewability placement;
                   only shown to free users once article content has rendered. */}
-              {adSenseConfig?.enabled && (!meterResult || meterResult.allowed) && html && (
+              {adSenseConfig?.enabled && html && (
                 <div className="mt-8 pt-2">
                   <AdSenseUnit
                     slotName="inline"
@@ -402,14 +351,14 @@ export default function ReaderModal() {
 
               {/* Inline newsletter signup — shown after article body to capture
                   readers at peak engagement. Hidden once they're subscribed. */}
-              {(!meterResult || meterResult.allowed) && !readSubToken() && (
+              {!readSubToken() && (
                 <div className="mt-8 pt-6 border-t border-[var(--color-border)]">
                   <NewsletterSignup compact source="reader_modal" />
                 </div>
               )}
 
               {/* AI Deep Dive — lazy analysis panel, only fires when expanded */}
-              {(!meterResult || meterResult.allowed) && html && article && (
+              {html && article && (
                 <ArticleDeepDive article={article} />
               )}
 
