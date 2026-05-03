@@ -14,7 +14,7 @@
 
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ChevronLeft, Activity, Users, Newspaper, Clock, Layers, BarChart3, MessageCircle } from "lucide-react";
+import { ChevronLeft, Activity, Users, Newspaper, Clock, Layers, BarChart3, MessageCircle, ExternalLink } from "lucide-react";
 import {
   useEvent,
   useEventTimeline,
@@ -183,7 +183,18 @@ export default function EventPage() {
 
       {/* Timeline */}
       <section className="mb-8">
-        <SectionHeader icon={Clock} label="Timeline" />
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Clock size={15} className="text-[var(--color-accent)]" />
+            <h2 className="font-semibold text-base text-[var(--color-text)]">Timeline</h2>
+          </div>
+          <Link
+            to={`/timeline/${slug}`}
+            className="text-[10px] text-[var(--color-accent)] hover:underline inline-flex items-center gap-1"
+          >
+            Open standalone <ExternalLink size={9} />
+          </Link>
+        </div>
         <EventTimeline entries={timeline} isLoading={loadingTimeline} onKindChange={setTimelineKind} />
       </section>
 

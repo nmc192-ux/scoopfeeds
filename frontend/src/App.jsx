@@ -42,6 +42,7 @@ import AnalysisExplainedPage from "./pages/AnalysisExplainedPage";
 import PredictionsPage      from "./pages/PredictionsPage";
 import EventsPage           from "./pages/EventsPage";
 import EventPage            from "./pages/EventPage";
+import TimelinePage          from "./pages/TimelinePage";
 import TruthGapPage         from "./pages/TruthGapPage";
 import DashboardPage        from "./pages/DashboardPage";
 import AnomaliesPage        from "./pages/AnomaliesPage";
@@ -73,7 +74,7 @@ const HIDE_TOPICNAV_ON = [
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
-  "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/world-map", "/finance", "/macro", "/synthetic", "/leaderboard",
+  "/analysis", "/predictions", "/events", "/timeline", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/world-map", "/finance", "/macro", "/synthetic", "/leaderboard",
   "/health", "/climate", "/sports", "/crypto", "/ai", "/space",
 ];
 
@@ -172,6 +173,7 @@ export default function App() {
           <Route path="/predictions"         element={<PredictionsPage />} />
           <Route path="/events"             element={<EventsPage />} />
           <Route path="/events/:slug"       element={<EventPage />} />
+          <Route path="/timeline/:slug"     element={<TimelinePage />} />
           <Route path="/health"             element={<HealthEventsPage />} />
           <Route path="/climate"            element={<ClimateEventsPage />} />
           <Route path="/sports"             element={<SportsEventsPage />} />
