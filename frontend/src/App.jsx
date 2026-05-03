@@ -49,6 +49,7 @@ import BriefsPage           from "./pages/BriefsPage";
 import BriefPage            from "./pages/BriefPage";
 import BriefsReviewPage     from "./pages/BriefsReviewPage";
 import WorldMapPage         from "./pages/WorldMapPage";
+import FinancePage          from "./pages/FinancePage";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
 const HIDE_TOPICNAV_ON = [
@@ -57,7 +58,7 @@ const HIDE_TOPICNAV_ON = [
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
-  "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/world-map",
+  "/analysis", "/predictions", "/events", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/world-map", "/finance",
 ];
 
 export default function App() {
@@ -161,6 +162,7 @@ export default function App() {
           <Route path="/briefs"               element={<BriefsPage />} />
           <Route path="/briefs/:slug"         element={<BriefPage />} />
           <Route path="/world-map"            element={<WorldMapPage />} />
+          <Route path="/finance"              element={<FinancePage />} />
           <Route path="*"                    element={<NotFound />} />
         </Routes>
       </main>
@@ -223,6 +225,8 @@ function Footer({ health }) {
           <a href="/briefs"            className="hover:text-[var(--color-text)] transition-colors">Briefs</a>
           <span>·</span>
           <a href="/world-map"         className="hover:text-[var(--color-text)] transition-colors">World Map</a>
+          <span>·</span>
+          <a href="/finance"           className="hover:text-[var(--color-text)] transition-colors">Finance</a>
           <span>·</span>
           <a href="/dashboard"         className="hover:text-[var(--color-text)] transition-colors">Dashboard</a>
           <span>·</span>
