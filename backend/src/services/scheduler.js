@@ -42,6 +42,7 @@ import { syncFredCycle } from "../realityIndex/ingest/economic/fredFetcher.js";
 import { syncWorldBankCycle } from "../realityIndex/ingest/economic/worldBankFetcher.js";
 import { runQuestionExtractor } from "../realityIndex/syntheticMarkets/questionExtractor.js";
 import { runAiAgentsCycle } from "../realityIndex/syntheticMarkets/aiAgents.js";
+import { runOutcomeResolverCycle } from "../realityIndex/syntheticMarkets/outcomeResolver.js";
 import { runBayesianUpdater } from "../realityIndex/intelligence/bayesianUpdater.js";
 
 let isRunning    = false;
@@ -177,6 +178,8 @@ export function startScheduler() {
     cron.schedule("47 */6 * * *",       () => runSyntheticExtractCycle());    // every 6h, +30m offset from FRED
     // Phase 6 — AI trader agents (skeptic/optimist/contrarian) keep markets lively.
     cron.schedule("23 * * * *",         () => runAiAgentsCronCycle());        // every 1h
+    // Phase 6.5 — LLM outcome resolver (drafts only; admin confirms via UI).
+    cron.schedule("41 * * * *",         () => runOutcomeResolverCronCycle()); // every 1h, +18 offset
     // Phase 3 leftover — bayesianUpdater attributes market moves to the article
     // most likely to have caused them. Runs hourly, +29m offset.
     cron.schedule("29 * * * *",         () => runBayesianUpdaterCycle());     // every 1h
@@ -424,6 +427,23 @@ async function runWorldBankCycle() {
 let isAiAgentsRun = false;
 let lastAiAgentsRun = null;
 let lastAiAgentsResult = null;
+let isOutcomeResolverRun = false;
+let lastOutcomeResolverRun = null;
+let lastOutcomeResolverResult = null;
+async function runOutcomeResolverCronCycle() {
+  if (isOutcomeResolverRun) { logger.warn("⏸️ Outcome resolver already running"); return null; }
+  isOutcomeResolverRun = true;
+  lastOutcomeResolverRun = new Date().toISOString();
+  try {
+    const out = await runOutcomeResolverCycle();
+    lastOutcomeResolverResult = out;
+    return out;
+  } catch (err) {
+    logger.error("❌ Outcome resolver failed", { error: err.message });
+    return null;
+  } finally { isOutcomeResolverRun = false; }
+}
+
 let isBayesianRun = false;
 let lastBayesianRun = null;
 let lastBayesianResult = null;
@@ -762,7 +782,7 @@ export function getSchedulerStatus() {
   return {
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
     isPublishRun, isPolymarketRun, isMatcherRun,
-    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isAcledRun, isFredRun, isWorldBankRun, isSyntheticExtractRun, isAiAgentsRun, isBayesianRun,
+    isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isAcledRun, isFredRun, isWorldBankRun, isSyntheticExtractRun, isAiAgentsRun, isOutcomeResolverRun, isBayesianRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
     lastPublishRun,
     lastPublishResult,
@@ -790,6 +810,8 @@ export function getSchedulerStatus() {
     lastSyntheticExtractResult,
     lastAiAgentsRun,
     lastAiAgentsResult,
+    lastOutcomeResolverRun,
+    lastOutcomeResolverResult,
     lastBayesianRun,
     lastBayesianResult,
     nextRun,

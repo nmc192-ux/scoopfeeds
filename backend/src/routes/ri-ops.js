@@ -26,6 +26,7 @@ import { runAnalystBriefCycle } from "../realityIndex/generation/analystBriefGen
 import { createMarket as createSyntheticMarket, getMarket as getSyntheticMarket } from "../realityIndex/dal/syntheticMarketsDao.js";
 import { resolveMarket as resolveSyntheticMarket } from "../realityIndex/syntheticMarkets/resolver.js";
 import { runQuestionExtractor } from "../realityIndex/syntheticMarkets/questionExtractor.js";
+import { runOutcomeResolverCycle } from "../realityIndex/syntheticMarkets/outcomeResolver.js";
 import { createApiKey, listApiKeys, revokeApiKey } from "../realityIndex/dal/apiKeysDao.js";
 import { logger } from "../services/logger.js";
 
@@ -209,6 +210,47 @@ router.post("/synthetic/extract", requireAdmin, async (req, res) => {
     res.json({ ok: true, ...out });
   } catch (err) {
     logger.error(`question extractor failed: ${err.message}`);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post("/synthetic/propose-outcomes", requireAdmin, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit ?? req.body?.limit ?? "3", 10);
+    const out = await runOutcomeResolverCycle({ limit });
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    logger.error(`outcome resolver trigger failed: ${err.message}`);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Editor view: list synthetic markets with their proposed-outcome metadata
+// merged in. Powers /scoop-ops/synthetic admin page.
+router.get("/synthetic/queue", requireAdmin, (_req, res) => {
+  try {
+    const rows = getDb().prepare(`
+      SELECT id, question, description, event_id, end_date, yes_price,
+             total_volume, resolved, outcome, created_at, meta
+      FROM synthetic_markets
+      ORDER BY resolved ASC, end_date ASC NULLS LAST
+      LIMIT 100
+    `).all();
+    const items = rows.map(r => {
+      let meta = null;
+      try { meta = r.meta ? JSON.parse(r.meta) : null; } catch { /* ignore */ }
+      return {
+        ...r, meta,
+        proposed_outcome:    meta?.proposed_outcome    ?? null,
+        proposed_confidence: meta?.proposed_confidence ?? null,
+        proposed_reasoning:  meta?.proposed_reasoning  ?? null,
+        proposed_sources:    meta?.proposed_sources    ?? null,
+        proposed_at:         meta?.proposed_at         ?? null,
+      };
+    });
+    res.json({ items });
+  } catch (err) {
+    logger.error(`synthetic queue failed: ${err.message}`);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
