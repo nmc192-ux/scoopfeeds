@@ -1,14 +1,13 @@
 /**
  * /embed — public, no-auth iframe embeds for blogs and Substacks.
  *
- *   GET /embed/event/:slug    — single event mini-dossier (Phase 5e per plan §5M)
+ *   GET /embed/event/:slug    — single event mini-dossier (plan §5M)
+ *   GET /embed/market/:id     — single Polymarket card with sparkline (plan §5M)
  *
  * Self-contained HTML document with inline CSS — embedders don't need to
  * load any external assets. Cached at the CDN layer for 5 min. CORS open.
  * X-Frame-Options stripped on this route so any site can iframe us
  * (the whole point — drives organic backlinks).
- *
- * Future: GET /embed/market/:id (single Polymarket card).
  */
 
 import { Router } from "express";
@@ -154,6 +153,107 @@ router.get("/event/:slug", (req, res) => {
     res.send(html);
   } catch (err) {
     logger.error(`embed/event error: ${err.message}`);
+    res.status(500).send("<!doctype html><body>Internal server error</body>");
+  }
+});
+
+// ─── /embed/market/:id ─────────────────────────────────────────────────
+router.get("/market/:id", (req, res) => {
+  try {
+    const db = getDb();
+    const m = db.prepare(`
+      SELECT id, source, source_market_id, question, description, url, slug,
+             yes_price, no_price, volume_24h, liquidity, end_date, active,
+             category
+      FROM prediction_markets WHERE id = ?
+    `).get(req.params.id);
+
+    // 24h sparkline points (hot tier).
+    const points = m
+      ? db.prepare(`
+          SELECT yes_price, ts FROM prediction_market_snapshots
+          WHERE market_id = ? AND tier = 'hot' AND ts >= ?
+          ORDER BY ts ASC
+        `).all(req.params.id, Date.now() - 24 * 60 * 60 * 1000)
+      : [];
+
+    res.removeHeader("X-Frame-Options");
+    res.setHeader("Content-Security-Policy", "frame-ancestors *");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=300, s-maxage=300");
+
+    if (!m) {
+      res.status(404).send(`<!doctype html><meta charset="utf-8"><body style="font:13px system-ui;padding:16px;color:#666">Market not found. <a href="${SITE}/predictions">Browse markets</a></body>`);
+      return;
+    }
+
+    const yesPct = Math.round((m.yes_price || 0) * 100);
+    const fullUrl = m.url || `${SITE}/predictions`;
+    const ends = m.end_date ? new Date(m.end_date).toISOString().slice(0, 10) : null;
+    // Inline SVG sparkline. Width 200, height 30. Y-axis 0..1.
+    let sparkline = "";
+    if (points.length >= 2) {
+      const W = 200, H = 30, pad = 2;
+      const xs = points.map((_, i) => pad + (i / (points.length - 1)) * (W - 2 * pad));
+      const ys = points.map(p => H - pad - (p.yes_price ?? 0) * (H - 2 * pad));
+      const path = xs.map((x, i) => `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${ys[i].toFixed(1)}`).join(" ");
+      const fill = severityColor(m.yes_price);
+      sparkline = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:30px;display:block">
+        <line x1="0" y1="${H/2}" x2="${W}" y2="${H/2}" stroke="#e5e7eb" stroke-dasharray="2 3" stroke-width="0.5"/>
+        <path d="${path}" fill="none" stroke="${fill}" stroke-width="1.5"/>
+      </svg>`;
+    }
+
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(m.question)} — Scoopfeeds Reality Index</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer-when-downgrade">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#111;line-height:1.4;font-size:14px}
+    body{padding:16px;border:1px solid #e5e7eb;border-radius:12px;max-width:480px;margin:auto}
+    .src{font-size:10px;color:#999;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;font-weight:600}
+    h1{font-size:16px;line-height:1.3;margin-bottom:10px;font-weight:700}
+    .prob-row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;font-size:13px;font-weight:600}
+    .prob-yes{color:${severityColor(m.yes_price)}}
+    .prob-no{color:#999}
+    .prob-bar{height:8px;background:#e5e7eb;border-radius:999px;overflow:hidden;margin-bottom:6px}
+    .prob-bar > div{height:100%;border-radius:999px;background:${severityColor(m.yes_price)}}
+    .meta{font-size:11px;color:#666;display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
+    .meta b{color:#111}
+    .footer{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#888;border-top:1px solid #f3f4f6;padding-top:10px;margin-top:10px}
+    .footer a{color:#2563eb;text-decoration:none;font-weight:600}
+    .disclaimer{font-size:10px;color:#aaa;font-style:italic;margin-top:6px;text-align:center}
+  </style>
+</head>
+<body>
+  <div class="src">${escapeHtml(m.source || "Polymarket")}${m.category ? " · " + escapeHtml(m.category) : ""}</div>
+  <h1><a href="${escapeHtml(fullUrl)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">${escapeHtml(m.question)}</a></h1>
+  <div class="prob-row">
+    <span class="prob-yes">YES ${yesPct}%</span>
+    <span class="prob-no">NO ${100 - yesPct}%</span>
+  </div>
+  <div class="prob-bar"><div style="width:${yesPct}%"></div></div>
+  ${sparkline}
+  <div class="meta">
+    ${m.volume_24h ? `<span>Vol 24h <b>$${Math.round(m.volume_24h).toLocaleString()}</b></span>` : ""}
+    ${m.liquidity ? `<span>Liq <b>$${Math.round(m.liquidity).toLocaleString()}</b></span>` : ""}
+    ${ends ? `<span>Ends <b>${ends}</b></span>` : ""}
+  </div>
+  <div class="footer">
+    <span>Source: ${escapeHtml(m.source || "Polymarket")}</span>
+    <a href="${escapeHtml(fullUrl)}" target="_blank" rel="noopener">View on ${escapeHtml(m.source || "source")} →</a>
+  </div>
+  <p class="disclaimer">Market-implied probability. Not a prediction guarantee.</p>
+</body>
+</html>`;
+
+    res.send(html);
+  } catch (err) {
+    logger.error(`embed/market error: ${err.message}`);
     res.status(500).send("<!doctype html><body>Internal server error</body>");
   }
 });

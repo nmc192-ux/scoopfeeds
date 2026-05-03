@@ -50,6 +50,7 @@ import BriefPage            from "./pages/BriefPage";
 import BriefsReviewPage     from "./pages/BriefsReviewPage";
 import WorldMapPage         from "./pages/WorldMapPage";
 import FinancePage          from "./pages/FinancePage";
+import MobileBottomBar      from "./components/layout/MobileBottomBar";
 
 // Routes that hide the sub-header topic strip (keeps focus on the page).
 const HIDE_TOPICNAV_ON = [
@@ -175,6 +176,11 @@ export default function App() {
       <PushOptInBanner topics={activeTopics} language={language} />
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
       <ToastViewport />
+
+      {/* Mobile-only bottom navigation. Adds matching bottom padding so
+          fixed-position bar doesn't crowd content. */}
+      <MobileBottomBar />
+      <div className="h-14 sm:hidden" aria-hidden />
     </div>
   );
 }
