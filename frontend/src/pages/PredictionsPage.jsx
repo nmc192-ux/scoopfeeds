@@ -18,6 +18,7 @@ import { COPY } from "../lib/copyGuide";
 import { formatMoney, formatDistanceToEnd } from "../lib/predictionFormat";
 import ProbabilityBar from "../components/predictions/ProbabilityBar";
 import ConfidenceDots from "../components/predictions/ConfidenceDots";
+import WatchButton    from "../components/predictions/WatchButton";
 
 const CATEGORIES = [
   { id: "",          label: "All" },
@@ -128,7 +129,8 @@ function Row({ market }) {
           Vol {formatMoney(market.volume_24h)} · Liq {formatMoney(market.liquidity)}
         </div>
       </div>
-      <div className="col-span-3 sm:col-span-1 flex justify-end">
+      <div className="col-span-3 sm:col-span-1 flex justify-end items-center gap-2">
+        <WatchButton itemType="market" itemId={market.id} size="sm" />
         {market.url && (
           <a
             href={market.url}
