@@ -17,6 +17,7 @@ import { useTruthGap } from "../hooks/useTruthGap";
 import { useBriefs } from "../hooks/useBriefs";
 import ProbabilityBar from "../components/predictions/ProbabilityBar";
 import TruthGapBadge  from "../components/predictions/TruthGapBadge";
+import SectorHeatmap  from "../components/charts/SectorHeatmap";
 import { COPY } from "../lib/copyGuide";
 
 function fmtMoney(n) {
@@ -128,18 +129,34 @@ export default function FinancePage() {
           {loadingMarkets ? (
             <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-8 bg-[var(--color-surface-2)] animate-pulse rounded" />)}</div>
           ) : (
-            <ul className="space-y-2">
-              {byCategory.map(s => (
-                <li key={s.category} className="flex items-center justify-between text-xs">
-                  <span className="font-medium text-[var(--color-text)] capitalize flex-1">{s.category}</span>
-                  <span className="text-[var(--color-text-secondary)] tabular-nums">{s.count} markets</span>
-                  <span className="text-[var(--color-text-tertiary)] tabular-nums w-16 text-right">{fmtMoney(s.vol)}</span>
-                  <span className="ml-3 w-12 text-right tabular-nums" style={{ color: s.avgYes > 0.5 ? "#10b981" : "#dc2626" }}>
-                    {fmtPct(s.avgYes)}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <>
+              {/* Treemap: cell area ∝ 24h volume, color ∝ avg YES price.
+                  Quick read of which sectors are loud and which way they're leaning. */}
+              <div className="mb-3">
+                <SectorHeatmap
+                  items={byCategory.map(s => ({
+                    key:   s.category,
+                    label: s.category,
+                    value: s.vol,
+                    score: s.avgYes,
+                  }))}
+                  formatValue={fmtMoney}
+                  height={220}
+                />
+              </div>
+              <ul className="space-y-2">
+                {byCategory.map(s => (
+                  <li key={s.category} className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-[var(--color-text)] capitalize flex-1">{s.category}</span>
+                    <span className="text-[var(--color-text-secondary)] tabular-nums">{s.count} markets</span>
+                    <span className="text-[var(--color-text-tertiary)] tabular-nums w-16 text-right">{fmtMoney(s.vol)}</span>
+                    <span className="ml-3 w-12 text-right tabular-nums" style={{ color: s.avgYes > 0.5 ? "#10b981" : "#dc2626" }}>
+                      {fmtPct(s.avgYes)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </Card>
 

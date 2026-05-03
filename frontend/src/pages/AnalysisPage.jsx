@@ -14,6 +14,7 @@ import { useStoryClusters, useExplainedList } from "../hooks/useAnalysis";
 import ExplainedHero from "../components/analysis/ExplainedHero";
 import TopicTrendChart from "../components/analysis/TopicTrendChart";
 import PerspectivePanel from "../components/analysis/PerspectivePanel";
+import SankeyNarrative from "../components/charts/SankeyNarrative";
 import ScoopMascot from "../components/mascot/ScoopMascot";
 
 export default function AnalysisPage() {
@@ -112,6 +113,45 @@ export default function AnalysisPage() {
           <SectionLabel label="Topic Trends" subtitle="72h coverage volume" />
           <TopicTrendChart />
         </section>
+
+        {/* ── C2. Story flow — clusters → categories ─────────────────────
+            Each top story flows into its category bucket; ribbon width =
+            article count. Quick read of which topics are dominating the
+            news cycle right now and which stories are driving each. */}
+        {clusters.length > 0 && (() => {
+          const topClusters = clusters.slice(0, 8);
+          const sources = topClusters.map(c => ({
+            id:    `c-${c.id}`,
+            label: c.title.length > 38 ? c.title.slice(0, 38) + "…" : c.title,
+            value: c.article_count || 1,
+          }));
+          const catTotals = new Map();
+          for (const c of topClusters) {
+            const k = c.category || "uncategorized";
+            catTotals.set(k, (catTotals.get(k) || 0) + (c.article_count || 1));
+          }
+          const targets = Array.from(catTotals.entries())
+            .sort((a, b) => b[1] - a[1])
+            .map(([id, value]) => ({ id, label: id, value }));
+          const links = topClusters.map(c => ({
+            source: `c-${c.id}`,
+            target: c.category || "uncategorized",
+            value:  c.article_count || 1,
+          }));
+          return (
+            <section>
+              <SectionLabel label="Story Flow" subtitle="Width = article count" />
+              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <SankeyNarrative
+                  sources={sources}
+                  targets={targets}
+                  links={links}
+                  height={Math.max(220, topClusters.length * 32)}
+                />
+              </div>
+            </section>
+          );
+        })()}
 
         {/* ── D. Perspective Compare ────────────────────────────────────── */}
         {withPersp.length > 0 && (
