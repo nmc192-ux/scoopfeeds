@@ -12,6 +12,7 @@ import { getDb } from "../models/database.js";
 import { getReferralCount } from "../models/database.js";
 import { getTransport, sendMail } from "./mailer.js";
 import { logger } from "./logger.js";
+import { buildRealityIndexBlock } from "../realityIndex/generation/newsletterEnricher.js";
 
 const SITE_URL = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 const PER_DIGEST = 8;
@@ -66,7 +67,7 @@ function pickTopArticles(categories) {
   `).all(since, PER_DIGEST);
 }
 
-function renderDigestHtml(articles, unsubUrl, { referralUrl = null, referralCount = 0, sponsor = null } = {}) {
+function renderDigestHtml(articles, unsubUrl, { referralUrl = null, referralCount = 0, sponsor = null, realityIndex = null } = {}) {
   const items = articles.map((a) => `
     <tr><td style="padding:12px 0;border-bottom:1px solid #eee">
       <a href="${a.url}" style="color:#111;text-decoration:none">
@@ -90,12 +91,14 @@ function renderDigestHtml(articles, unsubUrl, { referralUrl = null, referralCoun
   ` : "";
 
   const sponsorHtml = sponsor?.html || "";
+  const riHtml      = realityIndex?.html || "";
 
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:auto;padding:24px;color:#111">
       <div style="font-size:22px;font-weight:800;margin-bottom:4px">Scoop Daily</div>
       <div style="font-size:12px;color:#666;margin-bottom:18px">Top stories from the last 24 hours</div>
       ${sponsorHtml}
+      ${riHtml}
       <table width="100%" cellpadding="0" cellspacing="0">${items}</table>
       ${referralBlock}
       <div style="margin-top:28px;font-size:12px;color:#888">
@@ -128,8 +131,11 @@ export async function sendDailyDigest() {
     return { sent: 0 };
   }
 
-  // Compute sponsor block once — same for all subscribers in this send.
-  const sponsor = getSponsorBlock();
+  // Compute sponsor + Reality Index blocks once — same for all subscribers
+  // in this send. The RI block is empty when no events meet the truth-gap
+  // threshold, in which case the digest renders cleanly without it.
+  const sponsor      = getSponsorBlock();
+  const realityIndex = buildRealityIndexBlock();
 
   let sent = 0;
   for (const sub of subs) {
@@ -145,8 +151,8 @@ export async function sendDailyDigest() {
       await sendMail({
         to: sub.email,
         subject: `Scoop Daily — ${articles[0].title.slice(0, 60)}`,
-        html: renderDigestHtml(articles, unsubUrl, { referralUrl, referralCount, sponsor }),
-        text: (sponsor.text || "") +
+        html: renderDigestHtml(articles, unsubUrl, { referralUrl, referralCount, sponsor, realityIndex }),
+        text: (sponsor.text || "") + (realityIndex.text || "") +
           articles.map((a) => `• ${a.title}\n  ${a.url}`).join("\n\n") +
           `\n\n──\nInvite friends: ${referralUrl}`,
       });
