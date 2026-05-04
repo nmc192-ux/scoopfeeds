@@ -1,7 +1,7 @@
 import "../config/env.js";
 import { captureException, flushObservability, initObservability } from "../config/observability.js";
 import { getDbStatus } from "../models/database.js";
-import { startScheduler, getSchedulerStatus } from "../services/scheduler.js";
+import { startScheduler, getSchedulerStatus, stopScheduler } from "../services/scheduler.js";
 import { logger } from "../services/logger.js";
 import { assertRedisStartup } from "./redis.js";
 
@@ -10,6 +10,7 @@ initObservability({ role: PROCESS_ROLE });
 
 async function shutdown(signal) {
   logger.info(`[${PROCESS_ROLE}] received ${signal}, shutting down...`);
+  stopScheduler();
   await flushObservability();
   process.exit(0);
 }

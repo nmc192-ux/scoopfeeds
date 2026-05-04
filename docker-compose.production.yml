@@ -1,0 +1,89 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      ENABLE_SCHEDULER: "false"
+      USE_BULLMQ: "true"
+      REDIS_URL: redis://redis:6379
+      SCOOP_PERSISTENT_DATA_DIR: /var/lib/scoop
+    volumes:
+      - scoop_data:/var/lib/scoop
+    ports:
+      - "3000:3000"
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    command: ["npm", "run", "start:web"]
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: production
+      ENABLE_SCHEDULER: "false"
+      USE_BULLMQ: "true"
+      REDIS_URL: redis://redis:6379
+      SCOOP_PERSISTENT_DATA_DIR: /var/lib/scoop
+    volumes:
+      - scoop_data:/var/lib/scoop
+    stop_grace_period: 45s
+    command: ["npm", "run", "start:scheduler"]
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: production
+      ENABLE_SCHEDULER: "false"
+      USE_BULLMQ: "true"
+      REDIS_URL: redis://redis:6379
+      SCOOP_PERSISTENT_DATA_DIR: /var/lib/scoop
+    volumes:
+      - scoop_data:/var/lib/scoop
+    stop_grace_period: 60s
+    command: ["npm", "run", "start:worker"]
+
+volumes:
+  scoop_data:
+  redis_data:

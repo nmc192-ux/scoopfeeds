@@ -74,6 +74,8 @@ let lastPolymarketRun = null;
 let lastMatcherRun    = null;
 let nextRun         = null;
 let schedulerStarted = false;
+const schedulerTasks = [];
+const schedulerTimers = [];
 
 function bullmqEnabledForScheduler() {
   if (!shouldUseBullMQ()) return false;
@@ -109,6 +111,18 @@ function runDispatch(task, label) {
     });
 }
 
+function scheduleCron(expression, task) {
+  const scheduledTask = cron.schedule(expression, task);
+  schedulerTasks.push(scheduledTask);
+  return scheduledTask;
+}
+
+function scheduleTimer(task, delayMs) {
+  const timer = setTimeout(task, delayMs);
+  schedulerTimers.push(timer);
+  return timer;
+}
+
 export function startScheduler() {
   if (schedulerStarted) {
     logger.warn("⏰ Scheduler already started in this process");
@@ -119,16 +133,16 @@ export function startScheduler() {
   logger.info("⏰ Scheduler initialized — 30 min news, 60 min video, 15 min enrich, 60 min events, 2 AM video gen");
   runDispatch(() => dispatchIngestionCycle(), "news ingestion");
   runDispatch(() => dispatchVideoCycle(), "video ingestion");
-  setTimeout(() => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"), 60_000);
+  scheduleTimer(() => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"), 60_000);
   // Delay first events pass — it needs some ingested articles to work with.
-  setTimeout(runEventsCycle, 90_000);
+  scheduleTimer(runEventsCycle, 90_000);
   // Delay first analysis pass — 5 min after startup, needs ingested articles.
-  setTimeout(runAnalysisCycle, 5 * 60 * 1000);
-  cron.schedule("*/30 * * * *", () => runDispatch(() => dispatchIngestionCycle(), "news ingestion"));
-  cron.schedule("0 * * * *",    () => runDispatch(() => dispatchVideoCycle(), "video ingestion"));
-  cron.schedule("*/15 * * * *", () => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"));
-  cron.schedule("0 * * * *",    () => runEventsCycle());
-  cron.schedule("0 */2 * * *",  () => runAnalysisCycle()); // every 2 hours
+  scheduleTimer(runAnalysisCycle, 5 * 60 * 1000);
+  scheduleCron("*/30 * * * *", () => runDispatch(() => dispatchIngestionCycle(), "news ingestion"));
+  scheduleCron("0 * * * *",    () => runDispatch(() => dispatchVideoCycle(), "video ingestion"));
+  scheduleCron("*/15 * * * *", () => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"));
+  scheduleCron("0 * * * *",    () => runEventsCycle());
+  scheduleCron("0 */2 * * *",  () => runAnalysisCycle()); // every 2 hours
   // ─── Video generation crons (in-process) ───────────────────────────────
   // Disabled in production because Hostinger Cloud Hosting blocks subprocess
   // execution at the kernel level (RLIMIT_NPROC). Rendering is delegated to
@@ -139,32 +153,32 @@ export function startScheduler() {
   // allows spawn() (any VPS, Docker, local dev, etc.).
   const inProcessVideoEnabled = String(process.env.ENABLE_INPROCESS_VIDEO_CRON || "").toLowerCase() === "true";
   if (inProcessVideoEnabled) {
-    cron.schedule("0 2 * * *",   () => runVideoGenCycle({ batchSize: 3 }));
-    cron.schedule("0 6 * * *",   () => runDailyRecapCycle());
-    cron.schedule("0 */6 * * *", () => runLiveEventVideoCycle());
+    scheduleCron("0 2 * * *",   () => runVideoGenCycle({ batchSize: 3 }));
+    scheduleCron("0 6 * * *",   () => runDailyRecapCycle());
+    scheduleCron("0 */6 * * *", () => runLiveEventVideoCycle());
     logger.info("🎬 In-process video crons enabled (host supports spawn)");
   } else {
     logger.info("🎬 In-process video crons disabled — using GitHub Actions render worker via /scoop-ops/videos-gen/next-batch");
   }
   // Newsletter welcome sequence — runs hourly. Picks subscribers who are
   // due for d1/d3 follow-up emails. No-op when SMTP isn't configured.
-  cron.schedule("17 * * * *", () => runWelcomeSequenceCycle({ maxPerStage: 50 }).catch(err =>
+  scheduleCron("17 * * * *", () => runWelcomeSequenceCycle({ maxPerStage: 50 }).catch(err =>
     logger.warn(`welcomeSequence cron failed: ${err.message}`)
   ));
   // Daily digest at 07:00 server time — no-op if SMTP is not configured.
-  cron.schedule("0 7 * * *", async () => {
+  scheduleCron("0 7 * * *", async () => {
     try {
       await sendDailyDigest();
     } catch (err) {
       logger.error("❌ Digest failed", { error: err.message });
     }
   });
-  cron.schedule("0 3 * * *", async () => {
+  scheduleCron("0 3 * * *", async () => {
     logger.info("🧹 Pruning...");
     const n = pruneOldArticles(7);
     logger.info(`🧹 Pruned ${n} records`);
   });
-  cron.schedule("35 4 * * *", async () => {
+  scheduleCron("35 4 * * *", async () => {
     try {
       runDatabaseMaintenance();
     } catch (err) {
@@ -175,7 +189,7 @@ export function startScheduler() {
   // YouTube video metrics sync — runs at 14:00 daily (8h after typical upload
   // at 06:00 UTC, when views should show at least a few dozen data points).
   // Updates video_metrics + bubbles engagement signal into article ranking.
-  cron.schedule("0 14 * * *", async () => {
+  scheduleCron("0 14 * * *", async () => {
     if (!isYouTubeConfigured()) return;
     try { await syncVideoMetrics(); } catch (err) {
       logger.warn(`video metrics sync failed: ${err.message}`);
@@ -192,7 +206,7 @@ export function startScheduler() {
   // Runs every 90 minutes — frequent enough to surface fresh stories,
   // sparse enough to stay well within IG/FB rate limits and avoid spam
   // flags (Meta has flagged accounts pushing 8+ videos/day).
-  cron.schedule("23 */1 * * *", () => runVideoPublishCycle().catch(err =>
+  scheduleCron("23 */1 * * *", () => runVideoPublishCycle().catch(err =>
     logger.warn(`videoPublish cron failed: ${err.message}`)
   ));
 
@@ -200,65 +214,82 @@ export function startScheduler() {
   // Polymarket fetch-and-snapshot every 15 min. Disable with
   // ENABLE_REALITY_INDEX=false (e.g. on a cold deploy you don't want chatty).
   if (String(process.env.ENABLE_REALITY_INDEX ?? "true").toLowerCase() !== "false") {
-    cron.schedule("*/15 * * * *", () => runPolymarketCycle());
-    cron.schedule("7,37 * * * *", () => runMarketMatcherCronCycle());       // every 30 min, offset
-    cron.schedule("0 4 * * *",    () => runSnapshotDownsamplerCycle());     // daily 4 AM
+    scheduleCron("*/15 * * * *", () => runPolymarketCycle());
+    scheduleCron("7,37 * * * *", () => runMarketMatcherCronCycle());       // every 30 min, offset
+    scheduleCron("0 4 * * *",    () => runSnapshotDownsamplerCycle());     // daily 4 AM
     // Phase 2 — Event Tracker
-    cron.schedule("13,43 * * * *", () => runEventTrackerCronCycle());       // every 30 min, offset
-    cron.schedule("19 * * * *",    () => runEventTimelineBuilderCycle());   // every 1 hr
-    cron.schedule("49 * * * *",    () => runActorExtractorCycle());         // every 1 hr, offset
+    scheduleCron("13,43 * * * *", () => runEventTrackerCronCycle());       // every 30 min, offset
+    scheduleCron("19 * * * *",    () => runEventTimelineBuilderCycle());   // every 1 hr
+    scheduleCron("49 * * * *",    () => runActorExtractorCycle());         // every 1 hr, offset
     // Phase 3 — Sentiment + Composite + Anomalies
-    cron.schedule("21,51 * * * *", () => runRealityIndexComposeCycle());    // every 30 min, offset
-    cron.schedule("27 * * * *",    () => runSentimentScoreCycle());         // every 1 hr
-    cron.schedule("3,18,33,48 * * * *", () => runAnomalyScanCycle());       // every 15 min
+    scheduleCron("21,51 * * * *", () => runRealityIndexComposeCycle());    // every 30 min, offset
+    scheduleCron("27 * * * *",    () => runSentimentScoreCycle());         // every 1 hr
+    scheduleCron("3,18,33,48 * * * *", () => runAnomalyScanCycle());       // every 15 min
     // Phase 4c — Watchlist push fan-out (runs 2 min after each anomaly scan
     // so newly-detected alerts are dispatched promptly to watching users).
-    cron.schedule("5,20,35,50 * * * *", () => runWatchlistPushCycle());     // every 15 min, +2m offset
+    scheduleCron("5,20,35,50 * * * *", () => runWatchlistPushCycle());     // every 15 min, +2m offset
     // Phase 5 — GDELT global news multiplier. New articles inserted here flow
     // through the same cluster→event→matcher pipeline as RSS-ingested ones.
-    cron.schedule("8,38 * * * *",       () => runGdeltCycle());             // every 30 min, between RSS ticks
+    scheduleCron("8,38 * * * *",       () => runGdeltCycle());             // every 30 min, between RSS ticks
     // Phase 5 — USGS significant-earthquakes feed → events with geo_lat/lng
-    cron.schedule("*/10 * * * *",       () => runUsgsCycle());               // every 10 min
+    scheduleCron("*/10 * * * *",       () => runUsgsCycle());               // every 10 min
     // Phase 5 — NOAA active weather alerts (Severe + Extreme) → events
-    cron.schedule("4,14,24,34,44,54 * * * *", () => runNoaaCycle());          // every 10 min, +4 offset
+    scheduleCron("4,14,24,34,44,54 * * * *", () => runNoaaCycle());          // every 10 min, +4 offset
     // Phase 5 — ACLED conflict events (last 24h, ≥1 fatality) → events.
-    cron.schedule("33 */6 * * *",       () => runAcledCycle());               // every 6h
+    scheduleCron("33 */6 * * *",       () => runAcledCycle());               // every 6h
     // Phase 5 — FRED macro series (rates, CPI, unemployment, oil, VIX, etc.)
-    cron.schedule("17 */6 * * *",       () => runFredCycle());                // every 6h
+    scheduleCron("17 */6 * * *",       () => runFredCycle());                // every 6h
     // World Bank — annual indicators per country, daily refresh (slow source).
-    cron.schedule("9 5 * * *",          () => runWorldBankCycle());           // daily at 05:09
+    scheduleCron("9 5 * * *",          () => runWorldBankCycle());           // daily at 05:09
     // Phase 5 — TheSportsDB soccer fixtures (today + tomorrow, free tier).
-    cron.schedule("13 */3 * * *",       () => runSportsdbCycle());            // every 3 hours
+    scheduleCron("13 */3 * * *",       () => runSportsdbCycle());            // every 3 hours
     // Phase 5 — TMDB trending movies + TV (requires TMDB_API_KEY).
-    cron.schedule("27 */6 * * *",       () => runTmdbCycle());                // every 6 hours
+    scheduleCron("27 */6 * * *",       () => runTmdbCycle());                // every 6 hours
     // Phase 6 — synthetic market question extractor (LLM, drafts only).
-    cron.schedule("47 */6 * * *",       () => runSyntheticExtractCycle());    // every 6h, +30m offset from FRED
+    scheduleCron("47 */6 * * *",       () => runSyntheticExtractCycle());    // every 6h, +30m offset from FRED
     // Phase 6 — AI trader agents (skeptic/optimist/contrarian) keep markets lively.
-    cron.schedule("23 * * * *",         () => runAiAgentsCronCycle());        // every 1h
+    scheduleCron("23 * * * *",         () => runAiAgentsCronCycle());        // every 1h
     // Phase 6.5 — LLM outcome resolver (drafts only; admin confirms via UI).
-    cron.schedule("41 * * * *",         () => runOutcomeResolverCronCycle()); // every 1h, +18 offset
+    scheduleCron("41 * * * *",         () => runOutcomeResolverCronCycle()); // every 1h, +18 offset
     // Phase 3 leftover — bayesianUpdater attributes market moves to the article
     // most likely to have caused them. Runs hourly, +29m offset.
-    cron.schedule("29 * * * *",         () => runBayesianUpdaterCycle());     // every 1h
+    scheduleCron("29 * * * *",         () => runBayesianUpdaterCycle());     // every 1h
 
 
 
     // Phase 4 leftover — Analyst briefs (drafts only). Every 4h on the 23rd
     // minute. Generator emits status='draft'; editor approves manually in
     // /scoop-ops/briefs (plan §5J — no auto-promotion in v1).
-    cron.schedule("23 */4 * * *",       () => runAnalystBriefCycleWrapped());
+    scheduleCron("23 */4 * * *",       () => runAnalystBriefCycleWrapped());
     // First run shortly after boot — Polymarket cold start.
-    setTimeout(() => runPolymarketCycle(), 30_000);
-    setTimeout(() => runMarketMatcherCronCycle(), 5 * 60 * 1000);
-    setTimeout(() => runEventTrackerCronCycle(), 8 * 60 * 1000);
-    setTimeout(() => runRealityIndexComposeCycle(), 9 * 60 * 1000);
-    setTimeout(() => runGdeltCycle(), 2 * 60 * 1000);                       // first GDELT pull 2 min after boot
+    scheduleTimer(() => runPolymarketCycle(), 30_000);
+    scheduleTimer(() => runMarketMatcherCronCycle(), 5 * 60 * 1000);
+    scheduleTimer(() => runEventTrackerCronCycle(), 8 * 60 * 1000);
+    scheduleTimer(() => runRealityIndexComposeCycle(), 9 * 60 * 1000);
+    scheduleTimer(() => runGdeltCycle(), 2 * 60 * 1000);                       // first GDELT pull 2 min after boot
     logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventTracker 30m, timeline+actors hourly, downsample daily, sentiment hourly, RI compose 30m, anomaly 15m, watchlist-push 15m, GDELT 30m)");
   } else {
     logger.info("🧠 Reality Index crons disabled via ENABLE_REALITY_INDEX=false");
   }
 
   updateNextRun();
+  return true;
+}
+
+export function stopScheduler() {
+  if (!schedulerStarted) return false;
+
+  for (const task of schedulerTasks.splice(0)) {
+    try { task.stop(); } catch {}
+    try { task.destroy?.(); } catch {}
+  }
+  for (const timer of schedulerTimers.splice(0)) {
+    clearTimeout(timer);
+  }
+
+  schedulerStarted = false;
+  nextRun = null;
+  logger.info("⏹️ Scheduler stopped");
   return true;
 }
 

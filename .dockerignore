@@ -1,0 +1,13 @@
+.git
+.github
+.claire
+.claude
+node_modules
+backend/node_modules
+frontend/node_modules
+backend/data
+frontend/dist
+npm-debug.log*
+backend/npm-debug.log*
+frontend/npm-debug.log*
+.DS_Store
