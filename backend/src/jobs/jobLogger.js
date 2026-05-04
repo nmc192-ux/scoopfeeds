@@ -1,9 +1,11 @@
-import { insertBackgroundJobRun, updateBackgroundJobRun } from "../models/database.js";
+import { JobRunRepository } from "../repositories/JobRunRepository.js";
+
+const jobRunRepository = new JobRunRepository();
 
 export async function withJobRunLogging(queueName, job, runner) {
   const startedAt = Date.now();
   const attempts = (job?.attemptsMade || 0) + 1;
-  const runId = insertBackgroundJobRun({
+  const runId = jobRunRepository.create({
     queue: queueName,
     jobName: job.name,
     jobId: job.id ? String(job.id) : null,
@@ -16,7 +18,7 @@ export async function withJobRunLogging(queueName, job, runner) {
   try {
     const result = await runner();
     const finishedAt = Date.now();
-    updateBackgroundJobRun(runId, {
+    jobRunRepository.update(runId, {
       status: "completed",
       attempts,
       startedAt,
@@ -28,7 +30,7 @@ export async function withJobRunLogging(queueName, job, runner) {
     return result;
   } catch (error) {
     const finishedAt = Date.now();
-    updateBackgroundJobRun(runId, {
+    jobRunRepository.update(runId, {
       status: "failed",
       attempts,
       startedAt,

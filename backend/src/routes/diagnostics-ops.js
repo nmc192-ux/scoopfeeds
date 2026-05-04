@@ -2,9 +2,11 @@ import { Router } from "express";
 import { getProcessMemoryUsage, getProcessRole } from "../config/observability.js";
 import { getQueueDiagnostics } from "../jobs/queues.js";
 import { getRedisStatus } from "../jobs/redis.js";
-import { getDbStatus, listRecentFailedBackgroundJobs } from "../models/database.js";
+import { getDbStatus } from "../models/database.js";
+import { JobRunRepository } from "../repositories/JobRunRepository.js";
 
 const router = Router();
+const jobRunRepository = new JobRunRepository();
 
 router.get("/", async (_req, res) => {
   try {
@@ -13,7 +15,7 @@ router.get("/", async (_req, res) => {
       getQueueDiagnostics(),
     ]);
 
-    const failedJobs = listRecentFailedBackgroundJobs(10).map((job) => ({
+    const failedJobs = jobRunRepository.listRecentFailed(10).map((job) => ({
       queue: job.queue,
       job_name: job.job_name,
       job_id: job.job_id,
