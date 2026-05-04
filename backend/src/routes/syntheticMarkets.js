@@ -12,15 +12,24 @@
  */
 
 import { Router } from "express";
+import { z } from "zod";
 import { getUserBySession } from "../models/database.js";
 import { logger } from "../services/logger.js";
 import {
   listMarkets, getMarket, listTrades, executeTrade, leaderboard, agentLeaderboard,
 } from "../realityIndex/dal/syntheticMarketsDao.js";
 import { quote as ammQuote } from "../realityIndex/syntheticMarkets/ammEngine.js";
+import { sendError, sendUnauthorized, sendValidationError } from "../utils/apiResponse.js";
 
 const router = Router();
 const COOKIE_NAME = "scoop_session";
+const quoteSchema = z.object({
+  side: z.enum(["yes", "no"]),
+  amount: z.coerce.number().finite().positive().max(1_000_000),
+});
+const tradeSchema = quoteSchema.extend({
+  rationale: z.string().trim().max(2000).optional().nullable(),
+});
 
 function getSession(req) {
   const raw = req.headers.cookie || "";
@@ -29,9 +38,9 @@ function getSession(req) {
 }
 function requireAuth(req, res, next) {
   const sid = getSession(req);
-  if (!sid) return res.status(401).json({ error: "Not authenticated" });
+  if (!sid) return sendUnauthorized(res, req, "Not authenticated");
   const u = getUserBySession(sid);
-  if (!u) return res.status(401).json({ error: "Session expired" });
+  if (!u) return sendUnauthorized(res, req, "Session expired");
   req.user = u;
   next();
 }
@@ -84,7 +93,9 @@ router.post("/:id/quote", (req, res) => {
   try {
     const m = getMarket(req.params.id);
     if (!m) return res.status(404).json({ error: "Market not found" });
-    const { side, amount } = req.body || {};
+    const parsed = quoteSchema.safeParse(req.body || {});
+    if (!parsed.success) return sendValidationError(res, req, parsed.error);
+    const { side, amount } = parsed.data;
     const q = ammQuote({ yes_pool: m.yes_pool, no_pool: m.no_pool, side, amount: Number(amount) });
     res.json({ ok: true, quote: q });
   } catch (err) {
@@ -94,7 +105,9 @@ router.post("/:id/quote", (req, res) => {
 
 router.post("/:id/trade", requireAuth, (req, res) => {
   try {
-    const { side, amount, rationale } = req.body || {};
+    const parsed = tradeSchema.safeParse(req.body || {});
+    if (!parsed.success) return sendValidationError(res, req, parsed.error);
+    const { side, amount, rationale } = parsed.data;
     const out = executeTrade({
       market_id: req.params.id,
       user_id: req.user.id,
@@ -103,7 +116,7 @@ router.post("/:id/trade", requireAuth, (req, res) => {
     res.json({ ok: true, trade: out });
   } catch (err) {
     logger.warn(`synthetic trade failed: ${err.message}`);
-    res.status(400).json({ ok: false, error: err.message });
+    sendError(res, req, { status: 400, error: err.message, code: "trade_failed" });
   }
 });
 

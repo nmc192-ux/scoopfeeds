@@ -15,6 +15,7 @@
 
 import { Router } from "express";
 import express from "express";
+import { z } from "zod";
 import { writeFileSync, existsSync, mkdirSync, statSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -42,6 +43,7 @@ import { isTikTokConfigured, uploadToTikTok } from "../services/tiktokClient.js"
 import { isInstagramConfigured, postReelToInstagram } from "../services/instagramClient.js";
 import { isFacebookConfigured, postReelToFacebook } from "../services/facebookClient.js";
 import { logger } from "../services/logger.js";
+import { sendNotFound, sendValidationError } from "../utils/apiResponse.js";
 
 const router = Router();
 
@@ -97,12 +99,17 @@ router.get("/queue", (req, res) => {
   res.json({ jobs, count: jobs.length });
 });
 
+const enqueueSchema = z.object({
+  articleId: z.string().trim().min(1).max(128),
+});
+
 // ─── Manually enqueue ────────────────────────────────────────────────────────
 router.post("/enqueue", (req, res) => {
-  const { articleId } = req.body || {};
-  if (!articleId) return res.status(400).json({ error: "articleId required" });
+  const parsed = enqueueSchema.safeParse(req.body || {});
+  if (!parsed.success) return sendValidationError(res, req, parsed.error);
+  const { articleId } = parsed.data;
   const article = getArticleById(articleId);
-  if (!article) return res.status(404).json({ error: "article not found" });
+  if (!article) return sendNotFound(res, req, "article not found");
   const jobId = enqueueVideoJob(articleId);
   res.json({ jobId, article: { id: article.id, title: article.title } });
 });

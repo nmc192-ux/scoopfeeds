@@ -21,6 +21,7 @@
 import { Router } from "express";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
+import { z } from "zod";
 import {
   createAuthToken,
   consumeAuthToken,
@@ -33,8 +34,11 @@ import {
   saveArticleForUser,
   unsaveArticleForUser,
 } from "../models/database.js";
+import { authMagicLinkLimiter } from "../middleware/rateLimits.js";
+import { validate } from "../middleware/validate.js";
 import { sendMail, getTransport } from "../services/mailer.js";
 import { logger } from "../services/logger.js";
+import { sendError, sendSuccess, sendUnauthorized, sendValidationError } from "../utils/apiResponse.js";
 
 const router = Router();
 
@@ -44,9 +48,17 @@ const TOKEN_TTL   = 30 * 60 * 1000;            // 30 minutes for magic links
 const IS_PROD     = process.env.NODE_ENV === "production" || SITE_URL.startsWith("https://scoopfeeds");
 const COOKIE_NAME = "scoop_session";
 
-function isEmail(s) {
-  return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
-}
+const authRequestSchema = z.object({
+  email: z.string().trim().email(),
+});
+const authVerifyQuerySchema = z.object({
+  token: z.string().trim().regex(/^[0-9a-f]{64}$/i, "Invalid token"),
+});
+const authPrefsSchema = z.object({
+  preferredTopics: z.array(z.string().trim().min(1).max(64)).max(30).optional(),
+  language: z.string().trim().min(2).max(16).optional().nullable(),
+  preferredCountry: z.string().trim().min(2).max(8).optional().nullable(),
+});
 
 function randomHex(bytes = 32) {
   return crypto.randomBytes(bytes).toString("hex");
@@ -72,18 +84,16 @@ function getSessionFromRequest(req) {
 
 function requireAuth(req, res, next) {
   const sid = getSessionFromRequest(req);
-  if (!sid) return res.status(401).json({ success: false, error: "Not authenticated" });
+  if (!sid) return sendUnauthorized(res, req, "Not authenticated");
   const user = getUserBySession(sid);
-  if (!user) return res.status(401).json({ success: false, error: "Session expired" });
+  if (!user) return sendUnauthorized(res, req, "Session expired");
   req.user = user;
   next();
 }
 
 // ─── POST /api/auth/request ─────────────────────────────────────────────────
-router.post("/request", async (req, res) => {
-  const { email } = req.body || {};
-  if (!isEmail(email)) return res.status(400).json({ success: false, error: "Invalid email" });
-
+router.post("/request", authMagicLinkLimiter, validate(authRequestSchema), async (req, res) => {
+  const { email } = req.validated.body;
   const token = randomHex(32);
   const expiresAt = Date.now() + TOKEN_TTL;
   createAuthToken(token, email, expiresAt);
@@ -115,15 +125,18 @@ router.post("/request", async (req, res) => {
     logger.info(`auth: magic link (no SMTP): ${magicLink}`);
   }
 
-  res.json({ success: true });
+  sendSuccess(res, { success: true });
 });
 
 // ─── GET /api/auth/verify?token= ────────────────────────────────────────────
 router.get("/verify", (req, res) => {
-  const { token } = req.query;
-  if (!token) return res.status(400).send("Missing token");
+  const parsed = authVerifyQuerySchema.safeParse(req.query || {});
+  if (!parsed.success) {
+    return sendValidationError(res, req, parsed.error);
+  }
+  const { token } = parsed.data;
 
-  const authRow = consumeAuthToken(String(token));
+  const authRow = consumeAuthToken(token);
   if (!authRow) {
     return res.status(400).send(`
       <!doctype html><meta charset="utf-8">
@@ -181,9 +194,11 @@ router.post("/logout", (req, res) => {
 
 // ─── PUT /api/auth/prefs ─────────────────────────────────────────────────────
 router.put("/prefs", requireAuth, (req, res) => {
-  const { preferredTopics, language, preferredCountry } = req.body || {};
+  const parsed = authPrefsSchema.safeParse(req.body || {});
+  if (!parsed.success) return sendValidationError(res, req, parsed.error);
+  const { preferredTopics, language, preferredCountry } = parsed.data;
   updateUserPrefs(req.user.id, { preferredTopics, language, preferredCountry });
-  res.json({ success: true });
+  sendSuccess(res, { success: true });
 });
 
 // ─── Saved articles (cross-device sync) ─────────────────────────────────────

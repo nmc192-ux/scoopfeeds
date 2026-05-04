@@ -4,6 +4,7 @@
 // they fan out to every subscriber.
 
 import { Router } from "express";
+import { z } from "zod";
 import { adminAuth, adminAuditLogger } from "../middleware/adminAuth.js";
 import {
   upsertPushSubscription,
@@ -20,8 +21,19 @@ import {
 import { runBreakingNewsPush } from "../services/breakingNewsPusher.js";
 import { detectCountry } from "../services/geolocation.js";
 import { logger } from "../services/logger.js";
+import { validate } from "../middleware/validate.js";
+import { sendError, sendInternalError, sendSuccess } from "../utils/apiResponse.js";
 
 const router = Router();
+const pushSubscribeSchema = z.object({
+  endpoint: z.string().trim().url(),
+  keys: z.object({
+    p256dh: z.string().trim().min(1),
+    auth: z.string().trim().min(1),
+  }),
+  topics: z.array(z.string().trim().min(1).max(64)).max(30).optional(),
+  language: z.string().trim().min(2).max(16).optional(),
+});
 
 // Initialize on module load so VAPID keys are generated/loaded eagerly. If
 // this throws we fail loudly at boot rather than on first request.
@@ -29,15 +41,12 @@ try { ensurePushReady(); } catch (e) { logger.error(`pushService init failed: ${
 
 router.get("/public-key", (_req, res) => {
   const key = getPublicKey();
-  if (!key) return res.status(503).json({ ok: false, error: "vapid not configured" });
-  res.json({ ok: true, publicKey: key });
+  if (!key) return sendError(res, _req, { status: 503, error: "vapid not configured", code: "vapid_unavailable" });
+  sendSuccess(res, { ok: true, publicKey: key });
 });
 
-router.post("/subscribe", (req, res) => {
-  const { endpoint, keys, topics, language } = req.body || {};
-  if (!endpoint || !keys?.p256dh || !keys?.auth) {
-    return res.status(400).json({ ok: false, error: "invalid subscription payload" });
-  }
+router.post("/subscribe", validate(pushSubscribeSchema), (req, res) => {
+  const { endpoint, keys, topics, language } = req.validated.body;
   // Phase 4c: when the caller has an authed session, link the subscription
   // to the user so the watchlist dispatcher can fan out anomalies to them.
   // Anonymous subscribers continue to receive the global broadcast feed only.
@@ -62,10 +71,10 @@ router.post("/subscribe", (req, res) => {
       userAgent: req.get("user-agent") || "",
       userId,
     });
-    res.json({ ok: true, linked: !!userId });
+    sendSuccess(res, { ok: true, linked: !!userId });
   } catch (err) {
     logger.error(`push subscribe failed: ${err.message}`);
-    res.status(500).json({ ok: false, error: "subscribe failed" });
+    sendInternalError(res, req, "subscribe failed", err);
   }
 });
 

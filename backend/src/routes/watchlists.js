@@ -11,8 +11,10 @@
  */
 
 import express from "express";
+import { z } from "zod";
 import { getUserBySession } from "../models/database.js";
 import { logger } from "../services/logger.js";
+import { validate } from "../middleware/validate.js";
 import {
   addToWatchlist,
   removeFromWatchlist,
@@ -20,11 +22,20 @@ import {
   listForUser,
   activityForUser,
 } from "../realityIndex/dal/watchlistsDao.js";
+import { sendInternalError, sendUnauthorized, sendValidationError } from "../utils/apiResponse.js";
 
 const router = express.Router();
 
 const COOKIE_NAME = "scoop_session";
 const ALLOWED_TYPES = new Set(["event", "market", "topic", "ticker"]);
+const watchlistSchema = z.object({
+  item_type: z.enum(["event", "market", "topic", "ticker"]),
+  item_id: z.string().trim().min(1).max(128),
+  alert_threshold: z.number().finite().min(0).max(1).nullable().optional(),
+  alert_types: z.array(z.string().trim().min(1).max(64)).max(20).optional(),
+  notify_push: z.boolean().optional(),
+  notify_email: z.boolean().optional(),
+});
 
 function getSession(req) {
   const raw = req.headers.cookie || "";
@@ -34,9 +45,9 @@ function getSession(req) {
 
 function requireAuth(req, res, next) {
   const sid = getSession(req);
-  if (!sid) return res.status(401).json({ error: "Not authenticated" });
+  if (!sid) return sendUnauthorized(res, req, "Not authenticated");
   const user = getUserBySession(sid);
-  if (!user) return res.status(401).json({ error: "Session expired" });
+  if (!user) return sendUnauthorized(res, req, "Session expired");
   req.user = user;
   next();
 }
@@ -55,9 +66,9 @@ router.get("/", requireAuth, (req, res) => {
 // Body: { item_type, item_id, alert_threshold?, alert_types?, notify_push?, notify_email? }
 router.post("/", requireAuth, (req, res) => {
   try {
-    const { item_type, item_id, alert_threshold, alert_types, notify_push, notify_email } = req.body || {};
-    if (!ALLOWED_TYPES.has(item_type))      return res.status(400).json({ error: "Invalid item_type" });
-    if (!item_id || typeof item_id !== "string") return res.status(400).json({ error: "Missing item_id" });
+    const parsed = watchlistSchema.safeParse(req.body || {});
+    if (!parsed.success) return sendValidationError(res, req, parsed.error);
+    const { item_type, item_id, alert_threshold, alert_types, notify_push, notify_email } = parsed.data;
 
     addToWatchlist({
       user_id: req.user.id,
@@ -72,7 +83,7 @@ router.post("/", requireAuth, (req, res) => {
     res.json({ ok: true, watching: true });
   } catch (err) {
     logger.error(`POST /api/watchlists: ${err.message}`);
-    res.status(500).json({ error: "Internal server error" });
+    sendInternalError(res, req, "Internal server error", err);
   }
 });
 

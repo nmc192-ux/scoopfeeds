@@ -1,6 +1,7 @@
 import crypto from "crypto";
 export { requestIdMiddleware } from "../config/observability.js";
 import { insertAdminAuditLog } from "../models/database.js";
+import { sendError } from "../utils/apiResponse.js";
 
 const TEMP_QUERY_KEY_FLAG = "ALLOW_LEGACY_ADMIN_QUERY_KEY";
 const PUBLIC_SCOOP_OPS_PREFIXES = [
@@ -12,6 +13,7 @@ function setNoStoreHeaders(res) {
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
   res.setHeader("Surrogate-Control", "no-store");
+  res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
 }
 
 function getConfiguredAdminToken() {
@@ -64,10 +66,10 @@ export function adminAuth(req, res, next) {
 
   const configured = getConfiguredAdminToken();
   if (!configured?.token) {
-    return res.status(401).json({
-      ok: false,
+    return sendError(res, req, {
+      status: 401,
       error: "Admin access is not configured",
-      requestId: req.requestId || null,
+      code: "admin_not_configured",
     });
   }
 
@@ -92,10 +94,10 @@ export function adminAuth(req, res, next) {
     }
   }
 
-  return res.status(401).json({
-    ok: false,
+  return sendError(res, req, {
+    status: 401,
     error: "Invalid admin token",
-    requestId: req.requestId || null,
+    code: "invalid_admin_token",
   });
 }
 

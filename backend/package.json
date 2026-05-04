@@ -44,7 +44,8 @@
     "stripe": "^16.0.0",
     "uuid": "^9.0.0",
     "web-push": "^3.6.7",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "zod": "^4.4.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.3"

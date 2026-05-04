@@ -12,10 +12,13 @@
  */
 import { Router } from "express";
 import crypto from "crypto";
+import { z } from "zod";
 import { getDb } from "../models/database.js";
 import { getReferralCount } from "../models/database.js";
 import { logger } from "../services/logger.js";
+import { validate } from "../middleware/validate.js";
 import { getTransport, sendMail } from "../services/mailer.js";
+import { sendError, sendInternalError, sendSuccess } from "../utils/apiResponse.js";
 
 const router = Router();
 
@@ -24,22 +27,27 @@ const SITE_URL = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").repl
 function randomToken() {
   return crypto.randomBytes(24).toString("hex");
 }
-function isEmail(s) {
-  return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
-}
+const emailSchema = z.string().trim().email();
+const hexToken48Schema = z.string().trim().regex(/^[0-9a-f]{48}$/i, "Invalid token");
+const subscribeBodySchema = z.object({
+  email: emailSchema,
+  countryCode: z.string().trim().min(2).max(8).optional().nullable(),
+  language: z.string().trim().min(2).max(16).optional().nullable(),
+  topics: z.array(z.string().trim().min(1).max(64)).max(20).optional(),
+  referredBy: hexToken48Schema.optional().nullable(),
+});
+const tokenQuerySchema = z.object({
+  token: hexToken48Schema,
+});
 
 // ─── Subscribe ──────────────────────────────────────────────────────────────
-router.post("/subscribe", async (req, res) => {
-  const { email, countryCode, language, topics, referredBy } = req.body || {};
-  if (!isEmail(email)) return res.status(400).json({ success: false, error: "Invalid email" });
-
+router.post("/subscribe", validate(subscribeBodySchema), async (req, res) => {
+  const { email, countryCode, language, topics, referredBy } = req.validated.body;
   const db = getDb();
   const now = Date.now();
   const token = randomToken();
   const topicsJson = JSON.stringify(Array.isArray(topics) ? topics.slice(0, 20) : []);
-  // Validate referredBy is a plausible token string (hex, 48 chars) to prevent injection.
-  const refToken = (typeof referredBy === "string" && /^[0-9a-f]{48}$/.test(referredBy))
-    ? referredBy : null;
+  const refToken = referredBy || null;
 
   try {
     db.prepare(`
@@ -83,17 +91,18 @@ router.post("/subscribe", async (req, res) => {
       logger.info(`newsletter: no SMTP configured, storing subscriber ${email} without sending welcome`);
     }
 
-    res.json({ success: true, token });
+    sendSuccess(res, { success: true, token });
   } catch (err) {
     logger.error(`subscribe failed: ${err.message}`);
-    res.status(500).json({ success: false, error: "Internal error" });
+    sendInternalError(res, req, "Internal error", err);
   }
 });
 
 // ─── Confirm (token) ────────────────────────────────────────────────────────
 router.get("/confirm", (req, res) => {
-  const token = String(req.query.token || "");
-  if (!token) return res.status(400).send("Missing token");
+  const parsed = tokenQuerySchema.safeParse(req.query || {});
+  if (!parsed.success) return sendError(res, req, { status: 400, error: "Missing or invalid token", code: "invalid_token" });
+  const { token } = parsed.data;
   const db = getDb();
   const result = db.prepare(`UPDATE subscribers SET verified_at = ? WHERE token = ?`)
     .run(Date.now(), token);
@@ -103,8 +112,9 @@ router.get("/confirm", (req, res) => {
 
 // ─── Unsubscribe (token) ────────────────────────────────────────────────────
 router.get("/unsubscribe", (req, res) => {
-  const token = String(req.query.token || "");
-  if (!token) return res.status(400).send("Missing token");
+  const parsed = tokenQuerySchema.safeParse(req.query || {});
+  if (!parsed.success) return sendError(res, req, { status: 400, error: "Missing or invalid token", code: "invalid_token" });
+  const { token } = parsed.data;
   const db = getDb();
   const result = db.prepare(`UPDATE subscribers SET unsubscribed_at = ? WHERE token = ?`)
     .run(Date.now(), token);
@@ -123,13 +133,12 @@ router.get("/unsubscribe", (req, res) => {
 // ─── Referral stats (per subscriber token) ──────────────────────────────────
 // Used by the frontend "invite friends" card to show live referral count.
 router.get("/referral-stats", (req, res) => {
-  const token = String(req.query.token || "").trim();
-  if (!token || !/^[0-9a-f]{48}$/.test(token)) {
-    return res.status(400).json({ success: false, error: "Invalid token" });
-  }
+  const parsed = tokenQuerySchema.safeParse(req.query || {});
+  if (!parsed.success) return sendError(res, req, { status: 400, error: "Invalid token", code: "invalid_token" });
+  const { token } = parsed.data;
   const referrals = getReferralCount(token);
   const referralUrl = `${SITE_URL}/?ref=${token}`;
-  res.json({ success: true, referrals, referralUrl });
+  sendSuccess(res, { success: true, referrals, referralUrl });
 });
 
 // ─── Preview (admin) ────────────────────────────────────────────────────────

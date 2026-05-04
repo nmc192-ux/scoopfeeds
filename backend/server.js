@@ -3,7 +3,6 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
-import rateLimit from "express-rate-limit";
 import path from "path";
 import { fileURLToPath } from "url";
 import { existsSync } from "fs";
@@ -50,6 +49,14 @@ import { isStripeConfigured } from "./src/routes/tips.js";
 import { cacheMiddleware } from "./src/middleware/cache.js";
 import { adminAuth, adminAuditLogger } from "./src/middleware/adminAuth.js";
 import {
+  adminRouteLimiter,
+  analysisLimiter,
+  apiGlobalLimiter,
+  predictionsLimiter,
+  publicV1EdgeLimiter,
+  readerLimiter,
+} from "./src/middleware/rateLimits.js";
+import {
   apiRequestLoggingMiddleware,
   captureException,
   flushObservability,
@@ -60,6 +67,7 @@ import {
 import { getDb, getDbStatus } from "./src/models/database.js";
 import { RSS_SOURCES, YOUTUBE_SOURCES } from "./src/config/sources.js";
 import { assertRedisStartup, getRedisStatus } from "./src/jobs/redis.js";
+import { sendError, sendInternalError, sendNotFound } from "./src/utils/apiResponse.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -106,37 +114,58 @@ function shouldRedirectHost(host) {
   return Boolean(host) && REDIRECT_FROM_HOSTS.has(host) && host !== PRIMARY_SITE_HOST;
 }
 
+const isProduction = String(process.env.NODE_ENV || "").toLowerCase() === "production";
+const configuredOrigins = new Set(
+  (process.env.ALLOWED_ORIGINS || [
+    PRIMARY_SITE_URL,
+    `https://www.${PRIMARY_SITE_HOST}`,
+    ...REDIRECT_FROM_HOSTS,
+  ].join(","))
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
+
+function isLocalOrigin(origin) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+}
+
+function corsOrigin(origin, callback) {
+  if (!origin) return callback(null, true);
+  if (configuredOrigins.has(origin)) return callback(null, true);
+  if (!isProduction && isLocalOrigin(origin)) return callback(null, true);
+  return callback(null, false);
+}
+
 app.set("trust proxy", 1);
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(compression());
 app.use(cors({
-  origin: (process.env.ALLOWED_ORIGINS || [
-    PRIMARY_SITE_URL,
-    `https://www.${PRIMARY_SITE_HOST}`,
-    ...REDIRECT_FROM_HOSTS,
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3001",
-  ].join(","))
-    .split(",").map(o => o.trim()),
-  methods: ["GET","POST"],
+  origin: corsOrigin,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Authorization", "Content-Type", "X-Request-Id"],
 }));
 // Stripe webhook needs raw body for signature verification — must be before express.json().
 app.use("/api/tips/webhook", express.raw({ type: "application/json" }));
 // Ko-fi webhook sends application/x-www-form-urlencoded with a `data` JSON field.
 app.use("/api/tips/kofi-webhook", express.urlencoded({ extended: false }));
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "256kb" }));
 app.use(requestIdMiddleware);
 app.use(apiRequestLoggingMiddleware({ role: PROCESS_ROLE }));
-
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 500,
-  standardHeaders: true, legacyHeaders: false,
-  message: { success: false, error: "Too many requests 🐢" },
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    if (res.statusCode >= 400 && body && typeof body === "object" && !Array.isArray(body)) {
+      if (!("request_id" in body)) {
+        body = { ...body, request_id: req.requestId || null };
+      }
+    }
+    return originalJson(body);
+  };
+  next();
 });
-app.use("/api/", limiter);
+app.use("/api/", apiGlobalLimiter);
 
 app.use((req, res, next) => {
   const host = getRequestHost(req);
@@ -154,7 +183,7 @@ app.use("/api/market",   marketRouter);  // live FX, stocks, metals — has its 
 app.use("/api/weather",     weatherRouter);    // OpenWeatherMap proxy — 15-min cache per location
 app.use("/api/live-stream", liveStreamRouter); // YouTube RSS → current live video IDs — 10-min cache
 app.use("/api/geo",         geoRouter);        // IP → country / currency / timezone — 6h cache
-app.use("/api/reader",      readerRouter);     // Readability-powered article extraction — 12h cache
+app.use("/api/reader",      readerLimiter, readerRouter);     // Readability-powered article extraction — 12h cache
 app.use("/api/newsletter",  newsletterRouter); // subscribe / unsubscribe / daily digest
 app.use("/api/live-events", liveEventsRouter); // "Live" tab dossiers (AI-synthesized briefs + metrics)
 app.use("/api/track",       trackRouter);      // frontend event beacons (page_view, share, save, dwell, etc.)
@@ -164,17 +193,17 @@ app.use("/api/push",        pushRouter);       // web push: VAPID public key, su
 app.use("/api/auth",        authRouter);       // magic-link auth: /request, /verify, /me, /logout, /saves
 app.use("/api/tips",        tipsRouter);       // Stripe tip jar: /create-session, /webhook, /stats
 app.use("/api/meter",       meterRouter);      // metered paywall: /open (gate check + record), /status
-app.use("/api/analysis",   cacheMiddleware("short"), analysisRouter); // AI-powered news analysis: stories, trends, deep-dive, explained
-app.use("/api/predictions", cacheMiddleware("short"), predictionsRouter); // Reality Index: Polymarket markets bound to news clusters
-app.use("/api/ri/events",  cacheMiddleware("short"), eventsRouter);      // Reality Index Phase 2: event tracker (dossier, timeline, actors)
-app.use("/api/ri",         cacheMiddleware("short"), realityIndexRouter); // Reality Index Phase 3: /truth-gap, /anomalies
+app.use("/api/analysis",   analysisLimiter, cacheMiddleware("short"), analysisRouter); // AI-powered news analysis: stories, trends, deep-dive, explained
+app.use("/api/predictions", predictionsLimiter, cacheMiddleware("short"), predictionsRouter); // Reality Index: Polymarket markets bound to news clusters
+app.use("/api/ri/events",  predictionsLimiter, cacheMiddleware("short"), eventsRouter);      // Reality Index Phase 2: event tracker (dossier, timeline, actors)
+app.use("/api/ri",         predictionsLimiter, cacheMiddleware("short"), realityIndexRouter); // Reality Index Phase 3: /truth-gap, /anomalies
 app.use("/api/watchlists", watchlistsRouter);                            // Reality Index Phase 4: per-user follow lists (auth-gated; no caching)
 app.use("/api/briefs",     cacheMiddleware("short"), briefsRouter);      // Reality Index Phase 4: published analyst briefs (drafts in /scoop-ops)
 app.use("/embed",          embedRouter);                                 // Phase 5: public iframe embeds for blogs/Substacks (no auth, frame-ancestors *)
 app.use("/api/macro",      cacheMiddleware("medium"), macroRouter);     // Phase 5: macro indicators (FRED today; WB/IMF later)
 app.use("/api/synthetic-markets", syntheticMarketsRouter);              // Phase 6 foundation: x*y=k AMM markets (no caching — trades mutate)
-app.use("/api/v1",         cacheMiddleware("medium"), v1Router);        // Phase 7: public read-only API, key-authed + per-key rate-limited
-app.use("/scoop-ops",      adminAuth, adminAuditLogger);
+app.use("/api/v1",         publicV1EdgeLimiter, cacheMiddleware("medium"), v1Router);        // Phase 7: public read-only API, key-authed + per-key rate-limited
+app.use("/scoop-ops",      adminRouteLimiter, adminAuth, adminAuditLogger);
 app.use("/scoop-ops",       socialRouter);     // /scoop-ops/social-queue — preview auto-generated social captions (renamed from /admin to bypass host WAF)
 app.use("/scoop-ops/videos-gen", videoGenRouter); // video generation queue: /queue, /run, /approve/:id, /reject/:id
 app.use("/scoop-ops/newsletter", newsletterOpsRouter); // newsletter ops: /status, /welcome/run, /welcome/test
@@ -330,7 +359,7 @@ if (existsSync(distDir)) {
   app.get(/^(?!\/api)/, (req, res) => res.sendFile(path.join(distDir, "index.html")));
 }
 // API 404
-app.use((req, res) => res.status(404).json({ success: false, error: `Route ${req.path} not found 🤷` }));
+app.use((req, res) => sendNotFound(res, req, `Route ${req.path} not found 🤷`));
 app.use((err, req, res, next) => {
   captureException(err, {
     role: PROCESS_ROLE,
@@ -342,7 +371,14 @@ app.use((err, req, res, next) => {
       status_code: 500,
     },
   });
-  res.status(500).json({ success: false, error: "Internal server error" });
+  if (err?.type === "entity.too.large") {
+    return sendError(res, req, {
+      status: 413,
+      error: "Request body too large",
+      code: "payload_too_large",
+    });
+  }
+  return sendInternalError(res, req, "Internal server error", err);
 });
 
 const server = app.listen(PORT, () => {
