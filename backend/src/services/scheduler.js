@@ -334,7 +334,6 @@ async function runEventTrackerCronCycle() {
   isEventTrackerRun = true;
   try {
     const out = await runEventTracker();
-    await runEventTimelineBuilder();
     return out;
   } catch (err) {
     logger.error("❌ Event tracker failed", { error: err.message });
