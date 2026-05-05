@@ -1,4 +1,8 @@
 # Social poster credentials — survival guide
+Document type: Operational runbook
+Owner: DrJ
+Last updated: 2026-04-28
+Status: Active
 
 ## TL;DR
 

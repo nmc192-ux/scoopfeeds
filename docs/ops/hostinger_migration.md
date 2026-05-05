@@ -1,4 +1,8 @@
 # Hostinger Migration Plan
+Document type: Operational runbook
+Owner: DrJ
+Last updated: 2026-04-19
+Status: Active
 
 Scoop is moving from `scoop.urbenofficial.com` to `scoopfeeds.com` on Hostinger.
 

@@ -1,4 +1,8 @@
 # Scoop On A Mac Mini
+Document type: Operational runbook
+Owner: DrJ
+Last updated: 2026-04-05
+Status: Active
 
 This setup runs Scoop on your Mac mini full-time and exposes it to the internet through a Cloudflare Tunnel.
 

@@ -1,4 +1,8 @@
 # Mediavine / Ezoic Readiness Checklist
+Document type: Operational runbook
+Owner: DrJ
+Last updated: 2026-04-25
+Status: Active
 
 Apply **now** — review takes 2–4 weeks. Submit before you hit the threshold,
 not after.

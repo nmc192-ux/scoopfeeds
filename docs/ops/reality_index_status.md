@@ -1,4 +1,8 @@
 # Reality Index — build status
+Document type: Operational runbook
+Owner: DrJ
+Last updated: 2026-05-03
+Status: Active
 
 Snapshot of the Scoopfeeds → Reality Index conversion. One section per
 plan phase; every sub-bullet either ✅ shipped, ⚠️ partial, or ⏭️ deferred.
