@@ -203,6 +203,9 @@ app.use("/embed",          embedRouter);                                 // Phas
 app.use("/api/macro",      cacheMiddleware("medium"), macroRouter);     // Phase 5: macro indicators (FRED today; WB/IMF later)
 app.use("/api/synthetic-markets", syntheticMarketsRouter);              // Phase 6 foundation: x*y=k AMM markets (no caching — trades mutate)
 app.use("/api/v1",         publicV1EdgeLimiter, cacheMiddleware("medium"), v1Router);        // Phase 7: public read-only API, key-authed + per-key rate-limited
+// Global admin auth boundary for all /scoop-ops/* routers. All sub-routers
+// (riOpsRouter, push, social, newsletter, videos-gen, etc.) inherit
+// adminAuth + adminAuditLogger from this single mount point.
 app.use("/scoop-ops",      adminRouteLimiter, adminAuth, adminAuditLogger);
 app.use("/scoop-ops",       socialRouter);     // /scoop-ops/social-queue — preview auto-generated social captions (renamed from /admin to bypass host WAF)
 app.use("/scoop-ops/videos-gen", videoGenRouter); // video generation queue: /queue, /run, /approve/:id, /reject/:id

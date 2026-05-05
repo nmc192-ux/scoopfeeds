@@ -1,8 +1,9 @@
 /**
  * /scoop-ops/ri-ops — Reality Index operator diagnostics.
  *
- * Routes (all gated by ADMIN_KEY in prod via the `?key=` query param,
- * matching the existing /scoop-ops/* convention):
+ * Routes are protected by the global /scoop-ops/* admin auth boundary
+ * (adminAuth + adminAuditLogger) mounted in backend/server.js. Bearer
+ * token auth via Authorization header; ADMIN_BEARER_TOKEN env var.
  *
  *   GET /scoop-ops/ri-ops/provider    — live LLM/embed provider + RPM
  *   GET /scoop-ops/ri-ops/dashboard   — single JSON snapshot of the entire
@@ -34,15 +35,12 @@ import { createApiKey, listApiKeys, revokeApiKey } from "../realityIndex/dal/api
 import { logger } from "../services/logger.js";
 
 const router = Router();
-const ADMIN_KEY = process.env.ADMIN_KEY || "";
 
-function requireAdmin(req, res, next) {
-  if (!ADMIN_KEY) return next();           // dev mode: open
-  if (req.query.key === ADMIN_KEY) return next();
-  return res.status(404).json({ ok: false, error: "not found" });
-}
+// Admin auth is enforced upstream by the global mount at server.js:206
+// (app.use("/scoop-ops", adminAuth, adminAuditLogger)). Routes here MUST
+// be mounted only under /scoop-ops to inherit this protection.
 
-router.get("/provider", requireAdmin, (_req, res) => {
+router.get("/provider", (_req, res) => {
   const s = getQueueStatus();
   res.json({
     ok:      true,
@@ -51,7 +49,7 @@ router.get("/provider", requireAdmin, (_req, res) => {
   });
 });
 
-router.get("/dashboard", requireAdmin, (_req, res) => {
+router.get("/dashboard", (_req, res) => {
   try {
     const db   = getDb();
     const now  = Date.now();
@@ -131,7 +129,7 @@ router.get("/dashboard", requireAdmin, (_req, res) => {
 // move to 'published' via this manual approval — no auto-promotion path
 // exists in the generator (plan §5J).
 
-router.get("/briefs", requireAdmin, (req, res) => {
+router.get("/briefs", (req, res) => {
   const status = req.query.status ?? "draft";
   const items  = listBriefs({ status, limit: 50 }).map(b => {
     let evidence = [];
@@ -141,7 +139,7 @@ router.get("/briefs", requireAdmin, (req, res) => {
   res.json({ items, status });
 });
 
-router.post("/briefs/:id/approve", requireAdmin, (req, res) => {
+router.post("/briefs/:id/approve", (req, res) => {
   const id = parseInt(req.params.id, 10);
   const b  = getBriefById(id);
   if (!b) return res.status(404).json({ ok: false, error: "Brief not found" });
@@ -151,7 +149,7 @@ router.post("/briefs/:id/approve", requireAdmin, (req, res) => {
   res.json({ ok: true, status: "published" });
 });
 
-router.post("/briefs/:id/reject", requireAdmin, (req, res) => {
+router.post("/briefs/:id/reject", (req, res) => {
   const id = parseInt(req.params.id, 10);
   const b  = getBriefById(id);
   if (!b) return res.status(404).json({ ok: false, error: "Brief not found" });
@@ -161,7 +159,7 @@ router.post("/briefs/:id/reject", requireAdmin, (req, res) => {
 });
 
 // On-demand generation for a one-off run (also fires on cron).
-router.post("/briefs/run", requireAdmin, async (req, res) => {
+router.post("/briefs/run", async (req, res) => {
   try {
     const limit = parseInt(req.query.limit ?? req.body?.limit ?? "2", 10);
     const out = await runAnalystBriefCycle({ limit });
@@ -177,7 +175,7 @@ router.post("/briefs/run", requireAdmin, async (req, res) => {
 // 100-decided / ≥0.7-rate bar we'll consider auto-publication for high
 // confidence drafts in that bucket. Today this endpoint is purely
 // observational — used by /scoop-ops/reality-index to show calibration.
-router.get("/briefs/approval-rates", requireAdmin, (req, res) => {
+router.get("/briefs/approval-rates", (req, res) => {
   try {
     const days = Math.max(1, Math.min(parseInt(req.query.days ?? "90", 10), 365));
     const overall    = getOverallApprovalRate({ daysBack: days });
@@ -195,7 +193,7 @@ router.get("/briefs/approval-rates", requireAdmin, (req, res) => {
 // Resolution flips a market to outcome={yes|no|cancel}; payout logic for share
 // holders is computed lazily by the leaderboard worker (Phase 6.5).
 
-router.post("/synthetic/create", requireAdmin, (req, res) => {
+router.post("/synthetic/create", (req, res) => {
   try {
     const { question, description, cluster_id, event_id, end_date, initial_liquidity } = req.body || {};
     if (!question) return res.status(400).json({ ok: false, error: "question required" });
@@ -212,7 +210,7 @@ router.post("/synthetic/create", requireAdmin, (req, res) => {
   }
 });
 
-router.post("/synthetic/:id/resolve", requireAdmin, (req, res) => {
+router.post("/synthetic/:id/resolve", (req, res) => {
   try {
     const { outcome } = req.body || {};
     const out = resolveSyntheticMarket({ market_id: req.params.id, outcome });
@@ -223,7 +221,7 @@ router.post("/synthetic/:id/resolve", requireAdmin, (req, res) => {
   }
 });
 
-router.post("/synthetic/extract", requireAdmin, async (req, res) => {
+router.post("/synthetic/extract", async (req, res) => {
   try {
     const limit = parseInt(req.query.limit ?? req.body?.limit ?? "2", 10);
     const out = await runQuestionExtractor({ limit });
@@ -234,7 +232,7 @@ router.post("/synthetic/extract", requireAdmin, async (req, res) => {
   }
 });
 
-router.post("/synthetic/propose-outcomes", requireAdmin, async (req, res) => {
+router.post("/synthetic/propose-outcomes", async (req, res) => {
   try {
     const limit = parseInt(req.query.limit ?? req.body?.limit ?? "3", 10);
     const out = await runOutcomeResolverCycle({ limit });
@@ -247,7 +245,7 @@ router.post("/synthetic/propose-outcomes", requireAdmin, async (req, res) => {
 
 // Editor view: list synthetic markets with their proposed-outcome metadata
 // merged in. Powers /scoop-ops/synthetic admin page.
-router.get("/synthetic/queue", requireAdmin, (_req, res) => {
+router.get("/synthetic/queue", (_req, res) => {
   try {
     const rows = getDb().prepare(`
       SELECT id, question, description, event_id, end_date, yes_price,
@@ -276,11 +274,11 @@ router.get("/synthetic/queue", requireAdmin, (_req, res) => {
 });
 
 // ─── Public API key management (Phase 7) ──────────────────────────────────
-router.get("/api-keys", requireAdmin, (_req, res) => {
+router.get("/api-keys", (_req, res) => {
   res.json({ items: listApiKeys() });
 });
 
-router.post("/api-keys/create", requireAdmin, (req, res) => {
+router.post("/api-keys/create", (req, res) => {
   const { owner, tier } = req.body || {};
   if (!owner) return res.status(400).json({ ok: false, error: "owner required" });
   if (tier && !["free", "pro", "enterprise"].includes(tier)) {
@@ -290,7 +288,7 @@ router.post("/api-keys/create", requireAdmin, (req, res) => {
   res.json({ ok: true, ...out });
 });
 
-router.post("/api-keys/:key/revoke", requireAdmin, (req, res) => {
+router.post("/api-keys/:key/revoke", (req, res) => {
   const removed = revokeApiKey(req.params.key);
   res.json({ ok: true, removed });
 });
