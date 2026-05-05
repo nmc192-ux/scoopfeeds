@@ -62,7 +62,7 @@ export default function TopicNav() {
         <div className="relative">
           <div
             ref={scrollRef}
-            className="flex items-center gap-2 py-3 overflow-x-auto hide-scrollbar"
+            className="flex items-center gap-2 py-3 overflow-x-auto hide-scrollbar rtl:flex-row-reverse"
           >
           {savedCount > 0 && (
             <motion.button
@@ -133,10 +133,7 @@ export default function TopicNav() {
           </div>
           {/* Right-edge fade — indicates more topics to scroll to */}
           <div
-            className="pointer-events-none absolute right-0 top-0 h-full w-16"
-            style={{
-              background: "linear-gradient(to right, transparent, var(--color-bg))",
-            }}
+            className="pointer-events-none absolute right-0 top-0 h-full w-16 bg-gradient-to-r from-transparent to-[var(--color-bg)] rtl:right-auto rtl:left-0 rtl:bg-gradient-to-l"
           />
         </div>
       </div>

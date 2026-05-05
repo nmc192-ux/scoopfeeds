@@ -140,7 +140,7 @@ export default function App() {
   if (isOffline) return <BackendOffline />;
 
   return (
-    <div className="min-h-screen bg-[var(--color-bg)] transition-colors duration-300">
+    <div dir={isRtlLang ? "rtl" : "ltr"} className="min-h-screen bg-[var(--color-bg)] transition-colors duration-300">
       <SkimlinksLoader publisherId={publicConfig?.affiliate?.skimlinksId} />
       <Header />
       <BreakingBanner />

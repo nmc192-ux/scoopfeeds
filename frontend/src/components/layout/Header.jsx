@@ -159,7 +159,7 @@ export default function Header() {
           </AnimatePresence>
 
           {/* ── Actions ─────────────────────────────────────────────────── */}
-          <div className="flex items-center gap-1 sm:gap-1.5">
+          <div className="flex items-center gap-1 sm:gap-1.5 rtl:flex-row-reverse">
             {/* Live TV pill — high-visibility entry point */}
             <Link
               to="/live-tv"
