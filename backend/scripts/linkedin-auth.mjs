@@ -2,35 +2,22 @@
 /**
  * linkedin-auth.mjs  —  One-time OAuth2 setup for LinkedIn Company Page posting.
  *
- * Prerequisites (do this in the LinkedIn Developer portal first):
- *   1. Go to https://www.linkedin.com/developers/apps → Create App
- *      - App name: "Scoopfeeds Publisher"
- *      - Company page: link your Scoopfeeds LinkedIn page (create one at
- *        linkedin.com/company/setup/new if you haven't already)
- *      - Logo + privacy policy URL (required for review)
- *   2. Under "Products", request:
- *        • "Share on LinkedIn"          → instant approval
- *        • "Sign In with LinkedIn using OpenID Connect" → instant approval
- *      These give you w_member_social + openid scopes.
- *      For company-page posting you also need:
- *        • "Community Management API"  → apply (usually approved within 1-3 days)
- *      Until "Community Management API" is approved, the token will only have
- *      w_member_social (personal posts). Add it once approved and re-run.
- *   3. Under "Auth" → OAuth 2.0 settings:
- *        - Redirect URL: http://localhost:8086/callback
- *   4. Note your Client ID and Client Secret from the "Auth" tab.
- *   5. Find your Organization ID:
- *        - Go to your LinkedIn Company Page
- *        - The URL will be linkedin.com/company/<orgId>/
- *        - Copy the numeric ID
- *   6. Set env vars and run:
- *        export LINKEDIN_CLIENT_ID=...
- *        export LINKEDIN_CLIENT_SECRET=...
- *        export LINKEDIN_ORG_ID=...           # numeric org ID from company page URL
+ * App: "Scoopfeeds CMA"  (Client ID: 77d4j3lqv7l9de)
+ *   https://www.linkedin.com/developers/apps/245191621/auth
+ *
+ * Prerequisites:
+ *   1. "Community Management API" product must be approved in the Scoopfeeds CMA
+ *      LinkedIn app (applied 2026-05-01 — check admin@scoopfeeds.com for approval).
+ *      Once approved, the app gains w_organization_social + r_organization_social.
+ *   2. Redirect URL http://localhost:8086/callback is already saved in the Auth tab.
+ *   3. Set env vars and run:
+ *        export LINKEDIN_CLIENT_ID=77d4j3lqv7l9de
+ *        export LINKEDIN_CLIENT_SECRET=<secret from Auth tab>
+ *        export LINKEDIN_ORG_ID=115873586
  *        node backend/scripts/linkedin-auth.mjs
- *   7. Add to Hostinger env vars and redeploy:
- *        LINKEDIN_ACCESS_TOKEN   = (printed by this script)
- *        LINKEDIN_ORGANIZATION_ID = (your org ID)
+ *   4. Add to Hostinger env vars and redeploy:
+ *        LINKEDIN_ACCESS_TOKEN    = (printed by this script)
+ *        LINKEDIN_ORGANIZATION_ID = 115873586
  *
  * Token lifetime: LinkedIn access tokens expire in 60 days. Re-run this script
  * when posting starts failing with 401 errors.
@@ -61,9 +48,9 @@ Then re-run: node backend/scripts/linkedin-auth.mjs
 const PORT         = 8086;
 const REDIRECT_URI = `http://localhost:${PORT}/callback`;
 
-// w_organization_social requires Community Management API product approval.
-// w_member_social is available immediately with "Share on LinkedIn" product.
-// Request both — whichever is approved will be granted.
+// Scoopfeeds CMA app — Community Management API approved, so we request full org scopes.
+// w_organization_social = post/delete on behalf of the organization
+// r_organization_social = read org posts (needed for dedup checks)
 const SCOPES = [
   "openid",
   "profile",
@@ -156,9 +143,8 @@ Add these env vars to Hostinger → Settings and redeploy:
   LINKEDIN_ORGANIZATION_ID = ${orgId}
 
 Note: Token expires in ~${expiresIn}. Re-run this script to refresh.
-Note: Company-page posting requires "Community Management API" product
-      approval in your LinkedIn app. Apply at developers.linkedin.com.
-      Until approved, the token will only post to your personal profile.
+Note: This token uses the "Scoopfeeds CMA" app (Client ID: 77d4j3lqv7l9de).
+      It will post to organization ${orgId} if w_organization_social scope was granted.
 
 Done! LinkedIn auto-posting is now enabled.
 `);
