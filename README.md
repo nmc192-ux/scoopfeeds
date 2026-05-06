@@ -18,6 +18,8 @@ analytical workstation for journalists, researchers, and analysts.
 
 Scoopfeeds is currently in **Phase A (Stabilization and Audit)**. See the [Strategic Plan](docs/strategy/strategic_plan_v6.md) for the full vision and the [Phase A Kickoff Brief](docs/phases/phase_a_kickoff_brief.md) for current execution work.
 
+**Language support note:** English UI is fully supported. Urdu UI has correct RTL layout but translation quality is currently variable due to translation pipeline limitations being addressed in Phase B/C. Other language UIs (Arabic, Russian, Mandarin) are on the Phase E roadmap.
+
 ## Documentation
 
 All strategic, execution, and operational documentation lives in [`/docs/`](docs/README.md).
