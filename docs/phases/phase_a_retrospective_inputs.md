@@ -43,3 +43,20 @@ DB-based — or add instrumentation as part of Sprint 3 metrics work.
 Article count drops and uptime resets are normal in cloud hosting;
 not every anomaly is a bug signal. First diagnostic should always
 be "is this metric meaningful?" before "is this metric broken?"
+
+### 8. Hostinger restarts cause partial database rollback
+Production has experienced two restarts in 37 hours, each causing
+~300-600 articles to disappear from the database (15,269 → 14,897 →
+14,301). Articles ingested in stable periods persist correctly
+(verified: 14,301 → 14,498 over 50 minutes of stable uptime, ~4
+articles/minute ingestion). The loss happens at restart events,
+suggesting news.db is being restored from a snapshot taken before
+the most recent ingestion period. Likely root cause: Hostinger
+persistent-storage configuration where the database file lives on
+ephemeral storage and snapshots restore on restart. Fix likely
+involves moving the database to a persistent volume or adjusting
+backup/restore policy. Investigation needed in a separate session:
+confirm via file-system inspection where news.db is stored and
+whether sibling backup files exist with stale snapshots. Logged for
+Phase A retrospective; not blocking Sprint 2 work because production
+is functional in stable periods and restarts are infrequent.
