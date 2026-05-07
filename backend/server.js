@@ -8,6 +8,8 @@ import { fileURLToPath } from "url";
 import { existsSync } from "fs";
 import { logger } from "./src/services/logger.js";
 import { collectIntegrationStatus, countIntegrations } from "./src/config/integrations.js";
+import { CSP_HEADER_VALUE, REPORTING_ENDPOINTS_HEADER } from "./src/config/csp.js";
+import cspReportRouter from "./src/routes/csp-report.js";
 import { startScheduler, getSchedulerStatus } from "./src/services/scheduler.js";
 import newsRouter      from "./src/routes/news.js";
 import videosRouter    from "./src/routes/videos.js";
@@ -141,6 +143,22 @@ function corsOrigin(origin, callback) {
 app.set("trust proxy", 1);
 
 app.use(helmet({ contentSecurityPolicy: false }));
+
+// CSP report-only mode (Sprint 2 Issue 2.2 — Stage 1 of two-stage rollout).
+// Helmet's CSP stays disabled; we set the policy here ourselves so we
+// control the directive list and reporting endpoint without fighting
+// helmet's defaults. Applied to non-/api/ responses only — /api/* is
+// JSON, where CSP is meaningless, and the report endpoint must not
+// receive CSP itself. Stage 2 will switch the header name to
+// Content-Security-Policy (enforcement); the policy stays the same.
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/api/")) {
+    res.setHeader("Content-Security-Policy-Report-Only", CSP_HEADER_VALUE);
+    res.setHeader("Reporting-Endpoints", REPORTING_ENDPOINTS_HEADER);
+  }
+  next();
+});
+
 app.use(compression());
 app.use(cors({
   origin: corsOrigin,
@@ -188,6 +206,7 @@ app.use("/api/reader",      readerLimiter, readerRouter);     // Readability-pow
 app.use("/api/newsletter",  newsletterRouter); // subscribe / unsubscribe / daily digest
 app.use("/api/live-events", liveEventsRouter); // "Live" tab dossiers (AI-synthesized briefs + metrics)
 app.use("/api/track",       trackRouter);      // frontend event beacons (page_view, share, save, dwell, etc.)
+app.use("/api/csp-report",  cspReportRouter);  // CSP violation reports (Sprint 2 Issue 2.2 — Stage 1 report-only)
 app.use("/api/affiliate",   affiliateRouter);  // geo-aware affiliate program picker + paywall CTA resolver
 app.use("/api/cards",       cardsRouter);      // branded OG/IG/Story PNG cards — disk-cached, 1-week public cache
 app.use("/api/push",        pushRouter);       // web push: VAPID public key, subscribe/unsubscribe, admin broadcast
