@@ -80,3 +80,29 @@ Going forward, every Phase A issue's investigation phase should
 include a "verify the Brief's premise" check before proposing a
 fix, and Issues that turn out to be no-ops should be tracked as
 a meta-data point about Brief accuracy.
+
+### 10. /api/events endpoint returns 500 in production
+Production smoke testing of CSP Stage 1 (Issue 2.2) revealed that
+GET /api/events returns 500 Internal Server Error. Unrelated to
+Sprint 2 work — pre-existing condition surfaced by a clearer
+console view (CSP work quieted third-party noise). Endpoint is
+called by the homepage on load. Investigation needed: check
+Hostinger Runtime Logs for stack traces, identify the failing
+operation, fix. May relate to retrospective input #8 (Hostinger
+restart database rollback) if the events table is being affected
+by restart-time data loss. Investigation deferred to a separate
+session focused on production stability.
+
+### 11. Issue 2.4 integration summary log missing from Runtime Logs
+After production deploy of Sprint 2 Issue 2.4 (commit 12cd630),
+the expected "🔌 integrations summary: X/Y configured" log line
+does not appear in Hostinger Runtime Logs. The log line passes
+local syntax check and the file (backend/src/config/integrations.js)
+was created and committed correctly. Possibilities: (a) Hostinger's
+log panel filters certain emoji or formats; (b) winston meta-object
+serialization fails silently in production; (c) a runtime error in
+collectIntegrationStatus() throws and the try/catch swallows the
+emit; (d) the lazy import paths fail at runtime in production's
+file layout. Investigation needed: SSH to production, check actual
+process stderr/stdout, or add a fallback plain-text emit.
+Investigation deferred to a separate session.
