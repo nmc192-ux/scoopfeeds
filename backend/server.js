@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { existsSync } from "fs";
 import { logger } from "./src/services/logger.js";
+import { collectIntegrationStatus, countIntegrations } from "./src/config/integrations.js";
 import { startScheduler, getSchedulerStatus } from "./src/services/scheduler.js";
 import newsRouter      from "./src/routes/news.js";
 import videosRouter    from "./src/routes/videos.js";
@@ -388,6 +389,17 @@ const server = app.listen(PORT, () => {
   logger.info(`🚀 NewsFlow API (${PROCESS_ROLE}) → http://localhost:${PORT}`);
   logger.info(`📰 RSS sources: ${RSS_SOURCES.length}  |  📺 YouTube channels: ${YOUTUBE_SOURCES.length}`);
   logger.info(`⏰ Refresh: news every 30 min, videos every 60 min`);
+
+  // Integration summary — one scannable count line + one structured emit.
+  // Operators can see at a glance whether this deploy picked up env vars.
+  try {
+    const integrations = collectIntegrationStatus({ schedulerEnabled: shouldStartEmbeddedScheduler() });
+    const counts = countIntegrations(integrations);
+    logger.info(`🔌 integrations summary: ${counts.configured}/${counts.total} configured`);
+    logger.info("🔌 integrations", integrations);
+  } catch (err) {
+    logger.warn(`Integration summary log failed: ${err.message}`);
+  }
 
   // Reality Index Phase 1 — schema + sqlite-vec extension. Idempotent.
   // Safe to call before scheduler starts; only initializes new tables.
