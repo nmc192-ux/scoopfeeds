@@ -60,3 +60,23 @@ confirm via file-system inspection where news.db is stored and
 whether sibling backup files exist with stale snapshots. Logged for
 Phase A retrospective; not blocking Sprint 2 work because production
 is functional in stable periods and restarts are infrequent.
+
+### 9. Phase A Brief described a phantom bug in Issue 2.1
+Sprint 2 Issue 2.1 was scoped to fix "ALTER TABLE migrations re-run
+on every restart and log success even when no-op." Investigation
+revealed all 5 ALTER TABLE sites in the codebase already use a
+column-existence guard pattern (PRAGMA + if (!cols.some(...))) that
+short-circuits before any log fires on already-applied migrations.
+The formal migration system at backend/src/db/migrate.js tracks
+applied migrations in a schema_migrations table and is also
+idempotent. Issue 2.1 closed as no-op; no code change needed.
+
+This is the second case in Phase A where the Brief described
+behavior that didn't match the codebase (the first was Sprint 1
+Issue 1.3, where the local requireAdmin in ri-ops.js was already
+dead code due to upstream global middleware). Pattern: the Brief
+was written without full knowledge of Codex's prior hardening work.
+Going forward, every Phase A issue's investigation phase should
+include a "verify the Brief's premise" check before proposing a
+fix, and Issues that turn out to be no-ops should be tracked as
+a meta-data point about Brief accuracy.
