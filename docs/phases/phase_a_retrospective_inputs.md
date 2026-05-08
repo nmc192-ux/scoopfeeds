@@ -106,3 +106,64 @@ emit; (d) the lazy import paths fail at runtime in production's
 file layout. Investigation needed: SSH to production, check actual
 process stderr/stdout, or add a fallback plain-text emit.
 Investigation deferred to a separate session.
+
+### 12. Hostinger lsnode bridge does not capture winston output
+Investigation of finding #11 revealed that Hostinger's lsnode.js
+LiteSpeed bridge captures console.* method calls but does NOT
+capture winston's process.stdout.write output. Consequence: all
+winston-emitted logs (logger.info, logger.warn, logger.error) are
+invisible in Hostinger Runtime Logs panel. Affected log streams
+include:
+- All startup logs (🚀 NewsFlow API, 📰 RSS sources, ⏰ Refresh,
+  scheduler status, integration summary from Issue 2.4)
+- CSP violation logs via /api/csp-report (Issue 2.2 Stage 1)
+- Admin auth audit logs (Issue 1.3 work)
+- All error stack traces from any logger.error call
+
+Operationally significant because it means we've had a production
+observability blackout since the codebase started using winston.
+Real CSP violations being collected at /api/csp-report cannot be
+read in Hostinger; we'd been relying on synthetic curl tests for
+verification.
+
+Finding #11's narrow fix (commit f2fc7f5) addresses the integration
+summary specifically by adding a parallel console.log. The systemic
+fix (making all winston output visible) requires modifying
+backend/src/services/logger.js.
+
+Investigation in Phase 2 of session 4 evaluated four approaches:
+(a) custom winston Transport subclass that calls console.log;
+(b) replacement Console transport library; (c) logger.js wrapper
+around logger.info/warn/error; (d) winston 3.11's built-in
+forceConsole: true flag on the existing Console transport.
+
+Root cause confirmed by reading
+backend/node_modules/winston/lib/winston/transports/console.js
+lines 85-91: by default the Console transport writes via
+`console._stdout.write(...)` (an internal Node Console property
+pointing at process.stdout) rather than `console.log(...)`.
+lsnode patches console.log but not the underlying _stdout stream,
+hence the invisibility.
+
+Recommendation: option (d). Setting forceConsole: true on the
+existing Console transport routes writes through this._consoleLog
+(a console.log.bind(console) reference set at transport
+construction), which lsnode does intercept. Single-line config
+change in logger.js; zero risk to existing call sites (winston's
+public API and message format are unchanged); this is the exact
+use case the forceConsole flag was designed for (process managers
+and serverless environments that monkey-patch console but not raw
+stdout streams).
+
+Next session should:
+1. Apply forceConsole: true to the Console transport in
+   backend/src/services/logger.js
+2. Deploy and verify the existing winston.info startup lines
+   appear in Hostinger Runtime Logs
+3. If verified, decide whether to remove the narrow console.log
+   fallback added in commit f2fc7f5 (server.js) — the root-cause
+   fix obviates it, but leaving it as belt-and-braces is also fine
+4. Confirm CSP violation logs from /api/csp-report are now visible
+   too (the original purpose of Issue 2.2 Stage 1 — observation —
+   has been partly defeated by the invisibility gap, so this
+   verification is operationally important)
