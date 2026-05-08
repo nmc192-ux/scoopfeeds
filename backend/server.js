@@ -416,8 +416,12 @@ const server = app.listen(PORT, () => {
     const counts = countIntegrations(integrations);
     logger.info(`🔌 integrations summary: ${counts.configured}/${counts.total} configured`);
     logger.info("🔌 integrations", integrations);
+    // Stdout fallback so Hostinger's lsnode panel sees this (lsnode captures
+    // console.* but not winston.transports.Console's process.stdout.write).
+    console.log(`[server.js] integrations: ${counts.configured}/${counts.total} configured ${JSON.stringify(integrations)}`);
   } catch (err) {
     logger.warn(`Integration summary log failed: ${err.message}`);
+    console.error(`[server.js] integration summary log failed:`, err.message);
   }
 
   // Reality Index Phase 1 — schema + sqlite-vec extension. Idempotent.
