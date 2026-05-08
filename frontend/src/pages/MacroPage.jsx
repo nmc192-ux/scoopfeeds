@@ -13,6 +13,7 @@ import { useState } from "react";
 import { ArrowDown, ArrowUp, Minus, Database, ExternalLink } from "lucide-react";
 import { useMacroIndicators } from "../hooks/useMacro";
 import { COPY } from "../lib/copyGuide";
+import { useT } from "../lib/i18n";
 
 const PROVIDERS = [
   { id: "",   label: "All" },
@@ -84,6 +85,7 @@ function IndicatorCard({ ind }) {
 }
 
 export default function MacroPage() {
+  const { t } = useT();
   const [provider, setProvider] = useState("");
   const { data, isLoading } = useMacroIndicators({ provider: provider || undefined });
   const indicators = data?.indicators ?? [];
@@ -99,7 +101,7 @@ export default function MacroPage() {
           </span>
         </div>
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {COPY.brandTagline} Curated rates, inflation, labour, commodities, FX from St. Louis Fed (FRED) and World Bank Open Data.
+          {COPY.brandTagline(t)} Curated rates, inflation, labour, commodities, FX from St. Louis Fed (FRED) and World Bank Open Data.
         </p>
       </header>
 
@@ -142,7 +144,7 @@ export default function MacroPage() {
       )}
 
       <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-6 text-center">
-        {data?.disclaimer || COPY.brandTagline}
+        {data?.disclaimer || COPY.brandTagline(t)}
       </p>
     </div>
   );
