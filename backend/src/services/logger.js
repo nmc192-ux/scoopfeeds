@@ -23,7 +23,6 @@ export const logger = winston.createLogger({
   transports: [
     new winston.transports.Console({
       format: combine(colorize(), timestamp({ format: "HH:mm:ss" }), logFormat),
-      forceConsole: true,
     }),
     new winston.transports.File({
       filename: path.join(logsDir, "error.log"),
