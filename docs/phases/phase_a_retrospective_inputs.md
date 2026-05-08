@@ -167,3 +167,80 @@ Next session should:
    too (the original purpose of Issue 2.2 Stage 1 — observation —
    has been partly defeated by the invisibility gap, so this
    verification is operationally important)
+
+### 13. forceConsole flag on winston Console transport crashes production
+The systemic observability fix identified by session 4's investigation
+(adding forceConsole: true to backend/src/services/logger.js's Console
+transport, per finding #12's Phase 2 recommendation) caused immediate
+production failure when deployed.
+
+Timeline (2026-05-08):
+- 20:20:54 UTC — Hostinger deploy of commit 4a0abd9 (forceConsole
+  flag added) completed
+- Shortly after — Production began returning HTTP 503 across all
+  endpoints; LiteSpeed could not connect to the Node.js process
+- Recovery — Revert commit c67b741 created and deployed; production
+  returned to 200 status within ~90 seconds of the revert deploy
+- Post-recovery — Article ingestion resumed normally (18,326 → 18,576
+  during the session); no apparent data loss
+
+Root cause not yet investigated. Hypothesis space:
+- winston "^3.11.0" may have resolved to an older version where
+  forceConsole doesn't exist or behaves differently
+- forceConsole may interact badly with the multi-transport setup
+  (Console + 3 file transports)
+- Production's lsnode environment may have console internals
+  (console._stdout, console._consoleLog) that differ from
+  documented behavior
+- Side effect of forceConsole evaluation on the Console transport's
+  format chain (combine + colorize + timestamp + custom format)
+
+Future investigation should reproduce locally if possible
+(potentially by running with NODE_ENV mimicking production), check
+the actual installed winston version in production node_modules,
+and consider alternative approaches if forceConsole proves
+fundamentally incompatible:
+- Custom Console-compatible Transport that calls console.log directly
+- Logger module wrapper mirroring all calls to console.log
+- Replace winston with a library whose Console output uses console.log
+
+The narrow stdout fallback in commit f2fc7f5 (added console.log
+specifically for the integration summary) remains in place and
+provides minimal observability for that one log line. The systemic
+observability gap (winston output invisible to Hostinger Runtime
+Logs) remains open.
+
+### 14. Local node --check is insufficient verification for foundational infrastructure changes
+The forceConsole change in commit 4a0abd9 passed local node --check
+syntax validation but crashed at runtime in production. This is the
+inherent gap of static-only verification: the code is syntactically
+valid but fails in the specific runtime environment.
+
+Pattern observed across sessions:
+- Issue 1.4 (Urdu RTL) — local Vite preview verification caught
+  visual issues that node --check could not
+- Issue 2.2 Stage 1 (CSP) — staged report-only deploy caught
+  AdSense fraud-detection allowlist gap before enforcement
+- Issue 2.4 (integration log) — narrow fix shipped successfully but
+  the log was invisible in Hostinger panel for unrelated reasons
+- forceConsole — passed all available local checks but crashed
+  production immediately
+
+For future Phase A and Phase B+ changes touching foundational
+infrastructure (logger, error handling, app startup, middleware,
+authentication boundaries), defense-in-depth verification should
+include:
+- Pre-prepared revert path documented BEFORE deploy
+- Deploy during low-traffic windows where feasible
+- Immediate post-deploy verification curl (any 5xx triggers
+  immediate revert without further diagnosis)
+- Where possible, test in an environment that mimics production's
+  runtime configuration (none currently exists for Scoopfeeds)
+- For especially critical changes, consider a staged-deploy pattern
+  similar to CSP Issue 2.2 (report-only first, enforcement second)
+  where applicable
+
+This finding refines the investigate-before-act discipline that has
+served prior sessions. Investigation catches incorrect assumptions
+in the planning phase; this finding addresses the verification gap
+between "code looks correct" and "code works in production."
