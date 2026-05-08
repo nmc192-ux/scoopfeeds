@@ -139,10 +139,13 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
-      <div className="mb-6 flex items-center gap-2">
+      <div className="mb-2 flex items-center gap-2">
         <Star size={18} className="text-[var(--color-accent)]" fill="currentColor" />
         <h1 className="font-editorial italic text-2xl text-[var(--color-text)]">Dashboard</h1>
       </div>
+      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
+        Your saved events, prediction markets, and analyst briefs. Star anything across the site to add it here.
+      </p>
 
       <div className="grid lg:grid-cols-[1fr_22rem] gap-6">
         {/* Left: watchlist */}
