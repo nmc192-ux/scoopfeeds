@@ -244,3 +244,103 @@ This finding refines the investigate-before-act discipline that has
 served prior sessions. Investigation catches incorrect assumptions
 in the planning phase; this finding addresses the verification gap
 between "code looks correct" and "code works in production."
+
+### 15. Phase A Brief was wrong about specific details in 5 of 6 code issues investigated
+Pattern observed across Sprint 1 and Sprint 2 execution: when an
+issue required investigation before editing, the Phase A Brief's
+description of the bug or fix was substantively incorrect in 5 of
+6 cases.
+
+Cases:
+- Sprint 1 Issue 1.3 (auth refactor) — Brief described fail-open
+  ?key= bypass that was already dead code; upstream global
+  middleware (Codex's prior hardening) was already enforcing auth.
+  Fix scope was "remove dead code" not "harden vulnerable endpoint."
+- Sprint 1 Issue 1.4 (Urdu RTL) — Brief premise correct but missed
+  that translation pipeline produces mojibake regardless of CSS
+  direction. RTL CSS shipped successfully; underlying translation
+  quality issue captured separately for Phase B/C.
+- Sprint 1 Issue 1.5 (timeline duplication) — Brief framed cost as
+  LLM tokens; actual concern is DB operations. Brief said 2x
+  duplication; actual was 3x (the inline call ran at :13/:19/:43,
+  not just :19/:43).
+- Sprint 2 Issue 2.1 (migration log spam) — Brief described
+  phantom bug. All 5 ALTER TABLE sites already used column-existence
+  guard pattern; no log fired on already-applied migrations. Closed
+  as no-op.
+- Sprint 2 Issue 2.3 (hollow features) — Brief identified Reality
+  Index, Truth Gap, Anomalies, Briefs as needing explainer copy.
+  All four pages already had explainer subheads via copyGuide.js.
+  Real issues found through investigation: DashboardPage genuinely
+  hollow signed-in state, MacroPage rendering bug at two
+  COPY.brandTagline call sites.
+
+Only Sprint 1 Issue 1.7 (production smoke test design) was
+substantively as the Brief described, and even there the smoke test
+referenced a non-existent metric.
+
+Implication for Phase B brief authoring discipline:
+- Briefs written without inspecting current code state will
+  systematically misdescribe what needs fixing
+- Investigation phase should be mandatory for every issue, not
+  skipped on confidence
+- Brief authors should validate at minimum: does the named bug
+  exist in the form described? Does the proposed fix scope match
+  the actual problem? Are there adjacent bugs the Brief framing
+  would miss?
+
+The investigation-before-edit discipline that emerged organically in
+this Phase A has caught real problems repeatedly. Phase B should
+formalize this as part of every issue's lifecycle rather than
+discovering it again.
+
+### 16. Sign-in flow returns Page Not Found in production
+Verified during Issue 2.3 verification on 2026-05-08. Clicking
+"Sign in with email" on https://scoopfeeds.com/dashboard
+(signed-out state) routes to a Page Not Found page styled with
+Scoopfeeds branding (suggesting the React app's catch-all 404
+route is firing, not a Hostinger LiteSpeed 404).
+
+User-facing impact: new users cannot create accounts or sign in
+through the documented flow. The duration this has been broken is
+unknown — possibly weeks based on prior screenshots showing similar
+auth UI from April 2026.
+
+Investigation needed:
+- What URL does "Sign in with email" actually route to?
+  (Right-click → inspect → check href, or use DevTools Network tab)
+- Is the route registered in the React Router config?
+- Is there a missing Vercel rewrite or Hostinger configuration?
+- Is the auth backend responding correctly to whatever endpoint
+  the frontend hits?
+- Are there working sign-in paths (e.g., direct URL navigation)
+  vs only the button click broken?
+
+Priority: HIGH for next session. Sign-in is core user functionality
+and the fix may be small (routing typo, missing rewrite) or
+larger (auth integration regression). Investigation needed before
+scoping the fix.
+
+### 17. MacroPage data quality issues
+Observations during Issue 2.3 verification:
+- Indicators displayed in no apparent logical order (governance,
+  exports, GDP, inflation, unemployment intermixed without grouping)
+- Country coverage limited to a small set (US, India, China,
+  European Union, World) when the backing APIs (FRED + World Bank)
+  support far more
+- Mixed data freshness (some indicators from 2018, most from
+  2024-2025)
+- "FRED (US)" tab is empty despite the page subhead claiming data
+  comes from "St. Louis Fed (FRED) and World Bank Open Data" — all
+  visible data appears to be World Bank sourced
+- Page presents as ill-prepared/illogical to users
+
+Not a blocker for any current sprint work. Captured for future
+phase scope: a proper Macro feature build-out would include
+indicator categorization, expanded country coverage, fresh data
+priority, FRED ingestion verification, and likely a redesign of
+the indicator card layout for visual hierarchy.
+
+Defer to Phase B+ as a feature-level revisit, not a Sprint 2 fix.
+The brand tagline rendering bug has been resolved (Issue 2.3
+commit 240f2fd); the data quality work is separate and substantial.
