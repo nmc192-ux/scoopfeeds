@@ -579,3 +579,89 @@ For future sessions involving similar operational scope:
 Phases 4-7 of the original session 9 plan (breaking-news ticker,
 category-aware breaking news, internal-link click destination,
 re-enable Instagram) all deferred to subsequent sessions.
+
+### 28. Phase 4 (breaking news marquee) shipped successfully
+Session 10 work delivered the multi-item rotating ticker described
+in session 9's Phase 4 plan. Implementation:
+
+- CSS-driven horizontal marquee replaces single-item static banner
+- Continuous concat: all matching headlines join into one
+  scrolling track with bullet separators
+- Right-to-left direction regardless of locale (per design call)
+- Each headline is its own clickable <a> element
+- Pause on hover/focus
+- prefers-reduced-motion handling: stops scrolling, shows first
+  matching headline statically
+- Banner-level dismiss (X button) preserved
+- Visual identity (orange BREAKING pill, gradient bar, height)
+  preserved
+
+Verified working:
+- Desktop browsers: scrolling ticker as designed
+- Android Chrome: scrolling ticker as designed
+- iOS Safari with Reduce Motion OFF: scrolling ticker as designed
+- iOS Safari with Reduce Motion ON: static first-headline
+  fallback (respects accessibility preference)
+
+The ticker provides defense-in-depth on top of session 9's
+Phase 1 dedup fix and Phase 2 article remediation. Stuck content
+now rotates out of focus naturally instead of remaining
+permanently visible.
+
+### 29. Click destination remains external (Phase 6 deferred)
+Breaking news banner clicks still open the original article URL
+in a new tab via target="_blank" — preserves pre-existing
+behavior, not a regression introduced by Phase 4.
+
+Phase 6 of session 9's original plan (change banner clicks to
+open in-app reader matching news-card pattern) was deferred
+during session 9 due to scope, and not addressed in session 10.
+
+Effort estimate: ~20-30 min in a focused next session. Change is
+small (replace target="_blank" + external href with internal
+navigation pattern matching news cards) but requires
+verification that Scoopfeeds' in-app reader handles the article
+shape returned from /api/news/featured.
+
+Priority: medium. User-facing inconsistency between banner
+behavior and rest of site, but not a bug.
+
+### 30. Transient "Backend Not Running" UI observed during smoke test
+During session 10's production smoke test of Phase 4 marquee
+deploy, briefly observed the React app's "Backend Not Running"
+fallback page (the message that renders when useHealth() returns
+an error or unreachable response). Production was actually up
+during this window — curl checks returned HTTP 200 from both
+homepage and /api/health within seconds of observation.
+
+Possible causes:
+- Brief connectivity blip during production restart that the
+  frontend's useHealth hook detected and surfaced
+- Frontend-backend reconnect timing edge case
+- CDN cache propagation delay after redeploy
+
+Not investigated in session 10 because production self-recovered
+and verification continued normally. Captured for awareness; if
+this becomes a recurring pattern, investigation worthwhile.
+
+### 31. iOS Reduce Motion accessibility behavior
+A non-trivial portion of iOS users have Reduce Motion enabled by
+default (some iPhone configurations enable it automatically; some
+users enable it manually for vestibular conditions or motion
+sensitivity). For these users, the breaking news ticker
+intentionally shows the first matching headline statically rather
+than the scrolling ticker.
+
+This is correct behavior per WCAG and Apple HIG accessibility
+guidelines. No code change needed.
+
+Captured for product awareness:
+- Subset of iOS users won't see the marquee experience
+- The static fallback shows the highest-credibility most-recent
+  matching article (the "best single item" of what would have
+  rotated)
+- Phase 1 dedup fix and Phase 2 article remediation already
+  prevent stale-content issues for those users
+- If product wants to override Reduce Motion for this banner
+  (not recommended), would require deliberately ignoring the
+  user's accessibility preference
