@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { X, Zap } from "lucide-react";
 import { useFeatured } from "../../hooks/useNews";
 import { useNewsStore } from "../../store/newsStore";
+import { useReaderStore } from "../../hooks/useReader";
 
 // TV-news-style horizontal marquee. All matching headlines concatenated
 // into one continuous right-to-left scrolling track. CSS-driven (transform
@@ -24,6 +25,7 @@ export default function BreakingBanner() {
   const { data: featured = [] } = useFeatured();
   const [dismissed, setDismissed] = useState(false);
   const isUrdu = useNewsStore((s) => s.language === "ur");
+  const openReader = useReaderStore((s) => s.openReader);
 
   // Filter to fresh + high-credibility articles.
   const items = useMemo(() => {
@@ -71,8 +73,10 @@ export default function BreakingBanner() {
     <>
       <a
         href={a.url}
-        target="_blank"
-        rel="noopener noreferrer"
+        onClick={(e) => {
+          e.preventDefault();
+          openReader(a);
+        }}
         tabIndex={isDup ? -1 : undefined}
         className="text-sm font-semibold hover:underline"
       >
@@ -158,8 +162,10 @@ export default function BreakingBanner() {
             // filter, or when prefers-reduced-motion is set.
             <a
               href={items[0].url}
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={(e) => {
+                e.preventDefault();
+                openReader(items[0]);
+              }}
               className="flex items-center gap-3 flex-1 min-w-0 group"
             >
               <span className="text-sm font-semibold truncate flex-1 group-hover:underline">
