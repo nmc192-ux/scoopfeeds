@@ -665,3 +665,135 @@ Captured for product awareness:
 - If product wants to override Reduce Motion for this banner
   (not recommended), would require deliberately ignoring the
   user's accessibility preference
+
+### 32. Phase 6 deploy correlated with production outage — root cause unclear
+Session 11 attempted to ship Phase 6 of session 9's original plan
+(change breaking news banner click destination from external
+new-tab to in-app reader). The change in commit 7fa4d33 was a
+3-edit diff in BreakingBanner.jsx:
+- Added useReaderStore import
+- Added const openReader = useReaderStore((s) => s.openReader)
+- Replaced target="_blank"/rel attributes with onClick handler
+  calling openReader(article) at two link sites
+
+Diff was minimal, frontend-only, matched the existing pattern in
+NewsCard.jsx and FeaturedCard.jsx exactly. Local Vite verification
+was bundle-level only (same blocker as Issues 1.4, session 6, 8,
+10 — backend not running locally).
+
+After push and Hostinger redeploy of 7fa4d33:
+- DrJ reported scoopfeeds.com not loading
+- curl to https://scoopfeeds.com/ hung indefinitely (no response,
+  no error code)
+- Terminal eventually became unresponsive on the curl process
+- Spotlight on Mac briefly became slow (recovered)
+- Force-quit Terminal app, opened fresh terminal
+- Reverted 7fa4d33 via commit c7421ad, pushed
+- Triggered Hostinger redeploy of revert
+- Production immediately returned to healthy 200 responses
+
+Root cause UNKNOWN. Two hypotheses, neither verified:
+
+Hypothesis A: The Phase 6 commit somehow crashed production
+despite being a 3-edit frontend-only change that touched no
+infrastructure. Mechanism by which a click handler change could
+crash a Node.js backend or LiteSpeed reverse proxy is not obvious.
+
+Hypothesis B: Local Mac/network failure made production appear
+unreachable when it was actually healthy. The simultaneous
+unresponsiveness of curl, Terminal, and (briefly) Spotlight is
+more consistent with local-machine issues than with a remote
+production crash. Phone-check was not performed during the
+incident window to disambiguate.
+
+Diagnostic gap: when "site not loading" was first reported,
+operator should have checked from a second device (phone, with
+cellular data) before assuming production was down. This was the
+critical disambiguation step that was skipped under stress.
+
+Action for next session:
+1. Investigate before re-deploying Phase 6:
+   - Check Hostinger Runtime Logs from the deploy time of
+     7fa4d33 (00:48-00:50 UTC May 10) — were there startup errors?
+   - Check if 7fa4d33 actually built successfully on Hostinger
+     (was the deploy "Completed" or did it silently fail?)
+   - Confirm via fresh deploy whether the same change crashes
+     again or whether the previous "outage" was unrelated
+2. If Hostinger logs show clean deploy of 7fa4d33: re-deploy
+   Phase 6, monitor more carefully (phone-check from start)
+3. If Hostinger logs show errors: investigate what specifically
+   went wrong before any re-deploy attempt
+
+This finding marks Phase 6 status as "unverified to work in
+production" rather than shipped. The user-facing behavior
+(banner clicks open external source) remains the pre-existing
+state.
+
+### 33. Diagnostic discipline under stress: distinguish local from remote symptoms
+Session 11's incident response highlighted a recurring failure
+mode: when symptoms suggest production is down, local-machine
+issues can produce identical-looking symptoms (hung curl, browser
+not loading, etc.). Without a verification path that bypasses the
+local machine, root cause cannot be reliably identified.
+
+The discipline missed in session 11:
+- Phone check (cellular data, bypasses local WiFi/DNS) was not
+  performed before reverting
+- Reverting under uncertainty is asymmetric — if the change DID
+  crash production, revert is correct; if it didn't, revert
+  unnecessarily undoes work and creates churn
+
+Pattern observed: under stress, the cognitive load of "is
+production down?" + "what should I do?" combines into "revert
+fast." This is sometimes correct (session 5's forceConsole) but
+not always (this session, possibly).
+
+Improvement: build a 60-second verification ritual into incident
+response:
+1. Try a curl with --max-time 10 (forces a result, not a hang)
+2. Open the site on a phone with cellular data
+3. Check Hostinger panel for Site Status indicator if available
+4. Only after these three signals agree on "production down" do
+   we revert
+
+This discipline applies to ANY future incident response session.
+Capture in operational practices for subsequent phases.
+
+### 34. Recurring local Vite verification gap (compounding effect)
+Session 11 marks the FIFTH issue in this Phase A where Vite-based
+visual verification of frontend changes was blocked by the
+backend not running locally:
+- Issue 1.4 (Urdu RTL)
+- Session 6 Dashboard subhead
+- Session 8 sign-in fix
+- Session 10 marquee
+- Session 11 Phase 6 click destination (this)
+
+Each time, we accept bundle-level verification (grep for the
+expected change in the served Vite bundle) as a proxy for
+visual/behavioral verification. This works for code-structurally-
+correct changes but cannot exercise click flows, modal behavior,
+state transitions, or any runtime-dependent behavior.
+
+When Phase 6 deploy correlated with the production outage in
+session 11, we had no opportunity to learn whether the actual
+behavior of openReader(article) worked locally — only that the
+correct tokens appeared in the bundle.
+
+The bundle-verification proxy is structurally insufficient for:
+- Verifying state-store interactions (this session's pattern)
+- Verifying modal mount/unmount behavior
+- Verifying click-flow that depends on backend-served data
+- Verifying that components render correctly with realistic data
+
+Action item for future Phase B planning: establish a way to
+exercise frontend changes against either:
+- A working local backend (boot scripts, not just frontend)
+- A staging environment with realistic data
+- Or accept that frontend-touching commits will continue to ship
+  with bundle-only verification and adjust risk tolerance
+  accordingly
+
+This isn't a session-11-specific finding. It's been quietly
+accumulating across the Phase A arc and now manifests as a real
+gap.
