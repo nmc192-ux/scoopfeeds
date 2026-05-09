@@ -16,6 +16,7 @@ import AnomalyChip         from "../components/predictions/AnomalyChip";
 import WatchlistPushPanel  from "../components/predictions/WatchlistPushPanel";
 import { COPY }            from "../lib/copyGuide";
 import { useT }           from "../lib/i18n";
+import { useNewsStore }   from "../store/newsStore";
 
 function fmtPct(v) { return Number.isFinite(v) ? `${Math.round(v * 100)}%` : "—"; }
 
@@ -109,6 +110,7 @@ function AnomalyRow({ a }) {
 
 export default function DashboardPage() {
   const { t } = useT();
+  const { setAuthOpen } = useNewsStore();
   const { data: wlData, isLoading: loadingWl, error: wlError } = useWatchlists();
   const { data: actData, isLoading: loadingAct, error: actError } = useWatchlistActivity({ limit: 30 });
 
@@ -124,12 +126,12 @@ export default function DashboardPage() {
         <p className="text-sm text-[var(--color-text-secondary)] mb-6">
           Sign in to follow events and prediction markets, then track them in one place.
         </p>
-        <a
-          href="/login"
+        <button
+          onClick={() => setAuthOpen(true)}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[var(--color-accent)] text-white text-sm font-semibold hover:opacity-90 transition-opacity"
         >
           <LogIn size={14} /> Sign in with email
-        </a>
+        </button>
       </div>
     );
   }
