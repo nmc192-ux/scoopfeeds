@@ -431,3 +431,151 @@ others — Bluesky, Threads, Facebook, LinkedIn, YouTube, etc.).
 
 Specific quality issues not yet enumerated. Captured here as a
 placeholder for future detailed observation. Phase B+ work.
+
+### 23. Findings #19 and #20 PARTIALLY RESOLVED
+Session 9 work addressed both findings:
+
+Finding #19 (Instagram loop) structural cause resolved by commit
+274e74e — `findFreshUnpostedArticles` JOIN now treats both
+'posted' and 'failed' status as already-posted, preventing the
+infinite-retry pattern. Investigation revealed this dedup leak
+affected all 6 social platforms (bluesky, threads, facebook,
+instagram, linkedin, pinterest), not just IG. The May 4 local DB
+showed 51 failed Bluesky and 45 failed Facebook records consistent
+with the same pattern.
+
+Finding #20 (stale breaking news) resolved operationally for the
+Alex Batty article via Phase 2 endpoint exercise — published_at
+moved from 2026-05-13 (future, RSS misparsed) to 2026-04-09 (30
+days past). Breaking-news banner verified to show different article.
+
+REMAINING for #19 and #20:
+- Re-enable Instagram in next session, watch one full cycle to
+  verify dedup fix works structurally
+- The article will not naturally cause issues again because both
+  the structural fix (Phase 1) AND the operational fix landed
+- However, the RSS date-parsing precondition is still unfixed —
+  see finding #25
+
+### 24. Admin operational tooling for stuck articles now exists
+Phase 2 of session 9 shipped POST /scoop-ops/articles/:id/
+set-published-at as a narrow admin remediation endpoint:
+- Single-purpose: updates one article's published_at field only
+- Validation: rejects future dates (the bug pattern), rejects
+  dates >1y in past (sanity), validates id length (≤128 chars),
+  validates ms type
+- Inherits admin auth from existing /scoop-ops/* boundary
+- Returns before/after JSON for verification
+
+Use case demonstrated: corrected Alex Batty article's misparsed
+publication date.
+
+This endpoint is operational tooling, not strategic. The strategic
+fix (RSS date parsing hardening) is still needed — see finding #25.
+
+If similar stuck articles surface in the future:
+1. Find article ID via /api/news/featured (response shape is
+   {success, data, meta} where data is the array)
+2. Calculate target ms timestamp (typically 30 days ago)
+3. POST to /scoop-ops/articles/{id}/set-published-at with
+   {"published_at_ms": <ms>}
+4. Verify symptom resolved
+
+### 25. RSS date-parsing strategic fix STILL DEFERRED
+Investigation in session 9 confirmed that the Alex Batty article's
+future-dated published_at originated from RSS ingestion misreading
+"May 13" from BBC documentary content as the article's publication
+date. The "Coming soon:" prefix in the title indicates this was a
+documentary promo, where dates in the article body refer to
+broadcast schedules, not publication.
+
+Phase 1 dedup fix and Phase 2 operational tooling reduce the
+visible damage of this bug, but the precondition itself remains
+unfixed. Other articles with similar promotional content patterns
+(future broadcast/event dates parsed as publication dates) could
+still trigger:
+- Stale breaking-news banner (until article ages out)
+- Stuck position in Top/Featured ranking
+- Until structural fix lands, these would need manual remediation
+  via the new admin endpoint
+
+Investigation deferred to a future dedicated session. Scope:
+- Identify which RSS parser library/code is responsible
+  (rss-parser, custom logic, etc.)
+- Find the date-extraction logic
+- Determine whether the bug is general (any date string in
+  content beats the RSS-spec pubDate) or specific to a pattern
+- Fix to prefer RSS-spec pubDate fields (item.pubDate,
+  item.published, dc:date) over content-extracted dates
+- Audit existing articles for other future-dated published_at
+  values that may need similar remediation
+- Add validation at ingest time to reject future-dated articles
+
+Likely 2-4 hour dedicated session. Priority: MEDIUM (structural fix
+exists for the loop symptom; this is hardening against future
+recurrence).
+
+### 26. Token storage discrepancy between password manager and Hostinger
+During session 9 Phase 2 execution, the ADMIN_BEARER_TOKEN value
+in DrJ's password manager (saved during Sprint 1 Issue 1.2) did not
+match the value currently set in Hostinger's environment variables.
+Token had to be re-fetched from Hostinger panel directly to
+successfully call the new admin endpoint.
+
+Possibilities:
+- Token was rotated in Hostinger at some point and password
+  manager was not updated
+- Password manager entry was wrong from the start (typo on save)
+- Multiple tokens exist for different environments and password
+  manager has the wrong one
+
+Operational impact: significant friction in admin operations. Any
+future use of /scoop-ops/* endpoints depends on having the correct
+token readily available.
+
+Recommended action (not urgent): reconcile the token storage.
+Either:
+- Update password manager with the value currently in Hostinger
+- Or rotate to a new known value, set in both Hostinger and
+  password manager simultaneously
+- Document the canonical storage location going forward
+
+Captured here for next-session attention.
+
+### 27. Session 9 fatigue indicators in extended-session mode
+Session 9 was an extended (~4 hour) session that successfully
+shipped Phase 1 and Phase 2 of a planned 7-phase sequence. The
+session was deliberately curtailed at Phase 2 completion because
+of accumulating fatigue indicators:
+
+- Curl substitution error: ran POST with timestamp value used as
+  article ID and literal "<MS>" placeholder in body
+- Multi-line paste error: pasted entire chat block into terminal,
+  causing zsh to attempt executing prompt text as commands
+- Admin token mismatch: required 15 minutes of credential
+  reconciliation mid-fix execution
+
+None of these caused production harm — endpoint validation rejected
+the malformed request, terminal errors were self-contained, and
+token retry succeeded after reconciliation. But the trend across
+3+ hours of operational work suggests:
+
+PATTERN: Extended sessions (>3 hours) involving operational
+production changes (vs pure investigation or surgical commits)
+benefit from breaking into multiple shorter sessions, even when the
+operator reports being "fresh" and "good to go". Self-reported
+fatigue is unreliable; the error pattern is the more honest signal.
+
+For future sessions involving similar operational scope:
+- Default to 2-hour caps regardless of stated availability
+- Build in mandatory 5-minute breaks between phases (worked well
+  this session)
+- For credential-touching operations, establish credentials in a
+  separate prep step BEFORE the operational session begins
+- The "investigate-first" discipline that catches static bugs
+  doesn't help with operational fatigue; that requires session
+  scoping
+
+Phases 4-7 of the original session 9 plan (breaking-news ticker,
+category-aware breaking news, internal-link click destination,
+re-enable Instagram) all deferred to subsequent sessions.
