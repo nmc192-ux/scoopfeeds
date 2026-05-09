@@ -344,3 +344,90 @@ the indicator card layout for visual hierarchy.
 Defer to Phase B+ as a feature-level revisit, not a Sprint 2 fix.
 The brand tagline rendering bug has been resolved (Issue 2.3
 commit 240f2fd); the data quality work is separate and substantial.
+
+### 18. Finding #16 RESOLVED — sign-in 404 fixed
+Commit 88b2637 (this session) replaced obsolete <a href="/login">
+in DashboardPage.jsx with modal-based auth pattern matching
+Header.jsx. Production smoke test confirmed: clicking "Sign in
+with email" now opens the AuthModal as intended.
+
+Resolution method: pattern-matched the working Header.jsx auth
+trigger. The bug existed because DashboardPage was written before
+or alongside the auth refactor that moved from page-based to
+modal-based sign-in. Other entry points were updated; DashboardPage
+was missed.
+
+### 19. Instagram auto-publisher in infinite loop on stale content
+Discovered during Issue #16 smoke test on 2026-05-09. The Scoopfeeds
+Instagram account had published the same Alex Batty / BBC Sport
+story 181 times (most recent post 7 minutes before discovery).
+
+Symptoms:
+- Same article looped repeatedly
+- Same article matches the "BREAKING" header on the homepage
+  (suggests both the breaking-news selection AND the Instagram
+  publishing logic are stuck on the same stale item)
+- Post timestamp shows "BBC Sport · May 13" — date inconsistency
+  (the date is in the future vs reasonable publication dates)
+
+Operational action taken: Instagram publishing disabled via
+Hostinger environment variable INSTAGRAM_USER_ID (set to empty)
+to stop the bleeding. No code changes; root cause not yet
+investigated.
+
+Likely root causes (hypothesis):
+- Article-ranking logic stuck (always returning the same "top"
+  article regardless of refresh)
+- Deduplication broken (publisher doesn't track which articles
+  it's already posted)
+- Article ingestion has stalled despite scheduler still firing
+- Date parsing returning incorrect values causing same article
+  to always score highest
+
+Investigation needed for next session:
+- Check the Instagram publisher's selection logic
+- Check breaking-news selection logic (likely the same root
+  cause based on identical content)
+- Verify article ingestion is actually adding new "breaking"
+  candidates, not just total articles
+- Check the publisher's deduplication/already-posted tracking
+
+### 20. Stale breaking news header on production
+Same Alex Batty / BBC Sport headline has been the breaking-news
+header for an unknown but extended period (hours+). Likely related
+to finding #19 (same article loop in Instagram). Both surfaced
+simultaneously during Issue #16 smoke test.
+
+Suggests a single root cause: the system that decides "what's
+breaking news right now" is stuck. May be:
+- Article ranking returning fixed result
+- "Breaking" classification logic not promoting newer articles
+- Time/freshness factor not weighting recent articles correctly
+
+Investigation paired with finding #19.
+
+### 21. Dashboard UX — empty state lacks clear guidance to populate
+Even with Issue 2.3's signed-in subhead ("Your saved events,
+prediction markets, and analyst briefs. Star anything across the
+site to add it here."), DrJ reports difficulty understanding how
+to follow events or markets to populate the Dashboard.
+
+Possible UX issues:
+- "Star" affordance may not be visible enough on event/market
+  pages
+- Empty Dashboard might benefit from a more illustrative
+  empty-state with example actions
+- The path from "I want to follow X" to "X appears on my
+  Dashboard" may have multiple steps that aren't obvious
+
+Defer to Phase B+ as feature-level UX work, not Phase A scope.
+Issue 2.3's subhead addressed the "what is this page" gap; the
+"how do I populate it" gap is a separate, larger UX question.
+
+### 22. Social media post quality (general observation)
+Beyond the Instagram loop bug (finding #19), DrJ notes general
+quality concerns about social media posts (Instagram, possibly
+others — Bluesky, Threads, Facebook, LinkedIn, YouTube, etc.).
+
+Specific quality issues not yet enumerated. Captured here as a
+placeholder for future detailed observation. Phase B+ work.
