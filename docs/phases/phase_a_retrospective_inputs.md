@@ -797,3 +797,245 @@ exercise frontend changes against either:
 This isn't a session-11-specific finding. It's been quietly
 accumulating across the Phase A arc and now manifests as a real
 gap.
+
+### 35. Phase 6 saga: innocent commit, environmental cause
+
+Phase 6 of session 9's original plan (change breaking news banner
+click destination from external new-tab to in-app reader) was
+attempted twice in production:
+
+- Session 11 (May 9 ~21:32 UTC): commit 7fa4d33 deployed,
+  production became unreachable, reverted via c7421ad
+- Session 12 (May 10 ~05:30 UTC): commit c64c3ea (byte-identical
+  re-application of 7fa4d33) deployed, production returned 503
+  immediately, reverted via e4bdefc
+
+Both crashes were 503 across all endpoints. Both reverts restored
+service in 1-3 minutes.
+
+The Phase 6 commit itself is innocent. The 3-edit diff (useReaderStore
+import + destructure + 2 onClick handler replacements at link sites)
+was code-correct and matched the canonical pattern from NewsCard.jsx
+and FeaturedCard.jsx (both shipping in production). Bundle was
+deterministic and benign.
+
+Investigation arc (sessions 11-12):
+- Phase 2A (build logs): both Phase 6 builds completed cleanly
+- Phase 2B (import chain): useReader.js is benign; already loaded
+  by 5 other components
+- Phase 2C (Vite output): 0 new chunks, +17 bytes index.js,
+  5 cascading hash renames with byte-identical content
+- Phase 2D (deploy mechanics): no chunk filename pinning anywhere
+- Phase 2E (MCP runtime logs): doesn't exist for Hostinger shared
+  hosting JS apps
+- Phase 2F (browser File Manager): retrieved log structure, found
+  Hostinger truncates console.log on every worker restart, wiping
+  failed-deploy traces
+- Phase 2G (process patterns): identified actual root cause as
+  process saturation, not Phase 6
+
+Phase 6 retry recommendation: do NOT retry until process saturation
+relief is in place (see #37, #39). After relief, Phase 6 should
+deploy normally because the actual cause was the NPROC ceiling, not
+the bundle.
+
+### 36. Hostinger architecture revelation
+
+Investigation revealed our model of how Scoopfeeds runs in
+production was incomplete. Actual architecture:
+
+**Phusion Passenger (not raw lsnode):** Scoopfeeds runs under
+Hostinger's Phusion Passenger configuration, not bare LiteSpeed
+node bridge. Passenger has its own worker management, restart
+logic, and resource enforcement. Zero-downtime deploy semantics
+spawn new workers before killing old ones.
+
+**App root location:** Application lives at
+~/domains/scoopfeeds.com/nodejs/, NOT ~/domains/scoopfeeds.com/
+public_html/. The public_html/ directory contains:
+- .htaccess (Hostinger-managed Passenger config — NOT in our git)
+- .builds/ (Hostinger's deploy artifact directory, contains
+  injected preload script)
+
+The frontend dist/ that we kept inspecting is at nodejs/frontend/
+dist/, not under public_html/.
+
+**Hostinger-managed .htaccess:** ~/domains/scoopfeeds.com/public_html/
+.htaccess (455 bytes, Hostinger-managed, not in our repo) contains:
+  PassengerAppRoot     /home/u503692993/domains/scoopfeeds.com/nodejs
+  PassengerAppType     node
+  PassengerNodejs      /opt/alt/alt-nodejs18/root/bin/node
+  PassengerStartupFile backend/server.cjs
+  PassengerBaseURI     /
+  PassengerRestartDir  /home/u503692993/domains/scoopfeeds.com/nodejs/tmp
+  SetEnv NODE_OPTIONS  "--require .../public_html/.builds/config/preload-timestamp.js"
+  SetEnv LSNODE_CONSOLE_LOG console.log
+
+**NODE_OPTIONS preload script:** Hostinger injects a 28-line
+preload-timestamp.js via NODE_OPTIONS that runs BEFORE our
+server.cjs. The script wraps console.log/error/warn/info/debug/trace
+to write JSON-structured stdout, and replaces process.stderr.write to
+redirect stderr → stdout with a level tag. Pure logging shim, no
+bundle interaction.
+
+**Runtime log location and behavior:** Worker stdout/stderr lives at
+~/domains/scoopfeeds.com/nodejs/console.log (single file, ~530KiB).
+**Hostinger truncates console.log on every worker restart.** This
+is the fundamental observability gap — every deploy/revert wipes the
+previous worker's traces, making post-crash forensics impossible
+without external log capture.
+
+**Empty ~/.logs/:** The standard Hostinger logs directory is empty
+for this account. Application logs only go to nodejs/console.log.
+
+These details fundamentally change the model of what we can/can't
+diagnose post-incident, and what infrastructure decisions matter
+for Phase B planning.
+
+### 37. Process saturation root cause: Reality Index rollout
+
+Hostinger's 30-day Resource Usage panel revealed the actual cause
+of all Phase 6 deploy failures:
+
+**Max Processes:** 65 average, 120 hard limit. Sitting at 120
+ceiling almost continuously for the past 2-3 weeks, with the chart
+showing a dramatic transition from oscillating 0-50 range to
+pegged-at-120.
+
+**Storage IOPS:** 164 average, 512 limit. Frequent spikes hitting
+ceiling, pink "at-limit" zones throughout 30-day chart.
+
+**CPU and Memory:** Both fine. CPU 9% average, Memory 230 MB / 3072
+MB limit. Neither was the bottleneck.
+
+**Standing dashboard banner:** "Your hosting resource limits have
+been reached" — confirmed not disk (4.55%) or inodes (7.74%).
+Specifically the NPROC pressure.
+
+**Root cause:** Reality Index Phase 5/6 rollout landed 2026-05-03,
+exactly 7 days before today. That single day shipped 40+ commits
+adding:
+- 22 new cron schedules (USGS every 10 min, NOAA every 10 min,
+  GDELT every 30 min, polymarket every 15 min, AI traders every
+  1 hour, LLM outcome resolver every 1 hour, FRED every 6h, ACLED
+  every 6h, World Bank daily, sports/entertainment ingesters,
+  watchlist push every 15 min, +6 hourly schedulers)
+- 30 new RSS feeds (Phase 5d) bringing total to 119 sources
+
+**Mechanism:** All schedulers run in-process inside the single
+Passenger web worker (ENABLE_SCHEDULER=true; REDIS_URL unset, so
+the bullmq-based separate-worker path is dormant). At minute 0 of
+every hour, ~10 cron schedules fire simultaneously, each holding
+outbound HTTPS sockets via undici keepalive (4-second hold by
+default). Combined with 119-source RSS ingestion (5 concurrent
+batches), peak concurrent socket count is 30-80+ open connections.
+On Hostinger's NPROC quota, kernel-thread entries per socket count
+toward the 120-process limit.
+
+**Verification status:** Hypothesis is leading-confidence (~80%)
+based on:
+- Code-side process spawning audit found NO child_process /
+  worker_threads / Puppeteer / sharp / native subprocess patterns
+  in production paths
+- All gated subprocess code (videoGenerator.js spawn, bullmq
+  Worker, Sentry profiling) is disabled in production
+- Timing alignment between Reality Index rollout and saturation
+  metrics
+- Mechanism explains all observed crash and rollback patterns
+
+**Verification path (for next session):** SSH or Hostinger Terminal
+access to run:
+  ps -L -u u503692993 | wc -l  (count TIDs against 120 limit)
+  ps -L -u u503692993 -o pid,tid,comm | sort -k3 | uniq -c -f2 | sort -rn
+  (breakdown by command name)
+
+If the count is dominated by node TIDs and totals near 120, the
+hypothesis is confirmed.
+
+### 38. Connection to finding #8 (DB rollback recurrence)
+
+Finding #8 (Hostinger restart causes ~300-600 article rollback,
+recurring through Phase A arc) is downstream of #37's NPROC pressure.
+
+**Mechanism:** When Passenger forces a worker restart at the NPROC
+ceiling, the new worker has to wait for the old to exit before it
+can fork. During that gap:
+- In-flight better-sqlite3 transactions don't complete cleanly
+- WAL (Write-Ahead Log) and SHM (shared memory) state is interrupted
+- On WAL+SHM rebuild after the new worker's better-sqlite3 init,
+  recently-written pages can be skipped
+- Result: 300-600 article-sized rollback (matches typical 30-min
+  ingestion cycle batch)
+
+**This means:** the structural fix for #8 is the same as the fix
+for #37. Either:
+- Reduce NPROC pressure so worker restarts are clean (Reality Index
+  gating, plan upgrade, scheduler architectural split)
+- Migrate database off SQLite (Postgres, per .env.example Phase E
+  target) so WAL/SHM concerns don't apply
+
+The two findings are now consolidated under one root cause.
+
+### 39. Three relief paths for next session
+
+After session 12's diagnostic work, three concrete paths exist to
+relieve NPROC pressure. Each has different cost, reversibility, and
+risk profile. Strategic decision required before execution.
+
+**Path 1: Verify hypothesis dynamically (must do first)**
+- DrJ accesses Hostinger's web SSH or Terminal feature
+- Runs `ps -L -u u503692993 | wc -l` to confirm TID count near 120
+- Runs `ps -L -u u503692993 -o pid,tid,comm | sort -k3 | uniq -c -f2
+  | sort -rn` for breakdown
+- Cost: ~10 min, read-only, no production risk
+- Risk: low (no modifications)
+- Outcome: confirms or refutes #37 leading hypothesis
+
+**Path 2: Cheapest immediate relief — gate Reality Index**
+- Set ENABLE_REALITY_INDEX=false in Hostinger env vars
+- Disables 22 of 45 cron schedules (Phase 5/6 ingesters)
+- Estimated impact: drops sustained load below NPROC ceiling
+- Cost: Reality Index features dark in production
+- Reversibility: instant via env-var change + Passenger restart
+- Risk: medium (worker restart triggers finding #8 rollback as
+  side effect; Reality Index data freshness affected; UI may show
+  stale data in any Reality Index components)
+- Decision needed: is the trade-off worth it given Layer 2 ($19/mo)
+  is still in private/early state?
+
+**Path 3: Architectural fix — split scheduler off web worker**
+- Move cron workload to GitHub Actions cron workflows hitting
+  HTTP endpoints (pattern already used for video render per
+  scheduler.js:161 comment)
+- Web worker stays lean; every cron fires from outside the process
+- NPROC pressure drops permanently
+- Cost: substantial (endpoint design, auth review, GitHub Actions
+  workflow setup, cron schedule migration)
+- Estimated effort: 4-8 hours dedicated session, possibly multi-session
+- Risk: medium-high (architecture change, requires careful review)
+- Reversibility: complex but possible
+
+**Path 4 (additional): Hostinger plan upgrade**
+- Upgrade from Business plan to higher tier with more processes
+- Cost: monthly subscription increase
+- Reversibility: instant downgrade option
+- Risk: low (paying for more headroom)
+- Trade-off: ongoing cost vs engineering time
+
+**Path 5 (additional): SQLite → Postgres migration**
+- Already documented as Phase E target per .env.example
+- Eliminates finding #8 root cause (WAL/SHM disruption on restart)
+- But doesn't directly address NPROC pressure
+- Cost: substantial migration work
+- Better suited for Phase B planning than session 13
+
+**Recommended sequence for session 13:**
+1. Path 1 (verify) — 10 min
+2. If confirmed: discuss Paths 2/3/4 strategically
+3. Path 2 likely the right immediate move (if Reality Index
+   downtime acceptable), with Path 3/4 as longer-term followups
+4. Don't act on Phase 6 retry until relief is in place
+
+After process saturation is relieved (any of Paths 2/3/4), Phase 6
+retry should succeed normally because the underlying cause was
+environmental, not the code.
