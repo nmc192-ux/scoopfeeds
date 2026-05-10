@@ -46,7 +46,7 @@ router.post("/", cspReportLimiter, cspReportBodyParser, (req, res) => {
       // Modern Reporting API format: array of report envelopes.
       for (const entry of body) {
         if (entry && entry.type === "csp-violation" && entry.body) {
-          logger.warn("CSP violation (reports+json)", {
+          const data = {
             disposition:        entry.body.disposition,
             documentURL:        entry.body.documentURL,
             blockedURL:         entry.body.blockedURL,
@@ -55,13 +55,19 @@ router.post("/", cspReportLimiter, cspReportBodyParser, (req, res) => {
             sourceFile:         entry.body.sourceFile,
             lineNumber:         entry.body.lineNumber,
             sample:             truncate(entry.body.sample, 80),
-          });
+          };
+          logger.warn("CSP violation (reports+json)", data);
+          // Stdout fallback so Hostinger's lsnode panel sees this (lsnode captures
+          // console.* but not winston.transports.Console's process.stdout.write).
+          // Without this, CSP reports accumulate invisibly and Stage 2 enforcement
+          // can't be evaluated. Pattern mirrors f2fc7f5 (integration boot log).
+          console.warn(`[csp-report] CSP violation (reports+json): ${JSON.stringify(data)}`);
         }
       }
     } else if (body && body["csp-report"]) {
       // Legacy report-uri format.
       const r = body["csp-report"];
-      logger.warn("CSP violation (csp-report)", {
+      const data = {
         documentURI:        r["document-uri"],
         blockedURI:         r["blocked-uri"],
         effectiveDirective: r["effective-directive"] || r["violated-directive"],
@@ -69,14 +75,19 @@ router.post("/", cspReportLimiter, cspReportBodyParser, (req, res) => {
         sourceFile:         r["source-file"],
         lineNumber:         r["line-number"],
         scriptSample:       truncate(r["script-sample"], 80),
-      });
+      };
+      logger.warn("CSP violation (csp-report)", data);
+      console.warn(`[csp-report] CSP violation (csp-report): ${JSON.stringify(data)}`);
     } else {
-      logger.warn("CSP violation (unrecognized format)", {
+      const data = {
         keys: body && typeof body === "object" ? Object.keys(body) : null,
-      });
+      };
+      logger.warn("CSP violation (unrecognized format)", data);
+      console.warn(`[csp-report] CSP violation (unrecognized format): ${JSON.stringify(data)}`);
     }
   } catch (err) {
     logger.warn(`CSP report parse failed: ${err.message}`);
+    console.error(`[csp-report] parse failed:`, err.message);
   }
 
   // Browsers don't read the response body for CSP reports; 204 is the
