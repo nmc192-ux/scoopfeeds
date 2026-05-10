@@ -1039,3 +1039,220 @@ risk profile. Strategic decision required before execution.
 After process saturation is relieved (any of Paths 2/3/4), Phase 6
 retry should succeed normally because the underlying cause was
 environmental, not the code.
+
+### 40. CSP report logging fix shipped (Issue 2.2 Stage 1 closure prep)
+
+Session 14 shipped commit 90dd57a applying the f2fc7f5 stdout
+fallback pattern to backend/src/routes/csp-report.js. Four
+logger.warn call sites in csp-report.js now have parallel
+console.warn/console.error emissions with [csp-report] prefix
+and JSON.stringify(data) payload, ensuring CSP violation reports
+reach Hostinger's captured stdout (nodejs/console.log).
+
+Implementation:
+- Each logger.warn data dict hoisted to const so winston and
+  console see byte-identical payload (avoids field-list duplication)
+- Single 4-line explanatory comment at first added console.warn
+  call referencing f2fc7f5 as precedent
+- console.warn for violation cases, console.error for parse failures
+  (matching f2fc7f5 level distinction)
+- No CSP behavior change — header and policy untouched
+
+Diff: +17/-6, single file. node --check passed locally. Production
+verified healthy after deploy: homepage 200 in 0.76s, /api/health
+200 in 0.50s.
+
+Observation window started: 2026-05-10 15:57:55 UTC. After
+24-48h, in a future session (probably session 16 or 17), read
+accumulated CSP reports via SSH or Hostinger File Manager,
+identify any legitimate violators needing allowlist updates,
+then decide on Stage 2 enforcement (flip header from
+Content-Security-Policy-Report-Only to Content-Security-Policy
+in backend/server.js:157).
+
+Issue 2.2 Stage 1 closure prep done. Issue 2.2 Stage 2 awaiting
+calendar time for observation window.
+
+Refs: Phase A audit (session 14); finding #12; commit 90dd57a;
+prior commits 92f8c4f, f116508, f2fc7f5
+
+### 41. Winston-invisible logging is systemic — broader than initially estimated
+
+Phase 2E forward-look survey during session 14 revealed the
+finding-#12 winston invisibility issue affects 104 logger.warn /
+logger.error call sites across 30 route files, not the 23 sites
+across 7 files initially estimated.
+
+Affected files (alphabetical, 1+ call each):
+affiliate, analysis, articles-ops, auth, briefs, cards, embed,
+events, geo, liveEvents, macro, market, meter, news, newsletter,
+newsletter-ops, predictions, push, reader, realityIndex, ri-ops,
+syntheticMarkets, tips, track, translate, v1, videos, videos-gen,
+watchlists. (csp-report.js was the only one fixed in session 14.)
+
+Production observability has substantial gaps wherever the
+f2fc7f5 stdout fallback wasn't applied. This blocks effective
+debugging across most of the backend.
+
+Two paths to address:
+
+Path A — Per-route sweep: apply the f2fc7f5 dual-emit pattern
+to error paths in production-critical routes (auth, events, news,
+market) first, then expand. Lower risk, larger total work.
+
+Path B — Logger.js refactor: change winston transport
+configuration so all logger.warn/.error output reaches stdout
+without per-call-site changes. Higher leverage single fix, some
+risk of unexpected behavior in observability tooling later.
+
+Recommended approach for future session: Path B (refactor) if
+the winston configuration can be changed cleanly. Estimated
+effort: 1-2 sessions for refactor + smoke tests across affected
+routes.
+
+This finding sits in Phase A close-out tier. Could be addressed
+during Sprint 6 close-out work, or explicitly de-scoped to
+Phase B+ if Phase A wrap timing matters more.
+
+Refs: finding #12 (original observation); session 14 Phase 2E
+survey
+
+### 42. Phase A audit completed (session 14)
+
+Session 14 produced a detailed audit of Phase A status against
+the original Phase A Brief.
+
+Key findings:
+- Sprint 0 (foundation): COMPLETE. All 10 issues shipped.
+- Sprint 1 (production stabilization P0): COMPLETE. All 7 issues
+  shipped, Brief framing was wrong on 3 of 4 code issues but
+  substantive fixes happened.
+- Sprint 2 (debt cleanup P1): SUBSTANTIVELY IN MOTION with three
+  meaningful gaps:
+  - Issue 2.2 CSP Stage 2 not done (now unblocked by session 14
+    fix; awaiting 24-48h observation)
+  - Issue 2.5 dead nav.* keys: 10 keys deleted instead of 12 keys
+    wired; remaining state unverified
+  - Issue 2.6 verification not formally captured
+- Sprint 3 (hygiene + first metrics): NOT STARTED. 5 issues
+  pending; some may no longer be relevant (BullMQ failed-job rate
+  metric is moot since BullMQ not running in production).
+- Sprint 4 (source audit): NOT STARTED. Complicated by the Phase
+  5d 30-RSS-feed addition (now 119 sources vs Brief's "30-50
+  active").
+- Sprint 5 (social + search audits + tracker templates): NOT
+  STARTED. 8 tracker templates planned, 0 authored. Brief's
+  audit framing predates the Phase 5/6 expansion.
+- Sprint 6 (Phase A close-out): NOT STARTED. No exit verification,
+  metrics snapshot, formal retrospective, or Phase B Kickoff
+  Brief drafted.
+
+Items shipped beyond original Brief scope (sessions 8-13):
+Phase 4 marquee, Phase 6 click destination (deferred — finding
+#29), IG dedup fix (#19 → #23), admin remediation endpoint,
+sign-in 404 fix (#16 → #18), skills architecture v1 doc.
+
+Items in original Brief that should be explicitly de-scoped to
+Phase B+:
+- Sprint 3.4 metrics dashboard (redefine metrics for actual
+  architecture during Phase B.1 reorg)
+- Sprint 4 source audit (Phase B opening, runs alongside B.1)
+- Sprint 5 social + search audits + tracker templates (Phase B
+  opening)
+- Various deferred quality fixes (#2, #3, #17, #25)
+
+Realistic estimate to honest "Phase A complete":
+- Tier 1 (must do): Phase A retrospective writeup, exit-criteria
+  verification, smoke tests, Phase B Kickoff Brief
+- Tier 2 (relief required): finding #37 verification + relief
+  decision, CSP Stage 2 (after observation window)
+- ~7-8 dedicated sessions of work + 24-48h calendar window for
+  CSP observation
+
+Schedule reality: Phase A is behind the original 12-week timeline.
+Emergent work and incident response have produced real value not
+in the original plan but at the cost of original Brief items.
+Phase A close-out timing should be explicitly re-set rather than
+pretending we're on the 12-week track.
+
+Refs: docs/phases/phase_a_kickoff_brief.md (the original Brief);
+session 14 audit working notes
+
+### 43. GStack adoption deferred to dedicated evaluation session
+
+DrJ raised github.com/garrytan/gstack (Garry Tan, CEO of Y
+Combinator) as potential tooling for Claude Code-assisted
+development.
+
+Decision: Path B — defer adoption to a dedicated evaluation
+session before any integration. Mid-Phase-A tooling change
+explicitly avoided.
+
+Rationale:
+- Neither chat assistant nor DrJ has read GStack's README;
+  adopting unverified tooling is the pattern that creates
+  confused state (per session 12's worktree discovery)
+- Phase A is mid-execution with substantial concrete work
+  remaining (per finding #42)
+- Y Combinator brand credibility doesn't automatically mean
+  fit for Scoopfeeds specifically
+- Current pattern (Claude in chat for strategic + Claude Code
+  for execution + retrospective discipline) has been working
+
+Path B execution: One dedicated session (likely 15 or 16) to
+read README, understand what GStack provides, identify what it
+would change about current workflow. NO adoption decision in
+that session — just understanding.
+
+If GStack evaluation is favorable, adoption planned for Phase
+B opening (alongside codebase reorganization) rather than
+mid-Phase-A.
+
+Refs: session 14 conversation; skills architecture v1 doc
+
+---
+
+## Pace Tracker
+
+This section is added at the END of the retrospective inputs
+file, after all findings, as a running snapshot of Phase A
+schedule reality.
+
+```
+PACE TRACKER (updated session 14, 2026-05-10)
+PHASE A Original schedule: 12 weeks across Sprints 0-6
+Calendar elapsed in Phase A: ~5-6 weeks (estimated; session 1 was the start)
+Sessions executed: 14
+Realistic remaining: 7-8 dedicated sessions + 24-48h calendar window for CSP observation
+
+Sprint completion against original schedule:
+
+* Sprint 0 (Foundation): COMPLETE (5 weeks of 5 weeks planned) — but original timeline was 1 week
+* Sprint 1 (Production stabilization P0): COMPLETE — original timeline was 2 weeks
+* Sprint 2 (Debt cleanup P1): SUBSTANTIVELY IN MOTION with 3 small gaps (CSP Stage 2 awaiting observation, Issue 2.5 verification, Issue 2.6 verification) — original timeline was 2 weeks
+* Sprint 3 (Hygiene + first metrics): NOT STARTED — original timeline was 1 week
+* Sprint 4 (Source audit): NOT STARTED — DE-SCOPED TO PHASE B
+* Sprint 5 (Social + search audits + tracker templates): NOT STARTED — DE-SCOPED TO PHASE B
+* Sprint 6 (Phase A close-out): NOT STARTED — original timeline was 2 weeks
+
+Items shipped this session (14):
+
+* Sprint 2 Issue 2.2 Stage 1 closure prep: CSP report-logging fix (commit 90dd57a)
+* Phase A audit (this session, captured as finding #42)
+* Forward-look identification of systemic logging gap (finding #41)
+* GStack deferral decision (finding #43)
+* Pace Tracker section added to retrospective file
+
+Items shipped that were NOT in original Brief (cumulative across sessions 8-14):
+
+* Phase 4 marquee
+* IG dedup structural fix
+* Admin remediation endpoint
+* Sign-in 404 fix
+* Skills architecture v1 doc
+* Phase A audit + Pace Tracker
+
+Schedule reality: We are behind original Phase A timeline. Emergent and incident-driven work has produced real value not in the original plan. Phase A close-out timing should be explicitly re-set during the formal Phase A retrospective (Sprint 6.4 work).
+
+Phase A close-out estimated calendar timeline: Assuming 1-2 sessions per week, 7-8 sessions to complete plus the 24-48h CSP observation: realistic Phase A close in 4-6 weeks of additional calendar time. This sets actual Phase A duration at ~10-12 weeks total — close to original 12-week estimate, but with substantially different scope mix than planned (less audit work, more emergent infrastructure work, more strategic documentation work).
+```
