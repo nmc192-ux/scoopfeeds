@@ -1210,6 +1210,109 @@ mid-Phase-A.
 
 Refs: session 14 conversation; skills architecture v1 doc
 
+### 44. GStack evaluation complete — selective adoption deferred to Phase B.0
+
+Session 15 completed Path B GStack evaluation (deferred from
+session 14 finding #43). DrJ's motivation: Garry Tan
+(CEO Y Combinator) articulated development methodology patterns
+on his podcast that resonated. GStack may codify those patterns.
+
+Evaluation summary:
+
+GStack is an open-source MIT collection of ~35 Claude Code
+slash-command skills authored by Garry Tan, codifying a
+"Think → Plan → Build → Review → Test → Ship → Reflect"
+methodology. Each skill is a SKILL.md file giving the AI a
+structured procedure for one specialist role (CEO, Eng Manager,
+Designer, QA Lead, Release Engineer, Debugger, CSO, etc.).
+Free, MIT, no SaaS tier.
+
+Strongest signal — methodology overlap: the patterns Phase A
+produced organically (investigation-before-edit per finding #15,
+structured retrospective, atomic commits with capture-findings
+discipline, diff-approval ritual) are already the GStack pattern.
+/investigate's "Iron Law: no fixes without investigation" is
+exactly finding #15. /retro is what Phase A has been doing
+manually. The ETHOS document's "User Sovereignty" principle
+("AI recommends, user decides") is Phase A's diff-approval ritual.
+
+Phase A's 43 findings are partly evidence of "we figured out
+the GStack patterns the hard way." This reframes adoption from
+"adopt new methodology" to "replace handcrafted methodology
+with published version of essentially the same thing."
+
+Strongest conflict — deploy model: /ship opens a PR; Scoopfeeds
+commits straight to main. /land-and-deploy triggers deploy from
+terminal; Hostinger deploys via panel. setup-deploy supports
+Fly.io / Render / Vercel / Netlify / Heroku / GitHub Actions /
+"custom" — Hostinger isn't first-class. The deploy phase of
+GStack has reduced value for Scoopfeeds.
+
+Recommendation: Mixed fit. Selective adoption at Phase B.0.
+
+Curated install (~10 skills):
+- Daily: /investigate, /qa, /review, /codex
+- Per session: /retro
+- Per deploy: /canary
+- Strategic: /office-hours, /plan-ceo-review, /plan-eng-review
+- Safety: /careful, /freeze, /guard, /unfreeze
+
+Skip:
+- /ship, /land-and-deploy (deploy-model conflict)
+- All /design-* skills (minimal design surface)
+- GBrain (Supabase operational cost; markdown retrospective
+  achieves cross-session memory adequately)
+- GStack Browser (Claude in Chrome MCP already covers this)
+- Continuous checkpoint mode (conflicts with atomic-commit
+  discipline)
+
+Adoption complexity: LOW for selective install (~30 min setup +
+1-2 sessions to integrate). Reversible (rm -rf ~/.claude/skills/
+gstack ~/.gstack and we're back).
+
+Phase B.0 outline: install with prompts declined, pin a known
+SHA, opt out of telemetry, run a one-session trial during Phase A
+close-out work, decide based on lived experience.
+
+Open questions DrJ resolved during session 15:
+
+Q1 (productivity claims of "10,000 lines/day / 810×"): Hype-y.
+Treat as background noise, not a feature. Adopt for actual
+methodology value, not marketing claim.
+
+Q2 (migrate off Hostinger panel-deploy model): Worth chasing
+eventually, but for separate reasons unrelated to GStack. The
+Hostinger migration question is real (findings #8, #36, #37,
+#12, Phase 6 saga) but should be weighed independently. Don't
+let GStack drive platform decisions.
+
+Q3 (GBrain Supabase memory): Skip. Existing retrospective inputs
+file (1,258 lines, 43 findings) + this conversation's user memory
+serve cross-session memory adequately. GBrain adds operational
+cost for marginal benefit.
+
+Q4 (project-level CLAUDE.md): Useful regardless of broader
+GStack adoption. Captures project context, architecture summary,
+workflow patterns, reference to key docs. Worth doing standalone.
+DrJ's decision: wait for Phase B integration rather than
+introducing CLAUDE.md mid-Phase-A.
+
+Decision and close-out:
+
+Adoption deferred to Phase B.0. No GStack installation today.
+The selective-fit recommendation, curated skill list, and
+adoption outline are captured here for Phase B.0 reference.
+
+If GStack evaluation is favorable during Phase B.0 trial, full
+selective adoption planned alongside Phase B.1 codebase
+reorganization. If unfavorable in trial, GStack thread closes
+permanently and skill borrowing happens via documentation
+updates to execution_method_v1.md.
+
+Refs: session 15 evaluation; finding #43 (deferral decision);
+finding #15 (investigation discipline that GStack codifies);
+docs/strategy/skills_architecture_v1.md (Phase B direction)
+
 ---
 
 ## Pace Tracker
@@ -1255,4 +1358,40 @@ Items shipped that were NOT in original Brief (cumulative across sessions 8-14):
 Schedule reality: We are behind original Phase A timeline. Emergent and incident-driven work has produced real value not in the original plan. Phase A close-out timing should be explicitly re-set during the formal Phase A retrospective (Sprint 6.4 work).
 
 Phase A close-out estimated calendar timeline: Assuming 1-2 sessions per week, 7-8 sessions to complete plus the 24-48h CSP observation: realistic Phase A close in 4-6 weeks of additional calendar time. This sets actual Phase A duration at ~10-12 weeks total — close to original 12-week estimate, but with substantially different scope mix than planned (less audit work, more emergent infrastructure work, more strategic documentation work).
+
+---
+
+PACE TRACKER (updated session 15, 2026-05-10)
+
+Session 15 work shipped:
+- GStack evaluation complete (finding #44)
+- Path B closed cleanly: evaluation, no adoption decision today,
+  deferred to Phase B.0
+- ~35-40 min session, well under 75-min cap
+
+Cumulative session 15 today vs sessions 12, 13, 14:
+- Today (calendar Sunday May 10, UTC): 4 sessions completed
+  (12, 13, 14, 15)
+- Combined session time today: roughly 11-13 hours of focused
+  technical work
+- Pace concern flagged: this is heavily compressed work for a
+  single calendar day
+
+Phase A close-out remaining: ~7-8 dedicated sessions
+(unchanged from session 14 estimate)
+
+CSP observation window status: Started 2026-05-10 15:57:55 UTC.
+~22 minutes elapsed at session 15 close. ~22-46 hours remaining
+before reports are read.
+
+Next session opening candidates (when DrJ returns):
+- Issue 2.5 verification (audit pass on dead nav.* keys, ~30 min)
+- Finding #25 strategic planning (RSS date-parsing, ~30-45 min)
+- Finding #41 strategic discussion (logging refactor scope,
+  ~30-45 min)
+- Read accumulated CSP reports (only after observation window
+  ≥24h elapsed)
+
+Session 15 close: production at 30ca166 (no commits this session
+beyond finding capture).
 ```
