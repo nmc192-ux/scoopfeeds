@@ -12,7 +12,7 @@
  *  3. If the user closes the reader, navigate back to home (the URL no longer
  *     points at a meaningful resource on its own).
  */
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import axios from "axios";
 import { useQuery } from "@tanstack/react-query";
@@ -28,6 +28,12 @@ export default function ArticlePage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { openReader, open } = useReaderStore();
+  // Tracks whether we've already auto-opened the reader for this page mount.
+  // Needed to distinguish "initial pre-open state" (open=false because nothing
+  // has opened it yet — auto-open) from "user just closed it" (open=false
+  // because user clicked X — navigate home, don't re-open). Without this
+  // guard the useEffect re-fires on close and traps the user in the modal.
+  const hasOpenedRef = useRef(false);
 
   const { data: article, isLoading, isError } = useQuery({
     queryKey: ["article", id],
@@ -40,12 +46,24 @@ export default function ArticlePage() {
   // Once we have the article, hand it to the reader store so the existing
   // ReaderModal — already mounted globally — renders the body. This is the
   // "URL-addressable modal" pattern: every article state has a real URL,
-  // but the rendering itself reuses one component.
+  // but the rendering itself reuses one component. Runs only on first
+  // load (gated by hasOpenedRef) so user-initiated close doesn't re-trap.
   useEffect(() => {
-    if (article && !open) {
+    if (article && !open && !hasOpenedRef.current) {
+      hasOpenedRef.current = true;
       openReader(article);
     }
   }, [article, open, openReader]);
+
+  // After auto-open, honor the file-header step 3: when the user closes the
+  // reader, navigate to home. The URL no longer points at a meaningful
+  // resource on its own. replace:true prevents a back-button loop into the
+  // just-closed article modal.
+  useEffect(() => {
+    if (hasOpenedRef.current && !open) {
+      navigate("/", { replace: true });
+    }
+  }, [open, navigate]);
 
   // SEO meta — replaced once article loads
   useEffect(() => {

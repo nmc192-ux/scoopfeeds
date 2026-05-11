@@ -63,7 +63,11 @@ export default function Header() {
   return (
     <header
       className={clsx(
-        "sticky top-0 z-50 transition-all duration-300",
+        // z-[100] sits above ReaderModal's z-[90] backdrop so the brand,
+        // MoreMenu, search, sign-in, and lang/country pickers stay reachable
+        // when a user lands directly on /article/:id from a social-media
+        // link and the reader auto-opens. See session 17 retrospective.
+        "sticky top-0 z-[100] transition-all duration-300",
         scrolled
           ? "glass border-b border-[var(--color-border)] shadow-sm"
           : "bg-transparent"
