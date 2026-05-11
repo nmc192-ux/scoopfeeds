@@ -1313,6 +1313,233 @@ Refs: session 15 evaluation; finding #43 (deferral decision);
 finding #15 (investigation discipline that GStack codifies);
 docs/strategy/skills_architecture_v1.md (Phase B direction)
 
+### 45. Issue 2.5 final closure — Sprint 2 closes substantively
+
+Session 16 completed Issue 2.5 verification and final closure
+work. Phase A audit's session 14 unverified state is now resolved.
+
+Audit findings (Phase 1A-1E of session 16):
+
+The original Brief's "22 dead nav.* keys, MoreMenu uses hardcoded
+titles" premise was wrong on three counts:
+- MoreMenu was already properly internationalized via labelKey/
+  titleKey pattern (the literal grep used in the audit missed
+  this indirect resolution)
+- The 22 nav.* keys were never dead — all were wired through
+  MoreMenu's data structure
+- The c6ed2aa commit's "10 keys deleted" was unrelated cleanup
+  of common.*/dashboard.*/predictions.* dead keys, not nav.*
+  targets the Brief specified
+
+Real residual work identified: EventsPage.jsx had 9 hardcoded
+English category chips + 1 hardcoded English page title, visible
+to users in all 9 non-en locales. This was the actual gap from
+Issue 2.5.
+
+Action taken (commit 6821ceb):
+- Wired EventsPage chips through t() using labelKey pattern
+- 4 chips reused existing keys (nav.finance/health/sports/climate)
+- 5 new keys added (nav.all, nav.politics, nav.tech, nav.science,
+  nav.geopolitics)
+- pageTitle default changed from "Event Tracker" to null with
+  t() resolution; callers passing literal strings (category alias
+  pages) unaffected
+- 5 new keys added to all 9 non-en locale files with English
+  fallback values (translation review pending)
+
+Diff: 11 files changed, +75/-12. Vite build verified before
+commit (3092 modules transformed cleanly, same baseline).
+Production verified healthy after deploy at 6821ceb.
+
+Sprint 2 Issue 2.5 closes substantively. Two pieces explicitly
+de-scoped to Phase B+:
+
+- Category alias pages (SpaceEventsPage, HealthEventsPage,
+  CryptoEventsPage, SportsEventsPage, ClimateEventsPage,
+  AIEventsPage) still pass hardcoded English pageTitle. Will be
+  resolved naturally during Phase B.1 codebase reorganization
+  when EventsPage moves into the news skill folder.
+
+- Translation completeness for 12 nav.* keys × 9 locales = 108
+  missing translations (7 pre-existing + 5 new in this commit).
+  Requires translator-involved workstream, not engineering.
+  Captured for Phase B "translation review" item.
+
+Pattern lesson: this is the third recurring instance of Brief
+inaccuracy (findings #15, #42, now #45). The Phase A retrospective
+should formally acknowledge that the original Brief was an
+incomplete map of reality, and that retrospective discipline
+caught and corrected misalignments. This is itself a lesson worth
+naming in Sprint 6 retrospective writing.
+
+Refs: commit 6821ceb (EventsPage i18n fix); commit c6ed2aa (prior
+dead-key cleanup); finding #15 (Brief inaccuracy pattern); finding
+#42 (Phase A audit); session 16 Phase 1A-1G
+
+### 46. useHealth hook misreports 429 rate-limit as backend-down
+
+Finding #30 from session 10 ("transient 'Backend Not Running' UI
+observed during smoke test; production was actually up") is now
+upgraded from "transient unexplained" to "confirmed bug."
+
+Root cause: The frontend's useHealth hook polls /api/health and
+treats any non-200 response (including 429 Too Many Requests)
+as backend-down. When the operator runs multiple curls in quick
+succession during smoke testing OR when normal traffic exceeds
+the rate limit window on /api/health, the frontend surfaces the
+"Backend Not Running" placeholder page across all routes where
+it's wired.
+
+User-visible behavior observed in session 16:
+- During smoke testing, /api/health returned 429 after rapid
+  curls from operator IP
+- Browser concurrently showed "Backend Not Running" page on
+  /events when clicking category chips
+- "failed to load" messages on chip clicks (separate fetches
+  also hitting rate limit)
+- After 60-second cooldown, full functionality restored
+
+Production-side state during the apparent "outage":
+- Homepage: 200 in 0.42s ✓
+- /events: 200 in 0.40s ✓
+- /api/health: 429 (rate-limited, NOT crashed) ✓
+- Production fundamentally healthy throughout
+
+Impact:
+- Real users experiencing legitimate rate-limit retry scenarios
+  will see "Backend Not Running" instead of meaningful retry/wait
+  messaging
+- Erodes user trust in product reliability
+- Misleads operators during incident triage (session 11 retrospect:
+  if useHealth had reported 429 vs backend-down correctly, the
+  session 11 incident response would have been cleaner)
+
+Fix shape (for future session, NOT this one):
+- useHealth hook should distinguish 429 from 5xx
+- 429 → "high traffic, retrying in N seconds" or similar
+  retry-with-backoff UI
+- 5xx → "Backend Not Running" or "service unavailable" UI
+- Likely 30-60 min of focused work in a future session
+
+Refs: finding #30 (original observation); session 16 Phase 1H
+smoke test results
+
+### 47. Tagline rendering bug — visible JavaScript code literal
+
+Production rendering of EventTracker page (and possibly other
+surfaces) shows unrendered JavaScript template literal as text:
+
+  "e=>typeof e=="function"?e("brand.tagline","A data-backed
+  estimate, not a certainty."):"A data-backed estimate, not a
+  certainty." Major stories tracked as live events with
+  market-implied probabilities."
+
+This is a function reference being rendered as a string instead
+of being invoked. Pattern suggests a t()-style call where a
+fallback function is passed but not called.
+
+Probable location: copyGuide.js or a copy module that exports
+function-based fallbacks. Some render site is treating the
+function as the value to display.
+
+Not related to session 16's i18n changes — pre-existing bug.
+Confirmed visible to users in production today.
+
+Fix scope (for future session): ~30-60 min to locate the offending
+render site, identify the function-vs-string mismatch, fix the
+invocation pattern. Probably a one-line correction.
+
+Refs: session 16 production verification
+
+### 48. EventTracker product critique — fundamental redesign required
+
+DrJ's product-level observation during session 16 EventsPage
+verification:
+
+Current state: EventTracker page is misplaced, cluttered, badly
+designed, overcrowded with weather events. The implementation
+does not serve its intended purpose.
+
+DrJ's recommendation: NOT incremental improvement. Complete
+professional redesign starting from a rethink of what EventTracker
+is FOR.
+
+Open product questions that need resolving:
+- What qualifies as a "tracked event" worth elevating to
+  EventTracker vs staying in the news feed?
+- What's the criteria for significance? Magnitude, probability,
+  recency, public interest, all of the above?
+- How should events be visually hierarchized in the UI?
+- What's the relationship between EventTracker and Reality Index?
+  (They feel overlapping in scope today)
+- How does the breaking news marquee (Phase 4) interact with
+  EventTracker? Are they showing the same content in different
+  ways?
+
+Strategic alignment:
+- EventTracker likely belongs in the Reality Index skill per
+  skills architecture v1
+- A redesign would naturally happen during Phase B's Reality
+  Index skill formalization, not as a tactical patch
+- Treating this as Phase A "fix" would be premature — would patch
+  symptoms without addressing the architectural question of what
+  the surface should be
+
+Recommended sequencing:
+- Phase B.1 (codebase reorganization): EventTracker code moves
+  into reality-index skill folder
+- Phase B.X (Reality Index skill formalization): Product
+  redesign of EventTracker as part of broader Reality Index
+  UX rethink
+- Until then: EventTracker stays as-is. Known degraded experience
+  documented in finding.
+
+DrJ flagged this is "not worth keeping in its current form" —
+worth considering whether the page should be temporarily hidden
+from navigation until redesign lands, vs continuing to show a
+known-broken experience to users. Operator decision for a future
+session.
+
+Refs: session 16 browser verification; finding #28 (Phase 4
+marquee shipped); skills architecture v1; Reality Index Phase 5/6
+rollout (finding #37 root cause analysis)
+
+### 49. Content quality concern: weather posts dominating
+
+Related but distinct from finding #48: during session 16 EventsPage
+verification, DrJ observed content was overcrowded with weather
+posts, many of them similar/duplicate.
+
+Likely root cause: NOAA alerts ingestion runs every 10 minutes
+(per finding #37 Reality Index Phase 5e rollout). 59 alerts
+(Severe+Extreme) ingested in a recent cycle, with 41 upserted
+per session 12 log. Weather/NOAA alerts dominate event volume
+because:
+- High ingestion frequency
+- Geographic granularity creates near-duplicates (e.g., same
+  weather event represented across multiple counties)
+- No content-quality filter for de-prioritizing low-significance
+  alerts
+- Reality Index event credibility scoring may not differentiate
+  "Severe weather alert in one county" from "major political
+  event"
+
+This is connected to finding #48 (EventTracker UI fails) but
+the data layer is also part of the problem — even with perfect
+UI, surfacing 41 similar weather alerts ahead of substantive
+news creates a degraded experience.
+
+Fix scope:
+- Short-term: content-quality filter to limit weather/alert
+  volume per category in EventTracker view (likely 30-60 min
+  in a future session)
+- Long-term: dedup logic in Reality Index ingestion to collapse
+  geographically-clustered weather events into single records
+  (substantial; Phase B+ work)
+
+Refs: finding #37 (NOAA Phase 5e ingestion); finding #48
+(EventTracker UI fails); production runtime log from session 12
+
 ---
 
 ## Pace Tracker
@@ -1394,4 +1621,53 @@ Next session opening candidates (when DrJ returns):
 
 Session 15 close: production at 30ca166 (no commits this session
 beyond finding capture).
+
+---
+
+PACE TRACKER (updated session 16, 2026-05-11)
+
+Session 16 work shipped:
+- Issue 2.5 verification complete (Phase 1A-1E investigation)
+- Issue 2.5 final closure: EventsPage i18n wiring at 6821ceb
+- 5 new findings captured (#45-#49)
+- Sprint 2 closes substantively (CSP Stage 2 still observation-pending)
+
+Calendar pace:
+- Today is 2026-05-11 (Monday) — first session after a real
+  overnight rest (session 15 closed ~19 hours prior)
+- Session 16 duration: ~90 min at finding capture (will be
+  longer with capture commit included)
+- This is meaningfully better cadence than May 10's 4-session
+  compressed day
+
+Phase A close-out remaining work after session 16:
+- CSP Stage 2 enforcement (waiting for ~24h observation window
+  to be safely past; that point is ~2026-05-11 15:57:55 UTC =
+  ~today's 7pm Pakistan, achievable in session 17)
+- Finding #25 RSS date-parsing strategic fix (deferred from
+  this session; planned for session 17)
+- Finding #41 logging refactor scope decision
+- Sprint 6 work (exit verification, metrics snapshot, retrospective
+  writing, Phase B Kickoff Brief)
+- Findings #46/#47 (useHealth + tagline bugs) — fold into
+  general Phase A close-out bug fix sweep
+- Finding #48/#49 (EventTracker redesign + content quality) —
+  de-scope to Phase B+ as part of Reality Index skill work
+
+Realistic remaining: ~6-7 dedicated sessions to Phase A close
+(slight tightening from session 14's 7-8 estimate; Sprint 2
+closure progress).
+
+CSP observation window status: started 2026-05-10 15:57:55 UTC.
+~21 hours elapsed at session 16 close. 24-hour mark reached
+~today 7pm Pakistan time. Reports can be read in session 17.
+
+Next session opening candidates:
+- Finding #25 RSS date-parsing structural fix (was today's
+  deferred work)
+- CSP report reading + Stage 2 enforcement decision
+- Findings #46/#47 quick bug fixes (useHealth + tagline)
+
+Session 16 close: production at 6821ceb. CSP observation
+window continues running in calendar time.
 ```
