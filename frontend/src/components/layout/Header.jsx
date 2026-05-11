@@ -14,6 +14,7 @@ import CountryPicker from "./CountryPicker";
 import LanguagePicker from "./LanguagePicker";
 import MoreMenu from "./MoreMenu";
 import { isRtl } from "../../lib/languages";
+import { useReaderStore } from "../../hooks/useReader";
 import clsx from "clsx";
 
 export default function Header() {
@@ -32,6 +33,7 @@ export default function Header() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const readerOpen = useReaderStore((s) => s.open);
   const onLiveTv      = location.pathname === "/live-tv";
   const onAnalysis    = location.pathname.startsWith("/analysis");
 
@@ -60,6 +62,11 @@ export default function Header() {
   const rtl = isRtl(language);
   const isUrdu = language === "ur"; // keeps legacy Urdu-specific styling for the search box
 
+  // Opaque chrome when scrolled OR when ReaderModal is open — the latter
+  // prevents the brand wordmark from being unreadable against the modal's
+  // dimmed backdrop on /article/:id direct-arrivals (see session 17).
+  const opaque = scrolled || readerOpen;
+
   return (
     <header
       className={clsx(
@@ -68,7 +75,7 @@ export default function Header() {
         // when a user lands directly on /article/:id from a social-media
         // link and the reader auto-opens. See session 17 retrospective.
         "sticky top-0 z-[100] transition-all duration-300",
-        scrolled
+        opaque
           ? "glass border-b border-[var(--color-border)] shadow-sm"
           : "bg-transparent"
       )}
