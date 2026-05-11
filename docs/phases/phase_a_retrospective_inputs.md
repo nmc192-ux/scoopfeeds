@@ -1540,6 +1540,236 @@ Fix scope:
 Refs: finding #37 (NOAA Phase 5e ingestion); finding #48
 (EventTracker UI fails); production runtime log from session 12
 
+### 50. CSP observation insufficient for Stage 2 enforcement
+
+Session 17 Phase 1 read accumulated CSP violation reports via
+SSH (DrJ self-authenticated; SSH key not registered). Only 30
+reports accumulated since the session 14 logging fix (~25.5
+hours).
+
+Analysis revealed:
+- All 30 reports came from one article URL accessed via Facebook
+  and Threads referrers — likely 2-3 user sessions, not 30 users
+- Violations exclusively target Google ad/analytics infrastructure:
+  fundingchoicesmessages.google.com, region1.google-analytics.com,
+  boq-content-ads-contributor internal paths
+- These are legitimate sub-domains called from already-allowlisted
+  entry-points (googletagmanager.com, pagead2.googlesyndication.com)
+
+Critical context discovered mid-session: AdSense application was
+REJECTED by Google ("your site isn't ready to show ads at this
+time"). The violations being captured are partly for ad scripts
+that aren't even serving real ads to users.
+
+Decision: defer Stage 2 enforcement indefinitely. Reasons:
+1. 30 reports from one URL is statistically insufficient to
+   confidently allowlist
+2. Sparse data is itself a signal of bigger problem (low direct
+   traffic, social-only audience)
+3. Allowlisting infrastructure for blocked AdSense ads is
+   premature work
+4. The real fix is product distribution + AdSense approval,
+   not CSP allowlist iteration
+
+Continue CSP report-only mode indefinitely. Revisit after either
+substantial traffic growth OR AdSense approval, whichever comes
+first.
+
+Refs: session 14 CSP logging fix (commit 90dd57a); session 17
+Phase 1 SSH read; Google AdSense rejection screenshot
+
+### 51. Article-page navigation architecture — three-commit arc and final design
+
+Session 17's substantive engineering work: solving the article-page
+navigation gap (identified mid-session via DrJ's product framing
+of why direct-arrival users can't discover the rest of Scoopfeeds).
+
+The investigation chain:
+
+Phase 1 (z-index + close-trap fix, commit 49d7735):
+- Discovered Header was rendered globally but obscured by
+  ReaderModal's z-[90] backdrop
+- Discovered close button had a bug — useEffect re-fire trap
+  that contradicted the file-header comment's documented intent
+- Shipped: Header z-[100] above modal, useRef-gated useEffect,
+  navigate("/", replace:true) on close
+- Production verification revealed Header background was
+  transparent, making brand wordmark unreadable
+
+Phase 2 (opaque Header fix, commit 3490337):
+- Added readerOpen selector subscription to Header
+- Forced opaque "scrolled" styling when modal open
+- Production verification revealed correct technical fix but
+  WRONG product UX — full Header (12+ controls) overwhelming
+  for article-reading context
+
+Phase 3 (architectural refactor, commit d301cf6):
+- DrJ's product critique: "header is too overwhelming...
+  should be simple design rather than over cluttering"
+- Right architecture: hide Header entirely when modal is open;
+  give modal its own minimal nav strip (logo + tagline)
+- Cleaned up z-[100] and opaque logic from prior commits
+- ReaderModal.jsx gets new Link element with ScoopLogo at
+  modal top-center
+
+Final state at d301cf6:
+- Direct-arrival users see modal with minimal nav (logo + tagline
+  + X close)
+- Click logo or X → navigates to "/" with full Header restored
+- In-app browsing flow unchanged
+- Hit-area issue on X close resolved naturally (no Header overlap)
+
+Lesson learned: tonight's three-commit arc illustrates the
+trade-off between "ship something that technically works" vs
+"ship the right product design." Phase 1 was technically correct
+but missed the product gap. Phase 2 over-corrected by forcing
+homepage chrome into reading mode. Phase 3 (after DrJ's product
+critique) found the right architecture by treating the modal
+as a self-contained surface.
+
+Methodological insight: when implementing a fix to expand
+visibility/access of one component (Header above modal), check
+whether that component's design is appropriate in the new
+context. The full Header's design assumes browsing-mode usage;
+overlaying it on reading-mode required questioning whether the
+full surface still made sense (it didn't).
+
+For session 18 review: review the three commits together to
+understand whether close-trap fix could have been a smaller,
+more direct first attempt.
+
+Refs: commits 49d7735, 3490337, d301cf6; session 17 production
+verification with three iterations; DrJ product critique
+documented mid-session
+
+### 52. Logo click bug on modal nav — opens language picker instead of navigating
+
+After deploying d301cf6, browser verification revealed: clicking
+the Scoopfeeds logo in the modal top-bar triggers a language
+selection popup instead of navigating to "/".
+
+Expected behavior: Link to "/" navigates user to homepage.
+Actual behavior: language picker popup opens.
+
+Root cause hypothesis (untested in session 17):
+- ScoopLogo component may have internal click handlers (perhaps
+  for tagline-language toggling) that intercept clicks before
+  the parent Link's navigation fires
+- Or: language picker (mounted nearby in DOM) has overflow
+  positioning that captures clicks from the logo area
+
+User impact: bug is not blocking — X close button works correctly
+as the primary "close + go home" affordance. Logo is currently a
+redundant (and broken) secondary affordance.
+
+Fix shape (for session 18): investigate ScoopLogo component
+internals. Check for onClick handlers that should be removed
+when wrapped in Link. Possibly add stopPropagation guards, or
+restructure ScoopLogo to be presentation-only when used outside
+its original context.
+
+Refs: production verification post-d301cf6 deploy; DrJ
+observation
+
+### 53. useHealth hook 429 misreporting — confirmed recurring user-facing impact
+
+Finding #46 from session 16 documented the useHealth hook misreports
+429 rate-limit responses as "Backend Not Running." Session 17
+provides additional evidence that this is now a critical user-
+experience bug, not a minor annoyance:
+
+- During session 17 alone, DrJ observed "scoopfeeds.com shutting
+  down every few minutes" multiple times (11:05 PM, 11:30 PM,
+  and during browser verification)
+- Each "down" event corresponded to /api/health returning 429
+  with production homepage returning 200 — production was up
+- The frequency suggests this affects real users on any sustained
+  session, not just developer/test traffic
+- Combined with the deploy worker-restart pattern (finding #8),
+  users see degraded experience repeatedly during evenings when
+  ingestion + browsing load combines
+
+DrJ explicitly proposed: "I think it deserves a full session
+tomorrow."
+
+Priority: HIGH for session 18+. The bug actively undermines
+product trust. Users who see "Backend Not Running" on a working
+site believe Scoopfeeds is unreliable, which is the opposite
+of what an intelligence platform should communicate.
+
+Fix shape:
+- Distinguish 429 from 5xx in useHealth response handling
+- Show "retry" or "high traffic" UI for 429 rather than
+  "backend not running"
+- Consider exponential backoff for the polling interval after
+  receiving 429
+- Verify the message displayed is not catastrophic-feeling
+  even on real outage
+
+Estimated effort: 60-90 min in a focused session.
+
+Refs: finding #46 (session 16 origin); session 17 multiple
+observations; finding #8 (deploy worker restart pattern); session
+17 final production verification at d301cf6
+
+### 54. AdSense rejection — operational signal affecting CSP and product strategy
+
+During session 17 mid-session, DrJ shared screenshot of Google
+AdSense response: "your site isn't ready to show ads at this
+time. There are some issues which need fixing before your site
+is ready to show ads."
+
+Connected implications:
+1. CSP allowlist work for AdSense infrastructure is premature
+   (finding #50 above)
+2. Revenue thesis for Scoopfeeds depends on either AdSense
+   approval OR alternative monetization
+3. The "issues which need fixing" are operational, not
+   engineering — content quality, traffic minimums, policy
+   compliance — outside Phase A scope
+
+This is operational/business signal worth capturing for strategic
+planning. Engineering tasks alone won't unblock AdSense.
+
+Refs: AdSense rejection screenshot session 17; finding #25
+(RSS date-parsing — content quality contributor); finding #48
+(EventTracker product critique — UI quality contributor)
+
+### 55. Traffic shape — social-only audience reveals product distribution gap
+
+Session 17 analysis of CSP report data + DrJ's product framing
+revealed that scoopfeeds.com traffic is essentially:
+
+Social media post → click → /article/<uuid> → read → bounce
+
+Almost no:
+- Direct traffic (typing scoopfeeds.com)
+- Homepage navigation from social arrivals
+- Multi-article reading sessions
+- Newsletter signups from article readers
+- Returning visitors
+
+Root causes contributing to this shape:
+- Article cards from social posts go directly to /article/<uuid>
+  with no built-in path back to homepage (now partially addressed
+  by d301cf6 modal nav)
+- No "more articles" CTA at end of article reads
+- No subscription/conversion prompts during reading
+- Newsletter signup buried in modal scroll
+
+Implication: Phase A stabilization work matters less than expected
+because the product distribution gap means most users never
+experience most of what Phase A delivers. They read one article
+and leave.
+
+This is a strategic-level finding, not an engineering finding.
+Phase B+ product/distribution work matters more than additional
+Phase A stabilization passes.
+
+Refs: session 17 CSP report analysis (30 reports from 1 article);
+DrJ product observation; commit d301cf6 (partial fix — gives
+direct-arrivals a path home)
+
 ---
 
 ## Pace Tracker
@@ -1670,4 +1900,63 @@ Next session opening candidates:
 
 Session 16 close: production at 6821ceb. CSP observation
 window continues running in calendar time.
+
+---
+
+PACE TRACKER (updated session 17, 2026-05-11)
+
+Session 17 work shipped:
+- CSP report reading + analysis (Phase 1 of session)
+- Defer Stage 2 enforcement decision (finding #50 captured)
+- Three commits in article-page navigation arc:
+  - 49d7735: z-[100] + close-trap fix
+  - 3490337: opaque Header (later reverted)
+  - d301cf6: modal-native nav + Header hidden when modal open
+    (FINAL architectural fix)
+- Browser verification revealed logo click bug (finding #52)
+- 6 new findings captured (CSP defer, three-commit arc lessons,
+  logo bug, useHealth recurring, AdSense rejection, traffic
+  shape gap)
+
+Cumulative calendar pace:
+- Session 17 duration: ~3.5 hours (started 14:00 UTC, finishing
+  ~17:30 UTC at finding capture)
+- Session 17 was clean: started after real overnight rest from
+  session 16, used physical movement (evening jog) as session
+  break
+- BUT: still ran past stated "2-hour budget before sleep" by
+  ~90 min, ending at 12:43 AM Pakistan time (00:13 UTC)
+- Better cadence than May 10's 4-session compressed day, but
+  not the ideal cadence
+- Honest read: the session extended because product critique
+  surfaced mid-session and demanded a third commit; the work
+  was real and worth doing, but session-boundary discipline
+  remained imperfect
+
+Phase A close-out remaining work after session 17:
+- Sprint 6 work (exit verification, metrics snapshot, retrospective
+  writing, Phase B Kickoff Brief) — substantive remaining work
+- Finding #25 RSS date-parsing structural fix
+- Finding #41 logging refactor scope decision
+- Finding #53 (useHealth 429 priority HIGH) — likely session 18
+- Finding #52 (logo bug) — session 18 or batched with other UI work
+- Finding #47 tagline rendering bug (smaller, batchable)
+
+Realistic remaining: ~6-7 dedicated sessions to Phase A close
+(slight tightening from session 14's 7-8 estimate; session 17
+shipped substantive UX work).
+
+CSP observation continues running indefinitely (decision deferred
+per finding #50).
+
+Next session opening candidates:
+1. useHealth 429 fix (priority HIGH per finding #53; DrJ named
+   this as deserving full session)
+2. Logo click bug investigation + fix (finding #52)
+3. Finding #25 RSS date-parsing structural fix (long-deferred)
+4. Sprint 6 work begin (exit verification, retrospective writing)
+
+Session 17 close: production at d301cf6. Three commits shipped
+this evening. Architecture corrected via Approach 2 cleanup
+during Phase 3.
 ```
