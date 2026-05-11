@@ -62,20 +62,17 @@ export default function Header() {
   const rtl = isRtl(language);
   const isUrdu = language === "ur"; // keeps legacy Urdu-specific styling for the search box
 
-  // Opaque chrome when scrolled OR when ReaderModal is open — the latter
-  // prevents the brand wordmark from being unreadable against the modal's
-  // dimmed backdrop on /article/:id direct-arrivals (see session 17).
-  const opaque = scrolled || readerOpen;
+  // Hide the global Header entirely while ReaderModal is open. The modal is
+  // a self-contained reading surface with its own minimal nav (logo + tagline
+  // linking to "/"). The 12+ Header controls for homepage browsing aren't
+  // appropriate while a user is focused on a single article. See session 17.
+  if (readerOpen) return null;
 
   return (
     <header
       className={clsx(
-        // z-[100] sits above ReaderModal's z-[90] backdrop so the brand,
-        // MoreMenu, search, sign-in, and lang/country pickers stay reachable
-        // when a user lands directly on /article/:id from a social-media
-        // link and the reader auto-opens. See session 17 retrospective.
-        "sticky top-0 z-[100] transition-all duration-300",
-        opaque
+        "sticky top-0 z-50 transition-all duration-300",
+        scrolled
           ? "glass border-b border-[var(--color-border)] shadow-sm"
           : "bg-transparent"
       )}

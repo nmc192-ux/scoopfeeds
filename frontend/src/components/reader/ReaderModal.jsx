@@ -8,7 +8,9 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { X, ExternalLink, Type, Sun, Bookmark, Share2, Languages, Loader2, ArrowRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { ScoopLogo } from "../mascot/ScoopMascot";
 import { useReaderStore, useReaderArticle, useTranslatedReader } from "../../hooks/useReader";
 import { useNewsStore } from "../../store/newsStore";
 import { useSaveArticle } from "../../hooks/useSaveArticle";
@@ -150,6 +152,25 @@ export default function ReaderModal() {
               >
                 <X size={18} />
               </button>
+
+              {/* Minimal brand nav — modal is self-contained reading surface
+                  (global Header is hidden while open). Clicking takes the
+                  user to homepage with the full Header restored. */}
+              <Link
+                to="/"
+                className="flex items-center gap-2 hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-600/40 rounded-lg"
+                aria-label="Scoopfeeds — Home"
+              >
+                <ScoopLogo size={24} />
+                <div className="hidden sm:flex flex-col leading-none gap-[2px]">
+                  <span className="font-brand text-sm font-extrabold tracking-[-0.04em] leading-none text-[var(--color-text)]">
+                    Scoop<span className="text-[var(--color-orange)]">feeds</span>
+                  </span>
+                  <span className="font-editorial italic text-[10px] tracking-[0.01em] text-[var(--color-text-tertiary)]">
+                    Intelligent news, curated.
+                  </span>
+                </div>
+              </Link>
 
               <div className="flex items-center gap-1">
                 {/* Translation indicator — small pill showing target language */}
