@@ -20,6 +20,11 @@
   "nav.world_map": "عالمی نقشہ",
   "nav.weather": "موسم",
   "nav.live_tv": "لائیو ٹی وی",
+  "nav.all": "All",
+  "nav.politics": "Politics",
+  "nav.tech": "Tech",
+  "nav.science": "Science",
+  "nav.geopolitics": "Geopolitics",
 
   "mobile.home": "ہوم",
   "mobile.events": "واقعات",

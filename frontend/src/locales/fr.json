@@ -20,6 +20,11 @@
   "nav.world_map": "Carte du monde",
   "nav.weather": "Météo",
   "nav.live_tv": "TV en direct",
+  "nav.all": "All",
+  "nav.politics": "Politics",
+  "nav.tech": "Tech",
+  "nav.science": "Science",
+  "nav.geopolitics": "Geopolitics",
 
   "mobile.home": "Accueil",
   "mobile.events": "Événements",

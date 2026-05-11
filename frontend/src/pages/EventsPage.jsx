@@ -11,17 +11,23 @@ import { useEvents } from "../hooks/useEvents";
 import EventCard from "../components/events/EventCard";
 import LiveAnomaliesStrip from "../components/predictions/LiveAnomaliesStrip";
 import { COPY } from "../lib/copyGuide";
+import { useT } from "../lib/i18n";
 
+// Category chips. labelKey resolves via t() at render so chips translate
+// with the active locale (matches the MoreMenu pattern). 4 keys overlap
+// with existing MoreMenu nav.* keys (finance/health/sports/climate);
+// 5 new keys (all/politics/tech/science/geopolitics) are added to the
+// nav.* namespace in this commit.
 const CATEGORIES = [
-  { id: "",            label: "All" },
-  { id: "politics",    label: "Politics" },
-  { id: "finance",     label: "Finance" },
-  { id: "tech",        label: "Tech" },
-  { id: "science",     label: "Science" },
-  { id: "health",      label: "Health" },
-  { id: "sports",      label: "Sports" },
-  { id: "geopolitics", label: "Geopolitics" },
-  { id: "climate",     label: "Climate" },
+  { id: "",            labelKey: "nav.all" },
+  { id: "politics",    labelKey: "nav.politics" },
+  { id: "finance",     labelKey: "nav.finance" },
+  { id: "tech",        labelKey: "nav.tech" },
+  { id: "science",     labelKey: "nav.science" },
+  { id: "health",      labelKey: "nav.health" },
+  { id: "sports",      labelKey: "nav.sports" },
+  { id: "geopolitics", labelKey: "nav.geopolitics" },
+  { id: "climate",     labelKey: "nav.climate" },
 ];
 
 function SkeletonCard() {
@@ -39,14 +45,21 @@ function SkeletonCard() {
 
 export default function EventsPage({
   fixedCategory = null,
-  pageTitle = "Event Tracker",
+  // null default => translation-aware default title (nav.event_tracker).
+  // Callers that pass a literal string (e.g., category alias pages like
+  // HealthEventsPage passing pageTitle="Health") still get their literal —
+  // this only changes behavior on the bare /events route where no override
+  // is supplied.
+  pageTitle = null,
   pageSubtitle = null,
   pageIcon: PageIcon = Map,
 } = {}) {
+  const { t } = useT();
   const [chosen, setChosen] = useState("");
   const category = fixedCategory ?? chosen;
   const { data, isLoading, error } = useEvents({ category: category || undefined, limit: 60 });
   const events = data?.events ?? [];
+  const resolvedTitle = pageTitle ?? t("nav.event_tracker", "Event Tracker");
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
@@ -55,7 +68,7 @@ export default function EventsPage({
         <div className="flex items-center gap-2 mb-1">
           <PageIcon size={18} className="text-[var(--color-accent)]" />
           <h1 className="font-editorial italic text-2xl sm:text-3xl text-[var(--color-text)]">
-            {pageTitle}
+            {resolvedTitle}
           </h1>
         </div>
         <p className="text-sm text-[var(--color-text-secondary)]">
@@ -79,7 +92,7 @@ export default function EventsPage({
                   : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
               }`}
             >
-              {c.label}
+              {t(c.labelKey)}
             </button>
           ))}
         </div>

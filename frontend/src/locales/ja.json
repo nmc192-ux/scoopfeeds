@@ -20,6 +20,11 @@
   "nav.world_map": "世界地図",
   "nav.weather": "天気",
   "nav.live_tv": "ライブTV",
+  "nav.all": "All",
+  "nav.politics": "Politics",
+  "nav.tech": "Tech",
+  "nav.science": "Science",
+  "nav.geopolitics": "Geopolitics",
 
   "mobile.home": "ホーム",
   "mobile.events": "イベント",

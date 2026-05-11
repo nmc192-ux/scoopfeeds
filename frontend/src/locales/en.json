@@ -27,6 +27,11 @@
   "nav.crypto":     "Crypto",
   "nav.ai":         "AI",
   "nav.space":      "Space",
+  "nav.all":         "All",
+  "nav.politics":    "Politics",
+  "nav.tech":        "Tech",
+  "nav.science":     "Science",
+  "nav.geopolitics": "Geopolitics",
 
   "mobile.home": "Home",
   "mobile.events": "Events",

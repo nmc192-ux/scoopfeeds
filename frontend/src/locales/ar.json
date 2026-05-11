@@ -20,6 +20,11 @@
   "nav.world_map": "خريطة العالم",
   "nav.weather": "الطقس",
   "nav.live_tv": "البث المباشر",
+  "nav.all": "All",
+  "nav.politics": "Politics",
+  "nav.tech": "Tech",
+  "nav.science": "Science",
+  "nav.geopolitics": "Geopolitics",
 
   "mobile.home": "الرئيسية",
   "mobile.events": "الأحداث",

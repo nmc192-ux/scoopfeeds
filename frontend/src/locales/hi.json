@@ -20,6 +20,11 @@
   "nav.world_map": "विश्व मानचित्र",
   "nav.weather": "मौसम",
   "nav.live_tv": "लाइव टीवी",
+  "nav.all": "All",
+  "nav.politics": "Politics",
+  "nav.tech": "Tech",
+  "nav.science": "Science",
+  "nav.geopolitics": "Geopolitics",
 
   "mobile.home": "होम",
   "mobile.events": "घटनाएँ",
