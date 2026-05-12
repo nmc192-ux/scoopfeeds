@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import axios from "axios";
+import { createApi } from "../lib/api";
 
-const api = axios.create({ baseURL: "/api" });
+const api = createApi({ baseURL: "/api" });
 
 // List of all tracked live events (card index for the Live tab).
 export function useLiveEvents() {

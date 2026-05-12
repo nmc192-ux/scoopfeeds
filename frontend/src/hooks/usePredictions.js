@@ -4,9 +4,9 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import axios from "axios";
+import { createApi } from "../lib/api";
 
-const api = axios.create({ baseURL: "/api" });
+const api = createApi({ baseURL: "/api" });
 
 /** List active markets, optionally filtered by category and min volume. */
 export function usePredictions({ category, minVolume = 0, limit = 50 } = {}) {

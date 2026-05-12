@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import axios from "axios";
+import { createApi } from "../lib/api";
 
-const api = axios.create({ baseURL: "/api" });
+const api = createApi({ baseURL: "/api" });
 
 /**
  * Fetches live market data: FX rates (PKR), stock indices, gold & silver.

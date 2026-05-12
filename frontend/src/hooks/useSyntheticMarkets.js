@@ -2,9 +2,9 @@
  * useSyntheticMarkets — React Query hooks for /api/synthetic-markets.
  */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import axios from "axios";
+import { createApi } from "../lib/api";
 
-const api = axios.create({ baseURL: "/api/synthetic-markets" });
+const api = createApi({ baseURL: "/api/synthetic-markets" });
 
 export function useSyntheticMarkets({ resolved = false, limit = 30 } = {}) {
   return useQuery({

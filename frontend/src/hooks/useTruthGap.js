@@ -4,9 +4,9 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import axios from "axios";
+import { createApi } from "../lib/api";
 
-const api = axios.create({ baseURL: "/api/ri" });
+const api = createApi({ baseURL: "/api/ri" });
 
 export function useTruthGap({ direction = "both", windowMs, limit = 25 } = {}) {
   return useQuery({

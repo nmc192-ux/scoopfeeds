@@ -9,9 +9,9 @@
  * hydration so the cross-device state is immediately available.
  */
 import { useState, useEffect, useCallback } from "react";
-import axios from "axios";
+import { createApi } from "../lib/api";
 
-const api = axios.create({ withCredentials: true });
+const api = createApi({ withCredentials: true });
 
 export function useAuth() {
   const [user, setUser]       = useState(undefined);   // undefined = loading, null = not logged in

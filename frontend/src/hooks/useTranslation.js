@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import axios from "axios";
+import { createApi } from "../lib/api";
 import { useNewsStore } from "../store/newsStore";
 
-const api = axios.create({ baseURL: "/api" });
+const api = createApi({ baseURL: "/api" });
 
 // ─── In-memory cache (session-scoped) ─────────────────────────────────────
 const translationCache = new Map();

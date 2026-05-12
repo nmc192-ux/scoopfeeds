@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import axios from "axios";
+import { createApi } from "../lib/api";
 import { useEffect, useState } from "react";
 
-const api = axios.create({ baseURL: "/api" });
+const api = createApi({ baseURL: "/api" });
 const OVERRIDE_KEY = "scoop.geo.override";
 
 /**

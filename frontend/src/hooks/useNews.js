@@ -1,11 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
-import axios from "axios";
+import { createApi } from "../lib/api";
 import { useNewsStore } from "../store/newsStore";
 import { rankArticles } from "../lib/ranker";
 import { useGeo } from "./useGeo";
 
-const api = axios.create({ baseURL: "/api" });
+const api = createApi({ baseURL: "/api" });
 
 // ─── Fetch Functions ──────────────────────────────────────────────────────
 

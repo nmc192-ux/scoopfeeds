@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { create } from "zustand";
-import axios from "axios";
+import { createApi } from "../lib/api";
 
-const api = axios.create({ baseURL: "/api" });
+const api = createApi({ baseURL: "/api" });
 
 /**
  * Tiny zustand store for the in-app reader modal.

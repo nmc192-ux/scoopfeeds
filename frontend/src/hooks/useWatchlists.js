@@ -7,9 +7,9 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import axios from "axios";
+import { createApi } from "../lib/api";
 
-const api = axios.create({ baseURL: "/api/watchlists" });
+const api = createApi({ baseURL: "/api/watchlists" });
 
 export function useWatchlists() {
   return useQuery({
