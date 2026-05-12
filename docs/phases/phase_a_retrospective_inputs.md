@@ -2153,6 +2153,180 @@ catches similar patterns.
 
 Refs: session 19 Phase 2b-B code review; lib/api.js at c8917d1
 
+### 64. TopicPage connection-trouble fallback fires under rate-limit — Phase S4 input
+
+Production observation post-c8917d1: navigating to /topic/politics
+during a rate-limit window shows the "Oops! Connection trouble —
+The API server might be warming up. Give it a moment!" placeholder
+with a Try Again button, plus "0 stories curated from global
+sources" subhead.
+
+Screenshot evidence: 2026-05-13 00:57 PKT, c8917d1 bundle confirmed,
+Politics topic page rendered the connection-trouble fallback while
+the rest of the site (Header with 26,369 articles, breaking-news
+ticker, topic chips, country chips) rendered normally from cached
+data.
+
+Root cause analysis:
+- TopicPage queries /api/news?topic=politics (or similar shape)
+- The /api/news endpoint is NOT in Phase S2b's verified-sentinel
+  set (only /health and /auth/me have verified sentinels)
+- Cold-start 429 on /api/news returns data: null (Phase S2 behavior
+  preserved for non-verified endpoints)
+- TopicPage's component falls through to its connection-trouble
+  empty-state UI when data is null
+
+This is the documented Phase S4 scope manifesting in production.
+Not a regression from c8917d1 — c8917d1 explicitly scoped sentinels
+to 2 of the planned 10 endpoints (finding #60 documents why: hook
+unwrap pattern inconsistency makes wrong-shape sentinels dangerous).
+
+Resolution paths for Phase S4 (not for session 19):
+- Option A: Add verified /api/news sentinel with correct shape per
+  useNews hook's unwrap pattern ({data: []} per finding #60's
+  pattern table)
+- Option B: Make TopicPage resilient to null+stale data — when
+  cache miss + 429, show last-known articles with subtle staleness
+  indicator instead of full connection-trouble placeholder
+- Option C: Both A and B — sentinel for the common case +
+  defensive component for true cold start
+
+Recommendation when Phase S4 ships: Option C (sentinel + defensive
+component). The sentinel handles 95% of cases (returning users with
+warm localStorage); the defensive component handles the residual
+true-cold-start scenarios.
+
+User impact: anyone navigating between topic pages during sustained
+browsing trips rate limit and sees the connection-trouble fallback
+instead of cached articles. The Header continues to look healthy
+(showing 26,369 from cached /health data), creating cognitive
+dissonance — "site is up but this page is broken."
+
+Refs: finding #56 (cascade root cause), finding #60 (hook unwrap
+patterns + sentinel correctness), finding #61 (S2b verification),
+commit c8917d1 (Phase S2b base); screenshot 2026-05-13 00:57 PKT
+
+### 65. Article reader extraction degrades intermittently under rate-limit — Phase S4 input
+
+Production observation post-c8917d1: opening an article via the
+reader modal sometimes shows full article content, sometimes shows
+empty/error state. DrJ's specific report: "News item extraction
+stops working after few tries. Currently it's working again."
+
+This intermittency pattern is the signature of rate-limit
+interaction. Reader extraction makes upstream API calls (likely
+/api/reader or similar) that get caught by rate limiter under
+heavy use. The endpoint behavior depends on which fetch path
+the reader uses.
+
+Investigation needed (Phase S4 prerequisite):
+
+Path A: If extraction uses useReader hook (covered by S2b
+interceptor via createApi):
+- Returns data: null on cold-start 429
+- ReaderModal needs to handle null gracefully
+- Defensive component pattern fix
+
+Path B: If extraction uses raw fetch() (known-uncovered per
+S2b documentation — components/reader/ReaderModal.jsx
+related-stories fetch is documented as bypass):
+- Not covered by interceptor at all
+- Migration to createApi pattern needed
+- Larger fix touching the fetch call site
+
+Specific endpoint and path TBD in Phase S4 investigation. The
+useReader.js hook was converted to createApi in cf0f16f (it's
+in the 15-file consolidation). The related-stories raw fetch()
+in ReaderModal.jsx was explicitly documented as uncovered scope.
+
+If extraction is the useReader path: relatively contained Phase S4
+fix (component defensive coding + add /api/reader sentinel).
+
+If extraction is a different fetch() bypass discovered during S4
+investigation: scope expands to include that fetch() migration.
+
+User impact: when reader extraction is the value the user came
+for (clicking an article to read it), failing silently or
+intermittently undermines product trust. This is a higher-priority
+issue than topic-page fallback because it hits the primary
+user task.
+
+Refs: useReader.js (cf0f16f conversion to createApi); ReaderModal.jsx
+related-stories raw fetch() (documented S2b known-uncovered scope);
+finding #56 (cascade), finding #57 (#300 mechanism); production
+observation 2026-05-13 00:58 PKT
+
+### 66. ReaderModal nav components conditionally render — manifests the React #57 anti-pattern in production
+
+Production observation post-c8917d1: article reader modal shows
+the Scoopfeeds brand wordmark + X close button + nav cluster
+SOMETIMES at the top of the modal, sometimes does NOT show them.
+
+Screenshot evidence: 2026-05-13 01:02 PKT, article modal opened
+to "Anmol Pinky: Police officers suspended for aiding cocaine
+queen" (ARY News, Pakistan). Modal content (image, headline,
+byline, body text) renders fully. Modal nav (logo, tagline,
+X button) is ABSENT in this instance.
+
+Hypothesis: ReaderModal uses conditional rendering pattern like
+
+  {article && <ModalNav />}
+
+or
+
+  {isLoaded && (
+    <ModalNav />
+    <ArticleContent />
+  )}
+
+When article data is null (rate-limited reader fetch), the
+conditional skips the ModalNav block. When article data eventually
+loads, the conditional renders the nav. The intermittency depends
+on when article data arrives vs when the component first renders.
+
+This is the exact pattern finding #57 (React #300 mechanism)
+documented but at a less-catastrophic level — early-return on
+undefined doesn't cause hook-count crash here because it's
+JSX rendering not hook calling, but it does cause visible UI
+glitch where critical affordances (X close to return home)
+disappear.
+
+User impact: user can't see how to close the modal. Has to
+guess (Escape key? Browser back?). Worse on mobile where Escape
+isn't available. Critical product-UX failure even though it's
+not a JS crash.
+
+Phase S4 implication: defensive component patterns audit needs
+to identify ALL conditional rendering blocks where critical UI
+(navigation, close affordances, escape paths) depends on async
+data. Such blocks should always render structure with sensible
+fallback content, never skip entirely.
+
+Standard pattern recommendation for Phase S4:
+
+  Bad:
+    {data && (
+      <ModalNav>
+        <CloseButton />
+        <Logo />
+      </ModalNav>
+    )}
+
+  Good:
+    <ModalNav>
+      <CloseButton />  {/* always present */}
+      {data ? <Logo /> : <LogoPlaceholder />}
+    </ModalNav>
+
+This is component-defensive coding (S4 scope) AND product-UX
+principle (critical affordances always visible). Phase S4 audit
+output should be a coding-standard doc + ESLint rule + audited
+component list.
+
+Refs: finding #56 (cascade), finding #57 (React #300 mechanism);
+d301cf6 (ReaderModal architecture); screenshot 2026-05-13 01:02
+PKT; finding #64 + #65 as related Phase S4 manifestations
+
 ---
 
 ## Pace Tracker
@@ -2432,8 +2606,12 @@ Phase A close-out schedule update (revised from session 18):
 - Post-session-19 estimate: 9-10 sessions remaining for Phase A
   close
 - S3 (per-route rate limit recalibration): 1-2 sessions
-- S4 (component defensive patterns + hook unwrap contract):
-  1-2 sessions (scope revised upward per finding #60)
+- S4 — Component defensive patterns + hook unwrap contract
+  (1-2 sessions, scope per finding #60). Production observation
+  post-c8917d1 added concrete S4 input: finding #64 (TopicPage
+  fallback), #65 (reader extraction intermittency), #66 (modal
+  nav conditional rendering). These three production-observed
+  failures are the priority Phase S4 inventory items.
 - Finding #25 RSS date-parsing: 1-2 sessions
 - Finding #41 logging refactor decision: 1 session
 - Finding #47, #52 small bugs: batched, 1 session
