@@ -37,9 +37,35 @@ async function fetchStats() {
   return data.data || {};
 }
 
+// Module-level cache of the last successful /api/health response. Used by
+// fetchHealth when the global API rate limiter (apiGlobalLimiter, 500
+// req/15min/IP at backend/server.js:188) returns 429: instead of throwing
+// — which would make react-query flag isError and trigger BackendOffline
+// in App.jsx — we return the cached body so the UI keeps the previously-
+// known state. Production is healthy; we just paused polling.
+//
+// Cold-start + 429 (rate-limited on the very first health poll) degrades
+// gracefully: returns a minimal {status:"rate-limited"} sentinel so isError
+// stays false, but Header's emerald dot, article count, and Live badge
+// don't render (no fields to read). This is the deliberate trade-off —
+// full-page BackendOffline is much worse than a plain Header. Persisting
+// _lastHealth across page loads via sessionStorage is future scope, not
+// done today.
+let _lastHealth = null;
+
 async function fetchHealth() {
-  const { data } = await api.get("/health");
-  return data;
+  try {
+    const { data } = await api.get("/health");
+    _lastHealth = data;
+    return data;
+  } catch (err) {
+    // 429 = rate-limited, not a real outage. Return cached or sentinel
+    // so isError stays false. Real errors (5xx, network, CORS) re-throw.
+    if (err?.response?.status === 429) {
+      return _lastHealth ?? { status: "rate-limited", ratelimited: true };
+    }
+    throw err;
+  }
 }
 
 async function fetchPublicConfig() {
@@ -111,7 +137,12 @@ export function useHealth() {
     queryFn: fetchHealth,
     staleTime: 30 * 1000,
     refetchInterval: 30 * 1000,
-    retry: 1,
+    // Don't retry 429s — fetchHealth already catches them and returns
+    // cached/sentinel data, so this path normally isn't hit. Belt-and-
+    // suspenders: if a 429 ever bypasses the catch (e.g., axios behavior
+    // change), retrying just deepens the rate-limit window.
+    retry: (failureCount, err) =>
+      err?.response?.status !== 429 && failureCount < 1,
   });
 }
 
