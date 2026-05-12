@@ -1770,6 +1770,180 @@ Refs: session 17 CSP report analysis (30 reports from 1 article);
 DrJ product observation; commit d301cf6 (partial fix — gives
 direct-arrivals a path home)
 
+### 56. Systemic 429 cascade — root cause analysis and two-track fix plan
+
+Session 18 attempted to fix finding #53 (useHealth misreports
+429 as backend down). Shipped commit f34f2bf which correctly
+distinguished 429 from 5xx in useHealth. Production verification
+revealed the fix exposed a deeper systemic problem.
+
+ROOT CAUSE (network-engineering analysis):
+
+Scoopfeeds makes ~30 distinct API calls per page load
+(/api/auth/me, /api/geo, /api/weather, /api/public-config,
+/api/events, /api/analysis/stories, /api/affiliate/paywall ×7,
+/api/affiliate/pick, /api/predictions/badges, /api/market,
+/api/track, /api/news, /api/featured, /api/topics, /api/stats,
+/api/health, plus on-demand calls).
+
+The backend's global rate limiter (apiGlobalLimiter at 500
+req/15min/IP = 33.3 req/min) is structurally too aggressive
+for this call pattern. A single page load consumes ~30 of the
+33-req/min budget. Normal browsing (refresh, navigate, open
+article, go back, open another) easily exceeds the limit.
+
+When the rate limiter fires, EVERY hook receives 429:
+- /api/auth/me, /api/events, /api/predictions/badges,
+  /api/affiliate/*, /api/track, /api/analysis/stories,
+  /api/geo, /api/weather, /api/public-config, /api/market
+
+Each hook's queryFn throws because non-2xx responses raise
+axios errors. react-query flags isError on all of them.
+Components that conditionally render based on data presence
+hit "fewer hooks than expected" — React error #300. Page goes
+white.
+
+CONFIRMED IN PRODUCTION at f34f2bf: console showed 30+ 429
+errors in 2 seconds during normal browsing, followed by React
+#300 crash and white screen.
+
+Three problems compound:
+1. Call-heavy architecture (~30 calls per page load) — root cause
+2. Rate limiter calibrated for fewer calls per session than app
+   produces
+3. Components defensive against errors but not against systematic
+   data unavailability
+
+These three together create the cascade. Tonight's useHealth
+fix addressed only the symptom in one hook; problems 1-3 remained.
+
+TWO-TRACK FIX PLAN (DrJ approved):
+
+STABILIZATION TRACK (Phase A close-out):
+- S1: Revert f34f2bf (this session) — restore known-degraded-but-
+  not-crashing state
+- S2: Global axios 429 interceptor (session 19) — single layer
+  that catches 429 for all hooks, returns cached/sentinel data
+  instead of throwing
+- S3: Per-route rate limit recalibration (session 20-21) — replace
+  500/15min global with per-route budgets matching actual usage
+- S4: Defensive component patterns (session 22) — make components
+  safe against undefined data via standardized patterns
+
+REDESIGN TRACK (Phase B opening, threaded through B.1
+codebase reorganization):
+- R1: API endpoint consolidation — /api/bootstrap returns initial
+  state in one call; ~10-15 calls eliminated per page load
+- R2: Edge caching layer (Cloudflare or equivalent) — caches GET
+  responses, dramatically reduces origin load
+- R3: Stale-while-revalidate everywhere — UI shows last-known
+  data immediately, never blocks on fetch
+- R4: SSR evaluation (Phase B+) — strategic decision after
+  stabilization
+
+PHASE A CLOSE-OUT SCHEDULE IMPACT:
+- Original estimate (post-session 17): 6-7 sessions to close
+- Adjusted estimate (post-session 18): 10-11 sessions to close
+- Reason for adjustment: stabilization track (S2, S3, S4) belongs
+  in Phase A close-out because Sprint 6 exit verification needs
+  production stable enough to verify
+
+This is the documented "permanent solution" per DrJ's framing
+("network engineer fixing the system once and for all"). The
+fix is real but staged across multiple sessions because the
+right scope is architectural, not a single patch.
+
+Refs: finding #53 (useHealth origin); finding #46 (session 16
+upgrade); finding #41 (logging systemic gap, similar pattern);
+finding #36 (Hostinger Passenger architecture); finding #37
+(NPROC verification); commit f34f2bf (failed attempt); session
+18 console diagnostic from production
+
+### 57. React #300 crash mode — hook-count violation under data cascade
+
+The cascade in finding #56 manifests as React error #300:
+"Rendered fewer hooks than expected."
+
+Mechanism: when multiple data-fetch hooks return undefined
+simultaneously (due to 429 cascade), components that early-
+return based on data presence skip their subsequent hook calls.
+React tracks hook count per render; inconsistency triggers
+error #300, which is unrecoverable and shows blank page.
+
+Example pattern that fails:
+
+```jsx
+const { data: auth } = useAuth();
+if (!auth) return null;  // changes hook count!
+const { data: events } = useEvents(); // not called this render
+```
+
+Safe pattern (defensive):
+
+```jsx
+const { data: auth } = useAuth();
+const { data: events } = useEvents(); // always called
+if (!auth) return null; // returns AFTER all hooks
+```
+
+This is a coding-discipline issue, but the discipline isn't
+enforced anywhere. ESLint rule react-hooks/rules-of-hooks would
+catch it but apparently isn't configured strictly enough.
+
+Fix shape (Phase S4):
+- Audit components for early-return-before-hooks pattern
+- Establish coding standard: all hooks called, then early returns
+- ESLint config enforcement
+- Possibly: helper hook useAllRequired([list]) that returns
+  isReady when all data present, isLoading when any pending
+
+Estimated effort: 1 dedicated session for audit + standard +
+ESLint config, then ongoing discipline.
+
+Refs: finding #56; production console diagnostic session 18;
+React docs on rules of hooks
+
+### 58. Hostinger as platform fit — Phase B+ strategic question
+
+Findings 8, 12, 36, 37, 53, 56 all involve Hostinger constraints
+contributing to Scoopfeeds operational issues. Tonight's session
+makes the pattern explicit:
+
+Scoopfeeds' call-heavy architecture is fundamentally mismatched
+with Hostinger's process model (Phusion Passenger with NPROC
+ceiling), restart frequency (DB rollback on restart), absent
+edge caching, and rate-limit-prone configuration.
+
+Per DrJ's session 18 statement: "for the time being we should
+stay within Hostinger platform, though we could explore other
+packages and solutions in Hostinger. In larger context: We'll
+always decide what is best for scaling, growth and longterm
+stability."
+
+Read: Hostinger migration is a Phase B+ strategic decision, not
+immediate work. But the stabilization and redesign tracks in
+finding #56 should be designed platform-portably so a future
+migration is not blocked by Hostinger-specific assumptions.
+
+Specifically:
+- S2 axios interceptor: platform-agnostic ✓
+- S3 rate limit recalibration: platform-agnostic ✓
+- S4 component defensive patterns: platform-agnostic ✓
+- R1 /api/bootstrap endpoint: platform-agnostic ✓
+- R2 edge caching: Cloudflare or similar — can sit in front of
+  any origin, including Hostinger ✓
+- R3 stale-while-revalidate: platform-agnostic ✓
+- R4 SSR: would benefit from purpose-built platform (Vercel,
+  Fly.io) but not blocked on Hostinger
+
+Recommendation for Phase B+ retrospective: explicit decision
+session on Hostinger fit. Evaluate Hostinger upgrade packages
+vs. migration. Make the call once architecture is stable enough
+that platform constraints are the binding factor.
+
+Refs: findings 8, 12, 36, 37, 53, 56; DrJ session 18 framing
+on Hostinger as immediate constraint vs long-term decision
+
 ---
 
 ## Pace Tracker
@@ -1959,4 +2133,59 @@ Next session opening candidates:
 Session 17 close: production at d301cf6. Three commits shipped
 this evening. Architecture corrected via Approach 2 cleanup
 during Phase 3.
+
+---
+
+PACE TRACKER (updated session 18, 2026-05-12)
+
+Session 18 work:
+- useHealth 429 fix attempted (commit f34f2bf) — technically
+  correct but exposed systemic cascade
+- Production verification revealed React #300 crashes under load
+- Revert f34f2bf shipped (this commit) — restore stability
+- Comprehensive findings captured (#56 cascade root cause + two-
+  track fix plan, #57 React #300 mechanism, #58 Hostinger fit)
+- Strategic alignment with overall plan: stabilization track
+  (S2-S4) added to Phase A close-out; redesign track (R1-R4)
+  threaded through Phase B opening
+
+Calendar pace:
+- Session 18 duration: ~2.5 hours
+- Started after real overnight rest from session 17 (~16h gap)
+- Within stated 2+ hour budget
+- Honest read: session productive despite the failed-fix
+  experience because diagnostic depth produced real architectural
+  understanding
+
+Phase A close-out schedule REVISION:
+- Pre-session-18 estimate: 6-7 sessions remaining
+- Post-session-18 estimate: 10-11 sessions remaining
+- Schedule extension reason: stabilization track (S2 axios
+  interceptor, S3 rate limit recalibration, S4 defensive component
+  patterns) added to Phase A close-out for production stability
+
+Phase A close-out remaining work breakdown:
+- S2 — Global axios 429 interceptor (1 session)
+- S3 — Per-route rate limit recalibration (1-2 sessions)
+- S4 — Defensive component patterns + ESLint config (1 session)
+- Finding #25 — RSS date-parsing structural fix (1-2 sessions)
+- Finding #41 — Logging refactor scope decision and possible
+  implementation (1-2 sessions)
+- Finding #47 — Tagline rendering bug (can batch with smaller
+  fixes)
+- Finding #52 — Logo click bug (~30 min, batchable)
+- Sprint 6 — Exit verification, metrics snapshot, retrospective
+  writing, Phase B Kickoff Brief (2-3 sessions)
+
+Next session opening (session 19):
+- Phase S2: global axios 429 interceptor
+- Bounded session (60-90 min focused work)
+- Single architectural fix at axios layer; no per-hook changes;
+  benefits ALL data-fetching hooks systemically
+
+CSP observation continues running indefinitely per finding #50
+decision.
+
+Session 18 close: production state restored. Cascade root cause
+documented. Two-track fix plan agreed. Path forward clear.
 ```
