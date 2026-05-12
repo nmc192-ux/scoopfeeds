@@ -1944,6 +1944,215 @@ that platform constraints are the binding factor.
 Refs: findings 8, 12, 36, 37, 53, 56; DrJ session 18 framing
 on Hostinger as immediate constraint vs long-term decision
 
+### 59. Phase S2 verification failure — design assumption gap
+
+Session 19 shipped commit cf0f16f (global axios 429 interceptor
+with in-memory cache). Pre-flight investigation in Phase 2A
+discovered 15 separate axios.create() instances rather than the
+single central instance the original prompt assumed; implementation
+required 17 files but mechanical consolidation via createApi
+helper kept complexity manageable.
+
+Browser verification revealed the in-memory cache resets on page
+reload. Test sequence:
+- Test A (normal browsing): PASS
+- Test B (rapid refresh trip test): FAIL — same React #300
+  white screen as the reverted f34f2bf
+
+Root cause analysis:
+- Interceptor IS firing (429 responses confirmed in network tab)
+- Interceptor returns data: null on cold-start 429 (no cache yet)
+- Components early-return on undefined data
+- Hook count between renders becomes inconsistent
+- React error #300 → white screen
+
+The design assumed warm-cache scenarios would dominate. True for
+normal browsing. False for cold-start scenarios (page reload
+after rate-limit window opens).
+
+Critical learning: cf0f16f is strictly better than the prior
+state (passes Test A which was failing before; crashes only
+under sustained adversarial pressure with cold cache). But
+"strictly better" wasn't sufficient for the Yahoo/Bloomberg-class
+bar DrJ named. The verification revealed a real architectural
+gap, not just an edge case.
+
+Refs: commit cf0f16f, session 19 verification stack trace,
+finding #56 (cascade root cause), finding #57 (React #300
+mechanism)
+
+### 60. Hook unwrap pattern inconsistency — Phase S4 architectural input
+
+Phase S2b investigation discovered six distinct hook unwrap
+patterns across 21 hooks consuming the axios response:
+
+| Pattern | Example hooks | Required sentinel shape |
+|---|---|---|
+| data.data || [] | useNews, useFeatured, useTopics, useLiveEvents, useVideos, useAnalysis | {data: []} |
+| data.data || {} | useStats | {data: {}} |
+| data.data || null | useMarket (main), useAffiliate, useGeo | {data: <shape>} |
+| data.data (no fallback) | useReader, useLiveEvents, useAnalysis | crashes on data:null |
+| return data (raw) | useEvents (11 queries), usePredictions (7), useHealth | endpoint-specific shape |
+| if (!data.success) throw | useWeather | crashes if !success |
+
+Most spec'd sentinels for Phase S2b were wrong-shape for the
+actual hook patterns:
+- /weather sentinel {temperature, condition}: useWeather throws
+  if !data.success → cascade recreates
+- /market sentinel {rates, indices}: useMarket does data.data ||
+  null → wrong shape returns null anyway
+- /events sentinel []: useEvents returns data raw → consumers
+  expect {events: []} not []
+- /predictions sentinel {}: usePredictions expects data.data
+  array → crashes
+
+This inconsistency is accumulated complexity per DrJ's session 18
+diagnosis. Each hook was written at different times with different
+conventions and no enforced contract.
+
+Implication for Phase S4: cannot solve cascade with axios-layer
+sentinels alone. Component-layer defensive patterns required.
+Probably needs:
+- Uniform hook return contract (useSafeQuery wrapper or similar)
+- ESLint rule enforcing hook unwrap discipline
+- Optional: lib/safeData(data, fallback) helper imposed on all
+  hooks
+
+S4 is bigger than originally framed — not just "defensive
+components" but "establish data-layer contract first, then
+make components defensive against violations."
+
+Refs: session 19 Phase 2A and 2b-A investigation outputs;
+finding #57 (React #300 origin); finding #56 (two-track plan)
+
+### 61. Phase S2b verification — Yahoo/Bloomberg-class resilience achieved for warm-cache path
+
+Session 19 shipped commit c8917d1 (persistent tiered cache +
+verified sentinels) building on cf0f16f. Direct comparative
+verification under identical adversarial conditions confirmed
+the architecture works.
+
+Test sequence (same protocol that revealed cf0f16f's gap):
+- Test A (normal browsing 3-5 min): PASS — bundle hash verified
+  index-79YQiMiB.js, localStorage 12 entries populated,
+  sessionStorage 13 entries, privacy split confirmed
+  (/api/auth/me in sessionStorage but not localStorage)
+- Test B (rapid refresh trip test, 600 fetches, 470 returned
+  429): PASS — page rendered fully, hasRootContent 44,696
+  (vs 0 at cf0f16f), no React #300, cache survived burst
+- Test C (article modal): article aged out (orthogonal to S2b);
+  graceful "Article not found" fallback rendered cleanly
+- Test D (console + network): zero React #300, zero uncaught
+  exceptions, 12+ critical endpoints returned 429 during
+  subsequent navigation, all transparently substituted with
+  cached data, Retry-After captured (632s)
+
+Comparative table:
+
+| Metric | cf0f16f (failed) | c8917d1 (verified) |
+|---|---|---|
+| Page state after burst | WHITE SCREEN | Fully rendered |
+| hasRootContent | 0 | 44,696 |
+| React #300 in console | 2 errors | 0 errors |
+| Article count visible | n/a (crashed) | 26,369 |
+| Cache survived burst | n/a | yes (12 → 12) |
+
+Architecture mechanisms validated:
+1. Tiered cache (memory → sessionStorage → localStorage):
+   write-through working
+2. Persistence enabling 429 recovery: interceptor serves cached
+   data when origin rate-limited
+3. Privacy split: user-specific data sessionStorage only,
+   never localStorage
+
+What was NOT tested (deferred):
+- Cold-start 429 on non-verified endpoints (Phase S4 territory)
+- Module-load hydration from cross-session localStorage
+  (requires browser close/reopen cycle)
+- Cache version mismatch (requires version bump deploy)
+- Storage quota exhaustion (requires filling localStorage)
+- Real article modal under rate-limit (article aged out)
+
+Net effect: dominant real-world crash scenarios eliminated.
+Returning users have warm cache from localStorage. Same-session
+reloads survive rate-limit windows via sessionStorage. ~95% of
+crash scenarios from finding #56 now covered architecturally;
+remaining ~5% (cold-start + immediate 429 + non-verified
+endpoint) requires Phase S4.
+
+Refs: commits cf0f16f, c8917d1; finding #56 (two-track plan);
+finding #57 (React #300); finding #59 (S2 verification failure);
+finding #60 (hook pattern inconsistency); session 19 verification
+output
+
+### 62. Yahoo/Bloomberg study deferred to session 20 — comparative network analysis
+
+DrJ proposed in session 19 mid-implementation: "We can perhaps
+reverse engineer Yahoo or Bloomberg and see how they do it,
+then we can iterate the same solution to our own problem."
+
+This is the right engineering instinct. Yahoo News, Bloomberg
+Terminal, X all handle thousands of concurrent users without
+crashing. Studying their observable behavior (HTTP cache headers,
+service worker patterns, bootstrap request patterns, staleness
+handling) would inform Phase B redesign track design.
+
+Specifically transferable patterns worth studying:
+- HTTP cache headers from API responses (ETag, Cache-Control,
+  Last-Modified, 304 Not Modified revalidation)
+- Bootstrap request consolidation (how Yahoo's first page load
+  has so few API calls)
+- Service worker caching (X uses this for offline-capable
+  experience)
+- Staleness UI patterns (Bloomberg's timestamps on every quote,
+  X's "X new posts" banner)
+- SSR with hydration (Yahoo's first paint includes content
+  already in markup)
+
+Effort: ~1-2 hour dedicated session. Output: comparative
+analysis document with patterns categorized by transferability
+to Scoopfeeds.
+
+Sequencing: session 20 candidate work. Becomes design reference
+for Phase B redesign track (R1 bootstrap consolidation, R2 edge
+caching, R3 stale-while-revalidate).
+
+Not transferable to S2/S2b scope: backend infrastructure scale,
+WebSocket-based real-time data layers. We can adopt the patterns
+without replicating the infrastructure.
+
+Refs: session 19 mid-implementation discussion; finding #56
+(redesign track R1-R4); skills_architecture_v1 (Phase B reorg
+plan)
+
+### 63. PERSISTENT_MAX_ENTRIES constant declared but unused; endpoint TTL pattern collision risk
+
+Two minor code-hygiene items from Phase S2b implementation
+review:
+
+1. lib/api.js declares PERSISTENT_MAX_ENTRIES = 100 but never
+   references it. Reactive quota handling (eviction on
+   QuotaExceededError) was chosen over eager enforcement.
+   The constant should be removed OR a documentation comment
+   added explaining its absence from logic. Cleanup item for
+   future code review session.
+
+2. getEndpointTTL uses for...in iteration with first-match-wins
+   substring check. Current ENDPOINT_TTL_MS entries are safe
+   by coincidence (/events 5min and /live-events 5min have
+   same TTL, so collision doesn't matter). Future additions
+   that overlap with different TTLs would create order-dependent
+   bugs. Either:
+   - Add ordering comment to ENDPOINT_TTL_MS declaration
+   - Switch to longest-match-first lookup
+   - Add unit test catching collisions
+   Polish item for future code review session.
+
+Neither is blocking. Both worth capturing so future code review
+catches similar patterns.
+
+Refs: session 19 Phase 2b-B code review; lib/api.js at c8917d1
+
 ---
 
 ## Pace Tracker
@@ -2188,4 +2397,64 @@ decision.
 
 Session 18 close: production state restored. Cascade root cause
 documented. Two-track fix plan agreed. Path forward clear.
+
+---
+
+PACE TRACKER (updated session 19, 2026-05-12)
+
+Session 19 work shipped:
+- Phase S2 base architecture (commit cf0f16f): global axios 429
+  interceptor with Philosophy B data model, in-memory cache,
+  17-file consolidation via createApi helper
+- Phase S2 verification revealed cold-cache crash gap (finding #59)
+- Phase S2b persistent layer (commit c8917d1): tiered cache
+  (memory + sessionStorage + localStorage), per-endpoint TTL,
+  verified sentinels for /health and /auth/me, privacy split,
+  defensive storage, hydration on module load
+- Phase S2b verification confirmed architecture works under
+  same adversarial conditions that broke cf0f16f (finding #61)
+- 5 new findings captured (#59-#63)
+
+Calendar pace honest accounting:
+- Session 19 duration: ~5 hours
+- Started after 16-hour gap from session 18 (real overnight rest)
+- Extended past initial 2-hour budget
+- Session extension was driven by genuine discovery: cf0f16f
+  verification failure required design iteration to S2b in same
+  session rather than splitting
+- Engineering output: substantial (two architectural commits
+  shipping foundational data-layer resilience)
+
+Phase A close-out schedule update (revised from session 18):
+- Pre-session-19 estimate: 10-11 sessions remaining
+- Phase S2 + S2b shipped this session (was 1 session in original
+  plan, took effectively 1 long session)
+- Post-session-19 estimate: 9-10 sessions remaining for Phase A
+  close
+- S3 (per-route rate limit recalibration): 1-2 sessions
+- S4 (component defensive patterns + hook unwrap contract):
+  1-2 sessions (scope revised upward per finding #60)
+- Finding #25 RSS date-parsing: 1-2 sessions
+- Finding #41 logging refactor decision: 1 session
+- Finding #47, #52 small bugs: batched, 1 session
+- Sprint 6 close-out: 2-3 sessions
+- Plus Yahoo/Bloomberg study (finding #62) as session 20
+  candidate
+
+Next session opening candidates:
+1. Yahoo/Bloomberg comparative analysis (finding #62) — informs
+   later Phase B work but doesn't ship code
+2. Phase S3 per-route rate limit recalibration — direct continuation
+   of stabilization track
+3. Phase S4 defensive component patterns — closes the residual
+   5% gap from S2b
+
+Recommendation: session 20 should pick ONE of the above, not
+attempt multiple. Phase S3 is the natural continuation but Yahoo
+study has strategic value. DrJ to decide.
+
+CSP observation continues indefinitely per finding #50.
+
+Session 19 close: production at c8917d1. Yahoo/Bloomberg-class
+warm-cache path achieved. Path forward to Phase A close clear.
 ```
