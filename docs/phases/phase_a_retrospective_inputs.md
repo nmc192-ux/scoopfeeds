@@ -2708,6 +2708,277 @@ synthesis + recommendations + caveats); findings #70-#73 (per-site
 inputs); Phase B redesign track items R1-R4; finding #62 (session
 19 deferral that motivated this study)
 
+### 75. Phase A exit criteria audit — formal assessment against Strategic Plan v6 + Phase A Kickoff Brief
+
+Session 21 phase 2 conducted a formal audit of Phase A status
+against both:
+- Strategic Plan v6 section 9 Phase A exit criteria (8 named items)
+- Phase A Kickoff Brief Sprint 0-6 operational issues (50 items)
+
+This audit was triggered by DrJ's question "is this plan in line
+with the strategic plan?" before starting Phase B Sprint 0. The
+question was warranted: substantive gaps surfaced that prior
+tactical estimates had not captured.
+
+Strategic Plan v6 exit criteria results (post DrJ UNCLEAR
+resolution):
+- Scheduler running: DONE
+- Admin auth secured: DONE
+- Urdu RTL working: DONE
+- Hollow features populating: DONE per interpretation A
+  (empty-state UX copy meets criterion; data population is
+  Phase B scope per source matrix expansion)
+- 5 metrics captured: NOT STARTED
+- Source audit complete: NOT STARTED
+- Social audit complete: NOT STARTED
+- Search audit complete: NOT STARTED
+
+Net: 4 DONE / 4 NOT STARTED. Strategic close estimate 5-11
+sessions remaining.
+
+Phase A Kickoff Brief operational results:
+- Sprint 0: 10/10 DONE
+- Sprint 1: 7/7 DONE (Issue 1.5 confirmed via scheduler.js
+  inspection; Issue 1.7 informal-verification accepted)
+- Sprint 2: 3 DONE, 2 PARTIAL (2.3 hollow copy partial; 2.5
+  i18n keys partial), 1 deferred (2.2 CSP per finding #50),
+  1 informal-verification accepted (2.6)
+- Sprint 3: 2 DONE, 3 NOT STARTED (3.1 raw_signals drop, 3.4
+  metrics dashboard, 3.5 verification); Issue 3.3 CLOSED
+  (premise incorrect — isUrdu IS used at App.jsx:131)
+- Sprint 4: 0/7 DONE (source audit entirely)
+- Sprint 5: 0/8 DONE (social audit + search audit + 8 tracker
+  templates)
+- Sprint 6: 0/7 DONE (close-out artifacts including formal
+  retrospective and Phase B Kickoff Brief)
+
+Net: 22 DONE / 2 PARTIAL / 26 NOT STARTED. Operational close
+estimate 11-20 sessions remaining.
+
+The gap between estimates (5-11 strategic vs 11-20 operational)
+matters. The strategic view counts only the named exit criteria.
+The operational view counts all the Kickoff Brief's hygiene and
+close-out items. Both views are legitimate; they answer different
+questions about what "Phase A close" means.
+
+UNCLEAR resolutions accepted by DrJ (with review triggers per
+DrJ's "may add options to our plan for future reconsideration"
+framing):
+
+UNCLEAR 1 — "Hollow features populating": ACCEPTED interpretation
+A (empty-state UX copy meets criterion; data population is Phase
+B). Review trigger: if a hollow feature surfaces user-facing
+breakage (404, error UI, crash) that empty-state copy doesn't
+cover, reopen this audit item.
+
+UNCLEAR 2 — Sprint 1.5 double-timeline: RESOLVED via direct
+inspection of scheduler.js lines 332-347. Inline call removed;
+standalone cron at 19 * * * * is sole invocation. Sprint 1.5 =
+DONE. No review trigger needed.
+
+UNCLEAR 3 — Sprint 1.7 + 2.6 verification: ACCEPTED as "verified
+informally through stabilization track production smoke tests;
+no formal artifact exists." Review trigger: if Phase A exit
+verification (Sprint 6.1) requires formal sprint verification
+documents as prerequisites, backfill from existing production
+evidence in findings #56-#67.
+
+UNCLEAR 4 — Sprint 3.3 (dead isUrdu): CLOSED as "premise
+incorrect, no action needed." Variable IS used at App.jsx:131
+for toast message. Review trigger: none — premise was factually
+wrong.
+
+UNCLEAR 5 — sourceCount 119 vs brief's 30-50: ACCEPTED as
+"production state exceeds brief baseline; Sprint 4 audit scope
+to reflect categorization-first rather than inventory-first when
+executed." Review trigger: when Sprint 4 audit is executed,
+confirm whether 119 represents (a) sources active when brief
+was drafted but underestimated, or (b) informal expansion in
+sessions 12-21. Outcome may inform Phase B source matrix
+expansion scope.
+
+UNCLEAR 6 — Formal Phase A Retrospective: ACCEPTED as "still
+required per Execution Method v1; phase_a_retrospective_inputs.md
+is working data, not the retrospective itself." Review trigger:
+none — Execution Method v1 is explicit.
+
+Open questions parked for future reconsideration (not decided
+today):
+
+- The Skills Architecture v1 Phase B vs Strategic Plan v6 Phase B
+  inconsistency (deferred to dedicated future session per
+  finding #76)
+- The redesign track disposition (α/β/γ options per session 21
+  earlier framing; deferred per finding #76)
+- The two divergent close estimates (5-11 strategic vs 11-20
+  operational) — which framing does Phase A actually exit under?
+- Sprint 2.2 CSP enable — still deferred per finding #50, but is
+  "defer indefinitely" the final answer or "defer until specific
+  trigger"?
+- Sprint 3.1 raw_signals drop — still pending, no clear blocker,
+  just hasn't been done
+- The lastRun:null integrations (TMDB, FRED, WorldBank, ACLED,
+  SportsDB, Synthetic Extract) — are these activated in Phase B
+  source matrix expansion, or do they need pre-Phase-B config
+  work (API keys, integration validation)?
+
+Phase A is NOT 5-7 sessions from close as estimated at session
+20. Honest range is 5-11 sessions (strategic view, minimum) to
+11-20 sessions (operational view, full close-out). The session
+20 estimate was tactical and accurate for stabilization-track
+completion, but did not account for the unstarted audits and
+close-out artifacts.
+
+Refs: docs/strategy/strategic_plan_v6.md section 9 Phase A
+(lines 512-524); docs/phases/phase_a_kickoff_brief.md Sprint 0-6
+issues; docs/execution/execution_method_v1.md Section 11 (Phase
+Retrospective template); production smoke at HEAD b2b797c
+
+### 76. Four-way "Phase B" drift across strategic-tier documents — reconciliation deferred to dedicated future session
+
+Phase 21.2A reading surfaced that four documents in active use
+define "Phase B" with non-overlapping scope:
+
+1. Strategic Plan v6 (May 2026): Phase B = "Launch Layer 1 with
+   Comprehension + Distribution + Internal Scoop." Work is
+   overwhelmingly product features: Tracker Auto-Detection
+   Engine, op-ed aggregation, video integration, breaking news
+   engine, source expansion to 150+, Social Media Engine v2,
+   3 newsletters, Alert engine v1, Internal Scoop search upgrade,
+   Entertainment topic page, brand refresh, accessibility audit.
+
+2. Skills Architecture v1 (May 2026, added session 13): Phase B =
+   B.1 codebase reorganization by skill, B.2 skill contract docs,
+   B.3 linter boundaries, B.4 first skill isolation POC. Purely
+   architectural; no user-visible features.
+
+3. Finding #56 (session 18): "Phase B redesign track" = R1
+   bootstrap consolidation, R2 edge caching, R3 stale-while-
+   revalidate, R4 SSR evaluation. Infrastructure prep emerging
+   from the cascade discovery diagnosis.
+
+4. Session 21 comparative analysis (finding #74): Phase B opening
+   sequence = Sprint 0 Cache-Control immutable → Sprint 1 CDN
+   edge → Sprint 2 swr headers → Sprint 3 SWR pattern → Sprints
+   4-6 SSR for hot routes. Infrastructure prep grounded in
+   Yahoo/Bloomberg/X/Apple News observation.
+
+This is not a minor tactical drift. Definitions #1 and #2 are
+BOTH strategic-tier documents. Skills Architecture v1 was
+authored or refined AFTER Strategic Plan v6 but its Phase B
+content does not appear in Strategic Plan v6's Phase B section.
+That's a strategic-document inconsistency that predates the
+stabilization track entirely.
+
+The reconciliation requires explicit decisions on:
+
+- Which Phase B definition is authoritative? (Strategic Plan v6
+  is highest-tier by intent, but Skills Architecture v1 was
+  later-authored.)
+- How do definitions #3 and #4 (infrastructure prep) relate to
+  the authoritative Phase B? Are they preparatory work,
+  parallel work, deferred work, or work to be removed from the
+  plan entirely?
+- Does Skills Architecture v1's Phase B (codebase reorg) execute
+  alongside or after Strategic Plan v6's Phase B (product
+  features)?
+
+DrJ chose Path 2 today: stop after Phase A audit (finding #75),
+defer the four-way Phase B reconciliation to a dedicated future
+session. Rationale: strategic-tier inconsistencies deserve
+overnight reflection, not session-end fast decisions. The
+session 21 comparative analysis remains excellent technical input
+but its "Phase B opening sequence" recommendations apply only if
+the authoritative Phase B definition incorporates infrastructure
+prep.
+
+Dedicated reconciliation session scope when scheduled:
+- Read strategic_plan_v6.md and skills_architecture_v1.md
+  side-by-side; identify exactly where they diverge
+- Decide which document is authoritative, OR decide that they
+  describe parallel tracks that need explicit coordination
+- Position findings #56 redesign track and session 21 comparative
+  analysis recommendations within the reconciled Phase B
+- Update strategic_plan_v6.md to reference Skills Architecture
+  v1 Phase B work explicitly (if both tracks proceed), OR
+  supersede one with the other
+- Produce strategic_tactical_reconciliation_v1.md document
+- This session is strategic-decision-heavy, code-light. Allocate
+  90-120 minutes.
+
+Until reconciliation: do NOT execute Phase B work of any kind.
+Phase A close-out work (source audit, social audit, search
+audit, metrics dashboard, formal retrospective, Phase B Kickoff
+Brief drafting) is unblocked and can proceed without the
+reconciliation. The reconciliation can also happen in parallel
+with Phase A close-out if scheduled that way.
+
+Refs: docs/strategy/strategic_plan_v6.md section 9 Phase B;
+docs/strategy/skills_architecture_v1.md Phase B section;
+finding #56 (session 18 cascade root-cause + two-track plan);
+finding #74 (session 21 comparative analysis synthesis);
+docs/research/comparative_analysis_v1.md section 7 Phase B
+recommendations.
+
+### 77. Stabilization track (sessions 18-21) was emergent work that displaced Sprint 4-5 audit work
+
+Phase 21.2B audit revealed that sessions 18-21 worked outside the
+Phase A Kickoff Brief's planned sequence. The brief specified:
+- Sprint 1-2: P0 + P1 stabilization (executed sessions 12-17)
+- Sprint 3: hygiene + 5 metrics (partial)
+- Sprint 4: source audit (7 issues)
+- Sprint 5: social audit + search audit + 8 tracker templates
+  (8 issues)
+- Sprint 6: close-out (7 issues)
+
+Actual sessions 18-21 work:
+- Session 18: cascade discovery + revert (Phase S1)
+- Session 19: Phase S2 + S2b (frontend axios interceptor +
+  persistent tiered cache, two production commits)
+- Session 20: Phase S3 (per-route rate limit recalibration,
+  one production commit)
+- Session 21 phase 1: Comparative analysis research
+
+This is real engineering. The cascade was a production fire
+requiring response. Phase S2b is Yahoo/Bloomberg-class data-
+layer resilience. Phase S3 eliminated normal-use 429s. The
+comparative analysis grounded future architectural decisions in
+observation.
+
+But the trade-off needs to be named: this work happened INSTEAD
+OF Sprint 4-5 audit work, not in addition to it. Sprint 4 (source
+audit) and Sprint 5 (social + search audits + tracker templates)
+sat untouched while sessions 18-21 ran. 22 Phase A Kickoff Brief
+issues remain NOT STARTED specifically because emergent work
+consumed those four sessions.
+
+This isn't criticism of the stabilization work. It's accounting.
+A future session reviewing "where did Phase A's planned scope
+go?" needs to see this trade-off captured. Otherwise the
+disconnect between "session 20 said 5-7 sessions to close" and
+"session 21 audit shows 11-20 sessions to operational close"
+becomes inexplicable.
+
+Implication for forward planning: when emergent work appears in
+future phases, capture the displacement explicitly. The pattern
+is: scheduled work pauses, emergent work executes, scheduled
+work resumes. Without explicit capture, scheduled work doesn't
+resume — it silently defers.
+
+Phase 21.2A reading also surfaced that the formal Phase A
+Retrospective (Sprint 6.4, separate from
+phase_a_retrospective_inputs.md) doesn't exist. This is part of
+the same pattern: tactical capture of findings happened (74
+findings, 3,076 lines), but synthesis into the strategic-tier
+retrospective document didn't happen because Sprint 6 didn't
+execute.
+
+Refs: docs/phases/phase_a_kickoff_brief.md Sprint 4-6 scope;
+findings #56-#69 (stabilization track inception through
+verification); findings #70-#74 (session 21 comparative
+analysis); session 20 Pace Tracker close estimate; session 18
+Pace Tracker close estimate
+
 ---
 
 ## Pace Tracker
@@ -3073,4 +3344,102 @@ Session 20 close: production at 1cbf92b. Full stabilization
 track verified. Path to Phase A close is now genuinely visible
 within 5-7 sessions. Three concrete production failures from
 session 19 (findings #64-#66) all resolved.
+
+---
+
+PACE TRACKER (updated session 21 phase 2, 2026-05-13)
+
+Note: session 21 phase 1 (commits 8e44b5d + b2b797c, comparative
+analysis + findings #70-#74) shipped without a dedicated Pace
+Tracker entry. This phase 2 entry covers both phases of session
+21 plus the phase 2 audit work.
+
+Session 21 phase 1 work shipped (recap):
+- Comparative analysis document (1,375 lines) at
+  docs/research/comparative_analysis_v1.md
+- Findings #70-#74 captured
+- Commits 8e44b5d (research doc) + b2b797c (findings)
+
+Session 21 phase 2 work shipped:
+- Strategic plan + Skills Architecture v1 + Execution Method v1 +
+  Phase A Kickoff Brief + Decisions Log read in full (4,830
+  lines across 5 documents)
+- Phase A exit criteria audit completed against Strategic Plan v6
+  + Phase A Kickoff Brief
+- 6 UNCLEAR audit items resolved (5 via DrJ judgment with review
+  triggers, 1 via direct source inspection)
+- Four-way Phase B drift surfaced and documented (finding #76)
+- Stabilization-track-displaced-Sprint-4-5 trade-off captured
+  (finding #77)
+- 3 new findings (#75-#77)
+
+Calendar pace honest accounting:
+- Session 21 phase 1 duration: ~2.5 hours (comparative analysis
+  + findings + commits)
+- Session 21 phase 2 duration: ~1 hour (audit + UNCLEAR
+  resolution + findings)
+- Total session 21: ~3.5 hours of 4 hour stated budget
+
+What did NOT happen this session (Path 2 deferrals):
+- Full strategic_tactical_reconciliation_v1.md document
+- Strategic Plan v6 vs Skills Architecture v1 Phase B
+  reconciliation
+- Redesign track disposition decision (α/β/γ + extended
+  options)
+- Phase B Sprint 0 execution (originally planned for today)
+
+Phase A close estimate RE-REVISED:
+- Pre-session-21 estimate (session 20): 5-7 sessions remaining
+- Post-audit estimate (session 21 phase 2): 5-11 sessions
+  (strategic view minimum) to 11-20 sessions (operational view
+  full close-out)
+- Both views are legitimate; which framing Phase A exits under
+  is itself a parked decision
+
+Next session candidates (in order of strategic importance,
+NOT chronological order — DrJ to choose):
+
+1. Dedicated four-way Phase B reconciliation session (per
+   finding #76). Strategic-tier decision work. 90-120 min.
+   Output: reconciliation document + decision on which Phase B
+   definition is authoritative + position of finding #56 redesign
+   track and comparative analysis recommendations within
+   reconciled Phase B. PREREQUISITE for any Phase B execution.
+
+2. Sprint 4 source audit (7 issues, 2-3 sessions). Inventory
+   current 119 sources, categorize against 17×10×10 matrix,
+   identify dead sources, design quality scoring schema,
+   backfill scores, gap analysis, document Phase B source
+   priority list. Unblocked by Phase A audit findings.
+
+3. Sprint 6 begin (Phase A close-out artifacts). Exit
+   verification document, metrics snapshot, formal Phase A
+   Retrospective synthesis from inputs file, Phase B Kickoff
+   Brief drafting. Can run in parallel with #1 or after #2.
+
+4. Phase S4 downscoped (ESLint rule + targeted defensive fixes,
+   1 session). Now even less urgent than session 20's revision
+   suggested; the production-observed failures it addressed
+   (findings #64-#66) are resolved per session 20 verification.
+   May be subsumed into Phase B Kickoff Brief as "carry-forward
+   technical debt."
+
+Session 21 phase 2 close: production at 1cbf92b (unchanged).
+Retrospective at finding #77 (after commit). 77 cumulative
+findings. Phase A genuinely further from close than session 20
+estimated, but the audit was the necessary work to surface that
+honestly.
+
+The session opened intending Phase B Sprint 0 execution. It
+closes with formal Phase A audit + four-way Phase B drift
+documented. The pivot was correct: shipping Sprint 0 today would
+have built one more piece of tactical work on top of an
+unrecognized strategic-tactical drift. The drift was discovered
+because DrJ asked "is this in line with the strategic plan?"
+The question prevented an estimated 10-13 sessions of misaligned
+infrastructure work.
+
+CSP observation continues per finding #50. raw_signals drop
+(Sprint 3.1) and formal Phase A Retrospective (Sprint 6.4)
+remain pending.
 ```
