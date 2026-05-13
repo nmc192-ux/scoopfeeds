@@ -2474,6 +2474,240 @@ c8917d1, 1cbf92b (stabilization track); finding #68 (S4 downscope
 rationale); session 18 Pace Tracker (10-11 estimate origin);
 session 19 Pace Tracker (9-10 estimate)
 
+### 70. Yahoo News — SSR-first, content baked in HTML, no client-side state hydration
+
+Session 21 comparative study via Claude in Chrome DevTools-
+equivalent observation (`docs/research/comparative_analysis_v1.md`
+§2). Landing page measurements:
+
+- HTML document: ~1.0 MB decoded, body text already at 19.7 KB
+  before any XHR completes
+- 250 total resources on load; 42 XHR/fetch calls (almost entirely
+  ad-tech prebid auctions, NOT editorial content fetches)
+- No `__NEXT_DATA__`, no `__PRELOADED_STATE__`, no client hydration
+  JSON blob — content IS the HTML
+- Server: ATS (Apache Traffic Server, Yahoo's own internally-
+  developed edge proxy, no third-party CDN)
+- `Cache-Control: max-age=0, private` on HTML — every request
+  hits origin, freshness via origin re-render
+- Static assets on `s.yimg.com` with year-long immutable cache
+- No service worker, no Cache Storage API usage
+- Article page TTFB 419 ms, DOMContentLoaded 1.1 s, full load 3.0 s
+
+Article body (3,954 chars) ships in the HTML response. The 3.0 s
+load-event time is dominated by ad-tech auctions that run in
+parallel with content rendering, never on the critical path.
+
+Architectural lesson: Yahoo's pattern is the **opposite** of
+Scoopfeeds' current SPA-shell+XHR pattern. First contentful paint
+of editorial content happens at server response, not after JS
+hydration. This is the high-bar reference point for Phase B R4
+(SSR evaluation).
+
+Refs: `docs/research/comparative_analysis_v1.md` §2 (full Yahoo
+analysis); finding #74 (cross-cutting synthesis); finding #56
+(two-track plan); Phase B redesign track items R1-R4
+
+### 71. Bloomberg — SSR via Next.js+Express, Fastly edge with 120s TTL, PerimeterX bot wall
+
+Session 21 study via curl HTTP probing (browser blocked by Chrome
+MCP allowlist for `bloomberg.com`).
+`docs/research/comparative_analysis_v1.md` §3 has full analysis.
+
+Key observations:
+
+- **Two backend stacks**: Next.js for landing (`x-powered-by:
+  Next.js`), Express for article pages (`x-powered-by: Express`).
+  Both fronted by the same Fastly edge.
+- **Fastly edge identified** via `x-served-by: cache-{POP}-{POP}`
+  format and Fastly-specific `edge-control:` directive header
+- **Multi-tier cache (Fastly shielding)**: assets show
+  `x-served-by: cache-lga21973-LGA, cache-fjr990026-FJR` —
+  geographic edge POP pulls through shield POP before origin
+- **HTML TTL: 120 seconds** (`cache-control: public, max-age=120`,
+  `edge-control: max-age=120`). New headlines reach all readers
+  within 2 minutes; behind that, served from edge cache.
+- **Asset TTL: 365 days immutable** on `assets.bwbx.io`
+- **HTTP/3 enabled** via `alt-svc: h3=":443"`
+- **Pure SSR**: 3.5 MB HTML landing with 70 `<h3>` headlines + 16
+  `<article>` tags + actual content text. No `__NEXT_DATA__`, no
+  `self.__next_f.push`, no Apollo/Redux state blob.
+- **PerimeterX bot detection** (`_pxhd` cookie set every response);
+  403 to non-realistic UA, 200 with browser-like headers
+- **Paywall meter** signals present in article HTML; first paragraph
+  always SSR'd for SEO
+
+Architectural lesson: Bloomberg is the **professional-grade
+ceiling** of news platform architecture. The 120s edge TTL pattern
+is directly applicable to Scoopfeeds via Cloudflare/Fastly in
+front of Hostinger origin.
+
+Refs: `docs/research/comparative_analysis_v1.md` §3; finding #74
+(synthesis recommends Bloomberg's edge pattern as Phase B Rec 2);
+Phase B R2 (edge caching), R3 (SWR)
+
+### 72. X (Twitter) — SPA shell + 160 KB state blob, all content via XHR — negative reference for Scoopfeeds
+
+Session 21 study via Claude in Chrome.
+`docs/research/comparative_analysis_v1.md` §4 has full analysis.
+
+Key observations:
+
+- **SPA shell**: 467 KB HTML but only 1,021 chars rendered before
+  JS executes
+- **160 KB `__INITIAL_STATE__` JSON blob inlined in HTML (35% of
+  doc)** — auth/feature-flag/config state, not tweet content
+- **Tweet content via GraphQL persisted queries**:
+  `api.x.com/graphql/{32-char-hash}/UserTweets`. The persisted-
+  query-ID architecture enables edge caching despite GraphQL.
+- **HTML `Cache-Control: no-cache, private, must-revalidate`** —
+  explicitly disables both browser and edge caching of HTML.
+  Every request hits origin.
+- **No service worker** registered for logged-out users
+- **No Cache Storage** in use
+- **Login wall**: `/explore` and most navigation redirects to
+  `/i/flow/login`; only profile pages (`/<handle>`) render content
+  to anonymous users
+- **DOMContentLoaded 558 ms but load event 2,357 ms** — fast HTML,
+  slow until JS+XHR complete
+
+Critical architectural insight: Scoopfeeds at 1cbf92b is
+structurally **closer to X than to Yahoo/Bloomberg**. The Phase B
+redesign is essentially "move from X's pattern toward Yahoo's
+pattern." X's pattern is unreachable for Scoopfeeds because X
+spends years of engineering on persisted-query edge caching,
+GraphQL server optimization, and SW+IndexedDB for logged-in users.
+**X is the negative reference**, not a positive one.
+
+Refs: `docs/research/comparative_analysis_v1.md` §4 + §6.1
+(architecture quadrant); finding #74 (synthesis); finding #56
+(cascade root cause — Scoopfeeds in X's quadrant but without X's
+infrastructure)
+
+### 73. Apple News (native macOS) — two-process model with newsd daemon, local SQLite cache, CloudKit sync
+
+Session 21 study via macOS bash observation, container metadata
+inspection, screenshots, Apple News Format public docs, Wikipedia.
+`docs/research/comparative_analysis_v1.md` §5 has full analysis.
+
+Key observations (with [OBS] / [INF] tags throughout to mark
+methodology limits — sandbox prevents direct inspection of most
+state):
+
+- **Two-process architecture**: `News.app` (UI, 3.9 MB bundle, Mac
+  Catalyst port of iOS app) + `newsd` (privileged background
+  daemon at `/System/Library/PrivateFrameworks/NewsDaemon.framework`).
+  newsd started 20+ hours before the user opened News.app and
+  persists after quit — long-lived service managed by launchd.
+- **Time-to-content ~2 seconds** despite no network round-trip on
+  critical path. Content already pre-fetched into local SQLite
+  cache by newsd; News.app reads via XPC from local store.
+- **Local caches observed (metadata only)**:
+  - `~/Library/Caches/com.apple.newsd/Cache.db` (NSURLCache backing)
+  - `~/Library/HTTPStorages/com.apple.newsd/httpstorages.sqlite`
+    (cookies/auth, WAL active May 12)
+  - `~/Library/Preferences/com.apple.newscore.plist` (89 KB,
+    modified today)
+- **Sandbox-protected** (`Operation not permitted`):
+  - `~/Library/Containers/com.apple.news/`
+  - `~/Library/Group Containers/group.com.apple.news/` and `.newsd/`
+- **Framework dependencies**: Silex + SilexWeb (ANF rendering),
+  CloudKit (cross-device reading-state sync), WebKit (RSS-sourced
+  article fallback), UIKit (Catalyst)
+- **Apple News Format = JSON-based** publisher format; renders
+  natively via Silex (VoiceOver-accessible, consistent typography)
+
+Web equivalent for the patterns observed:
+- Background daemon → Service Worker with scheduled fetch (weak)
+- SQLite local cache → IndexedDB + the c8917d1 persistent cache
+  S2b shipped (already present!)
+- Cache-first rendering → SWR pattern (Phase B Rec 4)
+- CloudKit cross-device sync → out of scope (requires accounts)
+
+Architectural lesson: Apple News's "open app → instant content"
+model IS the stale-while-revalidate pattern, just with OS-managed
+infrastructure that web platforms can't match. SWR (Phase B R3) is
+the closest equivalent achievable on the web.
+
+Methodology limits documented:
+- Cannot read sandbox-protected container contents
+- Cannot decrypt TLS API contracts (no proxy)
+- Cannot decompile binaries
+- Cannot read personal data (by design)
+- Most architectural claims are [INF] from observable surface + public docs
+
+Refs: `docs/research/comparative_analysis_v1.md` §5; finding #74
+(synthesis); Apple News Format public docs at developer.apple.com;
+Wikipedia for product history
+
+### 74. Cross-cutting synthesis — Phase B opening sequence grounded in four-platform observation
+
+Session 21 comparative study synthesis.
+`docs/research/comparative_analysis_v1.md` §6 + §7.
+
+Findings #70-#73 cluster on a two-axis architecture map (server-
+heavy vs client-heavy × web-native vs platform-native):
+- Yahoo + Bloomberg: server-heavy, web-native (SSR + edge cache)
+- X: client-heavy, web-native (SPA + XHR)
+- Apple News: server-heavy, platform-native (daemon + local cache)
+- Scoopfeeds 1cbf92b: structurally in X's quadrant, but without
+  X's engineering scale
+
+The "minimum bar" for professional news platforms, distilled
+from observations:
+1. FCP of editorial content within 1.5s warm — Scoopfeeds ✓
+   (after c8917d1 cache hydrate); cold start still slow
+2. HTML delivered via edge CDN — Scoopfeeds: partial (LiteSpeed
+   local only, no geographic edge)
+3. Year-long immutable cache on hashed assets — Scoopfeeds:
+   partial (Vite emits hashed names but no `immutable` header set
+   on server)
+4. Graceful degradation under load — Scoopfeeds ✓ (post-
+   S1+S2+S2b+S3)
+5. Anonymous-first reading — Scoopfeeds ✓
+
+Scoopfeeds clears 3 of 5 bar items today, with 2 partial-credit
+items achievable in Phase B Sprint 1.
+
+**Top-5 Phase B recommendations (ranked by value/effort)**:
+
+1. **Rec 1** — `Cache-Control: max-age=31536000, immutable` on
+   hashed static assets. 1 session. Verifiable. Zero risk.
+   (Maps to R2.)
+2. **Rec 2** — Cloudflare edge in front of `scoopfeeds.com` HTML.
+   2-3 sessions. Cuts origin load ~98% under typical news traffic.
+   (Maps to R2.)
+3. **Rec 3** — SSR for hot routes (`/`, `/topic/:slug`). 4-6
+   sessions. The structural transformation: cold-start ~30-API-
+   call problem goes away. (Maps to R4.)
+4. **Rec 4** — SWR pattern on content API responses, extending the
+   c8917d1 persistent cache. 2 sessions. Apple News's "instant
+   content" pattern adapted to web. (Maps to R3.)
+5. **Rec 5** — `s-maxage=120, stale-while-revalidate=600` on HTML
+   responses (after Rec 2). 1 session. Bloomberg's exact pattern.
+   (Maps to R2+R3.)
+
+**Implied Phase B opening sequence**: Sprint 0 (Rec 1) → Sprint 1
+(Rec 2) → Sprint 2 (Rec 5) → Sprint 3 (Rec 4) → Sprints 4-6
+(Rec 3). Total ~10-13 sessions in dependency order with verifiable
+milestones at each step.
+
+**What this study does NOT recommend**:
+- Do NOT adopt X's SPA pattern (negative reference)
+- Do NOT build a custom edge proxy like Yahoo's ATS — use a
+  managed CDN
+- Do NOT invest in service workers for offline support (none of
+  the comparable platforms bother)
+- Do NOT consider GraphQL adoption solely for "edge caching"
+  reasons — Bloomberg achieves edge caching without GraphQL
+- Do NOT commit to a "native app" strategy on Phase B's timeline;
+  Apple News's daemon model is unreachable via web
+
+Refs: `docs/research/comparative_analysis_v1.md` §6 + §7 (full
+synthesis + recommendations + caveats); findings #70-#73 (per-site
+inputs); Phase B redesign track items R1-R4; finding #62 (session
+19 deferral that motivated this study)
+
 ---
 
 ## Pace Tracker
