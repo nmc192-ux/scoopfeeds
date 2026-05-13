@@ -56,9 +56,12 @@ import {
   adminRouteLimiter,
   analysisLimiter,
   apiGlobalLimiter,
+  highFreqLimiter,
+  mutationLimiter,
   predictionsLimiter,
   publicV1EdgeLimiter,
   readerLimiter,
+  standardReadLimiter,
 } from "./src/middleware/rateLimits.js";
 import {
   apiRequestLoggingMiddleware,
@@ -185,8 +188,6 @@ app.use((req, res, next) => {
   };
   next();
 });
-app.use("/api/", apiGlobalLimiter);
-
 app.use((req, res, next) => {
   const host = getRequestHost(req);
   if (shouldRedirectHost(host)) {
@@ -194,6 +195,44 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// ─── Phase S3 per-route rate limiters ────────────────────────────────────
+// Tier-based limits calibrated to actual usage patterns (finding #56, #61).
+// Mounted BEFORE the route routers so they fire first for matching paths;
+// the apiGlobalLimiter safety net is mounted AFTER all routes below (it
+// only matters for paths without a per-route tier mount). See
+// src/middleware/rateLimits.js for tier definitions.
+
+// HIGH-FREQUENCY tier (200/5min): polled endpoints + fire-and-forget beacons.
+app.use("/api/health",       highFreqLimiter);
+app.use("/api/healthz",      highFreqLimiter);
+app.use("/api/track",        highFreqLimiter);
+app.use("/api/auth/me",      highFreqLimiter); // useAuth polls on every component mount
+
+// STANDARD READ tier (120/5min): page-load reads + infrequent polled endpoints.
+app.use("/api/news",         standardReadLimiter);
+app.use("/api/videos",       standardReadLimiter);
+app.use("/api/market",       standardReadLimiter);
+app.use("/api/weather",      standardReadLimiter);
+app.use("/api/geo",          standardReadLimiter);
+app.use("/api/public-config", standardReadLimiter);
+app.use("/api/live-events",  standardReadLimiter);
+app.use("/api/affiliate",    standardReadLimiter);
+app.use("/api/cards",        standardReadLimiter);
+app.use("/api/translate",    standardReadLimiter);
+app.use("/api/macro",        standardReadLimiter);
+app.use("/api/synthetic-markets", standardReadLimiter);
+app.use("/api/briefs",       standardReadLimiter);
+app.use("/api/live-stream",  standardReadLimiter);
+
+// MUTATION tier (60/5min): user-action POST/PUT/DELETE. Covers both reads
+// and writes on routes with mixed shapes (watchlists, meter) for simplicity.
+app.use("/api/newsletter",   mutationLimiter);
+app.use("/api/push",         mutationLimiter);
+app.use("/api/tips",         mutationLimiter);
+app.use("/api/watchlists",   mutationLimiter);
+app.use("/api/meter",        mutationLimiter);
+app.use("/api/csp-report",   mutationLimiter);
 
 // Routes
 app.use("/api/news",      cacheMiddleware("medium"), newsRouter);
@@ -224,6 +263,12 @@ app.use("/embed",          embedRouter);                                 // Phas
 app.use("/api/macro",      cacheMiddleware("medium"), macroRouter);     // Phase 5: macro indicators (FRED today; WB/IMF later)
 app.use("/api/synthetic-markets", syntheticMarketsRouter);              // Phase 6 foundation: x*y=k AMM markets (no caching — trades mutate)
 app.use("/api/v1",         publicV1EdgeLimiter, cacheMiddleware("medium"), v1Router);        // Phase 7: public read-only API, key-authed + per-key rate-limited
+
+// Phase S3 safety net — generous global limit catches /api/* paths that
+// don't have a per-route tier mount above. Order matters: must come AFTER
+// the per-route mounts so it doesn't pre-empt them. Raised from 500/15min
+// to 3000/15min to absorb shared-IP traffic patterns (NAT, household).
+app.use("/api/", apiGlobalLimiter);
 // Global admin auth boundary for all /scoop-ops/* routers. All sub-routers
 // (riOpsRouter, push, social, newsletter, videos-gen, etc.) inherit
 // adminAuth + adminAuditLogger from this single mount point.
