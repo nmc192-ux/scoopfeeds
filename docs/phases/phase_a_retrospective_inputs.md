@@ -2327,6 +2327,153 @@ Refs: finding #56 (cascade), finding #57 (React #300 mechanism);
 d301cf6 (ReaderModal architecture); screenshot 2026-05-13 01:02
 PKT; finding #64 + #65 as related Phase S4 manifestations
 
+### 67. Phase S3 verification — per-route tier limits eliminate normal-use 429s
+
+Session 20 shipped commit 1cbf92b (per-route rate limit
+recalibration) replacing the single 500/15min global with tier-
+based limits calibrated to actual usage patterns. Browser
+verification confirmed the architecture works as designed.
+
+Test sequence:
+- Test A (normal browsing 3-5 min covering homepage + topic page
+  + article modal): 42 API requests, ZERO 429s
+- Test B (deliberate burst on /api/health, 280 requests): 181 ×
+  200 then 99 × 429 with Retry-After 14 seconds (5-min window)
+- Test C (cross-tier independence): 30 /api/news requests during
+  highFreq exhaustion all returned 200 (standardRead tier has
+  independent budget)
+- Test D (final state): zero React #300, zero uncaught exceptions,
+  full page render, cache survived (localStorage 19 entries,
+  sessionStorage 20 entries)
+
+Differential vs prior baselines:
+
+| Metric | cf0f16f | c8917d1 | 1cbf92b |
+|---|---|---|---|
+| Normal-browse 429s | Many | Some | 0 |
+| Burst trip behavior | White screen | Cached recovery | Tier fires + graceful |
+| Retry-After window | 600+ sec | 600+ sec | 14 sec |
+
+Three architectural properties verified:
+1. Tier separation: independent buckets per route group
+2. Faster recovery: 5-min windows vs 15-min global
+3. Generous headroom: 42 normal-browse calls = trivial fraction
+   of any tier's budget
+
+Net effect: backend rate limits are now calibrated to actual
+usage patterns. Normal browsing produces zero 429s. Deliberate
+abuse trips appropriate tier limits which the S2b frontend
+interceptor handles transparently via cached data. The
+combined stabilization track (S1+S2+S2b+S3) delivers
+Yahoo/Bloomberg-class data-layer resilience.
+
+Production at 1cbf92b is significantly better than at any prior
+commit: rate limits don't fire on normal traffic, frontend
+resilience handles edge cases, tier separation prevents
+cross-endpoint starvation.
+
+Refs: commit 1cbf92b (Phase S3); commits cf0f16f (S2), c8917d1
+(S2b); findings #56 (cascade root cause), #61 (S2b verification),
+#65 (reader limit raise rationale); session 20 verification output
+
+### 68. Findings #64, #65, #66 resolved via Phase S3 — rate-limit elimination as root-cause fix
+
+Session 19 documented three concrete production-observed failures
+from c8917d1 browsing:
+- Finding #64: TopicPage shows "Oops! Connection trouble"
+  placeholder on /topic/politics
+- Finding #65: Article reader extraction degrades intermittently
+- Finding #66: ReaderModal nav (logo, X button) sometimes absent
+
+Phase S3 verification confirmed all three are RESOLVED under
+normal browsing. The mechanism is interesting and worth noting:
+
+These weren't fixed by component-defensive code (Phase S4 scope).
+They were fixed by eliminating the rate-limit firing that was
+the root trigger. When the underlying 429 doesn't happen,
+cold-start sentinels don't return, components don't see null
+data, and the visible UI failure modes don't manifest.
+
+Architectural implication: Phase S4 (component defensive patterns
++ hook unwrap contract) is now LESS urgent than the two-track
+plan originally assumed. The residual 5% gap from S2b's
+intentionally-narrow sentinel scope (only /health and /auth/me
+verified) only manifests when rate limits actually fire. S3
+makes that rare enough that S4's user-impact case weakens.
+
+Phase S4 scope reconsidered:
+- The hook unwrap pattern inconsistency from finding #60 remains
+  real technical debt (six distinct patterns across 21 hooks)
+- The defensive coding pattern issue from finding #57 (React #300
+  mechanism) remains a latent risk under future load patterns
+  we haven't seen
+- ESLint rule enforcement (react-hooks/rules-of-hooks) would
+  prevent future violations
+- But the urgent user-impact case for S4 has been substantially
+  addressed by S3
+
+Recommendation: Phase S4 stays in the plan but downscoped. Focus
+on ESLint rule + targeted fixes for the patterns most likely to
+re-fire under future load. Skip the comprehensive component-by-
+component defensive coding sweep that the original scope implied.
+Estimated effort: 1 session instead of 1-2.
+
+Refs: findings #64, #65, #66 (session 19 production-observed
+failures); finding #67 (S3 verification); finding #60 (hook
+unwrap pattern inconsistency); finding #57 (React #300 mechanism)
+
+### 69. Stabilization track substantially complete — Phase A close-out schedule revised downward
+
+Session 20 closes the stabilization track of the two-track plan
+from finding #56:
+- S1 ✓ session 18 (revert f34f2bf, restore stability)
+- S2 ✓ session 19 (cf0f16f global axios 429 interceptor)
+- S2b ✓ session 19 (c8917d1 persistent tiered cache + sentinels)
+- S3 ✓ session 20 (1cbf92b per-route rate limit recalibration)
+- S4 - downscoped per finding #68 (ESLint rule + targeted fixes,
+  ~1 session)
+
+Phase A close-out remaining work breakdown (revised from session
+19's 9-10 sessions estimate):
+- S4 (downscoped per finding #68): ~1 session
+- Finding #25 RSS date-parsing structural fix: 1-2 sessions
+- Finding #41 logging refactor scope decision: 1 session (could
+  be Path A per-route sweep OR Path B logger.js refactor)
+- Finding #47 tagline rendering bug: batchable with smaller fixes
+- Sprint 6 (exit verification, metrics snapshot, retrospective
+  writing, Phase B Kickoff Brief draft): 2-3 sessions
+
+Revised remaining estimate: 5-7 sessions for Phase A close
+(down from 9-10 at session 19 close).
+
+This is real progress, not artificial schedule revision. The
+underlying reason is Phase S3's broader impact than originally
+estimated. S3 was scoped as "backend rate limit recalibration"
+but its actual effect was "eliminate the trigger for most S4
+manifestations," which downscopes S4 substantially.
+
+The Phase B redesign track (R1 bootstrap consolidation, R2 edge
+caching, R3 stale-while-revalidate, R4 SSR evaluation) is
+unchanged and still threads through Phase B opening. Those are
+optimization/scale work, not stability work — different scope.
+
+Next session opening candidates:
+1. Phase S4 downscoped (ESLint rule + targeted fixes)
+2. Yahoo/Bloomberg comparative analysis (finding #62) — deferred
+   from session 20, becomes input for Phase B R1-R3 design
+3. Finding #25 RSS date-parsing structural fix
+4. Sprint 6 begin (exit verification, retrospective writing)
+
+Recommendation: DrJ to decide based on what feels most natural.
+S4 is the cleanest continuation of stabilization. Yahoo study is
+strategic preparation for Phase B. RSS fix is long-deferred
+deep work. Sprint 6 is the actual close-out work.
+
+Refs: finding #56 (two-track plan origin); commits cf0f16f,
+c8917d1, 1cbf92b (stabilization track); finding #68 (S4 downscope
+rationale); session 18 Pace Tracker (10-11 estimate origin);
+session 19 Pace Tracker (9-10 estimate)
+
 ---
 
 ## Pace Tracker
@@ -2635,4 +2782,61 @@ CSP observation continues indefinitely per finding #50.
 
 Session 19 close: production at c8917d1. Yahoo/Bloomberg-class
 warm-cache path achieved. Path forward to Phase A close clear.
+
+---
+
+PACE TRACKER (updated session 20, 2026-05-13)
+
+Session 20 work shipped:
+- Phase S3 (commit 1cbf92b): per-route rate limit recalibration,
+  three new tier limiters (highFreq 200/5min, standardRead
+  120/5min, mutation 60/5min), apiGlobalLimiter raised to
+  3000/15min as safety net, readerLimiter raised 30 → 60 per
+  finding #65
+- Phase S3 verification confirmed architecture works as designed
+  (finding #67)
+- Findings #64, #65, #66 resolved via S3's elimination of
+  rate-limit firing rather than component defensive code
+  (finding #68)
+- 3 new findings captured (#67-#69)
+
+Calendar pace honest accounting:
+- Session 20 duration: ~2 hours
+- Started after 15.5-hour gap from session 19 (real overnight rest)
+- Within stated 1+ hour budget
+- Clean engineering session: investigation → design → implementation
+  → verification → findings, no false starts or reverts
+
+Phase A close-out schedule REVISED DOWN:
+- Pre-session-20 estimate: 9-10 sessions remaining
+- Post-session-20 estimate: 5-7 sessions remaining
+- Schedule reduction reason: S3's broader-than-expected impact
+  downscopes S4 substantially per finding #68
+
+Stabilization track status:
+- S1 ✓ (session 18) - revert
+- S2 ✓ (session 19) - cf0f16f interceptor
+- S2b ✓ (session 19) - c8917d1 persistence
+- S3 ✓ (session 20) - 1cbf92b tier limits
+- S4 - downscoped, ~1 session
+
+Phase A close-out remaining work:
+- S4 downscoped (1 session)
+- Finding #25 RSS date-parsing (1-2 sessions)
+- Finding #41 logging refactor (1 session)
+- Finding #47 tagline rendering (batched)
+- Sprint 6 (2-3 sessions)
+
+Next session opening candidates (in priority order):
+1. Phase S4 downscoped (ESLint rule + targeted fixes)
+2. Sprint 6 begin (retrospective writing + exit verification)
+3. Yahoo/Bloomberg study (Phase B input)
+4. Finding #25 RSS date-parsing
+
+CSP observation continues per finding #50.
+
+Session 20 close: production at 1cbf92b. Full stabilization
+track verified. Path to Phase A close is now genuinely visible
+within 5-7 sessions. Three concrete production failures from
+session 19 (findings #64-#66) all resolved.
 ```
