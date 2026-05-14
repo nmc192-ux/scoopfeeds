@@ -2979,6 +2979,248 @@ verification); findings #70-#74 (session 21 comparative
 analysis); session 20 Pace Tracker close estimate; session 18
 Pace Tracker close estimate
 
+### 78. Decision Point 1 — Authority resolution: β (parallel tracks within Phase B)
+
+Session 22 reconciliation. Resolves the strategic-tier conflict
+between Strategic Plan v6 Phase B (product features) and Skills
+Architecture v1 Phase B (codebase reorganization by skill).
+
+Three options were presented:
+- α: Strategic Plan v6 authoritative; Skills Architecture v1
+  demoted to "ongoing technical work parallel to phased roadmap."
+  Recommendation rationale: highest product velocity, respects
+  Skills Architecture v1's own anti-goals ("Don't build the
+  platform before the application"), aligns with solo + AI
+  execution model and pre-product-market-fit timing.
+- β: Parallel tracks within Phase B. Track 1 (product features
+  per Strategic Plan v6) + Track 2 (architecture per Skills
+  Architecture v1 B.1-B.4). Both proceed simultaneously.
+- γ: Skills Architecture v1 supersedes. Product features
+  re-mapped to skills. Strongest defiance of Skills Architecture
+  v1's anti-goals. Weakest defensibility.
+
+Claude Code's calibrated recommendation: α with safeguards
+(carry Skills Architecture v1 forward as Phase B+ input + Phase
+C review trigger). Reasoning: Skills Architecture v1's own
+self-hedges argue against over-applying it; solo + AI execution
+makes β's coordination overhead expensive; sessions 18-21
+demonstrated reactive architecture works when problems are
+concrete; pre-PMF timing suggests prioritizing user-visible
+value.
+
+DrJ's choice: **β (parallel tracks)**. Rationale: the cascade
+discovery during sessions 18-21 showed that architectural work
+matters and that reactive-only architecture leaves gaps. Two
+tracks acknowledge both concerns. The cost is real (longer Phase
+B duration; more coordination overhead for solo + AI), but the
+alternative (α) carries technical-debt risk that the cascade
+discovery made tangible.
+
+This choice was reinforced by DP2 = δ (see finding #79), where
+DrJ chose the architecturally-richest end of that option matrix
+as well. Pattern: DrJ consistently weighted durability over
+short-term velocity at both decision points.
+
+Implications:
+- Phase B duration extends from Strategic Plan v6 "Months 1-3" to
+  "Months 1-5" baseline (further extended by DP2 to "Months 4-7")
+- Both Strategic Plan v6 Phase B exit criteria AND Skills
+  Architecture v1 B.1-B.4 must be met for Phase B exit
+- BullMQ migrations (originally Strategic Plan v6 Foundation work)
+  reframe as Track 2 work because the 5 queues correspond to 5
+  skill boundaries
+- Binding kickoff gate (Skills Architecture v1 §10) applies to
+  all tracks
+- No Decisions Log changes required (spot-check confirmed all
+  31 locked decisions hold)
+
+Refs: docs/strategy/strategic_tactical_reconciliation_v1.md §5;
+docs/strategy/strategic_plan_v6.md §9 Phase B (Track 1 source);
+docs/strategy/skills_architecture_v1.md §7 + §10 (Track 2 source);
+finding #76 (drift surfaced); finding #75 (Phase A audit context)
+
+### 79. Decision Point 2 — Infrastructure track disposition: δ (parallel supporting Track 3)
+
+Session 22 reconciliation continued. Resolves how the
+infrastructure track (Finding #56 R1-R4 + Session 21 Sprint 0-6,
+treated as one definition per session 22.A reframing) fits within
+β-chosen Phase B.
+
+Four options were presented:
+- α: Defer entirely. Saves 10-13 sessions. Contradicts DP1=β's
+  durability premise.
+- β: Fold lazily into Phase B. Sprint 0 as 1-session hygiene win;
+  Sprint 1+ defer until specific feature triggers. 1-2 session
+  cost.
+- γ: Keep as Phase B prerequisite. Do R1-R4 first. Compounds
+  duration cost; Phase B becomes Months 6-9.
+- δ: Position as parallel supporting Track 3. Three concurrent
+  tracks. Highest coordination cost; honors comparative analysis
+  fully.
+
+Claude Code's calibrated recommendation: β (lazy fold-in).
+Reasoning: solo + AI managing three concurrent tracks is
+operationally heavy; β captures Sprint 0's verified value at
+minimum cost; β/β is the cleanest pairing with DP1=β.
+
+DrJ's choice: **δ (parallel supporting Track 3)**. Rationale: the
+comparative analysis is concrete observational evidence, not
+speculation. Sessions 18-21 demonstrated infrastructure pain is
+real at current scale. Treating R1-R4 as a supporting track —
+rather than deferred work or prerequisite work — honors both
+the analysis and the cascade learning. The "supporting track"
+framing matters: Track 3 does not block Track 1 (product
+features) or Track 2 (architecture).
+
+Track 3 work items (per `docs/research/comparative_analysis_v1.md`
+§7):
+- Sprint 0: `Cache-Control: public, max-age=31536000, immutable`
+  on hashed static assets (1 session, zero risk)
+- Sprint 1: Cloudflare (or equivalent CDN) edge in front of
+  scoopfeeds.com HTML (2-3 sessions)
+- Sprint 2: `Cache-Control: public, s-maxage=120, stale-while-
+  revalidate=600` on HTML responses (1 session, after Sprint 1)
+- Sprint 3: SWR pattern on content API responses, extending
+  c8917d1 persistent cache (2 sessions)
+- Sprints 4-6: Server-render hot routes via Vite SSR or small
+  Node SSR (4-6 sessions)
+
+Total Track 3 effort: 10-13 sessions.
+
+Decision Point 3 (Sprint 0 specific disposition) chose option **a**
+— Sprint 0 executes as Track 3's opening sprint AFTER the binding
+kickoff gate clears. Not pulled forward to Phase A close-out.
+Rationale: internal consistency with DP2=δ; no exception precedent
+that would erode the binding kickoff gate; 1-session production
+hardening represents genuine value but not urgency.
+
+Anti-goal tension acknowledged: Skills Architecture v1 §8 says
+"Don't build the platform before the application." Track 3 is
+partially platform-shaped work. The reconciliation accepts this
+tension explicitly. Mitigations: Sprint 0 is 5-line config (not
+platform); Sprint 1 integrates third-party CDN (not building one);
+Sprint 2 is header policy change; Sprint 3 extends existing
+persistent cache code; Sprints 4-6 (SSR) is application-facing
+(changes user-visible first paint), not infrastructure for
+non-existent features.
+
+Phase B duration post-DP2:
+- DP1=β baseline: "Months 1-5"
+- DP2=δ extension: "Months 4-7" estimated, "Months 6-9" realistic
+- Solo + AI execution typically runs 1.3-1.8× original estimates
+- DrJ accepts longer duration as cost of reconciliation
+
+Refs: docs/strategy/strategic_tactical_reconciliation_v1.md §6 + §7;
+docs/research/comparative_analysis_v1.md §7 (Track 3 source);
+finding #56 (R1-R4 origin); finding #74 (Sprint 0-6 elaboration);
+finding #77 (sessions 18-21 displaced Phase A audit work — context
+for why DrJ weighted durability heavily at this decision point)
+
+### 80. Reconciled Phase B definition — three-track structure with combined exit criteria
+
+Session 22 synthesis of DP1 + DP2 + DP3 decisions.
+
+Phase B is now defined as three concurrent tracks executing
+within a single Phase with unified entry gate and combined exit
+criteria.
+
+Track 1 — Product features (Strategic Plan v6 §9 Phase B):
+Mobile-first homepage redesign, Mobile-first Event Dossier,
+Tracker Auto-Detection Engine v1, first trackers across 8
+categories, Op-ed aggregation MVP, Video clip integration,
+Breaking news engine v1, source matrix expansion to ≥150,
+Social Media Engine v2 (FB/IG/Bluesky upgrade + new X +
+LinkedIn), 3 newsletter products, Alert engine v1 (web push +
+email + Telegram), Internal Scoop search upgrade, Brave preview,
+Entertainment surfaces, accessibility audit, brand refresh.
+
+Track 2 — Architecture (Skills Architecture v1 §7):
+B.1 Codebase reorganization by skill, B.2 skill contract docs,
+B.3 lint boundaries, B.4 first skill isolation POC (image/video),
+BullMQ migrations (5 queues mapping to skill boundaries).
+
+Track 3 — Infrastructure (Finding #56 + Comparative Analysis §7):
+Sprint 0 (immutable cache headers), Sprint 1 (CDN edge), Sprint 2
+(s-maxage+SWR headers), Sprint 3 (SWR persistent cache pattern),
+Sprints 4-6 (SSR for hot routes).
+
+Binding kickoff gate (Skills Architecture v1 §10, binding per
+session 22.A reframing):
+1. Phase A wrapped cleanly (all Sprint 0-2 issues closed; Phase A
+   retrospective written; no outstanding production incidents)
+2. Strategic clarity on Reality Index (stable or relief applied)
+3. Operational baseline understood (post-Phase-A observability
+   data exists)
+4. Time and energy budget realistic
+
+If any of these aren't true, Phase B waits. No exceptions for
+individual track items.
+
+Combined Phase B exit criteria:
+- All Strategic Plan v6 Phase B exit criteria (Lighthouse ≥90,
+  ≥10 trackers, ≥150 sources, ≥10,000 search queries/month,
+  ≥10,000 social followers, returning user rate ≥25%, Telegram
+  ≥5,000, etc.)
+- All Skills Architecture v1 Track 2 deliverables (skill folder
+  structure, lint enforcement, image/video isolation POC, 5
+  BullMQ migrations live)
+- All Track 3 Infrastructure deliverables (immutable cache header,
+  CDN edge, s-maxage/SWR HTML headers, SWR API pattern, at least
+  one hot route SSR)
+
+Forward path (sessions 23-N to clear kickoff gate, per finding #75
+operational view + reconciliation §9.1):
+1. Sprint 4 source audit (2-3 sessions) — unblocked
+2. Sprint 5 social + search audits + 8 tracker templates (3-4
+   sessions)
+3. Sprint 3 close-outs: 5 metrics dashboard, raw_signals drop
+   (1-2 sessions, parallelizable)
+4. Sprint 2 close-outs: hollow-feature copy, i18n key wiring
+   (1 session; CSP enable still deferred per finding #50)
+5. Sprint 6 close-out: exit verification doc, metrics snapshot,
+   formal Phase A Retrospective synthesis, Phase B Kickoff Brief
+   drafting (3-4 sessions)
+
+Estimated 10-14 sessions to clear kickoff gate (consistent with
+finding #75's operational view 11-20 sessions range).
+
+After kickoff gate clears, all three tracks open. Phase B Kickoff
+Brief (drafted in Sprint 6.7) will lay out detailed sprint-by-
+sprint plan per track.
+
+Coordination mechanism (solo + AI specific):
+- Per-session track tagging in commits + retrospective
+- No-track-dark rule: no track goes more than 4 consecutive
+  sessions without contribution
+- Cross-track file conflicts surface in retrospective rather than
+  silent absorption
+- No new tracks added without explicit decision (would require
+  reconciliation v2)
+
+What this reconciliation does NOT do:
+- Does not deprecate Strategic Plan v6 or Skills Architecture v1
+  (both remain in repo, both carry forward)
+- Does not pre-write the Phase B Kickoff Brief (Sprint 6.7 work)
+- Does not pre-decide Layer 4 issues or JIT prompts (execution-time
+  work per Execution Method v1)
+- Does not require immediate Strategic Plan v7 or Skills
+  Architecture v2 (recommended at next quarterly review, not
+  blocking)
+
+Honest caveats (per reconciliation §13):
+- Three-track execution for solo + AI is unproven
+- Comparative analysis is single-sample 2026-05-13 snapshot
+- Anti-goal tension on Track 2 + Track 3 acknowledged
+- Reconciliation itself is reversible via documented review
+  triggers (reconciliation §11)
+
+Refs: docs/strategy/strategic_tactical_reconciliation_v1.md
+(entire document, 883 lines); findings #78 (DP1) + #79 (DP2+DP3);
+finding #76 (drift origin); finding #56 (R1-R4 origin); finding
+#74 (Sprint 0-6 elaboration); finding #75 (Phase A audit context);
+Strategic Plan v6 §9 Phase B; Skills Architecture v1 §7 + §10;
+Decisions Log v1 (no changes required)
+
 ---
 
 ## Pace Tracker
@@ -3442,4 +3684,120 @@ infrastructure work.
 CSP observation continues per finding #50. raw_signals drop
 (Sprint 3.1) and formal Phase A Retrospective (Sprint 6.4)
 remain pending.
+
+---
+
+PACE TRACKER (updated session 22, 2026-05-15)
+
+Session 22 work shipped:
+- Strategic plan + Skills Architecture v1 + Phase A Kickoff Brief
+  + Comparative Analysis re-read for reconciliation purposes
+- 22.A reframing surfaced: drift is 3-way not 4-way (finding #56
+  and session 21 comparative analysis are the same infrastructure
+  track at two specificity levels)
+- 22.A reframing confirmed: Skills Architecture v1 §10 Phase B
+  Kickoff Gate is BINDING regardless of which reconciliation
+  option is chosen
+- 22.A investigation: BullMQ migrations status = SCAFFOLDED-NOT-
+  MIGRATED. Code on main since e57c3ca; production runs
+  USE_BULLMQ=false. Migrations remain Phase B Foundation work
+  (Strategic Plan v6's only explicitly-named structural item)
+- Decision Point 1 (authority resolution): DrJ chose β (parallel
+  tracks within Phase B) over Claude's recommended α
+- Decision Point 2 (infrastructure track disposition): DrJ chose
+  δ (parallel supporting Track 3) over Claude's recommended β
+- Decision Point 3 (Sprint 0 timing): DrJ chose a (Track 3
+  opening sprint, post-kickoff-gate)
+- Reconciliation document written:
+  docs/strategy/strategic_tactical_reconciliation_v1.md (883
+  lines)
+- 3 new findings (#78-#80) capturing the three decisions plus
+  the reconciled Phase B definition
+- Pattern observed at decision points: DrJ consistently weighted
+  durability over short-term velocity. At each decision point
+  Claude recommended the lower-cost-lower-coverage option; DrJ
+  chose the higher-cost-higher-coverage option. The reconciled
+  Phase B is the architecturally-richest option in the matrix.
+
+Calendar pace honest accounting:
+- Session 22 duration: ~2 hours
+- Started after ~24-hour gap from session 21 close (DrJ overnight
+  reflection per Path 2 choice)
+- Strategic-decision-heavy, code-light session: no production code
+  shipped; documentation + retrospective only
+
+Phase B duration estimate post-reconciliation:
+- Strategic Plan v6 original: "Months 1-3"
+- Post-DP1=β: "Months 1-5" baseline
+- Post-DP2=δ: "Months 4-7" estimated
+- Realistic (1.3-1.8× per Execution Method v1): "Months 6-9"
+- DrJ accepts longer duration as cost of reconciliation;
+  architectural durability prioritized over time-to-Phase-C
+
+Phase A close-out remaining work (pre-Phase-B kickoff gate
+clearing) per reconciliation §9.1:
+- Sprint 4 source audit (2-3 sessions)
+- Sprint 5 social + search audits + 8 tracker templates (3-4
+  sessions)
+- Sprint 3 close-outs: 5 metrics dashboard + raw_signals drop
+  (1-2 sessions, parallelizable)
+- Sprint 2 close-outs: remaining hollow-copy + i18n (1 session;
+  CSP deferred per finding #50)
+- Sprint 6 close-out: exit verification + metrics snapshot +
+  formal Phase A Retrospective + Phase B Kickoff Brief drafting
+  (3-4 sessions)
+- Total: 10-14 sessions to clear kickoff gate, consistent with
+  finding #75's operational view 11-20 sessions
+
+Phase B Kickoff Brief (Sprint 6.7 work) will translate the
+reconciled three-track structure into detailed sprint plans:
+- Track 1: Strategic Plan v6 work areas as sprint groupings
+- Track 2: B.1-B.4 + BullMQ migrations
+- Track 3: Sprint 0-6 from comparative analysis §7
+
+Next session candidates (in priority order — DrJ to choose):
+
+1. Sprint 4 source audit. Unblocked, concrete, single-track focus.
+   Inventory 119 sources, categorize against 17×10×10 matrix,
+   identify dead sources, design quality scoring schema, gap
+   analysis, document Phase B source priority list. Estimated
+   2-3 sessions for the 7-issue Sprint 4 sequence.
+
+2. Sprint 3 close-outs (5 metrics dashboard + raw_signals drop).
+   Smaller scope, 1-2 sessions. Unblocked.
+
+3. Sprint 5 begin (any one of: social audit, search audit, or
+   tracker template designs). Each is 1-2 sessions.
+
+4. Sprint 6 begin (exit verification document from finding #75
+   audit, or formal Phase A Retrospective synthesis from
+   retrospective_inputs.md). The formal retrospective is
+   especially leveraged — it's blocking Phase B kickoff gate.
+
+Recommendation: Sprint 6 begin (specifically the formal Phase A
+Retrospective synthesis), because it's the gate-clearing item
+furthest from execution. Sprint 4 and Sprint 5 are concrete
+execution work. Sprint 6 is structural-coordination work that
+benefits from rested attention.
+
+CSP observation continues per finding #50. raw_signals drop
+(Sprint 3.1) and formal Phase A Retrospective (Sprint 6.4) remain
+pending — pending status now formally captures the Phase B
+kickoff gate dependency.
+
+Session 22 close: production at 1cbf92b (unchanged). 80 cumulative
+findings. Phase B reconciled to three-track structure. Path to
+Phase B kickoff gate genuinely visible: 10-14 sessions of focused
+Phase A close-out work. No new strategic-tier ambiguity to
+resolve. The reconciliation document is the single source of
+truth for "what is Phase B" until a documented review trigger
+fires.
+
+The most useful output of this session was the alignment process
+itself, not the chosen options. Claude recommended α and β; DrJ
+chose β and δ. The recommendations were calibrated honestly; DrJ's
+choices reflect priorities that the recommendations did not weight
+identically. Both views were captured in the reconciliation
+document so future sessions can see why the path chosen was
+chosen, not just that it was chosen.
 ```
