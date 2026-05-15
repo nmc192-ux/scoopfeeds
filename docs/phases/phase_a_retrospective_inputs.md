@@ -3379,6 +3379,122 @@ distinction); commit `6821ceb` session 16 (origin of placeholder
 keys); MoreMenu.jsx + EventsPage.jsx (consumers of all 28
 nav.* keys via indirection pattern)
 
+### 83. Sprint 6.2 production smoke test — today's deploys PASS
+
+Session 25 Extension. Smoke test verified two production deploys
+(`60cfebf` Urdu i18n + `6278ab6` sources.js cleanup) work
+correctly with no detected regression.
+
+**PASS items verified in production:**
+- Page loads (`/`, `/briefs`, `/events`, `/more`): all HTTP 200,
+  <1s
+- Frontend bundle: `index-B5fUgtvM.js` confirmed live
+- All 12 Urdu translations verified in production
+  `ur-CVmHELql.js` chunk (Vite emits Urdu locale as separate
+  hashed chunk; not in main bundle — discovery)
+- All 5 English placeholders verified absent from production
+- `sourceCount: 110` (matches expected post-cleanup; was 119)
+- Article ingestion healthy (+67 articles in 20 min ≈ 3/min)
+- Zero articles from removed sources in `/api/news` sample
+  (BBC/NPR/Guardian dominate — expected)
+- `/api/health`, `/api/news`, `/api/ri/events`, `/api/live-events`
+  all healthy (HTTP 200, <1s)
+
+**False-alarm investigation worth capturing:**
+
+Smoke test initially flagged `/api/events?limit=5` as "hanging"
+(HTTP 200 headers + 0 body bytes after 60s timeout, reproducible
+across 30s and 60s tries). DrJ requested 5-minute investigation
+before classifying severity.
+
+Investigation revealed `/api/events` is an SSE (Server-Sent
+Events) endpoint, not REST:
+- `App.jsx:96` uses `new EventSource("/api/events")` — SSE
+  streaming connection
+- `useEvents.js:4` comment explicitly documents separation:
+  *"Base: /api/ri/events  (avoids collision with /api/events
+  SSE stream)"*
+- Frontend uses `/api/ri/events?category=X&status=active&limit=N`
+  for finite REST queries — verified HTTP 200 in 0.6s
+- The "hang" was correct SSE behavior: headers send immediately,
+  body streams indefinitely, no events queued for streaming when
+  curl probed
+- `?limit=5` query parameter was likely ignored by the SSE handler
+
+**Institutional learning:** Smoke tests should account for
+endpoint type. curl-based REST smoke tests produce false alarms
+on SSE endpoints. A complete smoke-test catalog should
+differentiate:
+- REST endpoints (curl with reasonable timeout, expect finite
+  body)
+- SSE endpoints (curl with stream-mode, expect ongoing event
+  chunks; or skip endpoint with documented reason)
+- WebSocket endpoints (require different tooling entirely)
+
+Phase B smoke test design (per Sprint 6.7 Kickoff Brief drafting
+work) should encode this differentiation as a smoke-test-catalog
+prerequisite.
+
+**Sprint 6.2 status:** **CLOSED.** Today's deploys verified
+working; no real production issue exists; the events "hang" was
+a smoke-test methodology gap, not a code defect.
+
+**Sprint 6 progress after this session:**
+- 6.1 Phase A exit verification — DONE (session 22, commit
+  `23ccf5b`)
+- **6.2 Full production smoke test — DONE ✓ (this session)**
+- 6.3 Metrics snapshot — Not started (depends on Sprint 3.4)
+- 6.4 Formal Phase A Retrospective — DONE (session 24 Part 1,
+  commit `72a7eb8`)
+- 6.5 Decisions Log review — Not needed
+- 6.6 Strategic Plan v6 revision — Deferred to quarterly review
+- 6.7 Phase B Kickoff Brief draft — Not started
+
+**Sprint 6: 3 of 7 issues CLOSED** (was 2 of 7 before this
+session).
+
+**Binding kickoff gate effect:** Sprint 6.2 closure is below the
+gate granularity (the gate conditions are at Sprint/criterion
+level, not individual issue level). Gate status unchanged at 4
+of 8 MET.
+
+**Minor evidence-quality precision (per DrJ note):** The "No
+outstanding production incidents" gate condition was MET
+**pre-Sprint-6.2 by inference** (no known incidents reported).
+After this smoke test, it is now **MET by smoke-test
+verification** — same status, higher evidence quality. This
+matters for future Phase B retrospective comparison: gate
+conditions verified by testing are more durable than those held
+by absence-of-known-issues.
+
+**Honest scope limitations of this smoke test:**
+- Visual Urdu rendering in browser NOT verified (only string
+  presence in production JS chunk)
+- Live tab SSE behavior in browser NOT verified (only confirmed
+  endpoint is SSE-shaped, not that EventSource consumes
+  correctly)
+- Mobile / responsive layout NOT tested
+- AdSense / CSP / third-party tag behavior post-deploy NOT
+  re-verified (no changes today should affect these, but not
+  re-checked)
+- Long-tail endpoint behavior NOT covered (only 5 endpoints
+  probed)
+- Performance under load NOT tested (single-request checks only)
+- Comprehensive Phase A regression coverage NOT covered (smoke
+  test scoped to today's-changes + obvious-regressions, ~30 min
+  cap)
+
+These limitations are intentional per Sprint 6.2 scope discipline
+(smoke test ≠ comprehensive verification). Phase B Kickoff Brief
+should specify whether Phase B exit needs deeper coverage.
+
+Refs: deploys `60cfebf` (session 24 Part 3 Urdu i18n) +
+`6278ab6` (session 25 sources.js cleanup); Phase A Kickoff Brief
+Sprint 6 Issue 6.2; `App.jsx:96` (SSE EventSource usage);
+`useEvents.js:4` (REST endpoint via `/api/ri/events`);
+`docs/phases/phase_a_exit_verification.md` §3.7 (Sprint 6.2
+status pre-this-session: NOT STARTED → DONE)
+
 ---
 
 ## Pace Tracker
@@ -4102,4 +4218,106 @@ notch. The most leveraged single output of session 24 Part 3 was
 catching the 12-key Urdu parity gap vs the audit's 7-key
 estimate — investigation-vs-summary tension surfaced as a real
 institutional pattern (finding #82).
+
+---
+
+PACE TRACKER (updated session 25 Extension, 2026-05-15)
+
+Note: session 25 main work (Sprint 4 Phase 2: source audit
+cleanup + gap analysis synthesis, commits 6278ab6 + 4f2a91b)
+shipped without a dedicated Pace Tracker entry. This entry
+consolidates session 25 main + session 25 Extension (Sprint 6.2
+smoke test).
+
+Session 25 main work shipped:
+- Phase A source audit Phase 2 cleanup (commit 6278ab6):
+  HTTP verification of 9 audit-flagged dead candidates from
+  session 24 Part 2 audit Phase 1; 9 entries removed from
+  sources.js (6 Reuters NXDOMAIN + 1 AP DEAD-HTML + 1 WHO
+  Headlines DEAD-404 + 1 Inside Climate News duplicate);
+  resulting sourceCount 119 → 110; wire-service Plan v6 type
+  collapsed from 7 to 0 effective.
+- Phase A source audit Phase 2 gap analysis synthesis
+  (commit 4f2a91b, 546 lines): Sprint 4 Issue 4.6 deliverable;
+  3-tier priority ranking (P0 regional + P1 category + P2
+  depth); 45 minimum needed exceeds 40 budget by 5 → α/β/γ/δ
+  allocation options for Phase B Kickoff Brief; wire-service
+  rebuild framed as not refinement but rebuild-from-scratch;
+  South Asia sub-regional gap surfaced (5 of 7 countries at
+  zero); 7 open questions parked for Sprint 6.7.
+- Sprint 4 progress: 3 of 7 → 4 of 7 issues DONE (4.3 + 4.6
+  closed); 1 PARTIAL (4.7 — illustrative candidates surfaced,
+  finalization deferred); 2 NOT STARTED (4.4 schema + 4.5
+  backfill, both session 26).
+
+Session 25 Extension work shipped (this entry):
+- Sprint 6.2 production smoke test (per Phase A Kickoff Brief
+  Sprint 6 Issue 6.2). Two production deploys verified:
+  * 60cfebf (Urdu i18n from session 24 Part 3)
+  * 6278ab6 (sources.js cleanup from session 25 main)
+- All 12 Urdu translations verified live in production
+  ur-CVmHELql.js chunk
+- All 5 English placeholders confirmed absent from production
+- sourceCount: 110 verified ✓
+- Article ingestion healthy (+67 articles in 20min); no
+  removed-source articles in /api/news sample
+- /api/events false-alarm investigation captured as finding #83
+  (endpoint is SSE not REST; frontend uses /api/ri/events for
+  REST; institutional learning for Phase B smoke-test catalog)
+- 1 new finding (#83).
+- Sprint 6 progress: 2 of 7 → 3 of 7 issues CLOSED (6.1 + 6.2
+  + 6.4).
+- Binding kickoff gate: 4 of 8 MET (unchanged — Sprint 6.2
+  closure below gate granularity); "No outstanding production
+  incidents" evidence-quality upgraded from MET-by-inference to
+  MET-by-smoke-test-verification.
+
+Calendar pace honest accounting:
+- Session 25 main duration: ~2 hours (Sprint 4 Phase 2 cleanup
+  + gap analysis)
+- Session 25 Extension duration: ~30 min (smoke test + false-
+  alarm investigation + finding capture)
+- Total session 25: ~2.5 hours
+
+Phase A close-out remaining (post-session-25 Extension):
+- Sprint 4 Phase 3 (issues 4.4 schema + 4.5 backfill + 4.7
+  finalization): 1-2 sessions (session 26)
+- Sprint 3 close-outs (5 metrics dashboard 3.4 + raw_signals
+  drop 3.1): 1-2 sessions
+- Sprint 5 audits + 8 tracker templates: 2-3 sessions
+- Sprint 6 remaining (6.3 metrics snapshot depends on 3.4;
+  6.7 Phase B Kickoff Brief drafting): 2-3 sessions
+- Total: 6-10 sessions to clear binding kickoff gate (was 7-11;
+  -1 from Sprint 6.2 closure)
+
+Production state at session 25 Extension close:
+- Production code: 6278ab6 (session 25 sources.js cleanup;
+  deployed ~50 min before this smoke test)
+- Repository HEAD: 4f2a91b (gap analysis doc)
+- sourceCount: 110 (verified)
+- Articles: ~27,200
+- Memory: 60/89 MB
+- Scheduler healthy, lastRun recent
+- No outstanding production incidents (verified by smoke test)
+
+Next session candidates (priority order):
+1. **Sprint 4 Phase 3** (close Sprint 4 entirely) — 1-2 sessions.
+   Highest leverage now that audit Phase 2 context is freshest.
+   Closes 4.4 schema + 4.5 backfill + 4.7 finalization.
+2. **Sprint 3 close-outs** — 1-2 sessions. 5 metrics dashboard
+   unblocks Sprint 6.3.
+3. **Sprint 5 audits begin** — 1-2 sessions per audit.
+4. **Sprint 6.7 Phase B Kickoff Brief drafting** — 2-3 sessions.
+   Best after Sprint 4-5 audits complete for full Track 1
+   input.
+
+CSP observation continues per finding #50. raw_signals drop
+(Sprint 3.1) remains pending. 5 metrics dashboard (Sprint 3.4)
+remains pending.
+
+Session 25 Extension close: production at 6278ab6. Sprint 4
+materially advanced (4 of 7 closed). Sprint 6.2 closed cleanly.
+Smoke test methodology surfaced false-alarm investigation
+discipline that Phase B should encode. 83 cumulative findings
+(was 82 at session 25 main close).
 ```
