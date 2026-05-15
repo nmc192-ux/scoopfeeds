@@ -6,9 +6,12 @@
 
 export const RSS_SOURCES = [
   // ─── TOP NEWS / GENERAL ───────────────────────────────────────────
-  { name: "Reuters",         url: "https://feeds.reuters.com/reuters/topNews",            category: "top",     credibility: 10, region: "global" },
+  // Note: Reuters topNews + Associated Press apf-topnews removed
+  // 2026-05-15 (Phase A source audit Phase 2 / Sprint 4.3).
+  // feeds.reuters.com decommissioned (NXDOMAIN); apnews.com/apf-*
+  // returns HTML hub page, no public RSS replacement exists.
+  // Wire-service category needs Phase B Track 1 rebuild.
   { name: "BBC News",        url: "https://feeds.bbci.co.uk/news/rss.xml",               category: "top",     credibility: 10, region: "global" },
-  { name: "Associated Press",url: "https://apnews.com/apf-topnews",                      category: "top",     credibility: 10, region: "global" },
   { name: "NPR News",        url: "https://feeds.npr.org/1001/rss.xml",                  category: "top",     credibility: 9,  region: "us"     },
   { name: "The Guardian",    url: "https://www.theguardian.com/world/rss",               category: "top",     credibility: 9,  region: "global" },
 
@@ -17,14 +20,12 @@ export const RSS_SOURCES = [
   { name: "The Hill",        url: "https://thehill.com/news/feed/",                      category: "politics", credibility: 8,  region: "us"     },
   { name: "NPR Politics",    url: "https://feeds.npr.org/1014/rss.xml",                  category: "politics", credibility: 9,  region: "us"     },
   { name: "BBC Politics",    url: "https://feeds.bbci.co.uk/news/politics/rss.xml",      category: "politics", credibility: 10, region: "global" },
-  { name: "Reuters Politics",url: "https://feeds.reuters.com/reuters/politicsNews",      category: "politics", credibility: 10, region: "global" },
 
   // ─── INTERNATIONAL ────────────────────────────────────────────────
   { name: "BBC World",       url: "https://feeds.bbci.co.uk/news/world/rss.xml",         category: "international", credibility: 10, region: "global" },
   { name: "Al Jazeera",      url: "https://www.aljazeera.com/xml/rss/all.xml",           category: "international", credibility: 8,  region: "global" },
   { name: "DW English",      url: "https://rss.dw.com/rdf/rss-en-all",                  category: "international", credibility: 9,  region: "global" },
   { name: "France 24",       url: "https://www.france24.com/en/rss",                    category: "international", credibility: 9,  region: "global" },
-  { name: "Reuters World",   url: "https://feeds.reuters.com/reuters/worldnews",         category: "international", credibility: 10, region: "global" },
 
   // ─── PAKISTAN ─────────────────────────────────────────────────────
   { name: "Dawn News",       url: "https://www.dawn.com/feed",                           category: "pakistan", credibility: 9,  region: "pk"     },
@@ -39,7 +40,6 @@ export const RSS_SOURCES = [
   { name: "ESPN",            url: "https://www.espn.com/espn/rss/news",                 category: "sports",  credibility: 9,  region: "us"     },
   { name: "BBC Sport",       url: "https://feeds.bbci.co.uk/sport/rss.xml",             category: "sports",  credibility: 10, region: "global" },
   { name: "Sports Illustrated", url: "https://www.si.com/rss/si_topstories.rss",        category: "sports",  credibility: 8,  region: "us"     },
-  { name: "Reuters Sports",  url: "https://feeds.reuters.com/reuters/sportsNews",       category: "sports",  credibility: 10, region: "global" },
 
   // ─── SCIENCE ──────────────────────────────────────────────────────
   { name: "Science Daily",   url: "https://www.sciencedaily.com/rss/all.xml",           category: "science", credibility: 9,  region: "global" },
@@ -58,8 +58,6 @@ export const RSS_SOURCES = [
 
   // ─── PUBLIC HEALTH ────────────────────────────────────────────────
   { name: "CDC Newsroom",    url: "https://tools.cdc.gov/api/v2/resources/media/403372.rss", category: "public-health", credibility: 10, region: "us" },
-  { name: "WHO Headlines",   url: "https://www.who.int/feeds/entity/mediacentre/news/en/rss.xml", category: "public-health", credibility: 10, region: "global" },
-  { name: "Reuters Health",  url: "https://feeds.reuters.com/reuters/healthNews",       category: "public-health", credibility: 10, region: "global" },
 
   // ─── SELF HELP ────────────────────────────────────────────────────
   { name: "Psychology Today",url: "https://www.psychologytoday.com/us/front-page/rss.xml", category: "self-help", credibility: 8, region: "us" },
@@ -115,7 +113,6 @@ export const RSS_SOURCES = [
   { name: "Bloomberg Tech",  url: "https://feeds.bloomberg.com/technology/news.rss",  category: "tech",    credibility: 10, region: "global" },
 
   // ─── BUSINESS ─────────────────────────────────────────────────────
-  { name: "Reuters Business",url: "https://feeds.reuters.com/reuters/businessNews",   category: "business", credibility: 10, region: "global" },
   { name: "BBC Business",    url: "https://feeds.bbci.co.uk/news/business/rss.xml",   category: "business", credibility: 10, region: "global" },
   { name: "CNBC",            url: "https://www.cnbc.com/id/100003114/device/rss/rss.html", category: "business", credibility: 9, region: "us" },
   { name: "Forbes",          url: "https://www.forbes.com/business/feed/",            category: "business", credibility: 8,  region: "global" },
@@ -177,7 +174,9 @@ export const RSS_SOURCES = [
   { name: "Decrypt",            url: "https://decrypt.co/feed",                                  category: "business", credibility: 7, region: "global" },
 
   // ─── CLIMATE / ENERGY ─────────────────────────────────────────────
-  { name: "Inside Climate News", url: "https://insideclimatenews.org/feed/",                     category: "environment", credibility: 9, region: "global" },
+  // Note: Inside Climate News duplicate removed 2026-05-15 (Phase A
+  // source audit Phase 2). Canonical entry retained at the Environment
+  // section above (credibility 8 per first-occurrence discipline).
   { name: "Grist",              url: "https://grist.org/feed/",                                  category: "environment", credibility: 8, region: "global" },
   { name: "Climate Home News",  url: "https://www.climatechangenews.com/feed/",                  category: "environment", credibility: 8, region: "global" },
 
