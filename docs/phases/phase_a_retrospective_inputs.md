@@ -3221,6 +3221,164 @@ finding #76 (drift origin); finding #56 (R1-R4 origin); finding
 Strategic Plan v6 §9 Phase B; Skills Architecture v1 §7 + §10;
 Decisions Log v1 (no changes required)
 
+### 81. Brief inaccuracy pattern recurring at Sprint 2 close-out — updated count ~7 of 8
+
+Session 24 Part 3 (Sprint 2 close-out investigation) added two
+more wrong-premise discoveries to the running tally:
+
+- **Sprint 2 Issue 2.3** (hollow feature copy): Brief specified
+  three pages (TruthGap, Leaderboard, Anomalies) as needing
+  explanatory copy. Investigation revealed all three pages
+  already have title + explanatory subhead + empty-state copy.
+  Brief premise was wrong; no code change needed. Issue closed
+  as CLOSED-WRONG-PREMISE.
+
+- **Sprint 2 Issue 2.5** (wire dead nav.* keys): Brief described
+  "22 of 36 keys never reach t()". Investigation traced the
+  indirection pattern (`labelKey: "nav.X"` + `t(labelKey)`
+  rendering in MoreMenu + EventsPage chip arrays) and found
+  ALL 28 nav.* keys ARE wired. The grep that fails to find
+  literal `t('nav.X')` calls produces the misleading dead-keys
+  count. Brief premise was wrong; original "dead keys" framing
+  closed as CLOSED-WRONG-PREMISE.
+
+Updated count: **~7 of 8 inspected code issues had Brief
+premises factually wrong** (vs 5 of 6 per finding #15; +2 from
+Sprint 2 close-out).
+
+Phase A's Brief was wrong on close inspection in:
+- Sprint 1 Issue 1.3 (admin auth — already fixed by Codex)
+- Sprint 1 Issue 1.5 (timeline duplication — 3× not 2×, cost
+  was DB ops not LLM tokens)
+- Sprint 2 Issue 2.1 (ALTER TABLE log spam — guard pattern
+  already in place)
+- Sprint 2 Issue 2.3 (hollow feature copy — pages already had
+  copy)
+- Sprint 2 Issue 2.5 (dead nav.* keys — all wired via
+  indirection)
+- Sprint 3 Issue 3.3 (dead isUrdu variable — actually in use)
+
+Only Sprint 1 Issue 1.7 (smoke test design) was substantively
+as the Brief described — and even there the smoke test
+referenced a non-existent metric (finding #6).
+
+The pattern validates D1 ("Brief written without inspecting
+current code state") in Phase A Retrospective v1.0 §4. The Brief
+was written without auditing Codex's prior hardening, without
+inspecting actual UI state, without tracing the indirection
+pattern.
+
+Implication for Phase B Kickoff Brief drafting (Sprint 6.7):
+investigation-before-edit should be encoded as Layer 4 (issue
+template) requirement, not Layer 1 (strategic plan) aspiration.
+Concretely:
+- Issue template requires "Premise verification" step before
+  acceptance criteria are locked
+- "Verified current state of X" becomes a documented prerequisite
+- Brief-versus-reality gaps captured in retrospective inputs
+  file in real-time, not at audit time
+- Mid-phase Brief refresh practice (per Phase A Retrospective
+  §7.3 Addition 1) enforced as Layer 2 hygiene, not optional
+
+The pattern is structural, not anomalous. Phase B Briefs should
+be written against verified codebase state, with explicit
+re-verification at sprint boundaries.
+
+Refs: finding #15 (D1 / Brief inaccuracy origin, 5 of 6 wrong);
+finding #75 UNCLEAR 4 (isUrdu premise wrong); finding #82 (Urdu
+parity full scope finding from same investigation);
+phase_a_retrospective.md §4 D1; Sprint 2 Issue 2.3 + 2.5
+close-out investigation in session 24 Part 3
+
+### 82. Urdu nav.* parity gap surfaced and resolved — full scope 12 keys, not initial 7
+
+Sprint 2 Issue 2.5 investigation (session 24 Part 3) initially
+identified 7 nav.* keys missing from ur.json relative to en.json:
+nav.ai, nav.categories, nav.climate, nav.crypto, nav.health,
+nav.space, nav.sports.
+
+**Closer inspection during Phase 24C.2 step 2 revealed an
+additional 5 keys present in ur.json but with English placeholder
+values** (introduced in session 16 commit `6821ceb` when
+EventsPage chip-labels were wired): `nav.all: "All"`,
+`nav.politics: "Politics"`, `nav.tech: "Tech"`, `nav.science:
+"Science"`, `nav.geopolitics: "Geopolitics"`.
+
+**Real gap: 12 nav.* items showing English fallback to Urdu users
+in MoreMenu / EventsPage, not 7.**
+
+DrJ chose Option B scope (12 keys). All 12 translations applied
+to ur.json in commit (forthcoming SHA captured in commit message
++ Pace Tracker). Translations selected by DrJ from style-aligned
+alternatives:
+
+| Key | Urdu translation | Style |
+|---|---|---|
+| nav.ai | اے آئی | Transliteration |
+| nav.categories | زمرے | Pure Urdu |
+| nav.climate | موسمیات | Pure Urdu (distinct from nav.weather = موسم) |
+| nav.crypto | کرپٹو | Transliteration |
+| nav.health | صحت | Pure Urdu |
+| nav.space | خلا | Pure Urdu |
+| nav.sports | اسپورٹس | Transliteration (matches Pakistani sports media) |
+| nav.all | تمام | Pure Urdu |
+| nav.politics | سیاست | Pure Urdu |
+| nav.tech | ٹیکنالوجی | Transliteration |
+| nav.science | سائنس | Transliteration |
+| nav.geopolitics | جیو پولیٹکس | Transliteration |
+
+**Institutional learning (the richer takeaway):**
+
+Close-out investigation can produce scope larger than the
+original audit estimate. The initial gap inventory (en/ur key
+comparison) found 7 missing. The actual user-facing gap
+(English-rendered nav items in Urdu UI) was 12. Investigation
+caught the 5-key placeholder pattern that the inventory's
+key-presence check missed.
+
+This generalizes: **audit summaries that count presence ("21
+keys in ur.json") can mask state quality ("only 16 of those 21
+are actually translated").** Phase B audits should distinguish:
+- **Presence audit**: does the key exist?
+- **Completeness audit**: does the key have a non-placeholder
+  value?
+
+The two are not the same. Finding #75 (Phase A exit criteria
+audit) used presence-style counts and inherited the inaccuracy;
+this Sprint 2 close-out investigation surfaced the deeper
+completeness gap.
+
+Per Decision 6 (Urdu as full UI language through Phase D),
+Urdu parity matters for the regional audience Strategic Plan
+v6 explicitly targets. This 12-key fix closes a real UX gap
+that predated finding #75 audit (the gap existed at audit time
+but audit didn't surface it because key-count was the metric).
+
+Cross-reference with finding #81: this investigation is one of
+the seven instances where close inspection produced a different
+picture than the Brief / audit estimate. The institutional
+pattern is: summary metrics mask state quality; investigation
+finds gaps that aggregations hide.
+
+Implication for Phase B Track 2 (architecture):
+- i18n parity becomes a continuous CI check (script to compare
+  en.json and ur.json key-sets AND value non-placeholderness),
+  not a manual audit
+- Future locale files (ar.json for Arabic per Decision 6 Phase
+  E) inherit the same CI parity requirement
+- Sprint 5 search audit (deferred to session 25 in Sprint 4-5
+  audit cluster) should apply this presence-vs-completeness
+  distinction to FTS5 + sqlite-vec scaffolding state
+
+Refs: Decision 6 (Urdu as full UI language); finding #75 (audit
+inherited presence-style count without completeness check);
+finding #81 (Brief inaccuracy pattern this fits into); session
+24 Part 3 ur.json commit (SHA captured in commit message);
+Phase A Retrospective v1.0 §5.4 (audit-vs-investigation
+distinction); commit `6821ceb` session 16 (origin of placeholder
+keys); MoreMenu.jsx + EventsPage.jsx (consumers of all 28
+nav.* keys via indirection pattern)
+
 ---
 
 ## Pace Tracker
@@ -3800,4 +3958,148 @@ choices reflect priorities that the recommendations did not weight
 identically. Both views were captured in the reconciliation
 document so future sessions can see why the path chosen was
 chosen, not just that it was chosen.
+
+---
+
+PACE TRACKER (updated session 24 Part 3, 2026-05-15)
+
+Note: sessions 23 (Phase A Retrospective DRAFT v0.1, commit
+8ed6016) and 24 Parts 1-2 (retrospective v1.0 final 72a7eb8;
+source audit Phase 1 70cac7b) shipped without dedicated Pace
+Tracker entries. This entry consolidates session 23 + session 24
+to date.
+
+Session 23 work shipped (recap):
+- Phase A Retrospective DRAFT v0.1 (commit 8ed6016, 768 lines)
+  per Execution Method v1 §11.2 template. Synthesis from 80
+  findings + exit verification + strategic-tactical
+  reconciliation.
+
+Session 24 Part 1 work shipped:
+- Phase A Retrospective v1.0 final (commit 72a7eb8). Seven
+  surgical refinements applied (status header, sign-off date,
+  §1 metadata table v1.0 row, §8 production snapshot freshness,
+  §8.2 documents-produced row, §10.4 gate row, §11 sign-off
+  record replacement). Substantive synthesis locked without
+  softening D4/D5/D6 honest tensions or W7 institutional
+  fragility framing.
+- Sprint 6 Issue 6.4 status: CLOSED.
+- Binding kickoff gate: 2 of 8 → 3 of 8 MET.
+
+Session 24 Part 2 work shipped:
+- Phase A Source Audit Phase 1 (commit 70cac7b, 592 lines).
+  Sprint 4 Issues 4.1 (inventory) + 4.2 (matrix categorization)
+  + 4.3 partial (dead/duplicate flagging). Categorization-first
+  per UNCLEAR 5 reframing. 119 RSS sources mapped to Plan v6
+  17×10×10 matrix.
+- Headline coverage findings: 9 of 17 Plan v6 categories ZERO
+  coverage; 3 regions zero/near-zero (Southeast Asia, Russia/
+  Central Asia, Oceania); MENA+SSA+East Asia near-zero;
+  specialized publications dominate at 48%; local-language
+  sources at 0.
+- 1 confirmed duplicate (Inside Climate News at lines 71+180);
+  9 dead-candidate URLs flagged for HTTP verification in
+  session 25.
+- Sprint 4 Phase 2 (issues 4.4-4.7) defers to session 25.
+
+Session 24 Part 3 work shipped (Sprint 2 close-out):
+- Sprint 2 Issue 2.3 (hollow feature copy): **CLOSED-WRONG-
+  PREMISE**. All three pages (TruthGap, Leaderboard,
+  Anomalies) verified to have title + explanatory subhead +
+  empty-state copy already. No code change needed.
+- Sprint 2 Issue 2.5 (wire dead nav.* keys): **CLOSED-WRONG-
+  PREMISE** on original "dead keys" framing — all 28 nav.*
+  keys ARE wired via indirection pattern. PLUS Urdu nav.*
+  parity gap surfaced and resolved: 12 translations added/
+  replaced in ur.json (7 missing keys + 5 English placeholder
+  replacements). See findings #81 + #82.
+- Sprint 2 Issue 2.2 (CSP enable): **DEFERRED-WITH-TRIGGER**
+  per finding #50. Finding #50 documents 4 deferral reasons
+  + revisit triggers ("after substantial traffic growth OR
+  AdSense approval, whichever comes first"). No new finding
+  needed for 2.2; finding #50 is binding rationale.
+- Sprint 2 status: **DONE**. 3 of 6 issues DONE via original
+  work (2.1 ALTER TABLE logging; 2.4 startup integration log;
+  partial 2.5/2.6); 2 of 6 CLOSED-WRONG-PREMISE via Sprint 2
+  close-out investigation (2.3, 2.5 dead-keys framing); 1 of
+  6 DEFERRED-WITH-TRIGGER (2.2 CSP). All Sprint 2 close-out
+  work complete.
+- 2 new findings (#81 Brief inaccuracy pattern; #82 Urdu parity
+  full scope).
+- **Binding kickoff gate: 3 of 8 → 4 of 8 MET.** Condition 1
+  (Sprint 0-2 closed) now MET.
+
+Calendar pace honest accounting:
+- Session 23 duration: ~1 hour (retrospective draft synthesis)
+- Session 24 Part 1 duration: ~30 minutes (v1.0 refinement)
+- Session 24 Part 2 duration: ~2 hours (source audit Phase 1)
+- Session 24 Part 3 duration: ~1 hour (Sprint 2 close-out
+  investigation + 12 translations + findings capture)
+- Total session 23 + 24: ~4.5 hours of active work across
+  multiple operator sessions
+
+Phase A close-out remaining (post session 24 Part 3):
+- Sprint 4 Phase 2 (issues 4.3-full + 4.4 + 4.5 + 4.6 + 4.7):
+  1-2 sessions
+- Sprint 5 audits + tracker templates: 2-3 sessions
+- Sprint 3 close-outs (5 metrics dashboard + raw_signals drop):
+  1-2 sessions
+- Sprint 6 remaining (production smoke test 6.2; metrics
+  snapshot 6.3 depends on 3.4; Phase B Kickoff Brief drafting
+  6.7): 3-4 sessions
+- **Total estimated: 7-11 sessions to clear binding kickoff
+  gate.**
+
+Binding kickoff gate after session 24 Part 3:
+
+| Gate condition | Status |
+|---|---|
+| Sprint 0-2 closed | **MET ✓ (this session)** |
+| Phase A Retrospective written | MET ✓ (session 24 Part 1) |
+| No outstanding production incidents | MET |
+| Strategic clarity on Reality Index | PARTIAL |
+| Operational baseline understood | PARTIAL |
+| Time/energy budget realistic | DrJ confirms per session |
+| Phase B Kickoff Brief drafted | NOT MET |
+| Three-track coordination mechanism documented | NOT MET |
+
+Net: **4 of 8 conditions MET**; 4 remain to clear before Phase B
+can start.
+
+Brief inaccuracy meta-observation per finding #81: ~7 of 8
+inspected code issues had Brief premises wrong. Pattern is
+structural, not anomalous. Phase B Kickoff Brief drafting
+(Sprint 6.7) should encode investigation-before-edit as Layer 4
+issue-template requirement.
+
+Production unchanged at 1cbf92b. 82 cumulative findings (was 80
+before this session-part).
+
+Next session candidates (priority order):
+1. **Sprint 4 Phase 2** (close Sprint 4 entirely) — 1-2 sessions.
+   Highest leverage: completes source-audit input for Phase B
+   Kickoff Brief drafting; advances categorization-quality
+   scoring chain.
+2. **Sprint 3 close-outs** (5 metrics + raw_signals) — 1-2
+   sessions. Unblocks Sprint 6.3 metrics snapshot.
+3. **Sprint 5 audits begin** — 1-2 sessions per audit (social,
+   search, then tracker templates). Each audit independent.
+4. **Sprint 6.7 Phase B Kickoff Brief drafting** — 2-3 sessions
+   (largest remaining single item). Best after Sprint 4-5
+   audits complete for full input.
+
+Recommended order: 1 → 3 → 2 → 4. Source audit Phase 2 first
+because session 24 Part 2 context freshest and Phase B Kickoff
+Brief eventually depends on it.
+
+CSP observation continues per finding #50. raw_signals drop
+(Sprint 3.1) remains pending. 5 metrics dashboard (Sprint 3.4)
+remains pending.
+
+Session 24 Part 3 close: production at 1cbf92b (unchanged across
+session 24). Sprint 2 closed. Binding kickoff gate advanced one
+notch. The most leveraged single output of session 24 Part 3 was
+catching the 12-key Urdu parity gap vs the audit's 7-key
+estimate — investigation-vs-summary tension surfaced as a real
+institutional pattern (finding #82).
 ```
