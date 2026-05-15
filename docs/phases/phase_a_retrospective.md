@@ -1,11 +1,11 @@
 # Phase A Retrospective — Stabilize and Audit
 
-**Status:** DRAFT v0.1 — pending review and refinement
+**Status:** FINAL v1.0 — Phase A Retrospective signed off
 **Document type:** Phase Retrospective (per Execution Method v1 §11.2)
 **Phase:** A — Stabilize and Audit
 **Author:** DrJ (Founder) + Claude Code
 **Draft date:** 2026-05-15 (Session 23)
-**Final date:** TBD (next session refinement + sign-off)
+**v1.0 sign-off date:** 2026-05-15 (Session 24)
 
 **Source inputs:**
 - `docs/phases/phase_a_retrospective_inputs.md` (80 findings, 3,803 lines)
@@ -24,6 +24,7 @@
 | Strategic goal (per Strategic Plan v6 §9) | *"Production runs new architecture. Foundation sound. Existing assets audited."* |
 | Phase A formalized in repo | 2026-05-05 (commit `a48715c`) |
 | Draft date | 2026-05-15 (Session 23) |
+| v1.0 sign-off date | 2026-05-15 (Session 24) |
 | Nominal calendar days | 10 days |
 | Effective execution time | 22 sessions (sessions 9-22 + earlier predecessor sessions) |
 | Original timeline | "Now → 4 weeks" (Strategic Plan v6); "4-6 weeks acceptable" (Phase A Kickoff Brief §0) |
@@ -520,13 +521,14 @@ Per Strategic Plan v6 §15 success metrics. **Honest acknowledgment:** the 5 met
 | Layer 1 returning user rate (7-day) | Baseline TBD | Not measured | No analytics dashboard configured |
 | Source diversity index | Baseline TBD | sourceCount: 119 | `/api/health` sourceCount; not yet weighted by category × region × type |
 
-**Production state snapshot at draft date:**
-- Production code: `1cbf92b`
-- HEAD: `1e3d8b3` (after exit verification commit `23ccf5b`)
-- Articles in DB: ~27,684
-- Videos in DB: 2,367
+**Production state snapshot at v1.0 sign-off (2026-05-15):**
+- Production code: `1cbf92b` (unchanged since session 20 Phase S3 deploy)
+- HEAD: `8ed6016` (DRAFT v0.1 commit); v1.0 being committed in this session
+- Articles in DB: 26,346
+- Videos in DB: 2,258
 - sourceCount: 119
-- Memory: 66 MB / 99 MB total
+- Memory: 52 MB / 99 MB total
+- scheduler.lastRun: 2026-05-15T15:30 UTC (within minutes of v1.0 sign-off)
 - No outstanding production incidents
 
 **What this snapshot says:**
@@ -547,7 +549,7 @@ Per Strategic Plan v6 §15 success metrics. **Honest acknowledgment:** the 5 met
 |---|---|
 | Production commits | ~11 (sessions 9-22) |
 | Findings captured | 80 (3,803 lines) |
-| Documents produced | Strategic Plan v6, Decisions Log v1, Skills Architecture v1, Execution Method v1, Phase A Kickoff Brief, Comparative Analysis v1, Strategic-Tactical Reconciliation v1, Phase A Exit Verification, this Retrospective draft |
+| Documents produced | Strategic Plan v6, Decisions Log v1, Skills Architecture v1, Execution Method v1, Phase A Kickoff Brief, Comparative Analysis v1, Strategic-Tactical Reconciliation v1, Phase A Exit Verification, Phase A Retrospective v1.0 (this document) |
 | Total documentation lines | ~10,000+ across all artifacts |
 | Sprint 0-3 operational issues DONE | 22 of 28 (78%) |
 | Sprint 4-6 operational issues DONE | 0 of 22 (0%) |
@@ -662,7 +664,7 @@ Per `phase_a_exit_verification.md` §6 + Skills Architecture v1 §10:
 | Gate condition | Current status | What clears it |
 |---|---|---|
 | Sprint 0-2 closed | Sprint 2 PARTIAL | Sprint 2 close-out items (1 session) |
-| Phase A Retrospective written | NOT MET (this document is DRAFT v0.1) | Next session refinement + sign-off |
+| Phase A Retrospective written | **MET** (this v1.0 commit) | — |
 | No outstanding production incidents | MET | — |
 | Strategic clarity on Reality Index | PARTIAL | Phase B Kickoff Brief decisions |
 | Operational baseline understood | MET (partial) | Sprint 4 audit clarifies fully |
@@ -744,25 +746,65 @@ Phase B opens with eyes open about these realities, not under aspirational frami
 
 ---
 
-## 11. Draft Status
+## 11. v1.0 Sign-Off Record
 
-This document is **DRAFT v0.1** — pending review and refinement before final commit as Sprint 6.4 artifact.
+This document is **FINAL v1.0** — Phase A Retrospective per Execution Method v1 §11.2 template. Sprint 6 Issue 6.4 **CLOSED**.
 
-**Known gaps in this draft:**
-- Section 8 (Metrics snapshot) is necessarily partial because Sprint 3.4 metrics dashboard wasn't implemented. Final version may incorporate session-23-or-later snapshot data if available.
-- Section 5.2 (audience learnings) could be elaborated with traffic shape data if a future session captures it.
-- Section 9 (Risk register) lists 4 new risks; final version should map these into Strategic Plan v6 §11 format for next quarterly review.
-- Section 10.7 open questions are placeholders — actual resolution happens in Phase B Kickoff Brief drafting, not here.
+### 11.1 v1.0 refinement scope (from DRAFT v0.1)
 
-**Next session refinement scope:**
-- Review tone for honesty calibration
-- Fill any thin sections identified
-- Cross-check all finding references for accuracy
-- Verify §8 metrics with any new production state at refinement time
-- Sign off as Sprint 6.4 close
+Refinements applied in session 24 (commit forthcoming):
 
-After refinement and DrJ sign-off, this document becomes the **formal Phase A Retrospective** — a binding kickoff gate item per Skills Architecture v1 §10 + `strategic_tactical_reconciliation_v1.md` §8.3.
+- Status header: DRAFT v0.1 → FINAL v1.0
+- §1 metadata table: v1.0 sign-off date row added
+- §8 production snapshot refreshed to 2026-05-15 values (articles 26,346, videos 2,258, memory 52 MB; sourceCount 119 and production code `1cbf92b` unchanged from session 20)
+- §8.2 documents-produced row updated to reflect v1.0 status
+- §10.4 binding kickoff gate row updated: Phase A Retrospective written now MET
+- This §11 replaced (DRAFT v0.1 had refinement scope; v1.0 has sign-off record)
+
+### 11.2 What is locked at v1.0
+
+Substantive synthesis preserved from DRAFT v0.1 without softening:
+
+- §3 W1-W7 (seven worked-well patterns) — including W7 institutional fragility framing about the single ad-hoc human question
+- §4 D1-D6 (six didn't-work patterns) — D4 silent strategic drift, D5 estimate undercount, D6 audit displacement honest tensions preserved as-is
+- §5 learnings (codebase / audience / technology / team velocity) — §5.2 and §5.3 kept at draft density per tight-is-better-than-padded principle
+- §6 surprises (five ranked items)
+- §7 Strategic Plan v6 + Execution Method v1 + Phase B Kickoff Brief implications
+- §8 Phase A baseline metrics with honest acknowledgment that 5 metrics dashboard (Sprint 3.4) was NOT implemented in Phase A; observable values updated, unimplemented metrics remain marked Not measured / Not applicable / Baseline TBD
+- §9 risk register (R-PA-1 through R-PA-4 + 5 existing-risk status updates)
+- §10 inputs to Phase B Kickoff Brief drafting
+
+### 11.3 Binding kickoff gate progress after v1.0
+
+Per Skills Architecture v1 §10 + `strategic_tactical_reconciliation_v1.md` §8.3, this v1.0 sign-off clears one of eight gate conditions:
+
+| Gate condition | Status after v1.0 |
+|---|---|
+| **Phase A Retrospective written** | **MET ✓ (this v1.0)** |
+| Sprint 0-2 closed | NOT MET (Sprint 2 PARTIAL) |
+| No outstanding production incidents | MET |
+| Strategic clarity on Reality Index | PARTIAL |
+| Operational baseline understood | MET (partial) |
+| Time/energy budget realistic | DrJ confirms per session |
+| Phase B Kickoff Brief drafted | NOT MET |
+| Three-track coordination mechanism documented | NOT MET |
+
+**3 of 8 gate conditions MET; 5 remain to clear before Phase B can start.**
+
+### 11.4 Sprint 6 status after v1.0
+
+| Sprint 6 issue | Status after v1.0 |
+|---|---|
+| 6.1 Phase A exit verification | DONE (session 22, commit `23ccf5b`) |
+| 6.2 Full production smoke test | Not started |
+| 6.3 Metrics snapshot | Not started (depends on Sprint 3.4) |
+| **6.4 Formal Phase A Retrospective** | **CLOSED ✓ (this v1.0)** |
+| 6.5 Decisions Log review | Not needed (no review triggers fired per finding #75) |
+| 6.6 Strategic Plan v6 revision | Deferred to next quarterly review |
+| 6.7 Phase B Kickoff Brief draft | Not started |
+
+Sprint 6 progress: 2 of 7 issues CLOSED. Remaining 5 issues span ~5-7 sessions of close-out work.
 
 ---
 
-*End of document. Phase A Retrospective DRAFT v0.1.*
+*End of document. Phase A Retrospective v1.0.*
