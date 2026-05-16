@@ -1,7 +1,57 @@
 /**
  * RSS Feed Sources + YouTube Channel Sources + X (Twitter) Account Curation
- * Each source: name, url, category, credibility (1-10), region
- * isVideo: true marks YouTube channel RSS feeds
+ *
+ * This file is the canonical source-of-truth for source INGESTION:
+ * scheduler.js and videoFetcher.js import RSS_SOURCES and YOUTUBE_SOURCES
+ * directly from this module to fetch articles and videos.
+ *
+ * As of Sprint 4.4 (session 26, methodology v1.0), source QUALITY SCORING
+ * lives in a parallel database table — Migration 002 (`sources`). The DB
+ * table is seeded from this file during migration and is the canonical
+ * home for scoring columns:
+ *   - quality_score (0-100, per methodology v1.0)
+ *   - source_posture (one of 8 labels: Independent, State-affiliated,
+ *     Government, Corporate-PR, Corporate-owned, Academic, Advocacy,
+ *     Aggregator)
+ *   - quality_score_components (per-component scorecard JSON)
+ *   - quality_score_methodology_version
+ *   - quality_score_last_updated
+ *
+ * Ingestion reads from THIS FILE. Scoring reads from the DB TABLE.
+ * Both layers stay in sync because the DB table seeds from this file
+ * via INSERT OR IGNORE during migration, with partial unique indexes
+ * on `url` (RSS) and `channel_id` (YouTube) preventing duplicates.
+ *
+ * Phase B Track 2 (architecture) will decide whether ingestion migrates
+ * to DB-canonical (single source of truth). Until that decision lands,
+ * this dual-canonical pattern is intentional, not accidental — documented
+ * here so future readers do not assume one layer is stale.
+ *
+ * Entry shapes:
+ *   RSS_SOURCES:     { name, url, category, credibility (1-10), region }
+ *   YOUTUBE_SOURCES: { name, channelId, category, region }
+ *
+ * YouTube entries have no `credibility` field — the legacy 1-10 scoring
+ * system never applied to YouTube sources. Methodology v1.0 scores both
+ * RSS and YouTube sources on the same 0-100 scale (the DB column
+ * `credibility_legacy` is nullable to accommodate this honestly; see
+ * Migration 002 header for full deviation rationale).
+ *
+ * is_video is derived at DB-seed time: 0 for RSS_SOURCES rows, 1 for
+ * YOUTUBE_SOURCES rows. There is no per-entry isVideo flag in this file.
+ *
+ * Related files:
+ *   - backend/src/db/migrations/002_sources_table.js  (schema + seed)
+ *   - docs/content/source_credibility_methodology.md  (scoring methodology)
+ *
+ * Source-list change log:
+ *   2026-05-15  Sprint 4 audit Phase 2: removed 9 dead entries
+ *               (Reuters topNews + Associated Press apf-topnews + 7 others).
+ *               See docs/audits/phase_a_source_audit_phase1.md and
+ *               docs/audits/phase_a_source_audit_phase2_gap_analysis.md.
+ *   2026-05-17  Sprint 4.4: sources DB table created (Migration 002).
+ *               This file remains canonical for ingestion; DB table
+ *               canonical for scoring. No source-list changes.
  */
 
 export const RSS_SOURCES = [
