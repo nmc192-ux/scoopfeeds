@@ -3495,6 +3495,136 @@ Sprint 6 Issue 6.2; `App.jsx:96` (SSE EventSource usage);
 `docs/phases/phase_a_exit_verification.md` §3.7 (Sprint 6.2
 status pre-this-session: NOT STARTED → DONE)
 
+### 84. Sprint 4.4 — two Brief premise errors in a single sprint (count to 9 of 10)
+
+Session 26. Sprint 4.4 implementation surfaced **two distinct
+Brief premise errors** in the same sprint, both caught at the
+first verification step before any code merged. This updates the
+cumulative count of inspected Brief items with wrong premises
+from **7 of 8** (post-finding #81) to **9 of 10**.
+
+**Error 1 (instance #8) — "Add columns to sources table" (no
+such table existed).**
+
+Brief Sprint 4.4 instructed adding quality-scoring columns
+(`quality_score`, `quality_score_components`, `source_posture`,
+`quality_score_methodology_version`,
+`quality_score_last_updated`) to the existing `sources` table.
+Verification showed the `sources` table did not exist; the
+codebase had no `sources` DB infrastructure at all. Sources
+were entirely config-file-driven via
+`backend/src/config/sources.js`. The Brief premise — that a
+`sources` table existed to extend — was wrong. Implementation
+pivoted to creating the table from scratch as Migration 002,
+with scoring columns NULL-able until backfill in Sprint 4.5.
+
+**Error 2 (instance #9) — `credibility_legacy INTEGER NOT NULL`
+(44 YouTube entries have no credibility values).**
+
+Brief specified `credibility_legacy INTEGER NOT NULL` as a
+schema constraint, modelled on the assumption that all 154
+sources had a legacy credibility value to migrate. Verification
+of `sources.js` showed the 110 RSS sources had `credibility:
+<int>` fields but the 44 YouTube sources did not — YouTube
+entries use `{ name, channelId, category, region }` shape with
+no credibility field. Forcing NOT NULL would have required
+fabricating credibility values for 44 sources where the legacy
+system never produced one. Implementation made the column
+NULL-able (Deviation 1, founder APPROVED); NULL accurately
+reflects "the legacy scoring system did not score this source."
+
+**Path B schema decision (founder override on Deviation 2).**
+
+Initial implementation derived YouTube URLs from channelIds to
+satisfy a single `url` column. Founder requested revise to Path
+B: separate `url` and `channel_id` columns with a CHECK
+constraint enforcing exactly one identifier per row, plus
+partial unique indexes per column. Not a Brief inaccuracy per
+se — the Brief did not specify how to model YouTube-vs-RSS
+identifiers — but a documented schema decision against the
+simpler-looking "single url column" default. Rationale: schema
+should match data semantics rather than deriving identifiers
+that the data itself does not natively carry.
+
+**Cumulative count progression (Brief inaccuracies in inspected
+code issues):**
+
+- Finding #15 (Sprint 2, session 9): 5 of 6
+- Finding #81 (Sprint 2 close-out): 7 of 8
+- **Finding #84 (Sprint 4.4, this session): 9 of 10** — two
+  new instances from a single sprint
+
+Pattern across nine instances: the Brief consistently described
+code/schema/data state at a granularity below what was actually
+verifiable at the time of writing. Brief writes premises in
+terms of expected state; verification reveals the actual state
+has drifted in small but consequential ways.
+
+**Institutional implication for Phase B Kickoff Brief writing.**
+
+The pattern argues for a verification step in the Brief
+authoring workflow: each premise about existing code or data
+state should be verified against `git ls-files` / schema
+inspection / actual config-file content before the premise is
+written, not after. Cost of mis-premised work has been low in
+Phase A because diagnostic discipline catches errors early
+(see findings #15, #81, #84 themselves) but the cumulative
+session-time cost of premise-correction is non-trivial.
+
+The other half of the pattern is that **Sprint 4.4 alone
+produced two of the nine instances**. Sprints that touch
+unfamiliar territory (here: a DB layer that did not previously
+exist; a 0-100 scoring methodology that did not previously
+exist) are higher-density premise-error risks than sprints
+that extend known infrastructure. Phase B Brief authoring
+should weight verification effort by topic novelty.
+
+**Sprint 4 progress update.** After Sprint 4.4 ships:
+
+- 4.1 Phase A audit findings (sessions 22-25): DONE
+- 4.2 Source-by-source audit Phase 1 (HTTP verify all 119):
+  DONE (session 24)
+- 4.3 Dead-source cleanup (remove 9): DONE (session 25 main)
+- **4.4 Quality scoring schema + methodology: DONE (this
+  session)**
+- 4.5 Quality score backfill: NOT STARTED (session 27
+  candidate)
+- 4.6 Gap analysis synthesis: DONE (session 25 main)
+- 4.7 Phase B source priority list: PARTIAL (illustrative
+  candidates surfaced session 25; finalization deferred)
+
+**Sprint 4 status after Sprint 4.4 close: 5 of 7 DONE + 1
+PARTIAL + 1 NOT STARTED.**
+
+**Phase A close-out remaining (post-Sprint-4.4):**
+
+- Sprint 4.5 backfill + 4.7 finalization: 1-2 sessions
+- Sprint 3 close-outs (3.1 raw_signals drop + 3.4 metrics
+  dashboard): 1-2 sessions
+- Sprint 5 audits + 8 tracker templates: 2-3 sessions
+- Sprint 6 remaining (6.3 metrics depends on 3.4; 6.7 Phase B
+  Kickoff Brief drafting): 2-3 sessions
+- **Total: 6-10 sessions to clear binding kickoff gate**
+  (unchanged from session 25 Extension estimate; -1 from
+  Sprint 4.4 closure offset by +1 institutional capture work
+  for finding #84)
+
+**Refs:**
+
+- `backend/src/db/migrations/002_sources_table.js` (Path B
+  schema)
+- `backend/src/db/migrate.js` (migration wiring)
+- `backend/src/config/sources.js` (architectural breadcrumb
+  header per session 26)
+- `docs/content/source_credibility_methodology.md` (public
+  methodology v1.0)
+- Finding #15 (5-of-6 origin), Finding #81 (7-of-8); Finding
+  #82 (Urdu nav.* parity gap — separate Brief inaccuracy
+  thread, not counted in the 9-of-10 code-issue series)
+- Strategic Plan v6 §3 Capability 1
+- Decisions Log Decision 7 (open methodology + proprietary
+  weights) + Decision 16 (source onboarding workflow)
+
 ---
 
 ## Pace Tracker
@@ -4320,4 +4450,120 @@ materially advanced (4 of 7 closed). Sprint 6.2 closed cleanly.
 Smoke test methodology surfaced false-alarm investigation
 discipline that Phase B should encode. 83 cumulative findings
 (was 82 at session 25 main close).
+
+---
+
+PACE TRACKER (updated session 26, 2026-05-17)
+
+Session 26 work shipped:
+- Sprint 4.4 quality scoring infrastructure (Path A — full DB
+  migration approach): DONE
+  * Migration 002 created: sources table seeded with 154 rows
+    (110 RSS + 44 YouTube) plus 5 nullable scoring columns
+    (quality_score, quality_score_components, source_posture,
+    quality_score_methodology_version,
+    quality_score_last_updated)
+  * Path B schema decision (founder override): separate `url`
+    and `channel_id` columns with CHECK constraint enforcing
+    exactly one identifier per row; partial unique indexes per
+    column
+  * credibility_legacy nullable (Deviation 1 APPROVED): NULL
+    for 44 YouTube rows reflects "legacy system did not score
+    this source" honestly rather than fabricating values
+  * Migration verified twice on isolated test DB
+    (/tmp/scoop-migration-test): fresh run appliedCount=2, all
+    154 rows seeded, all shape invariants 0; idempotent re-run
+    appliedCount=0, no double-insert, CHECK constraint holds
+- Source credibility methodology v1.0 published as public
+  artifact:
+  * docs/content/source_credibility_methodology.md (455 lines)
+  * 5 components per Strategic Plan v6 §3 Capability 1
+    (editorial track record, methodology transparency, domain
+    expertise, independence, historical accuracy)
+  * 8 X-derived posture labels (Independent, State-affiliated,
+    Government, Corporate-PR, Corporate-owned, Academic,
+    Advocacy, Aggregator) with explicit per-label band ranges
+    and reasoning
+  * 6 score bands for public-tier presentation; numeric scores
+    visible only to Layer 2 (premium)
+  * Decision 7 split honored: rubric public, weights
+    proprietary, weight-bounds (5%-40% per component) disclosed
+    as constraint
+  * §9 Honest limitations holds the line — six sub-sections,
+    no softening, self-serving-acknowledgment on the
+    public/proprietary split itself
+- Architectural breadcrumb in sources.js header (per session-26
+  documentation discipline): explains parallel-infrastructure
+  pattern (sources.js canonical for INGESTION; DB table
+  canonical for SCORING), names both layers, lists entry
+  shapes, source-list change log
+- Finding #84 captured: two Brief premise errors in Sprint 4.4
+  alone (no sources table existed + credibility_legacy NOT NULL
+  incompatible with YouTube entries). Cumulative count of
+  inspected Brief items with wrong premises now 9 of 10 (was
+  7 of 8 at finding #81).
+
+Sprint 4 progress: 4 of 7 → 5 of 7 issues DONE + 1 PARTIAL +
+1 NOT STARTED (4.4 closed this session; 4.5 backfill is the
+session-27 candidate).
+
+Sprint 6 progress unchanged at 3 of 7.
+
+Binding kickoff gate: 4 of 8 MET (unchanged — Sprint 4.4
+closure is below gate granularity, same as Sprint 6.2 in
+session 25 Extension).
+
+Calendar pace honest accounting:
+- Session 26 duration: ~4 hours (hard cap per kickoff)
+- Phase 26.A migration design + Path B revision + verification:
+  ~90 min (including one detected-and-recovered worktree state
+  discrepancy before any DB or commit action — diagnostic
+  discipline working)
+- Phase 26.B methodology v1.0 drafting + founder review +
+  Q1-Q4 refinement: ~120 min
+- Phase 26.C sources.js architectural breadcrumb: ~10 min
+- Phase 26.D finding #84 + pace tracker: ~20 min
+- Phase 26.E commits + push: pending at time of this entry
+
+Phase A close-out remaining (post-session-26, unchanged from
+finding #84 accounting):
+- Sprint 4.5 backfill + Sprint 4.7 finalization: 1-2 sessions
+- Sprint 3 close-outs (3.1 raw_signals drop + 3.4 metrics
+  dashboard): 1-2 sessions
+- Sprint 5 audits + 8 tracker templates: 2-3 sessions
+- Sprint 6 remaining (6.3 metrics depends on 3.4; 6.7 Phase B
+  Kickoff Brief drafting): 2-3 sessions
+- Total: 6-10 sessions to clear binding kickoff gate
+
+Production state at session 26 close (no production deploy
+this session — schema work is local-only until Sprint 4.5
+backfill + rollout decision):
+- Production code: 6278ab6 (unchanged from session 25
+  Extension)
+- Migration 002 staged locally; no production migration run
+  yet (next deploy will apply it idempotently on startup)
+- sourceCount: 110 (unchanged)
+- Methodology v1.0 published in repo as canonical version
+- No outstanding production incidents
+
+Next session candidates (priority order):
+1. **Sprint 4.5 backfill** — highest leverage now that the
+   schema exists. Score all 154 sources against methodology
+   v1.0 using AI-agent-proposes + founder-finalizes workflow
+   per Decision 16. Likely 2 sessions.
+2. **Sprint 3 close-outs** — unblocks Sprint 6.3 metrics
+   dashboard.
+3. **Sprint 4.7 finalization** — Phase B source priority list
+   can run in parallel with 4.5 if appetite.
+4. **Sprint 5 + Sprint 6.7** — sequenced after 4.5 ships.
+
+Cumulative findings count: 83 → 84 (finding #84 captured this
+session).
+
+Session 26 close: production at 6278ab6 (unchanged from
+session 25 Ext). Sprint 4 schema infrastructure complete.
+Methodology v1.0 published as public artifact (citable per
+Decision 7). 84 cumulative findings. Brief inaccuracy count
+at 9 of 10 — Phase B Kickoff Brief authoring needs verification
+discipline per finding #84 institutional implication.
 ```
