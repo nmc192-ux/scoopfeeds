@@ -5388,3 +5388,145 @@ Migration 003 has been smoke-tested twice in isolated `/tmp` DBs against both fr
 - `/scoop-ops/*` URL convention rationale should be documented per finding #88. Candidate: a section in `docs/specs/` or a comment block at `backend/server.js:275` near the `/scoop-ops` mount block. Phase B Track 1 admin-surface work would naturally produce this artifact.
 - ALLOW_LEGACY_ADMIN_QUERY_KEY → Authorization: Bearer migration for admin pages (Phase B Track 1 scope when admin surface gets revisited).
 - `.env` Step 8 revert: ADMIN_BEARER_TOKEN + ALLOW_LEGACY_ADMIN_QUERY_KEY dev-only additions to be removed after this commit chain ships. Local-only — never committed (gitignored).
+
+---
+
+### Finding #89 — Dev verification with seeded test data masks production data-path divergence
+
+**Session 30 Sprint 6.3 baseline snapshot capture.** Phase 29.B.2 Sprint 3.4 metrics-ops endpoint was verified in dev with a backend Node test using a seeded `background_job_runs` table containing hand-crafted rows (1,450 completed / 32 failed / 8 running / 10 queued = 1,500 total). The query mechanics produced the expected query behavior (uptime 0.9667, failure rate 0.0213, in-flight 18, etc.). Dev verification passed cleanly.
+
+**Production verification at Sprint 6.3 baseline capture revealed three of four metrics return `null`** despite active production scheduler:
+
+- `background_job_runs` table appears empty for the 24h window at capture time, despite the production scheduler being healthy (`/api/health.scheduler.started: true`).
+- Scheduler `last*Run` values **do exist** (14 of 28 fields populated at the same query time per `/api/health.scheduler`), but the metrics-ops route's `typeof v === "number" && v > 0` filter excludes them — production stores those values as ISO strings (or possibly Date objects), not numeric epoch milliseconds.
+
+**Sub-pattern (new, distinct from #87 and #88):**
+
+- **#87 sub-pattern:** Brief premise valid at authoring, invalidated by intervening work.
+- **#88 sub-pattern:** Design choice assumed convention was stylistic preference when it was structural constraint.
+- **#89 sub-pattern (new):** Dev verification with seeded test data didn't reveal that the underlying data path differed in production. The query mechanics worked correctly against the test fixture; **the fixture itself didn't match production reality.**
+
+The pattern is distinct because the verification *succeeded* — the test ran, the SQL executed, the output matched expectations against the seeded data. The bug was upstream of the query in the data-population layer: the fixture invented rows that match the schema, but production code paths produce a different population profile. This is harder to catch than #84/#85 (Brief premise verifiably wrong against current state) or #88 (collision detectable on first browser navigation) because the verification looks complete.
+
+**Mitigation pattern for future verification:**
+
+- **When seeding test data, verify the seed structure matches actual production data structure** — not just schema-valid but production-shape-realistic. Cross-check counts, value distributions, and field types against a recent production snapshot before treating the seed as a valid fixture.
+- **Where possible, run verification against production-like state** rather than synthetic test data. For backend routes that query operational tables, this means either: (a) connecting the test to a recent prod DB snapshot, or (b) exercising the route via the actual scheduler/job flows that populate the operational tables, rather than skipping straight to canned SQL inserts.
+- **Document expected production data shapes alongside the seeded test patterns** so future readers can verify alignment. For metrics-ops specifically: a comment near the test seed noting "production rows are written by [X] via [Y]; production scheduler `last*Run` values are [Z type]" would have surfaced the divergence at design time.
+
+**Sprint 6.3 disposition.** Closed Sprint 3.4 metrics-ops design gaps as Phase B Track 1 followup with concrete diagnostic data captured in [`docs/audits/phase_a_baseline_metrics_snapshot.md`](../audits/phase_a_baseline_metrics_snapshot.md) §4. The fix scope includes (a) investigating scheduler `last*Run` value types and updating the filter to accept ISO string / Date / number forms, and (b) investigating `background_job_runs` population semantics, then choosing one of three remediation options listed in the snapshot doc §4.4. Estimated as ~1–2 Phase B Track 1 sessions.
+
+**Brief-inaccuracy count interaction.** Finding #89 is a verification-pattern sub-pattern, not a Brief-inaccuracy or design-choice sub-pattern. Doesn't increment the 10-of-11 Brief numerator. Stands as a distinct institutional lesson on test-fixture realism.
+
+**Refs:** [`docs/audits/phase_a_baseline_metrics_snapshot.md`](../audits/phase_a_baseline_metrics_snapshot.md) (Sprint 6.3 deliverable + §4 diagnostic findings); Phase 29.B.2 Sprint 3.4 dev test (commit `078159a`); finding #87 (intervening-work sub-pattern); finding #88 (convention-vs-constraint sub-pattern); session 30 production curl evidence.
+
+---
+
+### Session 30 — May 17, 2026 — Sprint 6.3 baseline snapshot + Phase A close-out completion
+
+**Type:** Phase A close-out execution work. Capture baseline metric values from production `/scoop-ops/metrics-ops` endpoint per session 28-extension Path 2 classification.
+
+**Output:** Sprint 6.3 substantively DONE with partial baseline (Option B scope per session start). Source diversity captured (43 cells). Three metrics documented as Phase B Track 1 followup with diagnostic data; one bridged per earlier decision. Finding #89 captures new sub-pattern.
+
+#### Phase 30 work shipped
+
+| Phase | Output |
+|---|---|
+| 30.A — Production deploy verification | `/api/health` confirms ok / 110 sources / 25,378 articles / scheduler started. `/scoop-ops/metrics-ops` returns 401 unauthed — endpoint deployed. Migration 003 implicitly applied (backend started cleanly). |
+| 30.B — Production metric capture | DrJ provided admin credential. Authed query against production endpoint returned: source_diversity = 43 cells across 154 sources / 20 categories / 19 regions / methodology v1.1 active. Three other metrics returned `null` — diagnostic data captured. |
+| 30.C — Baseline snapshot document | `docs/audits/phase_a_baseline_metrics_snapshot.md` (v1.0, 225 lines). Captures source diversity baseline + methodology version operational confirmation + bridged-metric explanation + metrics-ops diagnostic findings + Phase B Track 1 followup work scope + honest limitations. Canonical Phase B Track 1 progress denominator locked as 170-cell Strategic Plan v6 target matrix. |
+| 30.D — Finding #89 + Pace Tracker session 30 + commits | This entry. |
+
+#### Sprint progress changes this session
+
+| Sprint | Pre-session 30 | Post-session 30 |
+|---|---|---|
+| Sprint 6.3 (metrics snapshot) | NOT STARTED (scheduled per session 28-extension classification) | **Substantively DONE.** 1 of 4 metrics captured cleanly (source diversity); 3 deferred to Phase B Track 1 followup with diagnostic data; 1 bridged (returning user rate per session 28-extension DEC1). |
+| Sprint 6 overall | 4 of 7 CLOSED (6.1, 6.2, 6.4, 6.7) | **5 of 7 CLOSED** (6.3 newly closed substantively). |
+
+Sprints 6.5 + 6.6 remain CLOSED N/A per session 28-extension DEC3. Sprint 6 work remaining within Phase A: none (Sprint 6.3 was the last operational deliverable).
+
+#### Counters at session 30 close
+
+| Counter | Pre-session 30 | Post-session 30 |
+|---|---|---|
+| Cumulative findings | 88 | **89** (added #89 dev-verification-with-seeded-data sub-pattern) |
+| Brief inaccuracy count | 10 of 11 | **10 of 11** (unchanged — #89 is verification-pattern, not Brief-item) |
+| Binding kickoff gate (per session 28-extension 8-gate decomposition) | 5 of 8 substantively MET | **5 of 8 substantively MET** (unchanged; gate 5 operational baseline understood strengthens by source-diversity capture but doesn't formally tick over given the 3-of-4-metrics-deferred status) |
+| Production code at HEAD | `6278ab6` (unchanged; session 28-30 ship is doc + admin-page work, no user-facing behavior change) | `6278ab6` (unchanged) |
+| Migrations staged for next deploy | 002 (sources table seed) + 003 (raw_signals drop) | **Both already applied in production** as of session 30 verification. Next deploy may bring no new migrations until Phase B Track 1 work introduces one. |
+
+#### Phase B Track 1 followup work added this session
+
+Captured in the baseline snapshot document §4.4 + finding #89. Concrete and scoped:
+
+- **metrics-ops endpoint scheduler-filter fix.** Update `typeof v === "number"` filter to accept ISO string / Date object / number forms. Code sketch provided in snapshot §4.2.
+- **metrics-ops endpoint `background_job_runs` semantics investigation.** Determine whether the table captures all scheduler ticks or only specific BullMQ workers. Decide between three remediation options (a/b/c in snapshot §4.4) based on findings.
+- **metrics-ops endpoint redeploy** post-fix + re-capture baselines.
+
+Estimated as ~1–2 Phase B Track 1 sessions. These belong to Track 1 (architecture/feature work on the admin-services surface) per Phase B Kickoff Brief §3 + §4 categorization — not Track 2 (codebase reorg) or Track 3 (infrastructure performance).
+
+#### Phase A close-out trajectory
+
+| Milestone | Status |
+|---|---|
+| Sprint 3 batch | DONE substantively (session 29 close) |
+| Sprint 6.3 baseline snapshot | DONE substantively (this session) |
+| Strategic Plan v6 §9 Phase A exit criterion #5 (5 metrics captured) | **PARTIALLY MET** — 4 of 5 metrics defined in-Phase-A endpoint; 1 of 4 captured cleanly at baseline; 3 deferred to Phase B Track 1 followup with diagnostic; 1 bridged per session 28-extension DEC1. Phase B Retrospective references this baseline as the v1.0 snapshot. |
+| Phase A close-out remaining work | **0 sessions.** Only the DrJ judgment moment on kickoff gate condition 6 (time / energy budget) remains. |
+
+**Phase A is execution-complete.** The only remaining step before Phase B kicks off is the DrJ judgment moment on whether the time/energy budget is realistic for Phase B's Months 4–7 estimated / Months 6–9 realistic duration (per reconciliation v1 §8.4 and Phase B Kickoff Brief §1.4).
+
+**Phase A execution work is complete. Phase A formal close-out requires the DrJ judgment moment on gate condition 6 (time/energy budget); after that judgment lands, Phase B kickoff is unblocked.**
+
+#### What this session does not close
+
+Items intentionally not in scope for session 30 (per Path 2 classification + DrJ decisions across sessions 28–30):
+
+- metrics-ops endpoint bug fix work — Phase B Track 1 followup (snapshot §4.4 + finding #89).
+- Layer 1 returning user rate analytics infrastructure — Phase B Track 1 Distribution (snapshot §3.1).
+- ALLOW_LEGACY_ADMIN_QUERY_KEY → Authorization: Bearer migration — Phase B Track 1 when admin surface gets revisited.
+- `/scoop-ops/*` URL convention documentation per finding #88 — Phase B Track 1 admin-surface work.
+- Strategic Plan v7 publication — next quarterly Strategic Plan review per Execution Method v1 §7 (per session 28-extension DEC3).
+
+#### Production state at session 30 close
+
+Unchanged from session 29 close:
+
+- Production code at `6278ab6` (no user-facing behavior change since then; session 28–30 ship is documentation, dev-environment, and admin-page work).
+- Migrations 002 + 003 both applied.
+- sourceCount 110.
+- Articles ~25,378.
+- Backend uptime healthy at capture; memory 86% (worth monitoring but not blocking).
+- No outstanding production incidents.
+
+#### Next-session candidates (priority order)
+
+1. **Phase B kickoff decision moment.** DrJ judgment on kickoff gate condition 6 (time/energy budget realistic for Phase B Months 4–7 estimated / Months 6–9 realistic duration). 0 sessions of work; one decision message.
+2. **Phase B Track 1 first work** per Phase B Kickoff Brief §6.4 (Tracker Auto-Detection Engine v1 as recommended starting work, subject to DrJ confirmation at actual kickoff). 5–10 sessions.
+3. **Phase B Track 2 first work** — B.1 codebase reorganization (Phase B Kickoff Brief §4.1). Could run in parallel with Track 1 per reconciliation v1 §8.5 no-track-dark rule.
+4. **Phase B Track 3 first work** — Sprint 0 Cache-Control immutable on hashed assets (Phase B Kickoff Brief §5.1). 1 session.
+
+#### Documentation status
+
+Phase A produced these institutional artifacts through close-out:
+
+- Phase A Retrospective v1.0 (session 24, commit `72a7eb8`)
+- Phase A Source Audit Phase 1 + Phase 2 + Phase 2 Calibration (sessions 24–27)
+- Source Credibility Methodology v1.0 + v1.1 (sessions 26 + 28)
+- Source Scoring Service Specification v1.0 (session 28)
+- Phase B Kickoff Brief v1.0 (session 28)
+- Phase A Baseline Metrics Snapshot v1.0 (this session)
+- Phase A Retrospective Inputs with 89 cumulative findings + Pace Tracker entries through session 30
+
+#### Honest accounting
+
+Sprint 6.3 ships substantively with one clean baseline (source diversity), one operational confirmation (methodology v1.1 active), and three honestly-documented gaps with concrete Phase B Track 1 followup. The metrics-ops endpoint's design is sound — three of four query paths just need refinement that the production-data divergence surfaced. Finding #89 captures that as institutional learning for Phase B verification discipline.
+
+The Phase A close-out target of "5 metrics captured" per Strategic Plan v6 §9 is honestly **partially MET**:
+
+- 1 metric captured cleanly (source diversity)
+- 3 metrics defined in endpoint but needing Phase B Track 1 fix work to capture values
+- 1 metric bridged to Phase B Track 1 Distribution per design
+
+The shape of "partially MET" is preserved in this snapshot, the Phase A close-out documentation, and the Phase B Retrospective will close the loop when the deferred metrics ship. No softening; the gap is named and scoped.
