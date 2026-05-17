@@ -3625,6 +3625,250 @@ PARTIAL + 1 NOT STARTED.**
 - Decisions Log Decision 7 (open methodology + proprietary
   weights) + Decision 16 (source onboarding workflow)
 
+### 85. Sprint 4.5 architectural reframing — infrastructure work disguised as content work in Phase planning
+
+Session 27. Sprint 4.5 Phase 1 calibration on 15 publisher
+sources validated methodology v1.0 (15/15 PASS within expected
+ranges). But the more important institutional artifact from
+this session is what the calibration revealed about Sprint 4.5
+as it was originally framed.
+
+**Pattern: infrastructure work disguised as content work.**
+
+Phase A Kickoff Brief framed Sprint 4.5 as content work: "score
+all 154 sources against the v1.0 rubric." Estimated effort:
+12-25 hours of manual scoring per scoring window. That framing
+treats source scoring as a one-time content deliverable.
+
+Per methodology v1.0 §7.1 (revisit cadence), sources are
+re-scored every 6-12 months. The annualized cost of manual
+scoring at the current 154-source corpus would be ~12-50 hours
+per year ongoing, PLUS the per-source-onboarding cost as
+corpus grows toward the Strategic Plan v6 targets (Phase B
+exit 150 sources, Phase C exit 300, Phase D exit 500, Phase E
+exit 800). At Phase E exit, annualized manual-scoring effort
+would be ~60-260 hours per year before accounting for
+methodology version transitions per §7.2 (which require
+full-corpus re-scoring within a defined window per minor
+version).
+
+When the actual work shape is recurring infrastructure
+operation, "shipping it as content" means one of three things:
+
+  (a) Doing the work manually and signing up for the recurring
+      cost forever (and absorbing the throughput cap that
+      becomes binding as corpus grows)
+  (b) Building the infrastructure halfway through, after
+      realizing the recurring cost is the real shape
+  (c) Pretending it shipped when only the first batch was
+      scored — letting the "scored sources" set drift
+      progressively stale relative to publication date
+
+The calibration session caught this before path (a) or (c)
+were committed to. Sprint 4.5 was reframed during pre-scoring
+discussion: Phase 1 calibration on 15 sources produces the
+ground-truth dataset; Phase 2 ships methodology v1.1 plus an
+automated scoring service specification handed to Phase B
+Track 1. The corpus-wide backfill itself executes within Phase
+B Track 1 as the scoring service goes live.
+
+**Pattern recognition — this is not the first instance.**
+
+Other Phase A sprints that turned out to be infrastructure
+disguised as content:
+
+- **Sprint 4.4 (session 26):** Brief said "add quality
+  scoring columns to sources table." The actual work shape
+  was: build the sources DB table (didn't exist), design the
+  schema (RSS vs YouTube identifier model, CHECK constraint,
+  partial unique indexes per Path B), seed it from the config
+  file. Two Brief premise errors (finding #84) plus a Path B
+  founder override on schema design. The "add columns"
+  framing concealed the table + schema-design + seed effort.
+- **Sprint 2 Issue 2.5 (session 24 Part 3):** Brief said "add
+  7 missing Urdu nav.* translations." Audit (finding #82)
+  revealed 12 keys total — 7 missing plus 5 English
+  placeholders that needed replacement. The "add 7" framing
+  concealed the systematic placeholder-audit work.
+- **Sprint 1 originally (session 9 era, finding #15):** Brief
+  framed several stabilization items as point fixes; investigation
+  revealed underlying infrastructure debt patterns.
+
+The pattern is not a critique of Brief authorship per se —
+Brief premises are written before evidence is gathered and
+necessarily compress. The pattern is a calibration signal: when
+a Brief item touches scoring, schema, audit, or systematic
+verification, the work shape should be assumed to be
+infrastructure work until evidence proves otherwise. Phase B
+Kickoff Brief authoring should apply this prior, especially
+when sizing source-quality, translation-pipeline, and
+tracker-template work.
+
+**Institutional implication carried into Phase B Kickoff Brief
+(Sprint 6.7 work):** Phase B Brief should explicitly classify
+each line item as "content" vs "infrastructure" with the
+classification justification documented. Infrastructure items
+should be sized in build-effort plus annualized-operation-cost
+terms, not just build-effort terms. Content items should be
+sized in throughput plus cadence terms.
+
+This finding pairs with finding #84 (Brief premise errors) as
+the two-part institutional lesson Phase A produces for Phase B
+Kickoff Brief authoring discipline: verify premises against
+actual code/data state (finding #84) AND verify work-shape
+classification against actual deliverable cost over time (this
+finding).
+
+**Refs:**
+
+- `docs/audits/phase_a_source_audit_phase2_calibration.md`
+  (Sprint 4.5 Phase 1 calibration document, §5.1 architectural
+  insight + §6.1 Sprint 4.5 reframing)
+- `docs/content/source_credibility_methodology.md` §7.1
+  (revisit cadence) + §7.2 (methodology versioning + per-version
+  re-scoring window)
+- Finding #82 (Urdu nav.* parity gap — same pattern in i18n
+  category)
+- Finding #84 (Sprint 4.4 Brief premise errors — companion
+  finding on Brief authoring discipline)
+- Strategic Plan v6 §3 Capability 1 (Phase B/C/D/E source-count
+  targets that compound the annualized-scoring effort)
+- Phase A Kickoff Brief Sprint 4 Issue 4.5 (the original
+  content-framed scope this finding reframes)
+
+### 86. Methodology scope gap — publisher v1.0 silent on individual creators; three-layer creator methodology preserved as architectural artifact
+
+Session 27. Methodology v1.0 (committed at `7409dfe`, Sprint
+4.4) was designed for publisher-class sources and validated on
+15 publishers in Sprint 4.5 Phase 1 calibration (this session).
+It does not handle individual creators. This finding documents
+the scope gap and preserves an architectural artifact for the
+future creator-methodology work (Phase B or C scope).
+
+**The gap, concretely.**
+
+Methodology v1.0 §1.1 says it scores "each source in our
+corpus." That phrasing implicitly assumes editorial-organization
+shape. The 5-component rubric carries that assumption forward:
+
+- §2.1.a — named editorial leadership. For a solo creator,
+  the creator IS the leadership; the sub-criterion collapses.
+- §2.1.b — published editorial standards. Creators rarely
+  publish standards documents.
+- §2.1.e — separation of news and opinion. Many creator
+  formats are explicitly opinion + commentary by design.
+- §2.4 — Independence. Creator independence is structurally
+  different from publisher independence: sponsorship rather
+  than ownership; platform-dependency rather than
+  publisher-charter; per-episode sponsorship disclosure
+  rather than masthead-level ownership disclosure.
+
+The current Scoopfeeds corpus is publisher-heavy by design (110
+RSS publishers + 44 YouTube channels operated mostly by
+publishers/news organizations + curated X handles), so the gap
+does not bind today. It will bind as Phase B / C expand the
+source matrix per Strategic Plan v6 (Phase C exit 300 sources,
+Phase D 500, Phase E 800), particularly for category × region
+cells where creator content is the dominant content shape
+(Substack-class commentary, podcast-host-led analysis, single-
+operator YouTube channels in specialized beats).
+
+**Creator methodology requires a three-layer structure for
+interview-format content.**
+
+This is the architectural artifact this finding preserves for
+future work. For interview-format content (podcasts, YouTube
+interviews, panel discussions, Substack-with-interview-
+podcast), source credibility is not a single number per
+channel. The credibility of a given episode is a composite of
+three independently-scored layers:
+
+  **Layer 1 — Host / channel credibility.** The show's own
+  editorial practice: sponsorship transparency, prior-guest
+  selection patterns, retraction history, fact-check track
+  record, audience-recommended-corrections handling. Roughly
+  analogous to publisher methodology §2.1 + §2.2 + §2.5 but
+  with creator-shape sub-criteria.
+
+  **Layer 2 — Guest credibility.** The specific guest's own
+  domain expertise, prior-claim track record on related
+  topics, declared conflicts of interest, history of behaviour
+  when challenged on factual claims. This layer is closer to
+  individual-source scoring than channel-source scoring;
+  highly portable across episodes (same guest scored once,
+  reused across appearances).
+
+  **Layer 3 — Per-episode composite.** Critically, this is
+  NOT a simple host × guest function. It captures how the host
+  handled the specific guest in this specific episode:
+  challenged claims or let them pass? fact-checked in real
+  time or post-hoc? added context or amplified? framed the
+  guest's claims accurately in show description / transcript /
+  social? Per-episode composite encodes the practice signal
+  that host-alone or guest-alone scoring miss.
+
+The three-layer structure means each episode has three score
+inputs and one composite output. Display surfaces vary:
+
+- Layer 1 host score visible on channel profile page (per
+  v1.0 §1.3 source profile pattern).
+- Layer 2 guest score visible on per-episode dossier
+  alongside guest's other appearances and standalone scoring.
+- Layer 3 episode composite drives ranking and confidence
+  signal on the episode in the corpus, and the long-tail
+  average of Layer 3 scores across episodes feeds back into
+  the host's Layer 1 over time (good hosts get credit for
+  consistent practice; bad hosts pay over time for letting
+  claims pass).
+
+**Scope and timing.**
+
+- Creator methodology v1.0 is NOT a v1.1 patch to publisher
+  methodology v1.0. The component set, sub-criteria, posture
+  labels, and band structure all differ materially. Treating
+  it as a v1.1 patch would muddy both methodologies.
+- Creator methodology v1.0 is appropriately Phase B or C
+  scope. Sprint 4.7 expanded scope (per this session's Sprint
+  4.5 reframing) includes drafting architectural framing
+  during Phase A close-out; the methodology document itself
+  ships when the corpus needs it.
+- The three-layer structure is the meaningful architectural
+  artifact this finding preserves. Specific component design
+  and sub-criteria are deferred to the methodology work
+  itself.
+
+**Cross-references for the future creator-methodology
+session:**
+
+- Publisher methodology v1.0 §2 (5 components) — likely
+  inspiration but not direct adoption; creator methodology
+  components will differ.
+- Publisher methodology §5 (8 posture labels) — creator
+  posture labels may overlap (Independent, Corporate-PR for
+  brand-owned-creator, Advocacy for mission-aligned creator)
+  but will need additions (Platform-employed-creator,
+  Sponsorship-dependent-creator).
+- Publisher methodology §6 (scoring workflow) — same
+  founder-review pattern per Decision 16 likely applies.
+- Publisher methodology §7 (versioning + cadence) — separate
+  v<major>.<minor> track for creator methodology, with
+  independent cadence from publisher methodology.
+- Finding #85 (Sprint 4.5 architectural reframing) — applies
+  fully to creator-methodology operationalization: build as
+  scoring service, not manual marathon.
+
+**Refs:**
+
+- `docs/audits/phase_a_source_audit_phase2_calibration.md`
+  §5.2 (publisher v1.0 scope gap) + §5.3 (three-layer
+  structure) + §6.2 (Sprint 4.7 expanded scope)
+- `docs/content/source_credibility_methodology.md` v1.0
+  (the publisher methodology that this finding scopes around)
+- Strategic Plan v6 §3 Capability 1 (corpus growth targets
+  that make creator scoring binding by Phase C)
+- Finding #85 (architectural reframing — applies to creator
+  scoring service shape as well)
+
 ---
 
 ## Pace Tracker
@@ -4566,4 +4810,146 @@ Methodology v1.0 published as public artifact (citable per
 Decision 7). 84 cumulative findings. Brief inaccuracy count
 at 9 of 10 — Phase B Kickoff Brief authoring needs verification
 discipline per finding #84 institutional implication.
+
+---
+
+PACE TRACKER (updated session 27, 2026-05-17)
+
+Session 27 work shipped:
+- Sprint 4.5 Phase 1 calibration on 15 publisher sources:
+  DONE
+  * Methodology v1.0 validated: 15 / 15 PASS within
+    expected ranges
+  * Posture distribution: Government 5, Corporate-owned 8
+    (including 3 Pakistani sub-set), Aggregator 1
+  * Floor rule did not trigger (Hacker News ET=35, closest
+    call, 5 points above the 30 threshold)
+  * Pakistani home-region check passed: Dawn (80) > The
+    News Intl (70) > Geo (64) ordering matches founder
+    home-region knowledge — strong validation signal that
+    rubric is not Anglo-American-biased to the point of
+    failing on local-tradition sources
+- Calibration document published:
+  docs/audits/phase_a_source_audit_phase2_calibration.md
+  (364 lines, structure §1-§7)
+  * Per-source scoring preserved as ground-truth dataset
+    for future automated scoring service
+  * Three v1.1 candidates catalogued (decisions deferred
+    to v1.1 review):
+    - P1: Government posture sub-case for direct-state-
+      funded international broadcasters (DW + France 24
+      pattern; current §5.2 only names charter/license-fee
+      mechanism)
+    - P2: Corporate-owned with industry-affiliated parent
+      guidance (CoinDesk pattern; gap between Corporate-
+      owned 55-95 and Corporate-PR 25-55)
+    - P3: Aggregator posture ET sub-criteria substitution
+      table (Hacker News pattern; current §2.1 sub-criteria
+      are publisher-shaped)
+- Sprint 4.5 architectural reframing (per founder pre-
+  scoring discussion + finding #85): full 154-source manual
+  backfill is the wrong shape. Sprint 4.5 Phase 2 deliverable
+  reframed as methodology v1.1 + automated scoring service
+  specification handed to Phase B Track 1. Manual scoring
+  would be 12-25 hours per scoring window with revisit
+  cadence per §7.1 producing ongoing annualized cost; corpus
+  growth toward Phase E target 800 sources compounds the
+  unsustainability of manual scoring.
+- Finding #85 captured: Sprint 4.5 architectural reframing
+  surfaces the broader institutional pattern — infrastructure
+  work disguised as content work in Phase planning. Third or
+  fourth instance in Phase A (Sprint 4.4 schema, Sprint 2.5
+  Urdu nav.*, Sprint 1 stabilization). Phase B Kickoff Brief
+  authoring should classify each line item as content vs
+  infrastructure with classification justification.
+- Finding #86 captured: methodology scope gap — publisher
+  v1.0 silent on individual creators. Three-layer creator
+  methodology preserved as architectural artifact (host
+  credibility + guest credibility + per-episode composite).
+  Phase B or C scope; Sprint 4.7 expanded scope includes
+  drafting architectural framing during Phase A close-out
+  while creator methodology itself ships when corpus needs
+  it.
+
+Sprint 4 progress: 5 of 7 → 5 of 7 DONE + 2 PARTIAL
+(was 5 of 7 DONE + 1 PARTIAL + 1 NOT STARTED at session
+26 close). Sprint 4.5 moved from NOT STARTED to PARTIAL
+(Phase 1 calibration ships this session; Phase 2 is v1.1
++ scoring-service spec — next-session candidate). Sprint
+4.7 unchanged at PARTIAL (now with expanded scope per
+session 27 reframing).
+
+Sprint 6 progress unchanged at 3 of 7.
+
+Binding kickoff gate: 4 of 8 MET (unchanged — Sprint 4.5
+Phase 1 closure is below gate granularity, same as Sprint
+4.4 in session 26 and Sprint 6.2 in session 25 Extension).
+
+Calendar pace honest accounting:
+- Session 27 duration: ~2 hours (hard cap)
+- Phase 27.A methodology read + state verification: ~15 min
+- Phase 27.B 15-source calibration scoring: ~75 min
+- Phase 27.C calibration analysis + 27.E document drafting:
+  ~25 min (consolidated, calibration analysis folded into
+  document body rather than separate report)
+- Phase 27.F findings + Pace Tracker + commits: ~15 min
+
+Phase A close-out remaining (post-session-27):
+- Sprint 4.5 Phase 2 (methodology v1.1 + scoring service
+  spec): 1 session (session 28 candidate)
+- Sprint 4.7 finalization (publisher source priority list +
+  creator-methodology architectural framing): 1-2 sessions
+- Sprint 3 close-outs (3.1 raw_signals drop + 3.4 metrics
+  dashboard): 1-2 sessions
+- Sprint 5 audits + 8 tracker templates: 2-3 sessions
+- Sprint 6 remaining (6.3 metrics depends on 3.4; 6.7
+  Phase B Kickoff Brief drafting): 2-3 sessions
+- Total: 5-9 sessions to clear binding kickoff gate
+  (unchanged from session 26 estimate; calibration
+  validates methodology but doesn't close sprints directly;
+  Phase 2 v1.1 + scoring-service-spec work counts within
+  the same estimate)
+
+Production state at session 27 close: no production deploy
+this session (calibration is document-only):
+- Production code: 6278ab6 (unchanged from session 25 Ext)
+- Migration 002 still staged for next deploy (no startup
+  since session 26; will apply idempotently on next deploy)
+- sourceCount: 110 (unchanged)
+- Calibration ground-truth dataset (15 sources) published
+  in repo as reference for future automated scoring service
+  testing
+- No outstanding production incidents
+
+Phase B Track 1 scoring-service backlog item created (in
+this Pace Tracker entry, no separate tracking system yet):
+- Spec inputs: methodology v1.1 (pending session 28),
+  calibration ground-truth dataset (this session), audit
+  trail integration via Migration 002 columns
+- Validation harness: reproduce 15 calibration scores
+  within ±5 points per source on a fixed methodology
+  version
+- Founder review hook per Decision 16 + methodology §6.1
+
+Next session candidates (priority order):
+1. **Sprint 4.5 Phase 2 — methodology v1.1 + scoring
+   service specification.** Highest leverage; closes the
+   calibration-to-spec arc. ~3-4 hours.
+2. **Sprint 4.7 finalization** — publisher source priority
+   list + creator-methodology architectural framing draft.
+3. **Sprint 3 close-outs** — unblocks Sprint 6.3.
+4. **Sprint 5 + Sprint 6.7** — sequenced after 4.5 Phase 2
+   + Sprint 3 ship.
+
+Cumulative findings count: 84 → 86 (findings #85 + #86
+captured this session).
+
+Session 27 close: production at 6278ab6 (unchanged).
+Methodology v1.0 calibration-validated for publisher-class
+sources (15/15 PASS). Three v1.1 candidates identified;
+decisions deferred to v1.1 review. Sprint 4.5 architecturally
+reframed from manual marathon to scoring-service-spec
+deliverable. Creator methodology scope gap preserved as
+architectural artifact for Phase B/C. 86 cumulative findings.
+Phase A close-out remaining: 5-9 sessions (unchanged).
 ```
