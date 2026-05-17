@@ -6,9 +6,10 @@ import { logger } from "../services/logger.js";
 import { timedQuery } from "./queryTiming.js";
 import * as migration001 from "./migrations/001_operational_tables.js";
 import * as migration002 from "./migrations/002_sources_table.js";
+import * as migration003 from "./migrations/003_drop_raw_signals.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS = [migration001, migration002];
+const MIGRATIONS = [migration001, migration002, migration003];
 
 function ensureSchemaMigrationsTable(db) {
   db.exec(`

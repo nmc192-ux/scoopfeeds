@@ -11,8 +11,10 @@
  *   article_market_links           — article ↔ market (m-to-m)
  *   embeddings                     — sqlite-vec vector store (vec0 virtual table)
  *
- * Tables reserved (created now, populated in later phases):
- *   raw_signals                    — generic landing zone for non-market sources
+ * Historical note: a `raw_signals` table was reserved here as a generic
+ * landing zone for non-market ingester payloads. It was never populated
+ * (ingesters always wrote directly to their own tables) and was dropped in
+ * Migration 003 (Sprint 3.1, session 29).
  */
 
 import * as sqliteVec from "sqlite-vec";
@@ -116,18 +118,6 @@ export function initRealityIndex(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_aml_article      ON article_market_links(article_id);
     CREATE INDEX IF NOT EXISTS idx_aml_market       ON article_market_links(market_id);
-
-    -- Generic landing zone for ingester payloads that don't have their own table.
-    CREATE TABLE IF NOT EXISTS raw_signals (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      source       TEXT NOT NULL,                        -- 'gdelt' | 'usgs' | 'fred' | ...
-      external_id  TEXT,
-      payload      TEXT NOT NULL,                        -- JSON
-      ts           INTEGER NOT NULL,
-      processed    INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_raw_unprocessed  ON raw_signals(source, processed, ts);
-    CREATE INDEX IF NOT EXISTS idx_raw_external     ON raw_signals(source, external_id);
   `);
 
   // ── 3. Vector table (only when sqlite-vec is loaded).
