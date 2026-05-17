@@ -5172,3 +5172,76 @@ with criterion 4 reserved as DrJ judgment call at kickoff.
 Phase A close-out remaining: 3-7 sessions (down from 5-9).
 86 cumulative findings. Phase B is structurally unblockable.
 ```
+
+---
+
+### Session 28-extension — May 17, 2026 — Phase A close-out decision review
+
+**Type:** Decision review (~45 min). No execution work, no commits except this entry.
+
+**Output:** Classification of all remaining Phase A close-out items into four categories (MUST / SHOULD / Phase B / Phase C), resolution of two uncertainty items, Path 2 confirmation for session 29-30 execution.
+
+#### Classification table
+
+| # | Item | Class | Notes |
+|---|---|---|---|
+| A | Sprint 3.1 + 3.2 + 3.3 + 3.4 (raw_signals drop + LiveTVChannelEmbed delete + isUrdu remove + 5 metrics dashboard) | **SHOULD** | Strategic Plan v6 §9 Phase A exit criterion #5 (5 metrics captured). Three XS + one L issue. 1-2 sessions estimated. |
+| B | Sprint 4.7 (Phase B source priority list finalization) | **Bridge to Phase B** | Phase B Track 1 source discovery service per Decision 16 proposes candidates iteratively; pre-freezing 40 sources inverts the workflow. Audit Phase 2 gap analysis enumerated category × region cells sufficient for Phase B Track 1 input. |
+| C | Sprint 5.x (social audit + search audit + tracker template library) | **Bridge to Phase B** | Per DrJ DEC2: bridge to Phase B Track 1. Strategic Plan v6 §9 criteria 7+8 formally NOT MET at Phase A close-out; Phase B Retrospective accounts. Social Engine v2 + Search Upgrade + Tracker Engine work covers the audit scope experientially. |
+| D | Sprint 6.3 (metrics snapshot) | **SHOULD** (conditional on A) | Pairs with item A. Captures 5 metrics dashboard values as Phase A close-out baselines. 1 session after item A ships. |
+| E | Sprint 6.5 (Decisions Log revisions) | **CLOSED N/A** | Per DrJ DEC3 + reconciliation v1 §10.5. No revisions needed. Audit done in reconciliation; no execution required. |
+| F | Sprint 6.6 (Strategic Plan v7 publication) | **CLOSED N/A** | Per DrJ DEC3 + reconciliation v1 §10.1. Analysis exists in reconciliation; v7 publication deferred to next quarterly Strategic Plan review per Execution Method v1 §7. |
+| G | Phase B kickoff decision (criterion 4 DrJ judgment) | **MUST** | 0 sessions of work. Single DrJ decision message after Sprint 3 batch + 6.3 ship. |
+
+#### Updated synthesis
+
+- **MUST execution work:** 0 sessions (item G is a decision, not work)
+- **SHOULD execution work:** 2-3 sessions (item A: 1-2 sessions; item D: 1 session after A)
+- **Bridge to Phase B:** 2 items (B, C) — accounted in Phase B Track 1 scope
+- **Closed N/A:** 2 items (E, F) — work done in reconciliation v1
+
+#### Sprint status updates after this classification
+
+| Sprint | Pre-classification | Post-classification |
+|---|---|---|
+| Sprint 3 | NOT STARTED (all 4 issues) | Scheduled for session 29 batch |
+| Sprint 4.7 | PARTIAL | BRIDGED to Phase B Track 1 |
+| Sprint 5.x | NOT STARTED (deferred) | BRIDGED to Phase B Track 1 |
+| Sprint 6.3 | NOT STARTED | Scheduled for session 30 after Sprint 3.4 ships |
+| Sprint 6.5 | NOT STARTED | CLOSED N/A (reconciliation v1 §10.5) |
+| Sprint 6.6 | NOT STARTED | CLOSED N/A in Phase A close-out (reconciliation v1 §10.1; v7 to quarterly review) |
+| Sprint 6.7 | MET (session 28 brief ship) | MET (unchanged) |
+
+#### Phase A close-out trajectory
+
+Updated estimate: 2-3 sessions of work + 1 DrJ decision moment for Phase A close-out completion.
+
+Session 29: Sprint 3 batch (4 issues, 1-2 sessions estimated)
+Session 30: Sprint 6.3 baseline snapshot (1 session)
+Post-session 30: Phase A close-out complete; Phase B kickoff decision moment (DrJ judgment on criterion 4 time/energy budget).
+
+Phase A close-out was at 3-7 sessions estimate at session 28 close. Classification work reveals achievable in 2-3 sessions.
+
+#### Binding kickoff gate status update
+
+| Gate condition | Pre-extension | Post-extension |
+|---|---|---|
+| 1. Sprint 0-2 closed | MET | MET |
+| 2. Phase A Retrospective written | MET | MET |
+| 3. No outstanding production incidents | MET | MET |
+| 4. Strategic clarity on Reality Index | PARTIAL | PARTIAL |
+| 5. Operational baseline understood | PARTIAL | PARTIAL (improves with item A + D ship) |
+| 6. Time/energy budget realistic | DrJ confirms | DrJ judgment at kickoff |
+| 7. Phase B Kickoff Brief drafted | MET (session 28) | MET |
+| 8. Three-track coordination documented | MET (session 28) | MET |
+
+5-of-8 substantively MET. Gate 6 reserved for DrJ judgment at kickoff moment after items A + D ship.
+
+#### Notes for session 29 starting Sprint 3 batch
+
+- Sprint 3.1 (XS, ~5 min): drop unused `raw_signals` table via Migration 003 or equivalent
+- Sprint 3.2 (XS): delete LiveTVChannelEmbed component
+- Sprint 3.3 (XS): remove isUrdu flag and related plumbing
+- Sprint 3.4 (L, ~1-2 sessions): build /scoop-ops/metrics admin dashboard capturing 5 baseline metrics — uptime, scheduler last-run age, BullMQ failure rate, returning user rate, source diversity index
+- All four issues likely fit in single session 29 if 3.4 dashboard design goes smoothly. Two-session split if 3.4 needs design discussion.
+- Session 30 (post-3.4-ship) captures actual baseline values from the dashboard per Sprint 6.3.
