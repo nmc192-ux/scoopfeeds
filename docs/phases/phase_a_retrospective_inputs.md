@@ -4952,4 +4952,223 @@ reframed from manual marathon to scoring-service-spec
 deliverable. Creator methodology scope gap preserved as
 architectural artifact for Phase B/C. 86 cumulative findings.
 Phase A close-out remaining: 5-9 sessions (unchanged).
+
+---
+
+PACE TRACKER (updated session 28, 2026-05-17)
+
+Session 28 work shipped — three phases, three commits:
+
+Phase 28.A — Methodology v1.0 → v1.1 (commit 3d935ef):
+- 14 surgical str_replace edits applied across the methodology
+  document, zero failures
+- Three rubric refinements per Sprint 4.5 Phase 1 calibration
+  v1.1 candidates:
+  * P1 Government posture sub-case expansion: §5.1 + §5.2 now
+    admit charter-equivalent direct-state-funded mechanism
+    (DW under Deutsche Welle Gesetz; France 24 under France
+    Médias Monde holding) alongside charter and license-fee
+    broadcasters. Typical scoring 75-80 for the direct-state
+    sub-case reflects weaker legal-firewall structure than
+    charter/license-fee.
+  * P2 Corporate-owned industry-affiliated parent sub-case:
+    new Corporate-owned sub-case with Independence ceiling at
+    80 (rather than 95). Fills operational gap between
+    Corporate-owned (parent in different industry) and
+    Corporate-PR (structurally unfit on core topic). CoinDesk
+    under Bullish is v1.1 reference case.
+  * P3 Aggregator ET sub-criteria substitution: §2.1 now adds
+    aggregator-specific operationalizations when posture is
+    Aggregator (selection criteria, source-mix transparency,
+    moderation policy, removal log, community governance).
+    Hacker News v1.1 ET estimate 50-70 vs v1.0's 35.
+- Five polish edits applied for v1.1 cross-reference
+  consistency (§9.6 opening reframed, §9.6 bullet 2 aligned
+  with §2.2, §2.2 honest difficulty 2.2.e target reset to
+  v1.2+, §10 Source list version reference dropped, §10
+  Migration 002 architectural reframing per finding #85)
+- v1.0 calibration document preserved as historical artifact;
+  v1.1 calibration deferred to Phase B Track 1 scoring service
+  first corpus-wide run
+- Methodology now at 481 lines
+
+Phase 28.B — Source Scoring Service Specification v1.0 (commit
+3ca4e34):
+- New docs/specs/ subdirectory created (first specs/ document)
+- 369-line architectural spec for the Phase B Track 1
+  automated source scoring service per session 27 finding #85
+  architectural reframing
+- Captures: service position in Phase B Track 1 source services
+  (alongside discovery, enrichment, editorial review;
+  scheduler.js operates downstream); inputs/outputs mapped to
+  Migration 002 sources table columns; methodology version
+  routing with selective rescore semantics on version bump;
+  multi-methodology slot reserved for Phase C creator
+  methodology per finding #86; sub-criteria operationalization
+  patterns (structured-data lookup / website scraping / LLM
+  evaluation) with 5 representative examples spanning the 5
+  methodology components including v1.1 reference cases;
+  scoring runtime (weekly batch per Decision 16 + triggered
+  rescore); editorial override per methodology §6.5 with
+  conflict resolution; service dependencies including
+  scoring_audit_log table with retention-policy-TBD note;
+  5 honest limitations; v1 implementation scope with explicit
+  validation harness binding service to 15-source v1.0
+  calibration ±5 points per source on methodology v1.0;
+  validation failure modes documented (intentional v1.1 deltas
+  vs unpredicted divergence requiring investigation)
+
+Phase 28.C — Phase B Kickoff Brief v1.0 (commit cef2270):
+- 536-line structural commitment defining Phase B
+- Three-track structure self-contained per reconciliation v1
+  §8.1 (locked source per DEC1): Track 1 product features
+  (Comprehension Layer + Source matrix + Distribution + Search
+  + Entertainment + Foundation per Strategic Plan v6 §9);
+  Track 2 architecture (B.1-B.4 codebase reorganization +
+  BullMQ 5-queue migrations + scoring service implementation
+  per Skills Architecture v1 §7); Track 3 infrastructure
+  performance (Sprint 0-6 Cache-Control / CDN / SWR / SSR per
+  Comparative Analysis v1 §7). Inline transparency note in
+  §2.4 acknowledges prompt-vs-reconciliation Track 3 scope
+  discrepancy and locks to reconciliation framing
+- Track 1 source-services subset detailed (§3): discovery,
+  enrichment, scoring (per Phase 28.B spec), editorial review,
+  Reality Index v1, corpus growth to 150+. Other Track 1 work
+  areas enumerated in §2.2; per-sprint detail deferred to
+  in-Phase-B sprint kickoffs
+- Track 2 detail (§4) including the source scoring service
+  implementation as Track 1/Track 2 cross-deliverable
+- Track 3 detail (§5) with Sprint 0-6 effort estimates +
+  verification commands per Comparative Analysis v1 §7
+- Sequencing (§6): critical path identified (Track 2 B.1 →
+  scoring service impl → Track 1 scoring operation → corpus
+  growth); parallel work named; recommended early sessions
+  respect no-track-dark rule; first-sprint recommendation
+  with explicit "subject to DrJ confirmation at Phase B
+  kickoff" caveat
+- Kickoff criteria (§7) per reconciliation v1 §8.3: 3 of 4
+  substantively MET at brief authoring; criterion 4
+  (time/energy budget) preserved as DrJ judgment call at
+  kickoff time
+- Exit criteria (§8) preserved in full per reconciliation v1
+  §8.2 (22 conditions across 4 groups: load-bearing
+  user-facing + architectural durability + performance
+  infrastructure + close-out artifacts)
+- Resource model (§9): Months 4-7 estimated, Months 6-9
+  realistic per reconciliation v1 §8.4 (~60-145 sessions at
+  Phase A observed velocity); solo founder + Claude Code
+  pattern; no-track-dark per-session discipline
+- 7 honest limitations and risks (§10) including Track 3
+  anti-goal tension acknowledgment and Phase A close-out
+  audit deferrals (Sprint 5 social/search audits NOT MET;
+  brief takes position they don't gate kickoff per
+  reconciliation v1 §8.3)
+
+Sprint progress changes this session:
+- Sprint 4.5: PARTIAL → PARTIAL (Phase 2 v1.1 methodology +
+  scoring service spec shipped this session; corpus-wide
+  backfill execution remains in Phase B Track 2 implementation
+  scope per session 27 explicit decision; Sprint 4.5 stays
+  PARTIAL within Phase A per session 27 framing)
+- Sprint 6.7 (Phase B Kickoff Brief drafting): NOT MET → MET
+  (Phase 28.C ships the brief; commit cef2270)
+- Sprint 4 progress unchanged at 5 of 7 DONE + 2 PARTIAL
+- Sprint 6 progress: 3 of 7 → 4 of 7 CLOSED (6.7 newly closed
+  via brief ship)
+
+Binding kickoff gate status (per reconciliation v1 §8.3
+4 binding conditions):
+- Criterion 1 (Phase A wrapped cleanly): substantively MET
+  (Sprint 4 closed substantively; Sprint 6.4 retrospective
+  shipped; Sprint 6.2 smoke test PASS; Sprint 6.7 brief
+  shipped this session; Sprint 5 social/search audits remain
+  NOT MET but per brief §7 position do not block kickoff)
+- Criterion 2 (Reality Index strategic clarity): MET
+  (Strategic Plan v6 Capability 3 + Decision 11 lock v1
+  sources)
+- Criterion 3 (operational baseline understood): MET
+  (Phase A retrospective + 86 findings + per-session Pace
+  Tracker entries 14-28 provide baseline)
+- Criterion 4 (time/energy budget realistic): DrJ judgment
+  call at actual kickoff time
+- Gate status: 3 of 4 substantively MET; criterion 4 is
+  human-decision-at-kickoff
+
+Calendar pace honest accounting:
+- Session 28 duration: ~3 hours across the three phases
+- Phase 28.A methodology v1.1 (Edits 1-14 across two rounds
+  with two cross-impact rounds): ~50 min
+- Phase 28.B scoring service spec drafting + 2 refinements +
+  commit: ~90 min
+- Phase 28.C kickoff brief drafting + 2 refinements +
+  commit: ~80 min
+- Pace Tracker session 28 entry + commit: ~10 min
+
+Phase A close-out remaining (post-session-28):
+- Sprint 3 close-outs (3.1 raw_signals drop + 3.4 metrics
+  dashboard): 1-2 sessions
+- Sprint 5 audits (social + search): 2-3 sessions if scoped
+  in (or deferred to Phase B Track 1 work or Phase C per
+  brief §7 + §10.7 position)
+- Sprint 4.7 finalization (publisher source priority list +
+  creator-methodology architectural framing draft): 1-2
+  sessions
+- Sprint 6 remaining (6.3 metrics depends on 3.4): 1 session
+  after 3.4 ships
+- Phase A close-out estimate: 3-7 sessions remaining (down
+  from 5-9 at session 27 close; -2 from Phase 28 commits
+  closing Sprint 6.7 plus methodology + spec landing
+  substantively reduces remaining commit-chain effort)
+
+Production state at session 28 close: no production deploy
+this session (all three Phase 28 commits are documentation-
+only):
+- Production code: 6278ab6 (unchanged from session 25
+  Extension)
+- Migration 002 still staged for next deploy startup (will
+  apply idempotently)
+- sourceCount: 110 (unchanged)
+- Methodology v1.1 published as canonical version in repo
+- Source scoring service spec v1.0 published in repo
+- Phase B Kickoff Brief v1.0 published in repo
+- No outstanding production incidents
+
+Phase B is now structurally unblockable from a documentation
+standpoint. Remaining Phase A close-out work is operational
+(metrics dashboard, audits if scoped in) rather than
+structural.
+
+Next session candidates (priority order):
+1. **Sprint 3.4 + 3.1 close-outs** — unblocks Sprint 6.3
+   metrics snapshot and clears Sprint 3 entirely. 1-2 sessions.
+2. **Sprint 4.7 finalization** — publisher source priority
+   list + creator-methodology architectural framing draft.
+   1-2 sessions.
+3. **Sprint 5 audits OR Phase B kickoff** — DrJ judgment call.
+   Brief §7 + §10.7 takes position that Sprint 5 audits
+   don't gate kickoff but are honest gaps. DrJ may prefer to
+   close Sprint 5 within Phase A (cleaner exit) or carry
+   forward to Phase B Track 1 work or Phase C.
+4. **Phase B kickoff** — after criterion 4 (time/energy
+   budget) DrJ judgment call.
+
+Cumulative findings count: 86 → 86 (no new findings this
+session; the three Phase 28 commits ship deliverables that
+session 27 findings #85 + #86 architecturally established).
+
+Per reconciliation v1 §8.5 no-track-dark rule (applicable
+from Phase B kickoff onward, not yet binding in Phase A
+close-out): this session contributed to Track 1 + Track 2
++ Track 3 simultaneously via the brief that defines all
+three tracks. Subsequent Phase A close-out sessions will
+operate per their natural sprint scope; per-track tagging
+becomes binding at Phase B kickoff.
+
+Session 28 close: production at 6278ab6 (unchanged). Phase
+28 commit chain shipped methodology v1.1 + scoring service
+spec v1.0 + Phase B Kickoff Brief v1.0. Sprint 6.7 closed
+via brief. Binding kickoff gate at 3 of 4 substantively MET
+with criterion 4 reserved as DrJ judgment call at kickoff.
+Phase A close-out remaining: 3-7 sessions (down from 5-9).
+86 cumulative findings. Phase B is structurally unblockable.
 ```
