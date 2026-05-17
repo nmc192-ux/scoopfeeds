@@ -1,11 +1,11 @@
-# Scoopfeeds Source Credibility Methodology v1.0
+# Scoopfeeds Source Credibility Methodology v1.1
 
 **Document type:** Public methodology specification
-**Version:** 1.0
+**Version:** 1.1
 **Owner:** DrJ (Founder)
 **Companion documents:** Strategic Plan v6.0 §3 Capability 1, Decisions Log v1.0 (Decisions 7 and 16), Phase A Kickoff Brief Sprint 4 Issue 4.4
 **Audience:** External readers — academic citations, journalists, premium-tier subscribers, regulators
-**Last updated:** May 2026
+**Last updated:** May 2026 (v1.1 — May 17)
 
 ---
 
@@ -78,6 +78,16 @@ This component asks whether the source has a documented editorial practice and w
 
 **Honest difficulty.** 2.1.a and 2.1.b are easy to verify and easy to fake — a source can publish an editorial standards document without practicing it. We weight 2.1.c and 2.1.d more heavily because they reflect ongoing behaviour rather than one-time policy artifacts.
 
+**Aggregator posture substitution (v1.1).** When a source's posture is Aggregator (§5.2), the five sub-criteria 2.1.a-e are substituted with aggregator-specific operationalizations because the publisher-shaped criteria (named editor, published standards, bylines, corrections, news-opinion separation) do not fit user-submitted or algorithmic content-curation formats. The substitution preserves the component's structural purpose (does the source have documented editorial practice and follow it?) while applying criteria that match the operational reality of curation-based sources:
+
+- **2.1.a (Aggregator) — Selection criteria documented.** Does the aggregator publish how items are selected (algorithmic ranking criteria, editorial selection criteria, or community vote mechanics)?
+- **2.1.b (Aggregator) — Source-mix transparency.** Is the underlying source for each item visible to the reader (per-item attribution to the originating publisher)?
+- **2.1.c (Aggregator) — Moderation policy published and enforced consistently.** Are removal, takedown, or flagging policies documented and applied consistently across content categories?
+- **2.1.d (Aggregator) — Removal / takedown log queryable.** Is there a public log of removed or modified items with rationale?
+- **2.1.e (Aggregator) — Community-governance mechanisms documented (where applicable).** For community-curation aggregators (Hacker News, Reddit-class), are the community governance mechanisms (moderation hierarchy, community guidelines, conflict resolution) documented?
+
+Hacker News under v1.1 substitution scores in the 50-70 range on Aggregator ET, reflecting that HN does have documented selection (algorithmic ranking based on user upvotes), partial source-mix transparency (each item shows the underlying source URL), moderation policy (dang's role and community guidelines are documented, with some opacity about specific decisions), no public removal log, and partial community-governance documentation. This contrasts with v1.0's score of 35 on publisher-shaped ET, which reflected the rubric mismatch rather than HN's operational reality.
+
 ### 2.2 Methodology transparency
 
 This component asks whether the source explains how it knows what it reports.
@@ -92,7 +102,7 @@ This component asks whether the source explains how it knows what it reports.
 
 **Why this matters more than it used to.** A decade ago, source attribution was the floor of basic practice. As content production has industrialized — wire repackaging, AI-generated summaries, syndicated wire copy treated as original reporting — the actual rate of primary-document linking has fallen across the industry. We treat 2.2.b as a high-signal differentiator.
 
-**Honest difficulty.** Sub-criterion 2.2.e is recent and the industry has not converged on what disclosure means. We score it generously in v1.0 and expect the bar to rise in v1.1 as norms stabilize.
+**Honest difficulty.** Sub-criterion 2.2.e is recent and the industry has not converged on what disclosure means. We score it generously and expect the bar to rise as industry norms stabilize. v1.1 did not raise the bar because Sprint 4.5 calibration did not surface 2.2.e as a methodology gap; v1.2 or later is the realistic target for substantive revision of this sub-criterion.
 
 ### 2.3 Domain expertise
 
@@ -233,9 +243,9 @@ The eight labels are drawn from X's state-affiliated / government-affiliated fra
 |---|---|---|
 | Independent | No corporate, state, or political-mission ownership. Editorial decisions made by journalists without owner or funder veto. | 65–100 |
 | Academic | University-affiliated, research-institute, or peer-reviewed journal publication. | 70–95 |
-| Corporate-owned | Privately-held or publicly-traded media business. | 55–95 |
+| Corporate-owned | Privately-held or publicly-traded media business. Industry-affiliated parent sub-case has ceiling 80 rather than 95 (§5.2). | 55–95 |
 | State-affiliated | Editorial decisions subject to state influence or direction. Excludes editorially-independent public broadcasters (see Government). | 20–55 |
-| Government | Government agencies publishing primary data; editorially-independent public broadcasters funded via charter or license-fee mechanism (BBC, NPR, NHK class); and ministry official communications. | 30–85 |
+| Government | Government agencies publishing primary data; editorially-independent public broadcasters funded via charter, license-fee, or charter-equivalent direct-state-funded mechanism (BBC, NPR, NHK, DW, France 24 class); and ministry official communications. | 30–85 |
 | Corporate-PR | Source is owned by or representing an entity reporting on itself, its industry, or its commercial interests. | 25–55 |
 | Advocacy | Mission-driven publishing with explicit advocacy purpose (think tanks, single-issue organizations, NGOs). | 35–70 |
 | Aggregator | Source primarily republishes content from other primary sources. Score reflects selection quality and source-mix transparency. | 30–80 |
@@ -250,9 +260,11 @@ The "typical Independence sub-score band" column is the **expected range** for t
 
 **Corporate-owned (55–95).** The widest band among the eight labels. The top end of the band is reserved for sources that demonstrate editorial firewall in observable practice — critical coverage of the parent company, refusal of advertiser veto, journalists holding ownership to public account. The bottom end of the band reflects corporate ownership where editorial independence is weak — content shaped by advertiser relationships, owner political projects, or commercial product tie-ins. Most major international outlets sit in the upper half of this band. The ceiling never reaches 100 because incentive structures, however well-managed, are non-trivial.
 
+**Corporate-owned with industry-affiliated parent (sub-case, 55–80).** A Corporate-owned source whose parent's primary business participates in the industry the source covers presents a structural conflict that differs from typical corporate ownership but does not rise to Corporate-PR's structural unfitness. The sub-case caps the Independence sub-score at 80 (rather than the broader Corporate-owned ceiling of 95) to reflect that the structural conflict is real even when editorial firewall practice is strong. Documented editorial firewall practice — investigating the parent's industry adversaries and allies on equal terms, breaking stories that disadvantage the parent's commercial interests, refusing parent veto on coverage — can move the score upward within the 55–80 range but does not lift the ceiling. The sub-case fills the operational gap between Corporate-owned (where corporate parent is in a different industry, e.g., NBCUniversal owning CNBC) and Corporate-PR (where source is structurally compromised on its core topic, e.g., a company-owned blog reporting on the company's own products). CoinDesk under Bullish ownership is the v1.1 reference case — broke the FTX story (practice independence demonstrable) but is structurally exposed on crypto-industry reporting where the parent participates.
+
 **State-affiliated (20–55).** State-affiliated denotes sources whose editorial decisions are subject to state influence or direction. The label does not require formal state ownership — funding patterns, executive appointment power, regulatory pressure, or operational coordination can each produce the same effect. Indicators include state appointment of senior editorial leadership, content guidelines issued or enforced by state actors, and coverage on state-priority topics that demonstrably tracks state messaging. The label specifically excludes editorially-independent public broadcasters funded via charter or license-fee mechanisms (BBC, NPR, NHK, ABC Australia, NRK class), which are captured under Government. The ceiling at 55 reflects the structural ceiling on Independence: a source under state editorial direction cannot, by definition, exceed the upper threshold of Band E on the Independence component. State-affiliated sources can still produce useful wire-style coverage on topics outside state-priority issues, and that practice is scored on its merits — but the structural attribute caps the ceiling regardless of practice.
 
-**Government (30–85).** Government covers three distinct cases. First, **technical agencies publishing primary data** — USGS earthquake feeds, NOAA weather data, WHO surveillance reports, national statistical agencies. Methodology is transparent, the data is the data, and political pressure on data production is publicly observable when it occurs. These score in the upper band (70–85). Second, **editorially-independent public broadcasters funded via charter or license-fee mechanism** — BBC, NPR, NHK, ABC Australia, NRK. The funding source is the state or a state-mandated levy, but editorial decisions are protected by charter and demonstrably independent in observable practice: critical coverage of the funding government is regular, editorial appointments are insulated from political cycles, and editorial standards are public and enforced. These score in the upper band (75–85). The reason this class lives in Government rather than State-affiliated is precisely that the charter mechanism removes state editorial direction even though the funding chain runs through the state. Third, **ministry political communications** — press releases, official statements, party-controlled communications offices. These are by construction advocacy for the issuing government and score in the lower band (30–50). The Government label spans all three because all three are forms of government-mediated communication, but the per-source position within the band is determined by which sub-case the source occupies plus its practice on the four other components.
+**Government (30–85).** Government covers three distinct cases. First, **technical agencies publishing primary data** — USGS earthquake feeds, NOAA weather data, WHO surveillance reports, national statistical agencies. Methodology is transparent, the data is the data, and political pressure on data production is publicly observable when it occurs. These score in the upper band (70–85). Second, **editorially-independent public broadcasters funded via charter, license-fee, or charter-equivalent direct-state-funded mechanism** — BBC, NPR, NHK, ABC Australia, NRK, DW, France 24, and others in this class. The funding source is the state or a state-mandated levy or direct state appropriation. The structural test is not the funding-mechanism type alone but whether editorial decisions are protected by charter or charter-equivalent legal framework AND demonstrably independent in observable practice: critical coverage of the funding government is regular, editorial appointments are insulated from political cycles, and editorial standards are public and enforced. Charter-equivalent direct-state-funded broadcasters (DW under the Deutsche Welle Gesetz; France 24 under France Médias Monde holding) have somewhat weaker legal-firewall structure than charter or license-fee broadcasters and accordingly tend to score in the lower part of the upper band (75–80 rather than 80–85), but the posture assignment remains Government provided practice independence holds. The reason this class lives in Government rather than State-affiliated is precisely that the charter or charter-equivalent mechanism removes state editorial direction even though the funding chain runs through the state. Third, **ministry political communications** — press releases, official statements, party-controlled communications offices. These are by construction advocacy for the issuing government and score in the lower band (30–50). The Government label spans all three because all three are forms of government-mediated communication, but the per-source position within the band is determined by which sub-case the source occupies plus its practice on the four other components.
 
 **Corporate-PR (25–55).** A source covering its owner's industry, products, or commercial interests is structurally compromised on the topic that matters most. The ceiling at 55 is intentional: even a well-edited corporate-PR source, on its core topic, cannot exceed Band E. The score reflects what the source is structurally fit to do — communicate the perspective of its owner — rather than what it is structurally unfit to do (independent investigation of its owner). Corporate-PR sources can be legitimate inputs to a story (the company's own framing of an event matters) but are never the only source.
 
@@ -433,8 +445,8 @@ This section does not soften. Source credibility scoring is editorial judgment e
 
 ### 9.6 Limitations of this version
 
-- Version 1.0 is the first public methodology release. It will have rough edges. We expect substantive critique from external readers and have built versioning into the methodology so we can respond.
-- Sub-criterion 2.2.e (AI and automation disclosure) is industry-immature; the bar for it will rise in v1.1 as industry norms develop.
+- The methodology is a young public artifact. v1.0 was the first public release; v1.1 ships three rubric refinements based on calibration findings (see Changelog). We expect substantive critique from external readers and have built versioning into the methodology so we can respond.
+- Sub-criterion 2.2.e (AI and automation disclosure) is industry-immature; v1.1 did not revise it because Sprint 4.5 calibration did not surface it as a gap (see §2.2). The bar is expected to rise in v1.2 or later as industry norms develop.
 - Per-category Domain expertise scoring (§2.3) is currently weighted by source publication volume per category; a more sophisticated weighting (by event-level relevance) is planned for v1.x.
 - The eight posture labels were derived from X's framework plus our own corpus needs. We do not commit to keeping the labels stable across major versions if the global media ecosystem evolves in ways that make the labels insufficient.
 
@@ -445,11 +457,25 @@ This section does not soften. Source credibility scoring is editorial judgment e
 - **[Strategic Plan v6.0](../strategy/strategic_plan_v6.md)** — Section 3, Capability 1: defines the five-component scoring framework and the source matrix.
 - **[Decisions Log v1.0](../strategy/decisions_log_v1.md)** — Decision 7 (open methodology + proprietary weights), Decision 16 (source onboarding workflow).
 - **[Phase A Kickoff Brief](../phases/phase_a_kickoff_brief.md)** — Sprint 4 Issue 4.4: quality scoring infrastructure work.
-- **Source list:** `backend/src/config/sources.js` is the canonical source list for ingestion as of methodology v1.0. The `sources` database table (Migration 002) is parallel infrastructure for scoring.
-- **Migration 002:** `backend/src/db/migrations/002_sources_table.js` defines the scoring columns (`quality_score`, `quality_score_components`, `source_posture`, `quality_score_methodology_version`, `quality_score_last_updated`) that will be populated against this methodology in Sprint 4.5.
+- **Source list:** `backend/src/config/sources.js` is the canonical source list for ingestion. The `sources` database table (Migration 002) is parallel infrastructure for scoring.
+- **Migration 002:** `backend/src/db/migrations/002_sources_table.js` defines the scoring columns (`quality_score`, `quality_score_components`, `source_posture`, `quality_score_methodology_version`, `quality_score_last_updated`) that will be populated against this methodology via the Phase B Track 1 automated scoring service per finding #85 architectural reframing. A 15-source calibration was performed against v1.0 manually (see `docs/audits/phase_a_source_audit_phase2_calibration.md`); the service handles full-corpus scoring in Phase B.
 
 ---
 
 ## Changelog
+
+**v1.1 — May 17, 2026.** Three rubric refinements based on calibration findings from 15-source publisher scoring (see `docs/audits/phase_a_source_audit_phase2_calibration.md` §4). Changes:
+
+- **§5.1 + §5.2 Government posture sub-case expansion.** Government sub-case 2 (editorially-independent public broadcasters) now admits charter-equivalent direct-state-funded mechanism alongside charter and license-fee mechanisms. DW and France 24 are explicitly classified under this expanded sub-case with typical scoring in 75-80 range to reflect their somewhat weaker legal-firewall structure.
+- **§5.1 + §5.2 Corporate-owned industry-affiliated parent sub-case.** New Corporate-owned sub-case for sources whose parent's primary business is in the industry the source covers. Independence sub-score ceiling at 80 (rather than 95). CoinDesk under Bullish ownership is the reference case.
+- **§2.1 Aggregator ET sub-criteria substitution.** When source posture is Aggregator, the five Editorial track record sub-criteria are substituted with aggregator-specific operationalizations (selection criteria, source-mix transparency, moderation policy, takedown log, community governance). Hacker News is the reference case.
+
+**Hypothesized score deltas for v1.0 calibration sources under v1.1:**
+
+- France 24, DW English: posture clarified; score deltas minimal (±2 points expected on Independence sub-score).
+- CoinDesk: industry-affiliated parent sub-case codifies existing scoring reasoning; score delta zero.
+- Hacker News: Aggregator ET substitution likely moves combined score from 48 to 53-60 range (ET substitution lifts component from 35 to 50-65 estimated).
+
+**v1.1 calibration deferred.** The 15 sources scored under v1.0 in `docs/audits/phase_a_source_audit_phase2_calibration.md` are NOT rescored as part of v1.1 ship. The v1.0 calibration document remains the v1.0 validation artifact. v1.1 calibration will happen when the Phase B Track 1 automated scoring service first runs against v1.1 methodology on the full corpus.
 
 **v1.0 — May 2026.** Initial public release. Five components and eight posture labels per Strategic Plan v6.0. Public/proprietary split per Decision 7. Six-band presentation. Hybrid AI + founder scoring workflow per Decision 16.
