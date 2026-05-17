@@ -41,6 +41,7 @@ import realityIndexRouter from "./src/routes/realityIndex.js";
 import watchlistsRouter  from "./src/routes/watchlists.js";
 import riOpsRouter       from "./src/routes/ri-ops.js";
 import articlesOpsRouter from "./src/routes/articles-ops.js";
+import metricsOpsRouter  from "./src/routes/metrics-ops.js";
 import briefsRouter      from "./src/routes/briefs.js";
 import embedRouter       from "./src/routes/embed.js";
 import macroRouter       from "./src/routes/macro.js";
@@ -280,6 +281,7 @@ app.use("/scoop-ops/queues", queueOpsRouter); // BullMQ / Redis queue diagnostic
 app.use("/scoop-ops/diagnostics", diagnosticsOpsRouter); // prod-safe DB/Redis/process diagnostics
 app.use("/scoop-ops/ri-ops",     riOpsRouter);          // Reality Index live provider/queue diag: /provider
 app.use("/scoop-ops/articles",   articlesOpsRouter);    // per-article remediation: /:id/set-published-at
+app.use("/scoop-ops/metrics-ops", metricsOpsRouter);    // Phase A baseline metrics dashboard (Sprint 3.4) — distinct from SPA route at /scoop-ops/metrics
 
 // Health
 app.get("/api/health", (req, res) => {

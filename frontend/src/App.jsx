@@ -47,6 +47,7 @@ import TruthGapPage         from "./pages/TruthGapPage";
 import DashboardPage        from "./pages/DashboardPage";
 import AnomaliesPage        from "./pages/AnomaliesPage";
 import RealityIndexOpsPage  from "./pages/RealityIndexOpsPage";
+import MetricsOpsPage       from "./pages/MetricsOpsPage";
 import BriefsPage           from "./pages/BriefsPage";
 import BriefPage            from "./pages/BriefPage";
 import BriefsReviewPage     from "./pages/BriefsReviewPage";
@@ -184,6 +185,7 @@ export default function App() {
           <Route path="/dashboard"          element={<DashboardPage />} />
           <Route path="/anomalies"          element={<AnomaliesPage />} />
           <Route path="/scoop-ops/reality-index" element={<RealityIndexOpsPage />} />
+          <Route path="/scoop-ops/metrics"        element={<MetricsOpsPage />} />
           <Route path="/scoop-ops/briefs"     element={<BriefsReviewPage />} />
           <Route path="/briefs"               element={<BriefsPage />} />
           <Route path="/briefs/:slug"         element={<BriefPage />} />
