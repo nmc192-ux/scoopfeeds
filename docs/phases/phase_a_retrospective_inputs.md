@@ -5245,3 +5245,146 @@ Phase A close-out was at 3-7 sessions estimate at session 28 close. Classificati
 - Sprint 3.4 (L, ~1-2 sessions): build /scoop-ops/metrics admin dashboard capturing 5 baseline metrics — uptime, scheduler last-run age, BullMQ failure rate, returning user rate, source diversity index
 - All four issues likely fit in single session 29 if 3.4 dashboard design goes smoothly. Two-session split if 3.4 needs design discussion.
 - Session 30 (post-3.4-ship) captures actual baseline values from the dashboard per Sprint 6.3.
+
+---
+
+### Finding #87 — Sprint 3.3 `isUrdu` Brief premise valid at authoring, invalidated by intervening work
+
+**Session 29 Phase 29.A investigation.** Phase A Kickoff Brief Sprint 3 Issue 3.3 said: *"App.jsx computes `isUrdu` but never uses it (per Upgradation document). 1. View App.jsx 2. Find the isUrdu computation 3. If genuinely unused, remove the line"* — sized XS (~5 min).
+
+**Actual codebase state at session 29:** `isUrdu` is referenced in **10 production files**:
+
+- `frontend/src/App.jsx` (lines 88, 131)
+- `frontend/src/components/layout/Header.jsx` (5 references — RTL styling, font selection, placeholder text)
+- `frontend/src/components/news/NewsCard.jsx` (8 references — conditional Urdu/English UI)
+- `frontend/src/components/news/FeaturedCard.jsx` (6 references — same)
+- `frontend/src/components/news/BreakingBanner.jsx` (3 references — labels in Urdu vs English)
+- `frontend/src/hooks/useTranslation.js` (returned from `useTranslatedTexts` hook)
+- `frontend/src/pages/HomePage.jsx`, `TopicPage.jsx`, `SavedPage.jsx`
+- `backend/src/routes/seo.js`
+
+The pattern is `const isUrdu = language === "ur"` repeated across components, used for RTL styling decisions (`flex-row-reverse`, `text-right`), font-family selection (Noto Nastaliq Urdu), conditional Urdu/English label text. Removing it would break the Urdu UX across all 10 files.
+
+**Sub-pattern.** This is the **second** Brief-inaccuracy sub-pattern surfacing:
+
+- **#84/#85 sub-pattern:** Brief premise wrong *at authoring time*. The Brief specified state that did not exist (Sprint 4.4 sources table did not exist; credibility_legacy NOT NULL incompatible with YouTube entries lacking credibility values).
+- **#87 sub-pattern (new):** Brief premise **valid at authoring time, invalidated by intervening work**. The Brief's "isUrdu computed but never used" was likely accurate when Sprint 3.3 was authored — there was a single unused `isUrdu` computation in App.jsx that the Upgradation document flagged. Subsequent i18n work propagated the `const isUrdu = language === "ur"` pattern across 10 files as load-bearing i18n flag. Brief became stale; Sprint 3.3 instruction would now do destructive work if executed literally.
+
+The distinction matters for Phase B Kickoff Brief authoring discipline:
+
+- Mitigation for #84/#85: verify premises against actual code/data state *at the moment of Brief authoring* (per finding #84 institutional implication).
+- Mitigation for #87: re-verify Brief premises against codebase state *at the moment of execution*, especially for any Brief item authored more than a few sessions before its execution. The verification-before-execution discipline (already established for #84/#85) handles this — investigation-before-edit caught the #87 case here.
+
+**Cumulative Brief-inaccuracy count.** 9 of 10 → **10 of 11** inspected Brief items with wrong premises (at moment of execution).
+
+**Sprint 3.3 disposition.** CLOSED AS WRONG-PREMISE. No execution work performed. `isUrdu` remains as load-bearing i18n infrastructure across the 10 files. The Brief item is preserved historically; the close-out documentation marks it wrong-premise rather than executed.
+
+**Refs:** Phase A Kickoff Brief §8 Sprint 3 Issue 3.3; finding #15 (Phase 1 Brief inaccuracy pattern origin); finding #84 (Sprint 4.4 Brief premise errors); finding #85 (institutional pattern of infrastructure work disguised as content work in Phase planning); Phase 29.A investigation report (this session).
+
+---
+
+### Finding #88 — Sprint 3.4 design choice 7 was structural constraint masquerading as stylistic preference
+
+**Session 29 Phase 29.B.2 + Phase 29.B.2 refinement.** Phase 29.B.2 design review surfaced 7 design choices for explicit DrJ approval. Design choice 7 read:
+
+> "Mount path is `/scoop-ops/metrics` (root) rather than `/scoop-ops/metrics/dashboard` (subroute). Cleaner because we have a single endpoint. Diverges slightly from `ri-ops` which uses `/scoop-ops/ri-ops/dashboard` — but `ri-ops` has multiple sub-endpoints. **Recommend root mount for v1** with intent to add subroutes later if needed."
+
+DrJ approved the design including choice 7. Implementation followed the approved design with backend mount at `/scoop-ops/metrics` and frontend SPA route at `/scoop-ops/metrics` — same path.
+
+**Where the design broke.** Browser navigation to `/scoop-ops/metrics` arrived at the backend with `Accept: text/html`, hit the API route (which is mounted *before* the SPA catch-all in `server.js`), and returned JSON instead of the SPA shell. The user saw raw JSON, never the React component. Same break occurs in production: API mount is more specific than catch-all, so the API endpoint wins regardless of Accept header on direct browser navigation.
+
+**Sub-pattern.** This is the **third** institutional sub-pattern in the Brief / design accuracy series:
+
+- **#84/#85 sub-pattern:** Brief premise wrong at authoring (data/code state assumption).
+- **#87 sub-pattern:** Brief premise valid at authoring, invalidated by intervening work (drift over time).
+- **#88 sub-pattern (new):** **Design choice assumed convention was stylistic preference when it was structural constraint.** The five existing admin route mounts (`newsletter-ops`, `videos-gen`, `articles-ops`, `ri-ops`, `diagnostics-ops`) follow the `*-ops` suffix pattern. Design choice 7 treated this as a style preference and chose differently for "cleanliness." The convention's actual purpose — separating SPA-namespace paths (`/scoop-ops/{reality-index, briefs, synthetic}`) from API-namespace paths (`/scoop-ops/{ri-ops, newsletter, articles, ...-ops}`) to prevent path collision between browser navigation and React fetch — was **structural, not stylistic**. The convention's rationale wasn't documented anywhere I could find at design time; required reverse-engineering after the collision surfaced in verification.
+
+**Resolution.** API renamed to `/scoop-ops/metrics-ops` (convention-compliant) at commit `078159a`. SPA route stays at `/scoop-ops/metrics`. Frontend fetch URL updated to match. File `backend/src/routes/scoop-ops-metrics.js` renamed to `metrics-ops.js` to match existing file-naming convention (`articles-ops.js`, `newsletter-ops.js`, `ri-ops.js`, `diagnostics-ops.js`, `queue-ops.js`).
+
+**Brief-inaccuracy count interaction.** Finding #88 is a design-choice pattern, not a Brief-inaccuracy pattern. Doesn't increment the 10-of-11 Brief numerator. Sub-pattern stands on its own as a distinct institutional lesson.
+
+**Documentation gap recorded.** The `/scoop-ops/*` URL convention's rationale should live somewhere discoverable — candidates: a routing-convention doc under `docs/specs/`, an architectural breadcrumb comment at the top of `backend/server.js` near the `/scoop-ops` mount block, or a section in the eventual `docs/specs/scoop-ops-routing.md` that future Phase B Track 1 admin-surface work would add. Capturing here as a follow-up — not in Sprint 3.4 scope.
+
+**Refs:** Phase 29.B.2 design choice 7 (recanted); commits `db43b7f` (vite proxy bypass fix), `078159a` (Sprint 3.4 ship with /scoop-ops/metrics-ops API mount); existing convention sources: `backend/server.js` lines 276-282 ( `/scoop-ops/*` mount block); `frontend/src/App.jsx` (existing SPA routes for `/scoop-ops/reality-index`, `/scoop-ops/briefs`, `/scoop-ops/synthetic`).
+
+---
+
+### Session 29 — May 17, 2026 — Sprint 3 batch close-out + dev-environment infrastructure improvements
+
+**Type:** Execution session (~3 hours). Sprint 3 batch close-out per session 28-extension Path 2 classification.
+
+#### Sprint 3 batch progress
+
+| Sprint | Pre-session 29 | Post-session 29 | Disposition |
+|---|---|---|---|
+| Sprint 3.1 (raw_signals drop) | NOT STARTED | **SHIPPED** | Migration 003 + schema.js historical note. Commit `c823dee` (early session 29). |
+| Sprint 3.2 (LiveTVChannelEmbed delete) | NOT STARTED | **CLOSED N/A** | Phase 29.A investigation confirmed component already deleted in prior cleanup (commit ancestry at `88a8ba4`). No work needed. |
+| Sprint 3.3 (isUrdu remove) | NOT STARTED | **CLOSED WRONG-PREMISE** | Phase 29.A investigation revealed isUrdu is load-bearing across 10 production files. Brief premise valid at authoring; invalidated by intervening i18n propagation. Finding #87. |
+| Sprint 3.4 (5 metrics dashboard) | NOT STARTED | **SHIPPED (4 of 5 metrics)** | Backend at `/scoop-ops/metrics-ops`; frontend SPA at `/scoop-ops/metrics`. Metric #5 (returning user rate) bridged to Phase B Track 1 Distribution per session 28-extension DEC1. Commit `078159a`. |
+
+**Sprint 3 progress: 0 of 4 → 4 of 4 closed** (2 shipped, 1 N/A, 1 wrong-premise). Sprint 3 batch DONE substantively.
+
+#### Session 29 commit chain
+
+| SHA | Subject | Phase |
+|---|---|---|
+| `c823dee` | `feat(db): drop unused raw_signals table (Sprint 3.1, Migration 003)` | 29.B.1 |
+| `db43b7f` | `chore(claude): launch.json absolute paths + vite proxy for /scoop-ops dev routes` | 29.B.2 (dev-env infra) |
+| `078159a` | `feat(scoop-ops): /scoop-ops/metrics dashboard with 4 baseline metrics (Sprint 3.4)` | 29.B.2 (feature ship) |
+| (this commit) | `docs(retrospective): findings #87 + #88 + Pace Tracker session 29 — Sprint 3 batch close-out + design-pattern sub-patterns` | 29.B.3 (institutional) |
+
+#### Dev-environment improvements (Commit A)
+
+Two surgical fixes that benefit all current and future admin pages, not just Sprint 3.4:
+
+- **launch.json absolute paths.** Replaced relative `cd backend`/`cd frontend` with absolute paths to the main repo. Preview startup is now deterministic regardless of whether the agent is operating from a worktree or the main repo. Diagnostic root cause: agent's cwd kept getting reset to the worktree, where node_modules don't exist.
+- **vite.config.js `/scoop-ops` proxy with bypass.** Added `/scoop-ops` to the proxy alongside `/api`. Critically, used a `bypass` function: returns `/index.html` on `Accept: text/html` (browser SPA navigations get vite's dev SPA shell); proxies to backend on JSON requests (React `fetch()` calls reach the API). Without bypass, the broad proxy hijacked SPA navigations and forwarded them to backend, which serves production-built SPA HTML referencing built bundle paths that don't exist in dev — empty page render. The bypass preserves vite's dev SPA serving for browser navs while enabling correct API proxying for fetches.
+
+Confirmed beneficial cross-page: RealityIndexOpsPage previously stuck on admin-key form in dev (because fetch returned HTML, parsed as JSON, threw, triggered error state). Post-fix, RealityIndexOpsPage renders full Provider info + pipeline counts (33,300 articles, etc.) directly in dev preview.
+
+#### ALLOW_LEGACY_ADMIN_QUERY_KEY institutional context
+
+Pre-existing constraint, not regression: `adminAuth.js` only honors the `?key=...` query-string auth path when env `ALLOW_LEGACY_ADMIN_QUERY_KEY=true`. Both `MetricsOpsPage.jsx` (new) and `RealityIndexOpsPage.jsx` (existing) use the query-string pattern; both rely on this flag being set in env to function. Production deploys presumably set the flag; otherwise existing admin pages would not work either.
+
+Long-term, admin pages should migrate from query-string auth to `Authorization: Bearer` header auth (the modern path adminAuth.js prefers and even includes a deprecation warning header for the query-key path). The migration is Phase B Track 1 scope if/when the admin surface gets revisited — not Sprint 3.4 work. Captured here for institutional context.
+
+#### Phase A close-out trajectory
+
+| Milestone | Pre-session 29 | Post-session 29 |
+|---|---|---|
+| Strategic Plan v6 §9 exit criterion #5 (5 metrics captured) | NOT MET | **PARTIALLY MET** (4 of 5 captured in-Phase-A; metric #5 bridged to Phase B per session 28-extension DEC1; Phase B Retrospective accounts) |
+| Sprint 3 batch | NOT STARTED | DONE substantively |
+| Sprint 6.3 (baseline snapshot) | NOT STARTED | **Scheduled for session 30** — captures values from the dashboard shipped this session |
+| Phase A close-out remaining sessions | 2-3 sessions | **1 session** (Sprint 6.3 baseline snapshot) + DrJ judgment on time/energy criterion 4 for Phase B kickoff |
+
+**Phase A close-out is one session away from completion** (Sprint 6.3 baseline snapshot in session 30) plus the Phase B kickoff DrJ decision moment.
+
+#### Binding kickoff gate status
+
+5 of 8 substantively MET (unchanged from session 28-extension framing). Gates 4 and 5 (Reality Index strategic clarity / operational baseline understood) remain PARTIAL — operational baseline strengthens with Sprint 3.4 dashboard shipping plus Sprint 6.3 capturing initial baselines next session. Gate 6 (time/energy budget) remains DrJ judgment at kickoff moment.
+
+#### Cumulative findings count
+
+86 → 88 (findings #87 + #88 captured this commit).
+
+#### Brief inaccuracy count
+
+10 of 11 inspected Brief items with wrong premises (was 9 of 10 at session 28-extension close; advanced by Sprint 3.3 isUrdu wrong-premise per finding #87). Finding #88 is a separate design-pattern sub-pattern (not a Brief item) and doesn't move the Brief-inaccuracy numerator.
+
+#### Production state at session 29 close
+
+Production code unchanged at `6278ab6`. Three migrations now staged for next deploy startup (Migration 002 sources table seed + Migration 003 raw_signals drop both apply idempotently). All session 28 + session 29 commits are documentation/dev-env/spec/admin-page work; no production code change touches user-facing behavior.
+
+Migration 003 has been smoke-tested twice in isolated `/tmp` DBs against both fresh + pre-existing paths.
+
+#### Next session candidates (priority order)
+
+1. **Sprint 6.3 baseline snapshot.** Captures current values from `/scoop-ops/metrics` dashboard as Phase A close-out baseline. 1 session.
+2. **Phase B kickoff decision.** DrJ judgment on time/energy gate condition 4 after Sprint 6.3 ships. 0 sessions of work; one decision message.
+3. **Phase B Track 1 first work** per Phase B Kickoff Brief §6.4 (Tracker Auto-Detection Engine v1 as recommended starting work, subject to DrJ confirmation at actual kickoff).
+
+#### Documentation follow-ups (deferred, captured for visibility)
+
+- `/scoop-ops/*` URL convention rationale should be documented per finding #88. Candidate: a section in `docs/specs/` or a comment block at `backend/server.js:275` near the `/scoop-ops` mount block. Phase B Track 1 admin-surface work would naturally produce this artifact.
+- ALLOW_LEGACY_ADMIN_QUERY_KEY → Authorization: Bearer migration for admin pages (Phase B Track 1 scope when admin surface gets revisited).
+- `.env` Step 8 revert: ADMIN_BEARER_TOKEN + ALLOW_LEGACY_ADMIN_QUERY_KEY dev-only additions to be removed after this commit chain ships. Local-only — never committed (gitignored).
