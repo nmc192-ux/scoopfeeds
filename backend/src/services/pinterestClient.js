@@ -22,7 +22,9 @@
 
 import { logger } from "./logger.js";
 
-const API_BASE = "https://api.pinterest.com/v5";
+// API base URL. Defaults to production; override with PINTEREST_API_BASE_URL
+// to route through the Trial-access sandbox at https://api-sandbox.pinterest.com.
+const API_BASE = `${process.env.PINTEREST_API_BASE_URL || "https://api.pinterest.com"}/v5`;
 
 const getToken    = () => process.env.PINTEREST_ACCESS_TOKEN || "";
 const getBoardId  = () => process.env.PINTEREST_BOARD_ID     || "";
