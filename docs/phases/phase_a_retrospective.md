@@ -807,4 +807,107 @@ Sprint 6 progress: 2 of 7 issues CLOSED. Remaining 5 issues span ~5-7 sessions o
 
 ---
 
-*End of document. Phase A Retrospective v1.0.*
+*End of v1.0 document. Phase A Retrospective v1.0 finalized session 24, 2026-05-15. v1.1 final addendum appended below.*
+
+---
+
+## Final addendum — Phase A formal close (May 18, 2026)
+
+### Sessions 28-30 close-out trajectory
+
+Phase A close-out completed across sessions 28, 28-extension, 29, and 30. Twelve commits total:
+
+| Session | SHA | Subject |
+|---|---|---|
+| 28.A | `3d935ef` | `docs(content): source credibility methodology v1.1 — three rubric refinements from Sprint 4.5 Phase 1 calibration` |
+| 28.B | `3ca4e34` | `docs(specs): source scoring service specification v1.0 (Phase B Track 1 deliverable)` |
+| 28.C | `cef2270` | `docs(phases): Phase B Kickoff Brief v1.0 — three-track structure, source scoring service Track 1 deliverable, ≥150 sources exit criterion` |
+| 28 | `c20b779` | `docs(retrospective): Pace Tracker session 28 — Phase 28 commit chain + binding kickoff gate progress` |
+| 28-ext | `9d018a7` | `docs(retrospective): Pace Tracker session 28-extension — Phase A close-out classification + Path 2 confirmation` |
+| 29.B.1 | `c823dee` | `feat(db): drop unused raw_signals table (Sprint 3.1, Migration 003)` |
+| 29 dev-env | `db43b7f` | `chore(claude): launch.json absolute paths + vite proxy for /scoop-ops dev routes` |
+| 29.B.2 | `078159a` | `feat(scoop-ops): /scoop-ops/metrics dashboard with 4 baseline metrics (Sprint 3.4)` |
+| 29 | `293a209` | `docs(retrospective): findings #87 + #88 + Pace Tracker session 29 — Sprint 3 batch close-out + design-pattern sub-patterns` |
+| 30.C | `5080a4f` | `docs(audits): Phase A baseline metrics snapshot v1.0 (Sprint 6.3 partial baseline + metrics-ops followup documented)` |
+| 30 | `2f281b0` | `docs(retrospective): finding #89 + Pace Tracker session 30 — Sprint 6.3 close + Phase A close-out completion` |
+| 31 (this) | (forthcoming this commit) | `docs(retrospective): Phase A Retrospective final addendum + gate 6 MET — Phase A formal close` |
+
+### Three new findings (#87, #88, #89)
+
+Sessions 28-30 captured three new findings expanding the Phase A institutional learning pattern. All three are verification / design-discipline sub-patterns distinct from the Brief-inaccuracy series (#84/#85):
+
+- **Finding #87** (session 29) — Sprint 3.3 `isUrdu` wrong-premise. **Sub-pattern: Brief premise valid at authoring, invalidated by intervening work.** Brief said "isUrdu computed but never used; remove the line." Investigation revealed `isUrdu` is load-bearing i18n infrastructure used in 10 production files. Likely valid at authoring; invalidated by intervening work propagating `const isUrdu = language === "ur"` pattern across components. Sprint 3.3 closed wrong-premise (not executed). Mitigation: re-verify Brief premises at moment of execution, especially for items authored more than a few sessions before execution.
+
+- **Finding #88** (session 29) — Sprint 3.4 design choice 7 convention-vs-constraint. **Sub-pattern: Design choice assumed convention was stylistic preference when it was structural constraint.** Phase 29.B.2 design choice 7 selected `/scoop-ops/metrics` root mount over subroute mount on stylistic grounds. SPA-route collision surfaced at frontend verification — vite proxy forwarded browser navigation to backend, displayed raw JSON. Five existing admin routes followed `*-ops/` convention; the convention's rationale (SPA-route-collision-prevention) wasn't documented; required reverse-engineering. Resolution: API renamed to `/scoop-ops/metrics-ops`; SPA route stays at `/scoop-ops/metrics`. Mitigation: when departing from established conventions, verify the convention's rationale is *stylistic* rather than *structural* before choosing differently.
+
+- **Finding #89** (session 30) — Dev verification with seeded data masks production data-path divergence. **Sub-pattern: Dev verification SUCCEEDED against the test fixture; the fixture itself didn't match production reality.** Phase 29.B.2 Sprint 3.4 metrics-ops endpoint passed dev verification with a seeded `background_job_runs` table containing hand-crafted rows. Sprint 6.3 production capture revealed three of four metrics return `null` despite active production scheduler — `background_job_runs` empty for 24h window, and scheduler `last*Run` filter rejects ISO-string production values. Distinct from #87/#88 because the verification *looked* complete. Mitigation: verify seed structure matches actual production data structure; where possible, run verification against production-like state rather than synthetic fixtures.
+
+Cumulative findings count through Phase A close-out: **84 → 89** (added #85, #86, #87, #88, #89 across sessions 27-30). Brief inaccuracy count: 9 of 10 → **10 of 11** (advanced by #87; #88 and #89 are design/verification sub-patterns, not Brief-prescription errors). Pattern continues to validate the investigation-before-conclusion discipline across the Phase A close-out work.
+
+### Sprint final closure state
+
+| Sprint | Final state |
+|---|---|
+| Sprint 0-2 | DONE (foundational work) |
+| Sprint 3 | DONE substantively (3.1 SHIPPED Migration 003, 3.2 N/A, 3.3 WRONG-PREMISE finding #87, 3.4 SHIPPED 4 of 5 metrics) |
+| Sprint 4 | 5 of 7 DONE; 4.5 PARTIAL (calibration Phase 1 + methodology v1.1 + scoring service spec v1.0 shipped this close-out); 4.7 BRIDGED to Phase B Track 1 |
+| Sprint 5.x | BRIDGED to Phase B Track 1 (Social Engine v2 + Search Upgrade + Tracker Engine) |
+| Sprint 6 | 5 of 7 CLOSED (6.1, 6.2, 6.4, 6.7 DONE; 6.3 DONE substantively; 6.5 N/A; 6.6 N/A in Phase A — deferred to next quarterly Strategic Plan review per session 28-extension DEC3) |
+
+Strategic Plan v6 §9 Phase A exit criteria final state:
+
+- Criteria 1-4: **MET**
+- Criterion 5 (5 metrics captured): **PARTIALLY MET** (1 captured cleanly — source diversity; 3 deferred to Phase B Track 1 with diagnostic data per finding #89; 1 bridged per session 28-extension DEC1)
+- Criterion 6: **MET**
+- Criteria 7-8 (social + search audits): **BRIDGED to Phase B Track 1** (Social Engine v2 + Search Upgrade work covers the audit scope experientially)
+
+### Phase B Track 1 followup work documented during Phase A close-out
+
+Five items deferred from Phase A to Phase B Track 1 with concrete scope captured:
+
+1. **Sprint 4.7 source priority list** — Phase B Track 1 source discovery service per Decision 16 weekly batch proposes candidates iteratively (per session 28-extension classification).
+2. **Sprint 5.x social audit, search audit, tracker template library** — Phase B Track 1 Social Engine v2 + Search Upgrade + Tracker Engine work covers experientially (per session 28-extension classification + Phase B Brief §10.7).
+3. **metrics-ops endpoint scheduler `last*Run` filter type fix** (finding #89 followup) — accept ISO string / Date / number forms. Code sketch in `docs/audits/phase_a_baseline_metrics_snapshot.md` §4.2. ~1-2 Phase B Track 1 sessions.
+4. **metrics-ops endpoint `background_job_runs` population semantics investigation** (finding #89 followup) — 3 remediation options (a/b/c) listed in baseline snapshot §4.4. Decision needs population-semantics evidence to make.
+5. **Returning user rate Layer 1 analytics infrastructure** (session 28-extension DEC1) — Phase B Track 1 Distribution / Layer 1 launch scope. Captured baseline shape (BridgedStub) per Phase B Brief §3.5 + baseline snapshot §3.1.
+
+### Binding kickoff gate final state (8-gate decomposition)
+
+| # | Condition | Final state |
+|---|---|---|
+| 1 | Sprint 0-2 closed | MET |
+| 2 | Phase A Retrospective written | MET (this addendum closes Phase A v1.1) |
+| 3 | No outstanding production incidents | MET |
+| 4 | Strategic clarity on Reality Index | PARTIAL (Phase B Track 1 work will resolve per Brief §3.5) |
+| 5 | Operational baseline understood | PARTIAL (source diversity captured; 3 of 4 metrics deferred to Phase B Track 1) |
+| 6 | Time/energy budget realistic | **MET** (DrJ judgment May 18, 2026) |
+| 7 | Phase B Kickoff Brief drafted | MET (commit `cef2270`) |
+| 8 | Three-track coordination documented | MET (commit `cef2270`) |
+
+**6 of 8 substantively MET.** Gates 4 + 5 PARTIAL with deferred work documented above. Per reconciliation v1 §8.3, the 4 binding conditions of Phase B kickoff are met (the 4-condition mapping to the 8-gate decomposition: condition 1 "Phase A wrapped cleanly" = gates 1 + 2 + 3 ✓; condition 2 "Reality Index strategic clarity" = gate 4 PARTIAL but acceptable per Brief §3.5 framing; condition 3 "Operational baseline understood" = gate 5 PARTIAL with deferred-work plan; condition 4 "Time/energy budget realistic" = gate 6 MET).
+
+### Phase A formally closes May 18, 2026
+
+Phase A execution work complete after session 30. Phase A formal close-out via this final addendum + DrJ gate 6 judgment. Phase B opens same date.
+
+Phase A artifacts preserved for institutional memory:
+
+- [Phase A Kickoff Brief](phase_a_kickoff_brief.md)
+- [Phase A Retrospective](phase_a_retrospective.md) (this document — v1.0 frozen at session 24; v1.1 final addendum is this)
+- [Phase A Retrospective Inputs](phase_a_retrospective_inputs.md) (Pace Tracker journal through session 31)
+- [Phase A Source Audit Phase 2 Calibration](../audits/phase_a_source_audit_phase2_calibration.md)
+- [Phase A Baseline Metrics Snapshot](../audits/phase_a_baseline_metrics_snapshot.md)
+- [Source Credibility Methodology](../content/source_credibility_methodology.md) v1.0 → v1.1
+- [Source Scoring Service Specification](../specs/source_scoring_service.md) v1.0
+- [Phase B Kickoff Brief](phase_b_kickoff_brief.md) v1.0
+
+Phase B retrospective inputs file (new this session at `docs/phases/phase_b_retrospective_inputs.md`) begins the Phase B institutional memory journal. Phase B Pace Tracker entries land there from session 32 forward; Phase A retrospective inputs is preserved read-only as institutional record.
+
+### Changelog
+
+- **v1.1 — May 18, 2026** — Final addendum: sessions 28-30 close-out trajectory + three new findings (#87, #88, #89) + Sprint final state + Phase B Track 1 followup work + binding kickoff gate final + Phase A formal close.
+- **v1.0 — May 15, 2026** — Initial Phase A Retrospective (session 24, commit `72a7eb8`).
+
+---
+
+*End of document. Phase A Retrospective v1.1.*
