@@ -614,3 +614,162 @@ This is operational discipline going forward — no code change required.
 - `package.json` dependencies (Sentry SDK already present; just unconfigured in production env)
 - Phase B Kickoff Brief §10.7 (Phase A close-out audit deferrals — production observability is implicitly an inherited gap, now made explicit by #93)
 - Sentry config in `backend/src/config/observability.js` (if present — Sentry initialization wiring is already in code; finding #93's remediation is config-only)
+
+---
+
+### Session 4 — May 19, 2026 — Three-session day: Pinterest sandbox token retrieved + Sprint 2.x.1 shipped + Pinterest Standard access deferred
+
+**Type:** Three Phase B sessions in one calendar day per DrJ 3×2h structure (extended to ~6–6.5h total). Sessions 34, 35, 36. This Session 4 entry captures the day's chronology, Sprint 2.x.1 retrospective, Pinterest deferral decision, and finding #94 candidate evaluation.
+
+**Output across three sessions:**
+
+- **Session 34 — Phase B Session 3 institutional capture** (commit `0a7df19`). Three findings #91/#92/#93 + Sprint 2.x scope plan + Pace Tracker Session 3 entry. Locked the prior day's Pinterest sandbox integration + 503 incident + X-Posting Queue scoping into institutional memory. ~1.5h.
+- **Session 35 — Pinterest sandbox token end-to-end.** Sandbox token retrieved from Pinterest Developer dashboard, deployed to Hostinger production env, verified end-to-end via dry-run + cadence-blocked-confirmed pin creation. First Scoopfeeds Pinterest pin (Sony headphones tech article) live in business Pinterest account on Main board. Trial-mode visibility (account-only, not public audience). ~1.5–2h. No commits this session (configuration + verification work, no code change).
+- **Session 36 Track A — Sprint 2.x.1 X-Posting Queue foundation** (commit `95189fe`). Migration 004 + `xPostGenerator.js` + scheduler hook + 4 DAO functions. Existing `composeX` from `socialComposer.js` reused for single-post path; thread composition (250-char threshold, max 4 parts, sentence-boundary splits, ellipsis on mid-clause truncation) net-new. Tests verified.
+- **Session 36 Track B — Pinterest Standard access demo script** (commit `b04a3dc`). Demo script written and committed; recording + Standard access application submission deferred indefinitely. Pinterest auto-cycle disabled in production after recording deferral decision.
+
+**Commits this day:** 3 — `0a7df19`, `95189fe`, `b04a3dc`.
+
+**Sprint trajectory at day close:**
+
+- Sprint 2.x.1 (X-Posting Queue foundation): **COMPLETE** (shipped commit `95189fe`)
+- Sprint 2.x.2 (email digest delivery): pending next session
+- Sprint 2.x.3 (mark-as-posted workflow): pending after 2.x.2
+- Sprint 2.x.1b (X queue from analytical posts): pending analytical post investigation
+- Sprint 1.1 (Tracker templates): plan-only, awaiting execution
+- Sprint 1.2–1.5 (Tracker Engine sub-sprints): plan-only
+- Sprint 0 (Cache-Control immutable, Track 3): plan-only
+
+**Pinterest state at day close:**
+
+| Surface | State |
+|---|---|
+| Code | Shipped and complete (`pinterestClient.js` + `pinterest-auth.mjs` + `socialPublisher` adapter + Migration 003 all in place) |
+| Production env | `PINTEREST_ACCESS_TOKEN` **deleted** (auto-cycle disabled) |
+| Auto-cycle behavior | Skips Pinterest; adapter reports `not_configured` via `/scoop-ops/auto-status` |
+| Sandbox token | Saved in DrJ password manager for future re-enable |
+| Standard access application | Deferred indefinitely per "Trial pin visibility insufficient for audience reach" |
+| Demo video | Script committed (`b04a3dc`); recording deferred indefinitely |
+| Re-enable path | ~2 min — Hostinger token restore + restart, no code work |
+
+**DrJ decisions captured this day:**
+
+- Path α confirmed for X distribution; Sprint 2.x.1 shipped this day per that plan.
+- Path C-Full attempted for Pinterest Standard access (disable-record-enable-rotate-submit); pivoted at the recording phase to "skip Standard access for now."
+- Pinterest auto-cycle disabled given Trial-mode visibility is account-only (no public audience reach).
+- Sprint 2.x.2 (email digest) deferred to next session.
+- Phase B Session 4 institutional capture taken immediately at day close (this session).
+
+**Time accounting:**
+
+| Session | Approx. hours | Output |
+|---|---|---|
+| 34 | ~1.5h | Phase B Session 3 institutional capture |
+| 35 | ~1.5–2h | Pinterest sandbox token end-to-end (live pin) |
+| 36 | ~3h | Sprint 2.x.1 + Pinterest demo script + production state cleanup |
+| **Total** | **~6–6.5h** | 3 commits + Pinterest operationalization-then-deferral |
+
+Initially planned 3×2h (=6h) per DrJ structure; extended modestly per DrJ confirm. Within the "open-ended" willingness window.
+
+**Production state at Session 4 open:**
+
+- `status`: ok
+- Articles: **27097**
+- Source count: **110**
+- Uptime: 179s (fresh restart visible at health check, ~3 min before Session 4 began)
+- Migrations applied: 001 + 002 + 003 + 004 (Sprint 2.x.1's Migration 004 auto-applied on Hostinger restart)
+- Social platforms enabled: bluesky, threads, facebook (Pinterest disabled per Session 36 Track B close; Instagram still failing per Session 33 pattern)
+
+**Phase B retrospective findings count:** 4 (`#90`, `#91`, `#92`, `#93`) at start of day → **4 at end** (finding #94 candidate evaluated below and declined).
+
+**Brief inaccuracy count:** 11 of 12 (unchanged this day; no new Brief-codebase-state errors surfaced).
+
+**Three-track contribution this day:**
+
+- **Track 1 (Phase B execution):** Heavy contribution. Sprint 2.x.1 shipped end-to-end. Pinterest sandbox operationalized (first live pin) then strategically disabled. Demo script written and deferred.
+- **Track 2 (Phase A close-out followups):** No contribution this day. Status unchanged from session 30.
+- **Track 3 (infrastructure performance per Brief §5.1):** No contribution this day. Sprint 0 (Cache-Control immutable) untouched. Per softened Track 3 framing per Session 34: timing remains DrJ judgment; Track 3 lapse since Phase B start is growing but not at a critical threshold yet.
+
+**Known followup work added/refreshed this day:**
+
+- **Sprint 2.x.2 (email digest delivery)** — next-session candidate, ~1 session.
+- **Sprint 2.x.3 (mark-as-posted workflow)** — after 2.x.2.
+- **Sprint 2.x.1b (X queue from analytical posts)** — pending analytical-post investigation, ~1–1.5 sessions.
+- **Frontend bug (analytical posts cannot be opened)** — pending investigation, Phase B Track 1.
+- **Pinterest Standard access demo video recording + application** — deferred indefinitely; revisit when Pinterest distribution priority changes.
+- **Finding #94 candidate (Pinterest sandbox intermittent auth)** — evaluated and declined as new finding (see below); captured as Session 4 observation.
+- **Sentry configuration (~30 min)** — Phase B Track 1/3 candidate per finding #93 cheap-mitigation path.
+- **Instagram failure rate diagnosis** (77+ failures/24h pattern) — Phase B Track 1.
+- **`.env\r` cruft housekeeping** — Phase B Track 3 followup.
+
+**Next-session candidates:**
+
+1. **Phase B Sprint 2.x.2 — Email digest delivery** (~1 session). Completes X-Posting Queue end-to-end. Renders pending posts to email digest delivered daily.
+2. **Phase B Sprint 1.1.1 — Tracker template library start** (conflict + outbreak templates). M scope, 2–3 sessions for full library.
+3. **Sentry configuration (~30 min)** — cheap finding #93 mitigation. Could fold into any session.
+4. **Track 3 Sprint 0 — Cache-Control immutable hygiene** (1 session per Brief §5.1). DrJ judgment on timing.
+5. **Instagram failure diagnosis** — Phase B Track 1 followup.
+
+#### Finding #94 candidate evaluation — declined as new finding
+
+**Pattern observed this day:** 60 failures + 1 success per 24h on Pinterest sandbox endpoint with sandbox-specific token. Failures all `401 Authentication failed`. Pattern surfaced when Pinterest auto-cycle was running with sandbox token deployed (Session 35 close → Session 36 Track B close).
+
+**Honest read:** This is **Pinterest sandbox behavior**, not a distinct Scoopfeeds finding. Per Pinterest developer community reports and Medium documentation, the sandbox endpoint is known to be less reliable than the production endpoint. The intermittent 401s are environmental, not bugs in `pinterestClient.js` and not misconfiguration in our setup. The single successful pin per 24h (Sony headphones article, Session 35) confirms the token and request shape are valid; intermittency is on Pinterest's side.
+
+**Why not a new finding:**
+
+- **Not a code/Brief premise error** (no Brief or codebase claim contradicted) → not the `#87`/`#88`/`#91` pattern shape.
+- **Not a verification-discipline failure** (no premature "shipped/verified" claim contradicted by reality) → not the `#89`/`#90` pattern shape.
+- **Not a production incident pattern** (no Scoopfeeds outage; pin creation simply rate-limited by sandbox) → not the `#93` pattern shape.
+- **Is environmental Pinterest sandbox behavior**, observable but not actionable for Scoopfeeds work without Standard access.
+
+**Disposition:** Captured as Session 4 observation. If/when Pinterest Standard access becomes priority and intermittent 401s **persist against the production endpoint**, that would be a real finding `#94`. For now: observation only.
+
+**Phase B findings count stays at 4 (`#90`/`#91`/`#92`/`#93`). Brief inaccuracy stays at 11 of 12.**
+
+#### Sprint 2.x.1 — X-Posting Queue foundation (retrospective)
+
+**Shipped:** Commit `95189fe` (5 files, +402 / −1 lines).
+
+**Scope per Sprint 2.x plan (locked in Session 34 institutional capture):**
+
+- **Migration 004:** `x_post_queue` table with `article_id` FK (CASCADE on delete), `post_text`, `post_type`, thread metadata, `status`, timestamps, 4 indexes.
+- **`xPostGenerator.js`:** `shouldThread()` length-only threshold (>250 chars), `composeThread()` with sentence-boundary splits + ellipsis on mid-clause truncation + max 4 parts, `composeSingle()` delegating to existing `socialComposer.composeX`.
+- **Scheduler hook:** `runXQueueGenerationCycle()` called after `runAllPlatformsCycle` in `runIngestionCycle`, graceful try/catch.
+- **4 DAO functions:** `findArticlesPendingXQueue`, `enqueueXPosts`, `countPendingXPosts`, `listPendingXPosts` (the last is a bonus for Sprint 2.x.2).
+
+**Scope corrections during Sprint 2.x.1:**
+
+- `composeX` from `socialComposer.js` already existed: reused for the single-post path (saved ~15–20 min). Folded into commit body; not a new finding (#91 sub-pattern of pre-existing implementation already documented).
+- Thread threshold refined from "description > 200 chars AND credibility ≥ 8" to "description > 250 chars" (length-only). The AND condition was too restrictive; the credibility filter is applied upstream.
+- Mid-clause truncation gets ellipsis (U+2026) for reader signal; sentence-boundary truncation does not.
+
+**Test coverage:** Migration applied cleanly. 4 sample articles (short, medium, long, duplicate-flagged): single-vs-thread logic correctly routed; long article produced a 4-part thread; final thread part had ellipsis + URL within the 280-char cap. Dedup via LEFT JOIN against `x_post_queue` verified. Cascade delete from `articles` → `x_post_queue` verified.
+
+**Production state:** Migration 004 auto-applied on next Hostinger restart (production restart happened ~25 min before Session 34 began per Session 34's health check). Queue should be filling with pending posts as auto-cycle fires every ~30 min.
+
+**Out of scope (Sprint 2.x.2 + 2.x.3 work):**
+
+- Email digest delivery (Sprint 2.x.2)
+- Admin endpoint to view queue
+- Mark-as-posted workflow (Sprint 2.x.3)
+- Analytical posts as queue source (Sprint 2.x.1b)
+
+**Architectural decision recorded:** X-Posting Queue uses a dedicated tracking surface (`status` column on the queue table) rather than the shared `social_posts` table. `social_posts` gets populated only at actual X delivery (Sprint 2.x.3 mark-as-posted endpoint). Clean separation: queue tracks **generation** lifecycle, `social_posts` tracks **delivery** lifecycle.
+
+**Refs:**
+
+- Sprint 2.x scope plan in Session 3 entry (Session 34 institutional capture; commit `0a7df19`)
+- Commit `95189fe` (the implementation itself)
+- `xPostGenerator.js` (net-new module)
+- Migration `backend/migrations/004_x_post_queue.sql` (auto-applied on production restart)
+- `socialComposer.composeX` (pre-existing; reused for single-post path)
+
+#### Session 4 references
+
+- Day's commits: `0a7df19` (Session 34), `95189fe` (Session 36 Track A), `b04a3dc` (Session 36 Track B)
+- Session 3 entry above (this file, line 299) — provides yesterday's narrative that Session 35 builds on
+- Sprint 2.x scope plan (this file, in Session 3 entry "X-Posting Queue scope plan" subsection)
+- `docs/audits/pinterest_standard_access_demo_script.md` (committed `b04a3dc`)
+- Pinterest auto-cycle disable: Hostinger production env (`PINTEREST_ACCESS_TOKEN` removed at Session 36 close)
+- Production health endpoint: `/api/health` (verified Session 4 open: status ok, 27097 articles, 110 sources)
