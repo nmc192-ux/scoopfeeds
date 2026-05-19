@@ -13,6 +13,7 @@ import { refreshAllEvents } from "./liveEvents.js";
 import { refreshAnalysis } from "./analysisService.js";
 import { runBreakingNewsPush } from "./breakingNewsPusher.js";
 import { runAllPlatformsCycle, listEnabledPlatforms } from "./socialPublisher.js";
+import { runXQueueGenerationCycle } from "./xPostGenerator.js";
 import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEventVideo, previewSlide } from "./videoGenerator.js";
 import { runVideoPublishAndApproveCycle } from "./videoPublisher.js";
 import { isYouTubeConfigured, getVideoStats } from "./youtubeClient.js";
@@ -743,6 +744,13 @@ export async function runIngestionCycle() {
         catch (err) { logger.error("❌ Auto-social failed", { error: err.message }); }
       }
     }
+
+    // X-Posting Queue (Phase B Sprint 2.x.1). Generates X-ready posts from
+    // fresh unposted articles and queues them for daily email digest delivery
+    // (Sprint 2.x.2). Synchronous, fast, no external API calls. Graceful-
+    // failure pattern: queue errors don't block ingestion.
+    try { runXQueueGenerationCycle(); }
+    catch (err) { logger.error("❌ X queue generation failed", { error: err.message }); }
   } catch (err) {
     logger.error("❌ News failed", { error: err.message });
   } finally {

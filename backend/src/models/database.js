@@ -2009,3 +2009,71 @@ export function upsertArticleAnalysisCache(data) {
     now + 6 * 60 * 60 * 1000,
   );
 }
+
+// ─── X-Posting Queue (Phase B Sprint 2.x.1) ────────────────────────────────
+//
+// Articles → x_post_queue entries via xPostGenerator.generateXPostsForArticle.
+// Dedup happens at the queue layer (article rejoining x_post_queue blocks
+// re-queueing). Cascade-delete on article TTL prune keeps queue bounded.
+
+export function findArticlesPendingXQueue({
+  minCredibility = 7,
+  withinMs       = 12 * 60 * 60 * 1000,
+  limit          = 10,
+} = {}) {
+  const cutoff = Date.now() - withinMs;
+  return getDb().prepare(`
+    SELECT a.id, a.title, a.description, a.category, a.credibility, a.published_at, a.image_url
+    FROM articles a
+    LEFT JOIN x_post_queue q ON q.article_id = a.id
+    WHERE q.article_id IS NULL
+      AND a.published_at > ?
+      AND a.credibility >= ?
+      AND a.is_duplicate = 0
+    ORDER BY a.credibility DESC, a.published_at DESC
+    LIMIT ?
+  `).all(cutoff, minCredibility, limit);
+}
+
+// posts: array of { post_text, post_type, thread_group_id?, thread_position?, thread_total? }
+// All posts for one article (or one thread) insert atomically.
+export function enqueueXPosts(articleId, posts) {
+  if (!articleId || !Array.isArray(posts) || posts.length === 0) return 0;
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO x_post_queue
+      (article_id, post_text, post_type, thread_group_id, thread_position, thread_total, status, generated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+  `);
+  const insertAll = db.transaction((aid, ps, now) => {
+    for (const p of ps) {
+      stmt.run(
+        aid,
+        p.post_text,
+        p.post_type,
+        p.thread_group_id || null,
+        p.thread_position || null,
+        p.thread_total || null,
+        now,
+      );
+    }
+    return ps.length;
+  });
+  return insertAll(articleId, posts, Date.now());
+}
+
+export function countPendingXPosts() {
+  return getDb().prepare(`SELECT COUNT(*) AS n FROM x_post_queue WHERE status = 'pending'`).get().n;
+}
+
+export function listPendingXPosts({ limit = 50 } = {}) {
+  return getDb().prepare(`
+    SELECT q.id, q.article_id, q.post_text, q.post_type, q.thread_group_id, q.thread_position, q.thread_total, q.generated_at,
+           a.title AS article_title, a.category AS article_category
+    FROM x_post_queue q
+    LEFT JOIN articles a ON a.id = q.article_id
+    WHERE q.status = 'pending'
+    ORDER BY q.generated_at ASC, q.thread_position ASC
+    LIMIT ?
+  `).all(limit);
+}
