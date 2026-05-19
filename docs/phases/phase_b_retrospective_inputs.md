@@ -296,6 +296,167 @@ Total per-template authoring time is the major cost; pattern verification at mil
 
 ---
 
+### Session 3 — May 18, 2026 — Pinterest sandbox integration + production 503 incident + X-Posting Queue scope plan
+
+**Type:** Phase B Track 1 work + production incident response. ~4 hours of work across investigation, code change, deployment, debugging, recovery. Pre-empted Sprint 1.1.1 (Tracker templates) which remains the next-session candidate.
+
+**Output:**
+
+- Pinterest integration architecture verified — implementation pre-existed (`pinterestClient.js` + `pinterest-auth.mjs` + `socialPublisher` adapter all in codebase pre-session). Phase B-S33.A investigation pivoted the session from "build" to "config + verify + deploy" within minutes of discovery.
+- Pinterest API base URL configurability fix shipped (commit `e8966ba`). Single-edit `pinterestClient.js` + `.env.example` Pinterest section addition.
+- Pinterest sandbox endpoint deployed to Hostinger production via `PINTEREST_API_BASE_URL=https://api-sandbox.pinterest.com`.
+- Pinterest sandbox-specific token requirement discovered as blocker (separate from production OAuth token).
+- Admin token rotated for security hygiene (previous accidentally leaked into conversation).
+- Production HTTP 503 incident encountered and resolved.
+- DrJ Path α decision locked for X work: free email-digest delivery (no paid X API).
+
+**Commits this session:** 1 (`e8966ba` — Pinterest endpoint fix).
+
+#### Pinterest state at Session 3 close
+
+| Surface | State |
+|---|---|
+| Endpoint routing | Production URL → sandbox URL (env-driven; verified via error message change from `403 Apps with Trial access may not create Pins in production` to sandbox-side `401 Authentication failed`) |
+| Token state | Production OAuth token deployed in `PINTEREST_ACCESS_TOKEN`; sandbox endpoint rejects with 401 (production tokens don't authenticate against sandbox endpoint) |
+| Adapter enabled in `/auto-status` | Yes (`enabled: ["...", "pinterest", "..."]` confirmed via curl) |
+| Pin creation | Blocked on sandbox-specific token retrieval |
+| Next-session work | Retrieve sandbox token via Pinterest Developer dashboard "Generate Test Token" flow (or whichever sandbox-token-issuance mechanism Pinterest provides) |
+
+#### Production 503 incident
+
+**Timeline.** Late afternoon UTC May 18:
+- Admin token rotated (security hygiene after accidental conversation exposure).
+- Pinterest sandbox env var added (`PINTEREST_API_BASE_URL=https://api-sandbox.pinterest.com`).
+- Restart triggered.
+- HTTP 503 returned by production.
+- Second restart executed.
+- Production recovered: HTTP 200 + fresh uptime.
+
+**Downtime:** approximately 5–10 minutes. **No data loss.** Migrations 002 + 003 stayed applied (verified via `/api/health.sourceCount: 110` post-recovery). Article ingestion resumed cleanly post-restart.
+
+**Root cause:** undetermined. Hostinger logs not accessible to DrJ during the incident. Possible causes (ranked):
+1. **Hostinger save-and-apply race condition** — env-var change saved but restart triggered before the new env propagated into the process's environment. Plausible given Hostinger's UI sometimes splits "save" from "apply."
+2. **First restart didn't actually trigger** — token rotated but the running app kept old admin-token state in memory; second restart was the real restart.
+3. **Transient platform issue** — Hostinger node went briefly unhealthy unrelated to our changes; second restart re-established health on a different node.
+
+Captured as finding #93 below.
+
+#### Operational mitigation pattern established this session
+
+For future production env changes:
+- Push env var to Hostinger
+- Trigger restart
+- Verify `/api/health` shows fresh low uptime (< 60s)
+- If uptime didn't refresh → restart again
+- Treat HTTP 503 as expected-during-transition (≤ 5 min) rather than as outage signal until two restarts have occurred
+
+This "second-restart-confirmation" pattern is operational discipline going forward; not a code change.
+
+#### Phase B retrospective findings count
+
+1 (Session 2 added #90) → **4** (Session 3 adds #91, #92, #93 — see Phase B findings section below).
+
+**Brief inaccuracy count:** 10 of 11 → **11 of 12** inspected items (advanced by #91 — Pinterest implementation pre-existed prompt premise).
+
+#### DrJ decisions captured this session
+
+- **X work — Path α confirmed.** Scoopfeeds X-Posting Queue Sprint 2.x with email-digest delivery. Completely free; manual paste step. Path β (direct X API at $200–300/month) ruled out. Path γ (third-party wrapper at $2.99–30/month) ruled out per "completely free" constraint. Sprint 2.x plan section below details the architecture.
+
+#### Known followup work added this session
+
+- **Sandbox token retrieval** — Session 35 (next-after-next). Phase B Track 1.
+- **Token-refresh rotation in `pinterestClient.js`** — 30-day operational debt. Currently no refresh logic; tokens just expire silently. Phase B Track 1.
+- **Instagram failure rate diagnosis** — 77 failures in 24h per `/auto-errors`; error string "Application request limit reached." Phase B Track 1. Independent of Pinterest work.
+- **Production observability improvement** — Hostinger logs access OR external logging service (Sentry / BetterStack / equivalent) to make incidents like #93 diagnosable. Phase B Track 3 candidate (cross-track operational discipline rather than dedicated Track 3 work).
+- **`.env\r` cruft housekeeping** — Windows line-ending artifact in repo, untracked. Low priority. Defer to separate investigation; not blocking.
+- **Pinterest Standard access demo video** — after sandbox works, DrJ records demo per Pinterest's Standard-access application requirements. DrJ executes; not code work.
+
+#### Production state at Session 3 close
+
+| Field | Value |
+|---|---|
+| Production HEAD | `6278ab6` — unchanged for user-facing behaviour. Session 3's `e8966ba` is a backend-config change that takes effect via Hostinger env; the user-facing code surface is unchanged. |
+| Uptime at capture | ~6.5 min (393s — fresh post-second-restart) |
+| Articles | 26,087 |
+| Videos | 2,237 |
+| sourceCount | 110 |
+| Scheduler started | true |
+| Memory | 53 MB / 58 MB (~91%) — up from 86% at session 30 close. Operational drift worth watching; not blocking. Worth a separate Phase B Track 3 followup if it crosses 95% sustained. |
+| Migrations applied | 002 + 003 (plus `e8966ba` config-only change that doesn't introduce a new migration) |
+| No outstanding production incidents | True (503 resolved at session ~mid-point) |
+
+#### Three-track contribution this session
+
+- **Track 1:** Pinterest integration verification + sandbox endpoint deployment + `e8966ba` config fix + sandbox-token-blocker discovery (all Track 1 source/distribution work — Pinterest is a Distribution surface per Phase B Kickoff Brief §2.2).
+- **Track 2:** None this session.
+- **Track 3:** Production observability gap surfaced via 503 incident (finding #93) — flagged as Phase B Track 3 followup candidate. No Track 3 code work shipped. Track 3 has not been touched in Phase B sessions 1–3. The no-track-dark guidance from Brief §2.4 suggests Track 3 work should appear before too many consecutive Track-1-only sessions. Sprint 0 (Cache-Control immutable) is the natural first Track 3 work; appropriate timing is DrJ judgment based on Track 1 momentum vs Track 3 lapse.
+
+#### Next session candidate
+
+**Session 35 — Pinterest sandbox token retrieval + verification.** Sandbox token from Pinterest Developer dashboard → Hostinger env → restart → re-test `/auto-post?platform=pinterest&dry=1` (expecting 200 with mock pin response from sandbox; sandbox doesn't create real pins) → flip to non-dry run if dry succeeds.
+
+If sandbox token retrieval is blocked by Pinterest Developer dashboard UX issues (which would be Pinterest's gap, not ours), session 35 could pivot to:
+- Sprint 1.1.1 — ship 2 Tracker templates (conflict + outbreak) per Sprint 1.1 plan from Session 2
+- Sprint 2.x.1 — start X-Posting Queue work (data model + post generator)
+
+---
+
+### Phase B Sprint 2.x plan — Scoopfeeds X-Posting Queue
+
+**Type:** Phase B Track 1 distribution sprint, locked by DrJ Path α decision (Session 3). Architecture finalized below; execution begins when DrJ schedules.
+
+**Goal:** Generate X-ready posts from published articles; deliver to DrJ via email digest; DrJ manually copy-pastes posts to the `@scoop_feeds` X account.
+
+**Architectural commitment:**
+
+- **Free, no recurring cost.** X API direct integration ($200–300/month) ruled out. Third-party wrappers (Buffer / Hootsuite tier) ruled out per "completely free" constraint.
+- **Email digest delivery** replaces the admin dashboard from earlier Sprint 2.x decomposition. Email is the operationally-cheapest delivery surface (reuses existing newsletter infrastructure).
+- **Manual paste step** is the trade-off accepted for $0/month cost. ~5–15 min/day for DrJ depending on article volume.
+- **80–90% automation:** generation, formatting, delivery all automated; only the paste itself is manual.
+
+**Sub-sprint decomposition:**
+
+| Sub-sprint | Work | Estimate |
+|---|---|---|
+| **Sprint 2.x.1** | **Data model + post generator** — Migration for `x_post_queue` table (article_id FK, post_text, post_type ∈ {single, thread}, status ∈ {pending, sent_in_digest, marked_posted}, generated_at, sent_in_digest_at, marked_posted_at). Post generator integrated with article publish pipeline. Generator handles X's 280-char limit + thread composition for high-value articles (multi-tweet format with "1/3", "2/3", "3/3" markers). Test against sample articles. | 1 session |
+| **Sprint 2.x.2** | **Email digest delivery** — Email template (HTML + plaintext fallback). Scheduled job at DrJ-configurable cadence (default daily 9am UTC). Renders pending queue as numbered list with copy-friendly formatting; threads formatted with sequence markers for clean sequential copy. Integrates with existing newsletter sending infrastructure (reuses transport + delivery DAOs). Mark-as-sent logic prevents same posts repeating across digests. | 1 session |
+| **Sprint 2.x.3** | **Workflow refinement** — Lightweight mark-as-posted endpoint (POST confirming "I posted this") so the queue knows what actually landed on X. Optional: regenerate-draft button if email content is bad (operator escape hatch). | ~0.5 session |
+| **Total** | | **~2.5 sessions** |
+
+**DrJ workflow once shipped:**
+
+1. Scoopfeeds publishes article (existing pipeline).
+2. Post generator queues an X-ready version (single tweet or thread per article value).
+3. Daily 9am UTC digest email delivers to DrJ inbox.
+4. DrJ reads email, copies posts (or thread sequences in order), pastes to `@scoop_feeds` X account via X mobile or web.
+5. Optionally: DrJ marks as posted via lightweight endpoint (mostly for analytics; the queue functions without this step).
+
+**Out of scope for Sprint 2.x v1:**
+
+- Admin dashboard (deliberately omitted per Path α refinement)
+- Auto-posting to X (rules out X API costs)
+- Per-post analytics on X engagement (Phase C concern when Scoopfeeds has volume that makes this useful)
+- Browser automation against X UI (ToS violation, account-lock risk; explicitly rejected)
+
+**Trade-off honestly documented:**
+
+| Dimension | Trade |
+|---|---|
+| Recurring cost | $0/month |
+| DrJ time per day | ~5–15 min manual paste step |
+| Automation depth | 80–90% (generation + formatting + delivery automated; posting manual) |
+| Future migration path | If DrJ later wants full automation: IFTTT Pro (~$3/month) bridges Threads → X automatically; add-on, doesn't require Sprint 2.x rewrite. If X API pricing changes: direct API integration replaces the manual paste step; existing generator + queue absorb without rebuild. If volume scales: admin dashboard added in a later sprint with the queue table already populated. |
+
+**Sequencing relative to Sprint 1.1:**
+
+Sprint 2.x runs in parallel with Sprint 1.1 (Tracker templates) at DrJ's discretion. They have no dependency between them. DrJ chooses per-session which track-1 sprint to feed.
+
+**Why Sprint 2.x is captured now (Session 3) before execution:**
+
+Path α decision was made this session as the response to "X work" surfacing. Capturing the plan now while the decision rationale is fresh — per Phase A finding #76 architectural breadcrumb pattern (document parallel infrastructure so future readers see structure explicitly). Execution begins when DrJ schedules.
+
+---
+
 ## Phase B findings
 
 Findings captured here are Phase B-specific, beginning with #90. Phase A findings 1-89 are preserved read-only in [Phase A Retrospective Inputs](phase_a_retrospective_inputs.md).
@@ -344,6 +505,112 @@ The rename must happen **before** Sprint 1.3 ships Tracker Engine code under the
 - Phase B Kickoff Brief §6.4 + §3.5 (strategic Tracker first-work framing)
 - Phase B retrospective inputs Session 2 entry (this commit; Sprint 1.1 decomposition references #90)
 
----
+### Finding #91 — Brief premise invalidated by intervening implementation (Pinterest integration pre-existed prompt assumption)
 
-*Phase B Retrospective Inputs document — institutional memory journal for Phase B sessions. Phase B opens 2026-05-18.*
+**Discovery context.** Phase B-S33.A investigation (May 18, 2026). Session 33 prompt framed Pinterest integration as greenfield implementation work — "verifies existing social-poster pattern (FB, IG, Threads, Bluesky already operational) before drafting Pinterest implementation." Investigation revealed `pinterestClient.js` (85 lines, fully implemented Pinterest API v5 publisher), `pinterest-auth.mjs` (193-line OAuth helper), and the Pinterest adapter in `socialPublisher.js` (lines 213-232) all already existed in the codebase. The prompt's premise was wrong at moment of execution.
+
+**The actual session pivoted from build to verify within minutes of discovery.** Phase B-S33.A surfaced the existing implementation, Phase B-S33.B did OAuth + Hostinger config + deploy, Phase B-S33.B.3 verified end-to-end (which surfaced finding #92 below), Phase B-S33.B.4 shipped the sandbox-routing config fix (`e8966ba`).
+
+**Sub-pattern (new, distinct from #87/#88/#89/#90):**
+
+- **#87 sub-pattern:** Brief premise valid at authoring, invalidated by intervening **work** on the same code (isUrdu propagated across files after Brief was written).
+- **#88 sub-pattern:** Design choice assumed convention was stylistic preference when it was structural constraint (SPA-route collision).
+- **#89 sub-pattern:** Dev verification with seeded test data masks production data-path divergence (metrics-ops null returns).
+- **#90 sub-pattern:** Terminology collision (same word, multiple unrelated operational meanings in same codebase).
+- **#91 sub-pattern (new):** **Brief premise invalidated by intervening implementation.** Distinct from #87 because in #87 the Brief item was authored before the relevant work landed (work invalidated the premise *after* Brief was written). In #91 the relevant implementation was already in the codebase *when* the prompt was authored — the prompt author didn't know it existed. Different vector for staleness: prompt author can't be expected to know every existing implementation, but the codebase has the truth.
+
+**Investigation-before-execution discipline caught this immediately.** Phase B-S33.A pivoted Session 33 within ~15 minutes of script-existence discovery. Pattern continues to validate the discipline established by findings #15, #75, #81, #82, #83, #84.
+
+**Brief inaccuracy count progression:** 10 of 11 → **11 of 12** inspected Brief items with wrong premises (advanced by #91).
+
+**Mitigation already in place** — investigation-before-execution discipline. Possible enhancement: Brief / prompt authors who don't have full codebase context should explicitly defer "what exists vs what's new" to the executing agent's investigation phase, rather than committing to a build/verify framing pre-investigation. This was already implicit in DrJ's prompts (which include "investigation first" framing); finding #91 just makes the implicit principle explicit.
+
+**Refs:**
+
+- Phase B-S33.A investigation findings (Session 3 entry above)
+- `backend/src/services/pinterestClient.js` (existing implementation)
+- `backend/scripts/pinterest-auth.mjs` (existing OAuth helper)
+- `backend/src/services/socialPublisher.js` lines 213-232 (existing adapter)
+- Commit `f5fd14f` (Phase A session ~26 era — when Pinterest implementation was added, predating Session 33's prompt by weeks)
+- Finding #87 (sibling sub-pattern; #91 distinguishes from it)
+- Finding #84 (Sprint 4.4 Brief premise errors — origin of the Brief-discipline pattern)
+
+### Finding #92 — Pinterest sandbox endpoint requires sandbox-specific access token (not the OAuth user-auth token)
+
+**Discovery context.** Phase B-S33.B.5 production verification after `e8966ba` deployed sandbox endpoint routing. Expected outcome: pin creation succeeds against sandbox endpoint. Actual outcome: pin creation now reaches the sandbox endpoint (proven by error message changing from production-403 to sandbox-401) but the sandbox rejects authentication with `401 Authentication failed`.
+
+**The two-layer Trial-access requirement** wasn't obvious from Pinterest's initial documentation discovered during Phase B-S33.A:
+
+1. **Sandbox endpoint URL** — `https://api-sandbox.pinterest.com` (documented in the production-API 403 error message that motivated `e8966ba`).
+2. **Sandbox-specific access token** — generated separately from the OAuth user-auth flow. The OAuth flow run via `pinterest-auth.mjs` generates a **production** token (it authenticates against the production OAuth server at `pinterest.com/oauth/...` and exchanges via the production token endpoint at `api.pinterest.com/v5/oauth/token`). The token works against production but not against sandbox.
+
+This was discovered via Pinterest community forum + Medium documentation searches after the 401, not from Pinterest's official API docs which were silent on the dual-token requirement.
+
+**Sub-pattern:** Platform documentation incomplete on tier-specific authentication. Trial access vs Standard access isn't just an endpoint switch — it's a **token-generation-flow switch too.** The Pinterest Developer dashboard likely has a "Generate Test Token" button or equivalent sandbox-token-issuance mechanism that wasn't part of the OAuth flow the auth script implemented.
+
+**Mitigation paths (ranked):**
+
+1. **Retrieve sandbox token from Pinterest Developer dashboard** — Session 35 work. Pinterest's UI for the "Scoopfeeds Autoposter" app should expose a test-token generator alongside or distinct from the OAuth flow.
+2. **Skip sandbox entirely — apply for Standard access.** Standard access removes the sandbox requirement; production endpoint + production token = working. The application requires a demo video showing the Pinterest integration working (catch-22: needs sandbox to work first to record demo). Path 2 is what eventually lands; Path 1 unblocks the path-2 demo recording.
+3. **Defer Pinterest to Phase C and ship other Distribution surfaces first.** Acceptable but un-needed given Path 1 is a small unblock.
+
+**Phase B Track 1 followup work added:**
+
+- Sandbox token retrieval via Pinterest Developer dashboard (Session 35 work — Phase B Track 1 distribution; ~30 min if dashboard UX is clear, longer if Pinterest's dashboard requires support contact).
+- Post-sandbox-token-works: record demo video + apply for Standard access. DrJ executes; not code work.
+- Post-Standard-access-granted: unset `PINTEREST_API_BASE_URL` in Hostinger env to revert to production routing. `e8966ba` already supports this (env-driven default).
+
+**Refs:**
+
+- Phase B-S33.B.3 verification (production endpoint 403 — original Trial-access discovery)
+- Phase B-S33.B.5 verification (sandbox endpoint 401 — sandbox-token-discovery surfaced here)
+- `backend/scripts/pinterest-auth.mjs` (OAuth user-auth flow — generates production token)
+- Commit `e8966ba` (sandbox endpoint routing — works as designed; orthogonal to token issue)
+- Pinterest community + Medium documentation (external sources that surfaced the dual-token requirement; not in official API docs at investigation time)
+
+### Finding #93 — Production HTTP 503 during admin token rotation; resolved by second restart; root cause undiagnosed due to no Hostinger log access
+
+**Discovery context.** Phase B-S33 admin token rotation. Late afternoon UTC May 18.
+
+**Incident timeline:**
+
+1. Admin token rotated in Hostinger production env (security hygiene response after previous admin token accidentally leaked into conversation).
+2. Pinterest sandbox env var added in same env-edit batch (`PINTEREST_API_BASE_URL=https://api-sandbox.pinterest.com`).
+3. Restart triggered via Hostinger control panel.
+4. Production returned HTTP 503 for approximately 5–10 minutes.
+5. Second restart executed.
+6. Production recovered: HTTP 200, fresh low uptime confirming new process, sourceCount and article counts preserved post-recovery.
+
+**No data loss.** Migrations 002 + 003 stayed applied; article ingestion resumed cleanly; admin token rotation did not lose any persistent state.
+
+**Root cause undetermined.** Hostinger logs were not accessible to DrJ during incident. Three plausible causes (ranked by likelihood):
+
+1. **Hostinger save-and-apply race condition.** Env-var changes saved in Hostinger UI but restart triggered before propagation completed → process restarted with mid-update env state → new admin-auth middleware threw on token mismatch → 503 → second restart picked up fully-propagated env → recovery. Most plausible given Hostinger's UI split between "save" and "apply" operations.
+2. **First restart didn't actually trigger.** Token rotated in env but the running Node process never received the restart signal → app kept old admin-token state in memory → first user request to admin endpoint failed with token mismatch → 503 → second (real) restart picked up new state. Less likely given the visible restart-button click but possible if Hostinger queued the restart silently.
+3. **Transient platform issue.** Hostinger node went briefly unhealthy unrelated to our changes; second restart re-established health on a different node. Lowest probability given timing correlation with our env edit.
+
+**Sub-pattern:** Hostinger platform behavior is opaque to DrJ. Production debugging requires more diagnostic surface area than currently available. The 5–10 minute window of 503 wasn't catastrophic (DrJ was actively monitoring and triggered the second restart promptly) but a future incident at the same diagnostic depth could be much harder to recover from if DrJ isn't actively watching.
+
+**Phase B Track 3 followup candidate (cross-track operational discipline):**
+
+- **Get Hostinger log access** if Hostinger's support tier permits → cheapest fix, leverages existing platform.
+- **OR migrate logging to external service** — Sentry / BetterStack / Logtail / equivalent. Backend already has Sentry SDK installed per `package.json` dependencies (`@sentry/node`, `@sentry/profiling-node`) but `SENTRY_DSN` is unset in production. Setting `SENTRY_DSN` and enabling Sentry crash + breadcrumb capture would have made finding #93's root cause traceable. ~30 min config + Sentry dashboard signup.
+
+**Recommendation:** Sentry path. Sentry is already wired up in code; just unset in env. The cost is one Sentry-account-setup session.
+
+**Mitigation pattern for now (no Sentry yet) — second-restart-confirmation:**
+
+- Push env var change to Hostinger.
+- Trigger restart.
+- Verify `/api/health` shows fresh low uptime (< 60s).
+- If uptime didn't refresh on the first attempt → restart again.
+- Treat HTTP 503 as expected-during-env-transition (≤ 5 min) rather than as outage signal until two restarts have occurred.
+
+This is operational discipline going forward — no code change required.
+
+**Refs:**
+
+- Phase B-S33.B.4.3 operational step (admin token rotation + sandbox env var deploy that triggered 503)
+- `package.json` dependencies (Sentry SDK already present; just unconfigured in production env)
+- Phase B Kickoff Brief §10.7 (Phase A close-out audit deferrals — production observability is implicitly an inherited gap, now made explicit by #93)
+- Sentry config in `backend/src/config/observability.js` (if present — Sentry initialization wiring is already in code; finding #93's remediation is config-only)
