@@ -762,7 +762,7 @@ Initially planned 3×2h (=6h) per DrJ structure; extended modestly per DrJ confi
 - Sprint 2.x scope plan in Session 3 entry (Session 34 institutional capture; commit `0a7df19`)
 - Commit `95189fe` (the implementation itself)
 - `xPostGenerator.js` (net-new module)
-- Migration `backend/migrations/004_x_post_queue.sql` (auto-applied on production restart)
+- Migration `backend/src/db/migrations/004_x_post_queue.js` (auto-applied on production restart)
 - `socialComposer.composeX` (pre-existing; reused for single-post path)
 
 #### Session 4 references
