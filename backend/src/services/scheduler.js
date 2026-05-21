@@ -8,6 +8,7 @@ import { pruneOldArticles, findArticlesForVideoQueue, enqueueVideoJob,
 import { logger } from "./logger.js";
 import { RSS_SOURCES, YOUTUBE_SOURCES } from "../config/sources.js";
 import { sendDailyDigest } from "./digest.js";
+import { sendXPostDigest } from "./xPostDigest.js";
 import { runWelcomeSequenceCycle } from "./welcomeSequence.js";
 import { refreshAllEvents } from "./liveEvents.js";
 import { refreshAnalysis } from "./analysisService.js";
@@ -172,6 +173,16 @@ export function startScheduler() {
       await sendDailyDigest();
     } catch (err) {
       logger.error("❌ Digest failed", { error: err.message });
+    }
+  });
+  // X-posting queue digest at 09:00 UTC (Phase B Sprint 2.x.2). Emails the
+  // X-ready posts queued by Sprint 2.x.1 to DIGEST_RECIPIENT_EMAIL. No-op
+  // when SMTP / DIGEST_RECIPIENT_EMAIL unset or the queue is empty.
+  scheduleCron("0 9 * * *", async () => {
+    try {
+      await sendXPostDigest();
+    } catch (err) {
+      logger.error("❌ X-digest failed", { error: err.message });
     }
   });
   scheduleCron("0 3 * * *", async () => {

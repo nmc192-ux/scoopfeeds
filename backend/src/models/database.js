@@ -2077,3 +2077,35 @@ export function listPendingXPosts({ limit = 50 } = {}) {
     LIMIT ?
   `).all(limit);
 }
+
+// Sprint 2.x.2 — digest delivery DAOs.
+
+// listPostsForDigest applies the digest gate: status='pending' AND
+// sent_in_digest_at IS NULL (belt-and-suspenders — either condition would
+// suffice given Migration 004 design, but both is defensive). Extends the
+// listPendingXPosts shape with article_url, which the digest renders.
+export function listPostsForDigest({ limit = 200 } = {}) {
+  return getDb().prepare(`
+    SELECT q.id, q.article_id, q.post_text, q.post_type, q.thread_group_id, q.thread_position, q.thread_total, q.generated_at,
+           a.title AS article_title, a.category AS article_category, a.url AS article_url
+    FROM x_post_queue q
+    LEFT JOIN articles a ON a.id = q.article_id
+    WHERE q.status = 'pending' AND q.sent_in_digest_at IS NULL
+    ORDER BY q.generated_at ASC, q.thread_position ASC
+    LIMIT ?
+  `).all(limit);
+}
+
+// markDigestSent advances status pending → sent_in_digest and stamps
+// sent_in_digest_at. The WHERE status='pending' guard is defensive against
+// concurrent state changes (e.g. a manual /send-now and the 09:00 cron
+// racing).
+export function markDigestSent(ids, timestamp) {
+  if (!Array.isArray(ids) || ids.length === 0) return 0;
+  const ph = ids.map(() => "?").join(",");
+  return getDb().prepare(`
+    UPDATE x_post_queue
+    SET status = 'sent_in_digest', sent_in_digest_at = ?
+    WHERE id IN (${ph}) AND status = 'pending'
+  `).run(timestamp, ...ids).changes;
+}
