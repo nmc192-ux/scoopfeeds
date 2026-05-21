@@ -140,7 +140,7 @@ export async function sendXPostDigest() {
     return { sent: false, reason: "no_smtp", count: 0 };
   }
 
-  const rows = listPostsForDigest({ limit: 200 });
+  const rows = listPostsForDigest({ articleLimit: 15 });
   if (rows.length === 0) {
     logger.info("x-digest: skipped (queue empty)");
     return { sent: false, reason: "empty", count: 0 };

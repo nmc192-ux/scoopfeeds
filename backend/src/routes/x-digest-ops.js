@@ -1,21 +1,25 @@
 /**
  * /scoop-ops/x-digest — operator endpoints for the X-posting digest.
  *
- * GET  /status     — SMTP configured? recipient set? pending count? last
- *                    digest send timestamp? cron schedule.
- * GET  /analytics  — queue volume diagnostics: status breakdown, post_type
- *                    split of pending, distinct-article count, age buckets,
- *                    credibility distribution, per-day enqueue rate. Pure
- *                    read-only aggregations; informs curation design.
- * GET  /preview    — render the current digest HTML body without sending.
- *                    Returns an empty-state HTML stub when the queue has
- *                    nothing pending.
- * POST /send-now   — fire sendXPostDigest() immediately. Returns the
- *                    {sent, reason, count, marked} result for confirmation.
+ * GET  /status         — SMTP configured? recipient set? pending count?
+ *                        last digest send timestamp? cron schedule.
+ * GET  /analytics      — queue volume diagnostics: status breakdown,
+ *                        post_type split of pending, distinct-article
+ *                        count, age buckets, credibility distribution,
+ *                        per-day enqueue rate. Pure read-only aggregations.
+ * GET  /preview        — render the current digest HTML body without
+ *                        sending. Empty-state stub when queue is empty.
+ * POST /send-now       — fire sendXPostDigest() immediately. Returns the
+ *                        {sent, reason, count, marked} result.
+ * POST /clear-backlog  — reject pending rows in bulk. DRY-RUN BY DEFAULT;
+ *                        ?confirm=1 required to actually mutate.
+ *                        ?olderThanHours=N optional age filter (omitted =
+ *                        all pending). Used for the one-time uncurated
+ *                        flood reset at Sprint 2.x.2b ship.
  *
- * All routes admin-token-gated via the /scoop-ops parent mount in
- * backend/server.js (adminAuth + adminAuditLogger). No per-router gating
- * needed here.
+ * All routes are gated by `Authorization: Bearer <ADMIN_TOKEN>` at the
+ * /scoop-ops parent mount in backend/server.js (adminAuth +
+ * adminAuditLogger). No per-router gating needed here.
  */
 import { Router } from "express";
 import { getDb, listPostsForDigest } from "../models/database.js";
@@ -151,7 +155,7 @@ router.get("/analytics", (_req, res) => {
 });
 
 router.get("/preview", (_req, res) => {
-  const rows = listPostsForDigest({ limit: 200 });
+  const rows = listPostsForDigest({ articleLimit: 15 });
   if (rows.length === 0) {
     return res.send(`<!doctype html><meta charset="utf-8"><title>X-digest preview (empty)</title>
       <body style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:80px auto;padding:24px;color:#666;text-align:center">
@@ -171,6 +175,93 @@ router.post("/send-now", async (_req, res) => {
     logger.error(`x-digest/send-now failed: ${err.message}`);
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// POST /clear-backlog — bulk pending → rejected.
+//
+// DRY-RUN BY DEFAULT. The mutation only fires if the caller explicitly
+// passes ?confirm=1. This is belt-and-suspenders against accidental
+// mass-reject from a copy-pasted curl: the dry-run-default plus the
+// confirm-must-be-present pattern means a caller has to deliberately
+// type the override.
+//
+// ?olderThanHours=N (optional) — only reject pending rows with
+// generated_at older than now - N hours. Omit to clear ALL pending
+// (used at Sprint 2.x.2b ship to reset the uncurated 2,241-row flood).
+router.post("/clear-backlog", (req, res) => {
+  const db = getDb();
+  const confirm = String(req.query.confirm ?? "") === "1";
+  const olderThanHoursRaw = req.query.olderThanHours;
+  let olderThanHours = null;
+  if (olderThanHoursRaw !== undefined && olderThanHoursRaw !== "") {
+    const parsed = Number(olderThanHoursRaw);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return res.status(400).json({ ok: false, error: "olderThanHours must be a non-negative number" });
+    }
+    olderThanHours = parsed;
+  }
+  const cutoffMs = olderThanHours !== null ? Date.now() - olderThanHours * 60 * 60 * 1000 : null;
+
+  // Build WHERE clause + params once; reused by dry-run COUNT and confirmed UPDATE.
+  const whereClauses = ["status = 'pending'"];
+  const params = [];
+  if (cutoffMs !== null) {
+    whereClauses.push("generated_at < ?");
+    params.push(cutoffMs);
+  }
+  const where = whereClauses.join(" AND ");
+
+  // Always compute the breakdown — both responses report what changed (or
+  // would change). Cheaper than two round trips and the data is identical.
+  const counts = db.prepare(`
+    SELECT
+      COUNT(*)                                              AS rows_total,
+      COUNT(DISTINCT article_id)                            AS articles_total,
+      SUM(CASE WHEN post_type = 'thread' THEN 1 ELSE 0 END) AS thread_rows,
+      SUM(CASE WHEN post_type = 'single' THEN 1 ELSE 0 END) AS single_rows
+    FROM x_post_queue
+    WHERE ${where}
+  `).get(...params);
+
+  const filter = {
+    olderThanHours,
+    cutoffAt: cutoffMs ? new Date(cutoffMs).toISOString() : null,
+  };
+
+  if (!confirm) {
+    return res.json({
+      ok: true,
+      dryRun: true,
+      hint: "Pass ?confirm=1 to actually reject these rows. Add ?olderThanHours=N to scope.",
+      filter,
+      wouldReject: {
+        rows:              counts.rows_total              || 0,
+        distinctArticles:  counts.articles_total          || 0,
+        threadRows:        counts.thread_rows             || 0,
+        singleRows:        counts.single_rows             || 0,
+      },
+    });
+  }
+
+  const result = db.prepare(`
+    UPDATE x_post_queue
+    SET status = 'rejected'
+    WHERE ${where}
+  `).run(...params);
+
+  logger.warn(`x-queue clear-backlog: rejected ${result.changes} rows (olderThanHours=${olderThanHours ?? "all"})`);
+  return res.json({
+    ok: true,
+    dryRun: false,
+    rejected: result.changes,
+    breakdown: {
+      rows:             counts.rows_total      || 0,
+      distinctArticles: counts.articles_total  || 0,
+      threadRows:       counts.thread_rows     || 0,
+      singleRows:       counts.single_rows     || 0,
+    },
+    filter,
+  });
 });
 
 export default router;

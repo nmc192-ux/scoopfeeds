@@ -4,7 +4,7 @@ import { fetchAllYouTube } from "./videoFetcher.js";
 import { enrichBatch } from "./contentEnricher.js";
 import { pruneOldArticles, findArticlesForVideoQueue, enqueueVideoJob,
          setVideoJobRendering, setVideoJobReady, setVideoJobFailed,
-         getArticleById } from "../models/database.js";
+         getArticleById, rejectStalePending } from "../models/database.js";
 import { logger } from "./logger.js";
 import { RSS_SOURCES, YOUTUBE_SOURCES } from "../config/sources.js";
 import { sendDailyDigest } from "./digest.js";
@@ -183,6 +183,21 @@ export function startScheduler() {
       await sendXPostDigest();
     } catch (err) {
       logger.error("❌ X-digest failed", { error: err.message });
+    }
+  });
+  // X-Posting Queue stale sweep at 02:00 UTC (Phase B Sprint 2.x.2b).
+  // Marks pending rows older than 24h as 'rejected' so the queue stays
+  // bounded and the 09:00 X-digest only sees fresh candidates. Runs BEFORE
+  // the 03:00 article prune (article cascade-deletes wouldn't otherwise
+  // affect sweep correctness, but earlier placement keeps the day's
+  // queue-related work contiguous) and BEFORE the 09:00 X-digest.
+  scheduleCron("0 2 * * *", async () => {
+    try {
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const n = rejectStalePending(cutoff);
+      if (n > 0) logger.info(`🧹 X-queue stale sweep: rejected ${n} pending older than 24h`);
+    } catch (err) {
+      logger.error("❌ X-queue stale sweep failed", { error: err.message });
     }
   });
   scheduleCron("0 3 * * *", async () => {

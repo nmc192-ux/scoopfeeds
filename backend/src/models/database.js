@@ -2080,20 +2080,39 @@ export function listPendingXPosts({ limit = 50 } = {}) {
 
 // Sprint 2.x.2 — digest delivery DAOs.
 
-// listPostsForDigest applies the digest gate: status='pending' AND
-// sent_in_digest_at IS NULL (belt-and-suspenders — either condition would
-// suffice given Migration 004 design, but both is defensive). Extends the
-// listPendingXPosts shape with article_url, which the digest renders.
-export function listPostsForDigest({ limit = 200 } = {}) {
+// listPostsForDigest applies the digest gate (status='pending' AND
+// sent_in_digest_at IS NULL — belt-and-suspenders per Migration 004 design)
+// AND a curation cap: top `articleLimit` distinct articles by recency,
+// returning ALL pending rows for those articles so threads stay whole.
+//
+// Article-level cap (not row-level) is the right primitive because threads
+// must deliver as a complete unit; a row-level cap could split a 4-part
+// thread across digests. CTE selects top N article_ids by MAX(generated_at);
+// outer returns all matching rows. Pre-curation listPendingXPosts row-limit
+// shape is preserved via the separate DAO above (consumed by /scoop-ops
+// admin views).
+//
+// Sprint 2.x.2b — added article-level cap after analytics showed 1,600
+// pending articles (all credibility 9–10; credibility lever inert). Recency
+// is the only viable discriminator.
+export function listPostsForDigest({ articleLimit = 15 } = {}) {
   return getDb().prepare(`
+    WITH top_articles AS (
+      SELECT article_id, MAX(generated_at) AS latest
+      FROM x_post_queue
+      WHERE status = 'pending' AND sent_in_digest_at IS NULL
+      GROUP BY article_id
+      ORDER BY latest DESC
+      LIMIT ?
+    )
     SELECT q.id, q.article_id, q.post_text, q.post_type, q.thread_group_id, q.thread_position, q.thread_total, q.generated_at,
            a.title AS article_title, a.category AS article_category, a.url AS article_url
     FROM x_post_queue q
+    JOIN top_articles ta ON ta.article_id = q.article_id
     LEFT JOIN articles a ON a.id = q.article_id
     WHERE q.status = 'pending' AND q.sent_in_digest_at IS NULL
-    ORDER BY q.generated_at ASC, q.thread_position ASC
-    LIMIT ?
-  `).all(limit);
+    ORDER BY ta.latest DESC, q.thread_position ASC
+  `).all(articleLimit);
 }
 
 // markDigestSent advances status pending → sent_in_digest and stamps
@@ -2108,4 +2127,18 @@ export function markDigestSent(ids, timestamp) {
     SET status = 'sent_in_digest', sent_in_digest_at = ?
     WHERE id IN (${ph}) AND status = 'pending'
   `).run(timestamp, ...ids).changes;
+}
+
+// rejectStalePending advances pending → rejected for rows generated before
+// cutoffMs. Used by the daily 02:00 UTC stale-sweep cron (Sprint 2.x.2b) to
+// keep the queue bounded. The 02:00 timing places it BEFORE the 03:00
+// article prune (so cascade-deletes from pruned articles don't races
+// against the sweep) and BEFORE the 09:00 X-digest (so the digest always
+// sees a swept queue).
+export function rejectStalePending(cutoffMs) {
+  return getDb().prepare(`
+    UPDATE x_post_queue
+    SET status = 'rejected'
+    WHERE status = 'pending' AND generated_at < ?
+  `).run(cutoffMs).changes;
 }
