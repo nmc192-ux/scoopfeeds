@@ -773,3 +773,130 @@ Initially planned 3×2h (=6h) per DrJ structure; extended modestly per DrJ confi
 - `docs/audits/pinterest_standard_access_demo_script.md` (committed `b04a3dc`)
 - Pinterest auto-cycle disable: Hostinger production env (`PINTEREST_ACCESS_TOKEN` removed at Session 36 close)
 - Production health endpoint: `/api/health` (verified Session 4 open: status ok, 27097 articles, 110 sources)
+
+### Session 5 — May 21–26, 2026 — Sprint 2.x completion + curation + Tracker Engine begins
+
+**Type:** Consolidated capture covering a multi-calendar-day arc. Sprint 2.x.2 (digest delivery) and 2.x.2b (curation) shipped on May 21–22; Sprint 1.1.1 (first two Tracker templates) shipped May 26 after a deliberate critical-path pivot. Four commits, two new findings, one validated end-to-end workflow.
+
+**Output across the arc:**
+
+- **Sprint 2.x.2 — Email digest delivery shipped** (commit `2a1ab1a`, May 21). `xPostDigest.js` (renderer + sender), `/scoop-ops/x-digest/*` admin routes (`status`, `preview`, `send-now`), 09:00 UTC daily cron, recipient `info.scoopfeeds@gmail.com`. Completes the queue→inbox half of Path α (free X distribution; manual paste step preserves $0 cost).
+- **Analytics endpoint shipped** (commit `a6a3857`, May 21). `/scoop-ops/x-digest/analytics` exposed status breakdown, post-type split, distinct-article count, age buckets, credibility distribution, per-day enqueue rate. Surfaced the volume problem within hours.
+- **Volume discovery via analytics:** 2,241 pending rows; **all at credibility 9–10**; ~700 articles/day across 110 sources producing ~1,000 queue rows/day (thread multiplication). The credibility threshold — the assumed curation lever — was a no-op because the ingestion pipeline already filters hard on credibility upstream. The problem was volume of *good* content, not noise.
+- **Sprint 2.x.2b — Curation shipped** (commit `06b6fa3`, May 22). Article-level recency cap (top-15 by `published_at`), dry-run-safe `clear-backlog` admin endpoint, daily 02:00 UTC stale sweep rejecting `pending` > 24h. Backlog cleared (~2,069 rows rejected, plus an earlier ~200 rows effectively cleared by the deploy-gap incident below).
+- **Workflow validated end-to-end (headline win):** DrJ received a curated digest in inbox, manually posted to `@scoop_feeds`. The full chain — queue → curate → digest → inbox → manual post → X audience — works in production autonomously: 09:00 UTC delivery + 02:00 UTC sweep self-maintaining, $0 recurring cost, zero X API dependency.
+- **Sprint 1.1.1 — First Tracker templates shipped** (commit `faddf16`, May 26). `conflict.md` (ACLED / Reuters Graphics / UN OCHA-grounded) and `outbreak.md` (WHO surveillance / DON / ProMED-grounded). Pure markdown design specs — schema follows Sprint 1.2, derived from these. Shared 7-section structure (purpose+trigger, metrics, sources, cadence, display, validation, open-questions) reusable for the remaining 6 templates.
+
+**Commits this arc:** 4 — `2a1ab1a`, `a6a3857`, `06b6fa3`, `faddf16`.
+
+**Sprint trajectory at arc close:**
+
+- Sprint 2.x.1 (X-Posting Queue foundation): COMPLETE (prior arc)
+- Sprint 2.x.2 (email digest delivery): **COMPLETE** (commit `2a1ab1a`)
+- Sprint 2.x.2b (curation correction): **COMPLETE** (commit `06b6fa3`)
+- Sprint 2.x.3 (mark-as-posted workflow): pending; completes Sprint 2.x trilogy
+- Sprint 2.x.1b (X queue from analytical posts): pending analytical-post investigation; DrJ-flagged twice
+- Sprint 1.1.1 (first 2 Tracker templates): **COMPLETE** (commit `faddf16`)
+- Sprint 1.1.2 (template pattern review): effectively folded into DrJ's MPH review of `outbreak.md` this arc
+- Sprint 1.1.3 (remaining 6 templates: incident, sports, environmental, election, study, entertainment): pending; ~1–2 sessions
+- Sprint 1.2–1.5 (Tracker schema, detection mechanism, scheduler, frontend): plan-only
+- Sprint 0 (Cache-Control immutable, Track 3): plan-only
+
+**Operational notes (one-liners):**
+
+- **Deploy-gap incident:** a `send-now` fired old code during a Hostinger deploy lag, sending a 200-post email + marking 200 rows `sent_in_digest`. Harmless (those 200 effectively cleared). Root pattern: Hostinger deploy lag means new routes 404 until pull+restart — bit the project 3× this arc.
+- **Auth-header drift:** Claude Code repeatedly drafted run-curls with `x-admin-token`; correct header is `Authorization: Bearer`. Corrected each time; not yet a calcified habit warranting a finding.
+- **SSH to Hostinger blocked:** connection drops after password prompt even with correct port 65002 / username `u503692993` (SSH password likely never set). Worked around entirely via admin endpoints — which is the better tool anyway.
+- **`gh` CLI auth expired** (PR-status only). `git push` via SSH unaffected; non-blocking.
+
+#### Finding #95 — Volume-curation design miss
+
+**Pattern:** Sprint 2.x assumed "handful of posts/day." Reality: ~700 articles/day at credibility 9–10 across 110 sources, ~1,000 queue rows/day after thread multiplication. The credibility threshold — the planned curation lever — was useless because the ingestion pipeline already hard-filters on credibility upstream; essentially everything entering the queue is 9–10.
+
+**Resolution:** Curation pivoted from quality-based (raise threshold) to recency+cap based (top-15 by recency + daily stale-sweep). Shipped as Sprint 2.x.2b commit `06b6fa3`.
+
+**Lesson:** When a pipeline already filters on a variable upstream, downstream curation using that *same* variable is a no-op. Verify the **distribution** of your filter variable before designing curation around it. Cost: shipped 2.x.1 + 2.x.2 on the wrong assumption, needed 2.x.2b to correct.
+
+**Cumulative findings:** `#95` is added; brought count from 4 (`#90`–`#93`) to 5.
+
+#### Finding #96 — Track imbalance / dark-track rule violation
+
+**Pattern:** Phase B's first 5 sessions went entirely to Distribution (Sprint 2.x). Track 2 (scoring service / critical path to 150 sources) and Track 3 (perf infrastructure) both received zero contribution. Brief §2.5 (no track > 4 consecutive sessions without contribution) was therefore **violated for both** Track 2 and Track 3 at the close of Session 4 and remained violated through Session 5's first three commits. The headline capability (Tracker Auto-Detection Engine) also remained at 0% until the Sprint 1.1.1 pivot mid-arc.
+
+**Mechanism:** Visible, satisfying, fast-feedback work (a digest you can see in your inbox) crowded out slower critical-path work (intelligence layer; perf foundations). The pull toward visible wins is strong and silent — there was no explicit decision to defer Tracks 2/3, just a series of locally-rational "ship the digest first" calls that compounded.
+
+**Resolution:** Corrected partially this arc by pivoting to Sprint 1.1.1 (Tracker templates — Track 1, but the *headline capability* part of Track 1, not the distribution part). Track 2 and Track 3 dark-track violation remain open.
+
+**Lesson:** Track-balance discipline needs *active* enforcement. The no-dark-track rule is not self-enforcing — at minimum, every session-close should explicitly check track contributions over the trailing window, not rely on the next-session candidate list to surface it.
+
+**Note:** This is a *process-discipline* finding, distinct in kind from the codebase/Brief-premise findings `#87`–`#95`. Captured here because the pattern is now twice-observed (Phase A had a related pattern around Sprint 5/6 quality-vs-shipping tension) and worth naming.
+
+**Cumulative findings:** `#96` is added; count is now 6 (`#90`–`#93`, `#95`, `#96`).
+
+#### Sprint 1.1.1 — Tracker templates (retrospective)
+
+**Shipped:** Commit `faddf16` (2 files, +450 lines).
+
+**Scope:**
+
+- `conflict.md` (180 lines) — casualties (killed/wounded/missing), displacement, event count, geographic scope, escalation. Confidence vocabulary `provisional` / `disputed` / `confirmed`. Disputed party-figures shown side-by-side, never averaged.
+- `outbreak.md` (270 lines) — WHO-aligned `suspected` / `probable` / `confirmed` as *distinct case counts*, not three views of one figure. Layer 1 deliberately surfaces confirmed-only as headline (conservative against early-outbreak suspected-count inflation).
+
+**DrJ (MPH) review produced three epidemiological decisions:**
+
+1. **CFR is relay-only** (never Scoopfeeds-computed). Live `deaths÷confirmed` is structurally misleading. Display only when an official body has published a CFR estimate, as an attributed relay. Schema implication for Sprint 1.2: CFR is an attributed-relayed field, not a derived field.
+2. **Rₜ / R₀ is relay-only** (official sources only). Modeling preprints not relayed regardless of plausibility. One of the most-misread epidemiological figures.
+3. **Testing / surveillance intensity** added as Layer-2 metric. Rationale: confirmed-case counts are uninterpretable without a testing denominator. Explicitly excluded from Layer 1 cards (figure requires context; headline real-estate hostile to caveats).
+
+**Confidence model (Option 3, DrJ decision):** headline figure + confidence flag + source attribution. Mirrors how Reuters Graphics and WHO actually present uncertain data; rejected the alternatives of (a) single-number-with-error-bar (loses provenance), (b) single-number-no-flag (loses uncertainty signal), (c) range-only (loses headline anchor).
+
+**Sprint 1.1.2 status:** Pattern review effectively folded into DrJ's review this session — the conflict / outbreak pair stress-tested the 7-section structure under two very different epistemic regimes (party-disputed event counts vs WHO-classified case counts). No structural changes needed.
+
+**Out of scope (Sprint 1.1.3 and onward):**
+
+- Remaining 6 templates (incident, sports, environmental, election, study, entertainment) — Sprint 1.1.3.
+- Schema derivation from the template set — Sprint 1.2.
+- Auto-detection mechanism + `eventTracker.js` rename per finding `#90` — Sprint 1.3.
+- Scheduler wiring — Sprint 1.4.
+- Frontend display (Layer 1 cards + Layer 2 pages) — Sprint 1.5.
+
+**Phase B retrospective findings count:** 4 (`#90`–`#93`) at arc start → **6 at arc close** (`#95`, `#96` added).
+
+**Brief inaccuracy count:** unchanged at 11 of 12.
+
+**Three-track contribution this arc:**
+
+- **Track 1 (Phase B execution):** Heavy contribution. Sprint 2.x.2 + 2.x.2b distribution shipped, Sprint 1.1.1 tracker templates shipped (both Track 1 — distribution and headline capability respectively).
+- **Track 2 (Phase A close-out followups):** **Zero** — dark-track violation, per finding `#96`.
+- **Track 3 (infrastructure performance per Brief §5.1):** **Zero** — dark-track violation, per finding `#96`. Sprint 0 (Cache-Control immutable) untouched since Phase B start.
+
+**Known followup work added/refreshed this arc:**
+
+- **Sprint 1.1.3** — remaining 6 tracker templates; finishes Sprint 1.1; ~1–2 sessions.
+- **Sprint 2.x.3** — mark-as-posted workflow; completes Sprint 2.x trilogy.
+- **Sprint 2.x.1b** — analytical-section posts as queue source; DrJ-flagged twice; pending analytical-post investigation.
+- **Frontend bug** — analytical posts cannot be opened to reveal full analysis; Phase B Track 1.
+- **Sentry configuration (~30 min)** — cheap finding `#93` mitigation; foldable into any session.
+- **Track 3 Sprint 0** — Cache-Control immutable (1 session); now part of breaking dark-track violation per `#96`.
+- **Instagram failure rate diagnosis** — long-standing ~77 fails/24h pattern; Phase B Track 1.
+- **Sprint 1.2** — tracker schema; gated on Sprint 1.1.3 template-set completion.
+- **`.env\r` cruft housekeeping** — Phase B Track 3 followup; still deferred.
+
+**Next-session candidates (priority order):**
+
+1. **Sprint 1.1.3** — remaining 6 tracker templates (incident, sports, environmental, election, study, entertainment); finishes Sprint 1.1; ~1–2 sessions.
+2. **Break the Track 2/3 dark-track violation:** Sentry config (~30 min, Track 1/3, finding `#93` mitigation) and/or Track 3 Sprint 0 Cache-Control (1 session). Direct response to finding `#96`.
+3. **Sprint 2.x.3** — mark-as-posted workflow; completes Sprint 2.x trilogy.
+4. **Sprint 2.x.1b** — analytical-section posts as queue source (DrJ flagged twice).
+5. **Instagram failure diagnosis** (long-standing ~77 fails/24h).
+6. **Sprint 1.2** — tracker schema (after Sprint 1.1.3 template-set complete).
+
+#### Session 5 references
+
+- Arc commits: `2a1ab1a` (Sprint 2.x.2), `a6a3857` (analytics), `06b6fa3` (Sprint 2.x.2b), `faddf16` (Sprint 1.1.1)
+- Session 4 entry above (this file, line 620) — provides the Sprint 2.x.1 foundation that Sprint 2.x.2 / 2.x.2b extend
+- Sprint 2.x scope plan (Session 3 entry, "X-Posting Queue scope plan" subsection)
+- `backend/src/services/xPostDigest.js` (Sprint 2.x.2)
+- `backend/src/routes/x-digest-ops.js` (admin routes incl. analytics + curation)
+- `docs/content/tracker_templates/conflict.md` and `outbreak.md` (Sprint 1.1.1 deliverables)
+- Curation backlog clear: ~2,069 rows rejected via `/scoop-ops/x-digest/clear-backlog?confirm=1`
