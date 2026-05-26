@@ -426,11 +426,51 @@ app.get("/ads.txt", (req, res, next) => {
 app.use("/", seoRouter);
 
 // ── Serve frontend (production) ──────────────────────────────────────────
+// Cache-Control strategy (Phase B Track 3 Sprint 0):
+//   • /assets/* (Vite-emitted, content-hashed) → cache forever + immutable.
+//     A content change produces a new filename, so it's always safe.
+//   • sw.js (service worker)                   → no-cache (canonical for SW
+//     update lifecycle; functionally equivalent to max-age=0 but is what
+//     browser SW update logic expects to see).
+//   • everything else under dist/ root (index.html, manifest.json, robots.txt,
+//     ads.txt, the un-fingerprinted images) → express.static's default
+//     (public, max-age=0), forcing revalidation. CRITICAL: index.html MUST
+//     NEVER get immutable — that would freeze returning users on a stale app
+//     because the HTML referencing newly-deployed asset hashes never updates.
+//     The /assets/ predicate is the safety boundary; Vite never puts
+//     non-hashed files there.
 const distDir = path.join(__dirname, "../frontend/dist");
 if (existsSync(distDir)) {
-  app.use(express.static(distDir));
-  // SPA catch-all — serve index.html for any non-/api route
-  app.get(/^(?!\/api)/, (req, res) => res.sendFile(path.join(distDir, "index.html")));
+  app.use(express.static(distDir, {
+    setHeaders(res, filePath) {
+      if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        return;
+      }
+      if (path.basename(filePath) === "sw.js") {
+        res.setHeader("Cache-Control", "no-cache");
+        return;
+      }
+      // index.html when served directly (e.g., GET / via static's index
+      // behavior, or GET /index.html). The SPA catch-all below covers the
+      // virtual-route case (/article/..., /category/..., etc.) where this
+      // setHeaders callback never fires because the file isn't on disk at
+      // that path. Both surfaces need must-revalidate to prevent stale-HTML
+      // freeze for returning users.
+      if (path.basename(filePath) === "index.html") {
+        res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
+        return;
+      }
+      // Else: fall through to express.static default (max-age=0).
+    },
+  }));
+  // SPA catch-all — serve index.html for any non-/api route. Explicit
+  // must-revalidate so LiteSpeed / CDNs / browsers never freeze on a stale
+  // entry HTML for SPA routes (/article/..., /category/..., etc.).
+  app.get(/^(?!\/api)/, (req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
+    res.sendFile(path.join(distDir, "index.html"));
+  });
 }
 // API 404
 app.use((req, res) => sendNotFound(res, req, `Route ${req.path} not found 🤷`));
