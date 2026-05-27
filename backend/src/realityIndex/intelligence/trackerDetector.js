@@ -113,6 +113,8 @@ const INGESTER_TAG = Object.freeze({
 const SOURCE_FEED_SLUG_PREFIXES = Object.freeze({
   conflict:      ["acled-"],
   environmental: ["usgs-", "noaa-"],
+  sports:        ["sports-"],          // Sprint 1.3.3a — sportsdbFetcher.js writes slug=`sports-${eventId}`
+  entertainment: ["tmdb-"],            // Sprint 1.3.3a — tmdbFetcher.js writes slug=`tmdb-${mediaType}-${tmdbId}`
 });
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -265,16 +267,116 @@ function detectEnvironmentalTriggers(now) {
   return proposals;
 }
 
-// ─── Detector: not-yet-implemented stubs (Sprint 1.3.3) ────────────────────
-// Each returns []. The composer loop stays uniform so 1.3.3 can drop in
-// real implementations without restructuring the composer.
+// ─── Detector: sports ──────────────────────────────────────────────────────
+// Source-feed path: events with slug prefix "sports-" (SportsDB fixtures).
+// Wire-density path: events in the "sports" category with ≥ 3 article-links
+// over the 7d window (per sports.md §1).
+//
+// Initial metrics = {} per Sprint 1.3.3a DrJ ruling (Q1, locked decision).
+// Sports's confidence vocabulary is temporal (scheduled / live / final). We
+// cannot honestly declare temporal state on detection without score data:
+// SportsDB events can be future, in-progress, or completed; the slug alone
+// doesn't tell us which. Tracker creation anchors the fixture; score
+// ingestion (future work) populates metrics via updateTrackerMetrics with
+// the appropriate tier at that point. Never claim live/final state without
+// score data — that's the design discipline.
+//
+// template_meta carries fixture_kind + sport as "unknown" placeholders. The
+// SportsDB title format is structured (`"<home> vs <away> — <league>"`) so
+// `sport` and `league` could be parsed from the event title in a future
+// pass; deferred deliberately — title-format parsing is fragile and belongs
+// in a dedicated ingestion populator, not in detection.
+// TODO (Sprint 1.3.3+ cleanup): parse sport/league from SportsDB title when
+// the populator pattern is established.
+function detectSportsTriggers(now) {
+  const proposals = [];
+  const events = selectCandidateEvents("sports", now);
+  for (const ev of events) {
+    const fromFeed = matchesSourceFeed(ev.slug, SOURCE_FEED_SLUG_PREFIXES.sports);
+    const articleCount = countArticlesInWindow(ev.id, WIRE_DENSITY.sports.windowMs, now);
+    if (!fromFeed && articleCount < WIRE_DENSITY.sports.min) continue;
+
+    proposals.push({
+      event_id: ev.id,
+      template_meta: { fixture_kind: "unknown", sport: "unknown" },
+      data_source_provenance: {
+        _ingester_status: INGESTER_TAG.sports,
+        _origin: fromFeed ? "source-feed" : "wire-density",
+      },
+      initial_metrics: {},
+      started_at: ev.started_at,
+    });
+  }
+  return proposals;
+}
+
+// ─── Detector: entertainment ───────────────────────────────────────────────
+// Source-feed path: events with slug prefix "tmdb-" (TMDB ingester). The
+// TMDB slug format is contractual — `tmdb-<mediaType>-<tmdbId>` where
+// mediaType is "movie" or "tv" — so we can honestly derive title_kind from
+// it (per Sprint 1.3.3a DrJ ruling Q2: derive from our own structured slug,
+// not fabrication). The derivation is defensive: if the slug split doesn't
+// produce the expected 3+ parts or the mediaType doesn't map cleanly,
+// title_kind falls through to "unknown" rather than guessing.
+//
+// Wire-density path: events in entertainment/top clusters with ≥ 3
+// article-links over the 24h window. title_kind = "unknown" — wire articles
+// don't reveal title kind reliably (could be theatrical / streaming /
+// series-arc / awards-event).
+//
+// Initial metrics = {} regardless. Entertainment metrics are all
+// box-office / critical-reception / awards data — none of which the event
+// row provides. Detection anchors the title; ingestion populates the rest.
+function deriveTitleKindFromTmdbSlug(slug) {
+  // Slug format contract: tmdb-<mediaType>-<tmdbId>. Split should yield
+  // [..."tmdb", <mediaType>, <id...>]. Anything else → unknown (defensive
+  // against ingester-format drift).
+  if (!slug || !slug.startsWith("tmdb-")) return "unknown";
+  const parts = slug.split("-");
+  if (parts.length < 3) return "unknown";
+  const mediaType = parts[1];
+  if (mediaType === "movie") return "theatrical-release";
+  if (mediaType === "tv")    return "series-arc";
+  return "unknown";
+}
+
+function detectEntertainmentTriggers(now) {
+  const proposals = [];
+  const events = selectCandidateEvents("entertainment", now);
+  for (const ev of events) {
+    const fromFeed = matchesSourceFeed(ev.slug, SOURCE_FEED_SLUG_PREFIXES.entertainment);
+    const articleCount = countArticlesInWindow(ev.id, WIRE_DENSITY.entertainment.windowMs, now);
+    if (!fromFeed && articleCount < WIRE_DENSITY.entertainment.min) continue;
+
+    const titleKind = fromFeed ? deriveTitleKindFromTmdbSlug(ev.slug) : "unknown";
+
+    proposals.push({
+      event_id: ev.id,
+      template_meta: { title_kind: titleKind },
+      data_source_provenance: {
+        _ingester_status: INGESTER_TAG.entertainment,
+        _origin: fromFeed ? "source-feed" : "wire-density",
+      },
+      initial_metrics: {},
+      started_at: ev.started_at,
+    });
+  }
+  return proposals;
+}
+
+// ─── Detector: not-yet-implemented stubs (Sprint 1.3.3b) ───────────────────
+// Each returns []. The composer loop stays uniform so 1.3.3b can drop in
+// real implementations without restructuring the composer. KEEP this
+// scaffolding (NOT_IMPLEMENTED_DETECTORS dict + makeNotImplementedDetector
+// + notImplementedLogged Set) even after 1.3.3b fills in the 4 quartet
+// detectors — per Sprint 1.3.2 hygiene comment, it costs nothing and
+// protects against a future 9th-template addition being introduced
+// stub-first.
 
 const NOT_IMPLEMENTED_DETECTORS = Object.freeze({
   outbreak:      "wire-density only (no WHO/ProMED ingester yet)",
   incident:      "wire-density only (no NTSB/ICAO/IMO ingester yet)",
-  sports:        "SportsDB integration pending",
   election:      "wire-density only (no electoral-commission ingester yet)",
-  entertainment: "TMDB-fixture integration pending",
   study:         "wire-density only (no journal-publication ingester yet)",
 });
 // Log-spam prevention: each not-yet-implemented detector logs once per
@@ -286,7 +388,7 @@ function makeNotImplementedDetector(templateType) {
   return function () {
     if (!notImplementedLogged.has(templateType)) {
       notImplementedLogged.add(templateType);
-      logger.info(`trackerDetector(${templateType}): not yet implemented (Sprint 1.3.3) — ${NOT_IMPLEMENTED_DETECTORS[templateType]}`);
+      logger.info(`trackerDetector(${templateType}): not yet implemented (Sprint 1.3.3b) — ${NOT_IMPLEMENTED_DETECTORS[templateType]}`);
     }
     return [];
   };
@@ -302,10 +404,10 @@ const DETECTORS = Object.freeze({
   conflict:      detectConflictTriggers,
   outbreak:      makeNotImplementedDetector("outbreak"),
   incident:      makeNotImplementedDetector("incident"),
-  sports:        makeNotImplementedDetector("sports"),
+  sports:        detectSportsTriggers,
   environmental: detectEnvironmentalTriggers,
   election:      makeNotImplementedDetector("election"),
-  entertainment: makeNotImplementedDetector("entertainment"),
+  entertainment: detectEntertainmentTriggers,
   study:         makeNotImplementedDetector("study"),
 });
 
