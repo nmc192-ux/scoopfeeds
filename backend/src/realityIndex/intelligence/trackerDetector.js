@@ -364,20 +364,150 @@ function detectEntertainmentTriggers(now) {
   return proposals;
 }
 
-// ─── Detector: not-yet-implemented stubs (Sprint 1.3.3b) ───────────────────
-// Each returns []. The composer loop stays uniform so 1.3.3b can drop in
-// real implementations without restructuring the composer. KEEP this
-// scaffolding (NOT_IMPLEMENTED_DETECTORS dict + makeNotImplementedDetector
-// + notImplementedLogged Set) even after 1.3.3b fills in the 4 quartet
-// detectors — per Sprint 1.3.2 hygiene comment, it costs nothing and
-// protects against a future 9th-template addition being introduced
-// stub-first.
+// ─── Detector: outbreak (wire-density-only, graceful degradation) ─────────
+// No WHO Disease Outbreak News / ProMED-mail ingester exists today (per the
+// Sprint 1.3 investigation; documented data-source gap in outbreak.md
+// header). This detector fires on wire-density alone: ≥ 3 dispatches in
+// matching health categories within 14d. Initial metrics are intentionally
+// EMPTY — outbreak.md §2 metrics (suspected_cases / probable_cases /
+// confirmed_cases / cfr / r0_rt / who_designation) are NOT honestly
+// derivable from "we have N articles about this event." Article count is
+// media attention, not epidemiological signal. Writing any §2 metric from
+// article count alone would be fabrication. The empty shell anchors the
+// event so future ingester work (or operator override) can populate via
+// updateTrackerMetrics. Refusing to guess IS the design discipline.
+function detectOutbreakTriggers(now) {
+  const proposals = [];
+  const events = selectCandidateEvents("outbreak", now);
+  for (const ev of events) {
+    const articleCount = countArticlesInWindow(ev.id, WIRE_DENSITY.outbreak.windowMs, now);
+    if (articleCount < WIRE_DENSITY.outbreak.min) continue;
+    proposals.push({
+      event_id: ev.id,
+      template_meta: { pathogen: "unknown" },
+      data_source_provenance: {
+        _ingester_status: INGESTER_TAG.outbreak,
+        _origin: "wire-density",
+      },
+      initial_metrics: {},
+      started_at: ev.started_at,
+    });
+  }
+  return proposals;
+}
+
+// ─── Detector: incident (wire-density-only, graceful degradation) ─────────
+// No NTSB / ICAO / IMO / national-rail-safety ingester exists today
+// (Sprint 1.3 investigation). Wire-density fires on ≥ 3 dispatches in 24h.
+// Initial metrics EMPTY — incident.md §2 explicitly warns that early cause
+// attribution is "wrong more often than right" (§2 cause_attribution note)
+// and that casualty figures are highly volatile in the first 72h. Writing
+// either from article count alone would be exactly the failure mode the
+// template was designed to resist. Empty shell + 'unknown' validating
+// authority preserves the option for the real investigation body
+// (NTSB / ICAO / IMO / rail authority) to identify itself when an ingester
+// or operator override fills it in.
+function detectIncidentTriggers(now) {
+  const proposals = [];
+  const events = selectCandidateEvents("incident", now);
+  for (const ev of events) {
+    const articleCount = countArticlesInWindow(ev.id, WIRE_DENSITY.incident.windowMs, now);
+    if (articleCount < WIRE_DENSITY.incident.min) continue;
+    proposals.push({
+      event_id: ev.id,
+      template_meta: { mode: "unknown", validating_authority: "unknown" },
+      data_source_provenance: {
+        _ingester_status: INGESTER_TAG.incident,
+        _origin: "wire-density",
+      },
+      initial_metrics: {},
+      started_at: ev.started_at,
+    });
+  }
+  return proposals;
+}
+
+// ─── Detector: election (wire-density-only, count-completion invariant) ──
+// No electoral-commission ingester exists today (documented gap in
+// election.md header). Wire-density fires on ≥ 5 dispatches in 24h.
+//
+// Initial metrics EMPTY by design — Sprint 1.2 spec §3.5 specifies a
+// count-completion-% companion invariant: any vote / seat / turnout metric
+// at confidence='partial-count' MUST be accompanied by a count_completion_pct
+// metric in the same block. Detection has NEITHER the vote counts NOR the
+// completion-%; writing votes_by_contestant without count_completion_pct
+// would actively violate the spec, and writing count_completion_pct without
+// a real count is meaningless. Empty metrics is therefore the count-
+// completion-% invariant enforced at detection time. The tracker exists
+// to anchor the election event; metrics populate when an ingester (or
+// operator) provides the count + completion-% together.
+function detectElectionTriggers(now) {
+  const proposals = [];
+  const events = selectCandidateEvents("election", now);
+  for (const ev of events) {
+    const articleCount = countArticlesInWindow(ev.id, WIRE_DENSITY.election.windowMs, now);
+    if (articleCount < WIRE_DENSITY.election.min) continue;
+    proposals.push({
+      event_id: ev.id,
+      template_meta: { electoral_system: "unknown", jurisdiction: "unknown" },
+      data_source_provenance: {
+        _ingester_status: INGESTER_TAG.election,
+        _origin: "wire-density",
+      },
+      initial_metrics: {},
+      started_at: ev.started_at,
+    });
+  }
+  return proposals;
+}
+
+// ─── Detector: study (wire-density-only, badge-omission discipline) ──────
+// No PubMed / bioRxiv / medRxiv / Crossref ingester exists today (study.md
+// documented gap). Wire-density fires on ≥ 5 dispatches in 14d.
+//
+// Initial metrics EMPTY and template_meta also EMPTY by design.
+// study.md §2 names study_type as "the dominant honesty signal" — the
+// single most important field, and not honestly derivable from article
+// count. The evidence_badge field that lives in template_meta per Sprint
+// 1.2 spec §3.4 is a DERIVED display structure (computed at render time
+// from study_type + sample_size + tier + hierarchy_rank); v1.2 permits
+// caching it in template_meta but explicitly warns it's cache, not source
+// of truth. Pre-ingester, with no study_type signal, the badge would be
+// nonsensical — so it is OMITTED entirely (no doi / pubmed_id / venue
+// either; nothing is honestly derivable). Sprint 1.5 frontend re-derives
+// the badge at render once underlying metrics exist; until then this
+// tracker is a shell that anchors the finding's existence and provenance.
+function detectStudyTriggers(now) {
+  const proposals = [];
+  const events = selectCandidateEvents("study", now);
+  for (const ev of events) {
+    const articleCount = countArticlesInWindow(ev.id, WIRE_DENSITY.study.windowMs, now);
+    if (articleCount < WIRE_DENSITY.study.min) continue;
+    proposals.push({
+      event_id: ev.id,
+      template_meta: {},
+      data_source_provenance: {
+        _ingester_status: INGESTER_TAG.study,
+        _origin: "wire-density",
+      },
+      initial_metrics: {},
+      started_at: ev.started_at,
+    });
+  }
+  return proposals;
+}
+
+// ─── Not-yet-implemented stubs (defensive scaffolding) ────────────────────
+// As of Sprint 1.3.3b, all 8 detectors are implemented — NOT_IMPLEMENTED
+// is empty. KEEP this scaffolding (the empty dict + makeNotImplementedDetector
+// + notImplementedLogged Set) per the 1.3.2 / 1.3.3a hygiene comments:
+// it costs nothing at runtime and protects against a future 9th-template
+// addition being introduced stub-first. If we ever add a new template_type,
+// the natural pattern is to register a stub here first, then implement.
 
 const NOT_IMPLEMENTED_DETECTORS = Object.freeze({
-  outbreak:      "wire-density only (no WHO/ProMED ingester yet)",
-  incident:      "wire-density only (no NTSB/ICAO/IMO ingester yet)",
-  election:      "wire-density only (no electoral-commission ingester yet)",
-  study:         "wire-density only (no journal-publication ingester yet)",
+  // All 8 detectors implemented as of Sprint 1.3.3b. Scaffolding retained
+  // for future 9th-template additions.
 });
 // Log-spam prevention: each not-yet-implemented detector logs once per
 // process lifetime, then stays quiet. Keep this Set even after 1.3.3 fills
@@ -402,13 +532,13 @@ function makeNotImplementedDetector(templateType) {
 
 const DETECTORS = Object.freeze({
   conflict:      detectConflictTriggers,
-  outbreak:      makeNotImplementedDetector("outbreak"),
-  incident:      makeNotImplementedDetector("incident"),
+  outbreak:      detectOutbreakTriggers,
+  incident:      detectIncidentTriggers,
   sports:        detectSportsTriggers,
   environmental: detectEnvironmentalTriggers,
-  election:      makeNotImplementedDetector("election"),
+  election:      detectElectionTriggers,
   entertainment: detectEntertainmentTriggers,
-  study:         makeNotImplementedDetector("study"),
+  study:         detectStudyTriggers,
 });
 
 export function runTrackerDetector() {
