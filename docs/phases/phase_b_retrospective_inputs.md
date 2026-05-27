@@ -900,3 +900,112 @@ Initially planned 3×2h (=6h) per DrJ structure; extended modestly per DrJ confi
 - `backend/src/routes/x-digest-ops.js` (admin routes incl. analytics + curation)
 - `docs/content/tracker_templates/conflict.md` and `outbreak.md` (Sprint 1.1.1 deliverables)
 - Curation backlog clear: ~2,069 rows rejected via `/scoop-ops/x-digest/clear-backlog?confirm=1`
+
+### Session 6 — May 25–26, 2026 — Tracker Engine: design + data layer (Sprint 1.1 + 1.2 shipped); Track 3 unblocks
+
+**Type:** Consolidated capture covering a two-calendar-day arc with four commits and two new findings. The Tracker Auto-Detection Engine moves from 0% built to roughly 40% built (design layer + data layer both real; detection / scheduler / frontend still ahead). Track 3 broke its dark-track streak with concrete code. Track 2 stayed dark — but for the first time in Phase B by **deliberate prioritization**, not by drift.
+
+**Output across the arc:**
+
+- **Sprint 1.1.1 — First 2 of 8 Tracker templates shipped** (commit `faddf16`, May 25–26). `conflict.md` (180 lines, ACLED / UN OCHA grounded) and `outbreak.md` (270 lines, WHO surveillance grounded). DrJ MPH review locked three epidemiological decisions on outbreak: **CFR is relay-only** (never Scoopfeeds-computed — official-body figures only, attributed), **Rₜ / R₀ is relay-only** (modeling preprints not relayed regardless of plausibility), **testing / surveillance intensity** added as Layer-2 metric (case counts uninterpretable without testing denominator). Option-3 confidence model (headline value + confidence flag + source attribution) confirmed as the universal pattern.
+- **Track 3 Sprint 0 — Cache-Control immutable shipped** (commit `c7267b8`, May 26). **First Track 3 contribution in all of Phase B.** Hashed `/assets/*` → `public, max-age=31536000, immutable`; `sw.js` → `no-cache`; `/` and SPA-virtual-route HTML → `public, max-age=0, must-revalidate`; non-hashed root files unchanged. Locally verified across 5 curl-header scenarios on `localhost:4099`. Mid-implementation footgun caught + fixed (see operational notes). Per-Phase-A diagnostic Sentry check pivoted to a different unblock when Sentry turned out to be pre-coded (Finding #97 below).
+- **Sprint 1.1.3 — Remaining 6 Tracker templates shipped, Sprint 1.1 COMPLETE** (commit `19c1b0f`, May 26). `incident`, `sports`, `environmental`, `election`, `entertainment`, `study` — 1,420 new markdown lines. All 8 templates verified to share the identical 7-section structure (`grep -cE '^## [0-9]\.'` returns 7 across all). `study.md` got the GRADE/Consensus-grounded **evidence-quality badge** design per DrJ ruling: finding shown WITH a dominant, inseparable, color-coded quality badge (tier + study_type + sample_size + hierarchy_rank), rejecting both the austere study-type-only headline (hid the finding — no gold-standard EBM tool does that) and the naive equal-weighting headline (the hype-cycle pattern). Two **data-source gaps** documented honestly in `election.md` and `study.md` headers — no electoral-commission ingester, no journal-publication ingester; feed onboarding is future Track 1 source work, not hidden.
+- **Sprint 1.2 — Tracker schema + DAO + canonical metrics spec shipped** (commit `4c43317`, May 26–27). Migration 005 creates `tracker_instances` + `tracker_metric_revisions` (DrJ chose ship-both-now over the defer-revisions recommendation). DAO module `backend/src/models/trackers.js` exposes 7 functions; `updateTrackerMetrics` is an atomic transaction (metric flip + revision insert). DAO-layer JSON validation (not per-template SQL CHECK) enforces template-allowed metric names + confidence vocabulary + minimum block shape; throws structured `TrackerValidationError`. `docs/specs/tracker_metrics_json.md` (215 lines) is the binding contract Sprint 1.3 will write against. Mid-review fix: `archiveTracker` dropped the synthetic `__closeout__` revision (cleaner than the magic metric_name workaround).
+
+**Headline:** Tracker Auto-Detection Engine moved from 0% built to ~40% built this arc. Design layer (Sprint 1.1) + data layer (Sprint 1.2) both real and reviewed; detection / scheduler / frontend (Sprints 1.3–1.5) remain.
+
+**Commits this arc:** 4 — `faddf16`, `c7267b8`, `19c1b0f`, `4c43317`.
+
+**Sprint trajectory at arc close:**
+
+- Sprint 1.1 (template library, 8 templates): **COMPLETE**
+- Sprint 1.2 (schema + DAO + canonical spec): **COMPLETE**
+- Sprint 1.3 (detection engine + `eventTracker.js` rename per Finding #90): unblocked, pending
+- Sprint 1.4 (scheduler wiring), Sprint 1.5 (frontend display): pending
+- Track 3 Sprint 0 (Cache-Control immutable): **COMPLETE**; Track 3 Sprint 1 (CDN edge) pending
+- Track 2: still dark — but now **7 consecutive Phase B sessions**, and this arc it's dark **by deliberate prioritization** per Finding #98 (below), not by drift
+- Sprint 2.x.3 (mark-as-posted), Sprint 2.x.1b (analysis posts as queue source), IG-failure diagnosis: all pending carry-forwards from prior arcs
+
+**Operational notes (one-liners):**
+
+- **Auth-header drift documented.** Across 3+ sessions Claude Code repeatedly drafted run-curls with `x-admin-token` when the correct header is `Authorization: Bearer`. The pattern was corrected each time but recurred. This arc the canonical form was finally documented inline in the `clear-backlog` docstring so future curl-drafts have a local reference.
+- **`index.html` two-serving-paths footgun (Track 3 Sprint 0).** `index.html` is served BOTH by `express.static`'s directory-index behavior (for `/` and `/index.html`) AND by the SPA catch-all (for `/article/foo`, `/category/bar`, etc.). Cache headers must be set on **both** surfaces; the first implementation only set `must-revalidate` on the catch-all and missed the static-index path. Caught by local curl verification on `localhost:4099/` before commit. Worth recording so future static-asset work remembers the two-paths shape.
+- **Production verifications still pending (DrJ-side, non-blocking):** Cache-Control headers live on `scoopfeeds.com/assets/<hash>.js` after next Hostinger pull+restart? Sentry DSN activated in production env? Both small, non-blocking.
+
+#### Finding #97 — Sentry already-coded (closes Finding #93's framing as stale)
+
+**Pattern.** Phase A investigation for what was prompted as "wire up the unconfigured Sentry SDK" revealed Sentry is **fully wired in code already** — `backend/src/config/observability.js` (shipped commit `2a4f2c8`, pre-Phase-B) implements `initObservability({role})` with the no-op-when-DSN-unset guard, `flushObservability` for graceful shutdown, `captureException` with rich context (tags, extras, request_id, role, level), and `captureWorkerFailure` for queue/cron failures. The plumbing is invoked at **all three process entry points**: `server.js` line 87 (web, immediately after `const app = express()`, before any route mount), `schedulerProcess.js` line 9 (cron), `workerProcess.js` line 19 (BullMQ). Express error handler at `server.js:437` calls `captureException` with full request context. `flushObservability` runs on SIGTERM and `exitFatal`.
+
+**The stale framing.** Finding #93's "SDK installed but unconfigured" was accurate at the **operational level** (`SENTRY_DSN` unset on Hostinger production env, so Sentry skip-no-ops) but **stale at the code level** — the wiring landed in commit `2a4f2c8` between Finding #93 capture and now. Same family pattern as `#87` / `#88` / `#91` / `#95`: an assumption that work needed to be done turned out to be already done.
+
+**Resolution.** Closes Finding #93 as **resolved-by-pre-existing-code**. The operational activation step (set `SENTRY_DSN` in Hostinger production env) remains as a non-blocking carry-forward — pure operator work, ~30 seconds, no code change. Phase B Track 3 Sprint 0 (Cache-Control immutable) substituted for the Sentry session.
+
+**Cumulative findings:** `#97` is added; brought count from 6 (`#90`–`#93`, `#95`, `#96`) to 7. Brief inaccuracy count unchanged at 11 of 12 (Finding #97 resolves Finding #93's framing rather than opening a new brief-inaccuracy — same surface, updated state).
+
+#### Finding #98 — Track-2 dark-by-deliberate-prioritization vs dark-by-drift
+
+**Pattern.** Finding `#96` (Session 5) captured Tracks 2 & 3 as dark **by inattention** through 5 Phase B sessions — the pull toward visible distribution work crowded out the slower critical-path work silently. Session 6 broke Track 3 with concrete code (commit `c7267b8`). Track 2 stayed dark — but the epistemic state changed.
+
+**The conscious decision.** Faced with Sprint 1.2 (Tracker Engine data layer) vs Track 2 first-work, DrJ explicitly compared:
+
+| Axis | Track 1 Sprint 1.2 | Track 2 B.1 (codebase reorg) |
+|---|---|---|
+| Momentum | Fresh — 8 templates from previous arc just shipped | None — Track 2 untouched all of Phase B |
+| Scope | 1–2 sessions | 4–8 sessions, **biggest scope uncertainty in all of Phase B** per Kickoff §10.2 |
+| Risk profile | Additive — new tables, new module, no live-prod surface | Touches live production; files moving while Track 1 ingestion runs |
+| User-visible payoff | Indirect (unblocks the headline capability) | None (pure refactor) |
+| Critical-path position | Tracker Engine's data layer | Head of the **corpus-growth → 150-sources critical path** |
+
+DrJ chose Track 1 consciously, knowing Track 2 would stay dark for a 7th consecutive session. This is a **different epistemic state** than `#96`'s accidental neglect.
+
+**Why it matters institutionally.** The no-dark-track rule (Brief §2.5) exists to prevent **unconscious drift** — to make sure a track doesn't get silently abandoned. Conscious deliberate prioritization is a different judgment; it's the operator weighing real trade-offs and choosing one with eyes open. Both produce the same surface state (Track 2 dark), but they shouldn't carry the same institutional weight. Treating dark-deliberate as if it were dark-by-drift retroactively erases the prioritization decision and pretends the operator was inattentive when they were in fact attentive.
+
+**Lesson.** When a "rule" is being broken, the **consciousness of the breakage matters** for institutional honesty. Track 2 dark **by inattention** is a process failure that should drive corrective action; Track 2 dark **by deliberate choice** is legitimate prioritization that future capture should not retroactively soften by re-narrating as accidental. Future retrospective entries should distinguish these states explicitly.
+
+**Schema implication for future captures.** When recording track imbalance going forward, use the labels `dark-deliberate` (operator weighed, chose, accepted the consequence) vs `dark-by-drift` (no conscious comparison, just absence). Mixed-arc cases (some sessions dark by drift, then a deliberate choice to extend the dark period) get both labels with session-by-session attribution.
+
+**Cumulative findings:** `#98` is added; count is now 8 (`#90`–`#93`, `#95`, `#96`, `#97`, `#98`).
+
+#### Sprint 1.1 / 1.2 retrospectives (brief)
+
+**Sprint 1.1 (template library) — COMPLETE.** 8 templates, 1,870 lines of pure markdown design spec, 7-section structure consistent across all (verified via `grep -cE '^## [0-9]\.'` returning 7 per file). DrJ's MPH review baked domain expertise directly into the design layer: outbreak's CFR / Rₜ relay-only rules + testing-intensity Layer-2 metric, study's GRADE/Consensus-grounded evidence badge. Two **data-source gaps** (election: no electoral-commission ingester; study: no journal-publication ingester) documented honestly in their template headers — feed onboarding is future Track 1 source work, not hidden behind aspirational language. Sprint 1.1.2 (pattern review) effectively folded into the DrJ MPH review process in Sprint 1.1.1.
+
+**Sprint 1.2 (schema + DAO + spec) — COMPLETE.** Central design tension (8 templates × different metric names × different confidence vocabularies × different epistemic shapes) resolved by **Option (a)**: generic JSON keyed by metric_name with the universal Option-3 triple `{value, confidence, source, as_of}` as the shared block structure. Per-template-typed columns rejected — the harvest showed no shared field NAMES across templates, only a shared block shape. 8 schema decisions resolved at investigation hard-stop (DAO-layer validation not SQL CHECK; ship both tables in one migration; disputed parties[] as single block; active/dormant/archived status; CHECK-enum template_type; ship the spec doc; event-first FK NOT NULL; override audit via revision reason). `archiveTracker` design corrected mid-review — closeout is a status change, not a metric change; the magic `__closeout__` metric_name was special-casing the DAO unnecessarily.
+
+**Phase B retrospective findings count:** 6 (`#90`–`#93`, `#95`, `#96`) at arc start → **8 at arc close** (`#97`, `#98` added).
+
+**Brief inaccuracy count:** unchanged at 11 of 12 (per Finding #97 resolution).
+
+**Three-track contribution this arc:**
+
+- **Track 1 (Phase B execution):** **Very heavy.** Sprint 1.1 (template library, 8 specs) shipped. Sprint 1.2 (schema + DAO + canonical spec) shipped. Tracker Engine moved 0% → ~40% built.
+- **Track 2 (architecture / scoring service):** **Zero — but for the first time in Phase B by deliberate prioritization per Finding #98**, not by drift. 7th consecutive dark-track session, the last one labeled `dark-deliberate`.
+- **Track 3 (infrastructure performance per Brief §5.1):** **Broke dark-by-drift streak.** Sprint 0 Cache-Control immutable shipped (`c7267b8`). First Track 3 contribution in all of Phase B. Local verification across 5 curl-header scenarios passed; production verification still pending (DrJ-side post-deploy).
+
+**Known followup work (current state):**
+
+- **Sprint 1.3** — detection engine + `eventTracker.js` rename per Finding #90; ~2–3 sessions; **now unblocked** (Sprint 1.2's DAO is the API surface Sprint 1.3 calls).
+- **Sprint 1.4 + 1.5** — scheduler wiring + frontend display; gated on Sprint 1.3.
+- **Sprint 2.x.3** — mark-as-posted endpoint; completes the X-Posting trilogy.
+- **Sprint 2.x.1b** — analytical-section posts as queue source; DrJ-flagged twice.
+- **Track 2 dark-deliberate per #98** — B.1 codebase reorg planning or a smaller scoring-service-implementation slice whenever priority justifies. Not abandoned, deliberately deferred.
+- **Production verifications** — Cache-Control headers live on `scoopfeeds.com/assets/...`? Sentry DSN activated in Hostinger production env? Both small, non-blocking.
+- **Instagram failure rate diagnosis** — long-standing ~77 fails/24h pattern; Phase B Track 1.
+- **`.env\r` cruft housekeeping** — Phase B Track 3 followup; still deferred.
+
+**Next-session candidates (priority order):**
+
+1. **Sprint 1.3 — detection engine** (Tracker Engine intelligence layer; rename `eventTracker.js` → cluster-promotion-suggesting name per Finding #90; per-template detection rules per the 8 templates' §1 triggers). The meaty intelligence piece. Design-rich. Now unblocked by Sprint 1.2.
+2. **Track 2 — break the deliberate-dark per Finding #98.** B.1 codebase reorganization planning or a smaller scoring-service-implementation slice. The "deliberate" framing only stays honest if Track 2 isn't deferred indefinitely; revisit the trade-off every arc.
+3. **Carry-forwards (small):** production header verification, Sentry DSN activation, Sprint 2.x.3 mark-as-posted, Sprint 2.x.1b analysis-section, IG-failure diagnosis.
+
+#### Session 6 references
+
+- Arc commits: `faddf16` (Sprint 1.1.1 first 2 templates), `c7267b8` (Track 3 Sprint 0 Cache-Control), `19c1b0f` (Sprint 1.1.3 remaining 6 templates), `4c43317` (Sprint 1.2 schema + DAO + spec)
+- Session 5 entry above (this file, line 777) — provides the Sprint 2.x curation arc context that immediately preceded this Tracker Engine focus
+- `docs/content/tracker_templates/{conflict,outbreak,incident,sports,environmental,election,entertainment,study}.md` — the 8 design specs (Sprint 1.1 deliverable)
+- `backend/src/db/migrations/005_tracker_instances.js` — schema (Sprint 1.2)
+- `backend/src/models/trackers.js` — DAO surface that Sprint 1.3 detection engine will write against
+- `docs/specs/tracker_metrics_json.md` — canonical metrics JSON contract
+- Pre-existing Sentry plumbing surfaced by Finding #97: `backend/src/config/observability.js` (commit `2a4f2c8`)
+- Production verification pending: `curl -sI https://scoopfeeds.com/assets/<hash>.js | grep -i cache-control` (expect `public, max-age=31536000, immutable`)
