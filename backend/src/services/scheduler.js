@@ -27,6 +27,7 @@ import { snapshotActiveMarkets } from "../realityIndex/ingest/predictionMarkets/
 import { runMarketMatcherCycle } from "../realityIndex/intelligence/marketMatcher.js";
 import { runSnapshotDownsampler } from "../realityIndex/jobs/snapshotDownsampler.js";
 import { runEventPromoter } from "../realityIndex/intelligence/eventPromoter.js";
+import { runTrackerDetector } from "../realityIndex/intelligence/trackerDetector.js";
 import { runEventTimelineBuilder } from "../realityIndex/intelligence/eventTimelineBuilder.js";
 import { runEventActorExtractor } from "../realityIndex/intelligence/eventActorExtractor.js";
 import { runMediaSentimentForActiveEvents } from "../realityIndex/intelligence/mediaSentimentScorer.js";
@@ -62,7 +63,8 @@ let isEventsRun   = false;
 let isAnalysisRun = false;
 let isPolymarketRun   = false;  // Reality Index Phase 1
 let isMatcherRun      = false;  // Reality Index Phase 1
-let isEventPromoterRun = false;  // Reality Index Phase 2
+let isEventPromoterRun  = false;  // Reality Index Phase 2
+let isTrackerDetectorRun = false; // Sprint 1.3.4 — Tracker Auto-Detection Engine
 let isActorRun        = false;  // Reality Index Phase 2
 let lastRun       = null;
 let lastVideoRun = null;
@@ -246,6 +248,10 @@ export function startScheduler() {
     scheduleCron("0 4 * * *",    () => runSnapshotDownsamplerCycle());     // daily 4 AM
     // Phase 2 — Event Tracker
     scheduleCron("13,43 * * * *", () => runEventPromoterCronCycle());       // every 30 min, offset
+    // Sprint 1.3.4 — Tracker Auto-Detection Engine. Runs 3 min after the
+    // eventPromoter cron so promoted events are fresh when the detector
+    // evaluates per-template triggers. Independent of timeline+actors below.
+    scheduleCron("16,46 * * * *", () => runTrackerDetectorCronCycle());     // every 30 min, +3 offset from eventPromoter
     scheduleCron("19 * * * *",    () => runEventTimelineBuilderCycle());   // every 1 hr
     scheduleCron("49 * * * *",    () => runActorExtractorCycle());         // every 1 hr, offset
     // Phase 3 — Sentiment + Composite + Anomalies
@@ -292,9 +298,12 @@ export function startScheduler() {
     scheduleTimer(() => runPolymarketCycle(), 30_000);
     scheduleTimer(() => runMarketMatcherCronCycle(), 5 * 60 * 1000);
     scheduleTimer(() => runEventPromoterCronCycle(), 8 * 60 * 1000);
+    // Sprint 1.3.4 — Tracker Detector first run ~11 min after boot, between
+    // eventPromoter's 8-min boot pulse and the next on-the-hour :16 cron tick.
+    scheduleTimer(() => runTrackerDetectorCronCycle(), 11 * 60 * 1000);
     scheduleTimer(() => runRealityIndexComposeCycle(), 9 * 60 * 1000);
     scheduleTimer(() => runGdeltCycle(), 2 * 60 * 1000);                       // first GDELT pull 2 min after boot
-    logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventPromoter 30m, timeline+actors hourly, downsample daily, sentiment hourly, RI compose 30m, anomaly 15m, watchlist-push 15m, GDELT 30m)");
+    logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventPromoter 30m, trackerDetector 30m, timeline+actors hourly, downsample daily, sentiment hourly, RI compose 30m, anomaly 15m, watchlist-push 15m, GDELT 30m)");
   } else {
     logger.info("🧠 Reality Index crons disabled via ENABLE_REALITY_INDEX=false");
   }
@@ -367,6 +376,28 @@ async function runEventPromoterCronCycle() {
     return null;
   } finally {
     isEventPromoterRun = false;
+  }
+}
+
+// Sprint 1.3.4 — production cron wrapper for the Tracker Auto-Detection
+// Engine. Fires every 30 minutes at :16 and :46 (after eventPromoter at
+// :13/:43 so events are fresh) plus a boot pulse ~11 min after server start.
+// runTrackerDetector itself is synchronous; the async wrapper preserves the
+// scheduler's await pattern and the is-already-running guard. Per the
+// engine's design (Sprint 1.3.2-3b), the detector iterates over recent
+// events, applies per-template triggers, dedups via (event_id, template_type)
+// at the composer, and creates tracker_instances via the Sprint 1.2 DAO.
+async function runTrackerDetectorCronCycle() {
+  if (isTrackerDetectorRun) { logger.warn("⏸️ Tracker detector already running"); return null; }
+  isTrackerDetectorRun = true;
+  try {
+    const out = runTrackerDetector();
+    return out;
+  } catch (err) {
+    logger.error("❌ Tracker detector failed", { error: err.message });
+    return null;
+  } finally {
+    isTrackerDetectorRun = false;
   }
 }
 
@@ -656,7 +687,7 @@ async function runAnalystBriefCycleWrapped() {
 
 // Suppress unused-warning while exposing for ad-hoc /scoop-ops triggers later.
 export { runPolymarketCycle, runMarketMatcherCronCycle, runSnapshotDownsamplerCycle, snapshotActiveMarkets,
-         runEventPromoterCronCycle, runActorExtractorCycle,
+         runEventPromoterCronCycle, runTrackerDetectorCronCycle, runActorExtractorCycle,
          runSentimentScoreCycle, runRealityIndexComposeCycle, runAnomalyScanCycle,
          runWatchlistPushCycle, runGdeltCycle };
 
