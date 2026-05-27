@@ -8,9 +8,10 @@ import * as migration001 from "./migrations/001_operational_tables.js";
 import * as migration002 from "./migrations/002_sources_table.js";
 import * as migration003 from "./migrations/003_drop_raw_signals.js";
 import * as migration004 from "./migrations/004_x_post_queue.js";
+import * as migration005 from "./migrations/005_tracker_instances.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS = [migration001, migration002, migration003, migration004];
+const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005];
 
 function ensureSchemaMigrationsTable(db) {
   db.exec(`
