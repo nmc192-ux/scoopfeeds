@@ -5,7 +5,7 @@
  *   article      — article published that belongs to this event
  *   market_move  — YES price changed >= PRICE_MOVE_THRESHOLD in one snapshot step
  *
- * Run after eventTracker so event_articles and event_market_links are fresh.
+ * Run after eventPromoter so event_articles and event_market_links are fresh.
  * Idempotent: entries are INSERT OR IGNORE keyed on (event_id, kind, ref_id).
  */
 

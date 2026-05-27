@@ -178,7 +178,7 @@ export function initRealityIndex(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_events_status         ON events(status, last_activity_at DESC);
     CREATE INDEX IF NOT EXISTS idx_events_category       ON events(category, status);
-    -- cluster_id is unique when set so eventTracker.upsert can ON CONFLICT(cluster_id).
+    -- cluster_id is unique when set so eventPromoter.upsert can ON CONFLICT(cluster_id).
     -- Partial index allows multiple NULLs for future multi-cluster events.
     CREATE UNIQUE INDEX IF NOT EXISTS idx_events_cluster ON events(cluster_id) WHERE cluster_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_events_slug           ON events(slug);

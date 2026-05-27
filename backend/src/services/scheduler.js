@@ -26,7 +26,7 @@ import { syncPolymarketMarkets } from "../realityIndex/ingest/predictionMarkets/
 import { snapshotActiveMarkets } from "../realityIndex/ingest/predictionMarkets/polymarketSnapshotter.js";
 import { runMarketMatcherCycle } from "../realityIndex/intelligence/marketMatcher.js";
 import { runSnapshotDownsampler } from "../realityIndex/jobs/snapshotDownsampler.js";
-import { runEventTracker } from "../realityIndex/intelligence/eventTracker.js";
+import { runEventPromoter } from "../realityIndex/intelligence/eventPromoter.js";
 import { runEventTimelineBuilder } from "../realityIndex/intelligence/eventTimelineBuilder.js";
 import { runEventActorExtractor } from "../realityIndex/intelligence/eventActorExtractor.js";
 import { runMediaSentimentForActiveEvents } from "../realityIndex/intelligence/mediaSentimentScorer.js";
@@ -62,7 +62,7 @@ let isEventsRun   = false;
 let isAnalysisRun = false;
 let isPolymarketRun   = false;  // Reality Index Phase 1
 let isMatcherRun      = false;  // Reality Index Phase 1
-let isEventTrackerRun = false;  // Reality Index Phase 2
+let isEventPromoterRun = false;  // Reality Index Phase 2
 let isActorRun        = false;  // Reality Index Phase 2
 let lastRun       = null;
 let lastVideoRun = null;
@@ -245,7 +245,7 @@ export function startScheduler() {
     scheduleCron("7,37 * * * *", () => runMarketMatcherCronCycle());       // every 30 min, offset
     scheduleCron("0 4 * * *",    () => runSnapshotDownsamplerCycle());     // daily 4 AM
     // Phase 2 — Event Tracker
-    scheduleCron("13,43 * * * *", () => runEventTrackerCronCycle());       // every 30 min, offset
+    scheduleCron("13,43 * * * *", () => runEventPromoterCronCycle());       // every 30 min, offset
     scheduleCron("19 * * * *",    () => runEventTimelineBuilderCycle());   // every 1 hr
     scheduleCron("49 * * * *",    () => runActorExtractorCycle());         // every 1 hr, offset
     // Phase 3 — Sentiment + Composite + Anomalies
@@ -291,10 +291,10 @@ export function startScheduler() {
     // First run shortly after boot — Polymarket cold start.
     scheduleTimer(() => runPolymarketCycle(), 30_000);
     scheduleTimer(() => runMarketMatcherCronCycle(), 5 * 60 * 1000);
-    scheduleTimer(() => runEventTrackerCronCycle(), 8 * 60 * 1000);
+    scheduleTimer(() => runEventPromoterCronCycle(), 8 * 60 * 1000);
     scheduleTimer(() => runRealityIndexComposeCycle(), 9 * 60 * 1000);
     scheduleTimer(() => runGdeltCycle(), 2 * 60 * 1000);                       // first GDELT pull 2 min after boot
-    logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventTracker 30m, timeline+actors hourly, downsample daily, sentiment hourly, RI compose 30m, anomaly 15m, watchlist-push 15m, GDELT 30m)");
+    logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventPromoter 30m, timeline+actors hourly, downsample daily, sentiment hourly, RI compose 30m, anomaly 15m, watchlist-push 15m, GDELT 30m)");
   } else {
     logger.info("🧠 Reality Index crons disabled via ENABLE_REALITY_INDEX=false");
   }
@@ -356,17 +356,17 @@ async function runSnapshotDownsamplerCycle() {
   catch (err) { logger.error("❌ Snapshot downsampler failed", { error: err.message }); return null; }
 }
 
-async function runEventTrackerCronCycle() {
-  if (isEventTrackerRun) { logger.warn("⏸️ Event tracker already running"); return null; }
-  isEventTrackerRun = true;
+async function runEventPromoterCronCycle() {
+  if (isEventPromoterRun) { logger.warn("⏸️ Event promoter already running"); return null; }
+  isEventPromoterRun = true;
   try {
-    const out = await runEventTracker();
+    const out = await runEventPromoter();
     return out;
   } catch (err) {
-    logger.error("❌ Event tracker failed", { error: err.message });
+    logger.error("❌ Event promoter failed", { error: err.message });
     return null;
   } finally {
-    isEventTrackerRun = false;
+    isEventPromoterRun = false;
   }
 }
 
@@ -656,7 +656,7 @@ async function runAnalystBriefCycleWrapped() {
 
 // Suppress unused-warning while exposing for ad-hoc /scoop-ops triggers later.
 export { runPolymarketCycle, runMarketMatcherCronCycle, runSnapshotDownsamplerCycle, snapshotActiveMarkets,
-         runEventTrackerCronCycle, runActorExtractorCycle,
+         runEventPromoterCronCycle, runActorExtractorCycle,
          runSentimentScoreCycle, runRealityIndexComposeCycle, runAnomalyScanCycle,
          runWatchlistPushCycle, runGdeltCycle };
 

@@ -1,5 +1,13 @@
 /**
- * eventTracker — promotes story clusters into first-class Event entities.
+ * eventPromoter — promotes story clusters into first-class Event entities.
+ *
+ * Renamed from eventTracker.js as part of Finding #90 resolution: the
+ * "tracker" name belongs to the strategic Tracker concept (per-event
+ * quantitative scorecards in tracker_instances, the data layer for the
+ * Tracker Auto-Detection Engine — see docs/specs/tracker_metrics_json.md
+ * and backend/src/realityIndex/intelligence/trackerDetector.js). This
+ * module makes events EXIST so that trackerDetector has something to
+ * decide about; the dataflow is cluster → event (here) → tracker (there).
  *
  * Promotion criteria (either condition triggers):
  *   A. cluster.article_count >= MIN_ARTICLES (default 5)
@@ -70,7 +78,7 @@ function summaryFromCluster(cluster) {
   }
 }
 
-export async function runEventTracker() {
+export async function runEventPromoter() {
   const db  = getDb();
   const now = Date.now();
 
@@ -163,7 +171,7 @@ export async function runEventTracker() {
       }
 
     } catch (err) {
-      logger.warn(`eventTracker: cluster ${cluster.id} failed — ${err.message}`);
+      logger.warn(`eventPromoter: cluster ${cluster.id} failed — ${err.message}`);
     }
   }
 
@@ -175,6 +183,6 @@ export async function runEventTracker() {
   `).run(now, dormantCutoff);
 
   const stats = { eligible: eligible.length, promoted, refreshed, dormanted };
-  logger.info(`🗂️  eventTracker done — ${JSON.stringify(stats)}`);
+  logger.info(`🗂️  eventPromoter done — ${JSON.stringify(stats)}`);
   return stats;
 }
