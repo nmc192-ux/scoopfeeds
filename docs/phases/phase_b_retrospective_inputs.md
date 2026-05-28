@@ -1009,3 +1009,102 @@ DrJ chose Track 1 consciously, knowing Track 2 would stay dark for a 7th consecu
 - `docs/specs/tracker_metrics_json.md` — canonical metrics JSON contract
 - Pre-existing Sentry plumbing surfaced by Finding #97: `backend/src/config/observability.js` (commit `2a4f2c8`)
 - Production verification pending: `curl -sI https://scoopfeeds.com/assets/<hash>.js | grep -i cache-control` (expect `public, max-age=31536000, immutable`)
+
+### Session 7 — May 26–27, 2026 — Tracker Engine detection layer complete + production-live (Sprint 1.3 full arc)
+
+**Type:** Consolidated capture of the full Sprint 1.3 arc across two work sessions — 5 commits completing the Tracker Auto-Detection Engine's detection layer and wiring it into the production scheduler. The headline capability (Strategic Plan v6 Capability 2) is now functionally live: the engine fires every 30 minutes on real ingested events, evaluates per-template triggers, and materializes tracker_instances. Only the frontend (Sprint 1.5) remains.
+
+**Output across the arc:**
+
+- **Sprint 1.3.1 — Rename eventTracker.js → eventPromoter.js** (commit `9ca71c9`). Resolves Finding #90 (the long-deferred naming collision): the module does cluster→event *promotion*; the "tracker" name now belongs to the strategic Tracker concept (per-event scorecards in tracker_instances). Pure refactor; grep-verification caught 3 leftover references (the `isEventTrackerRun` flag + 2 wrapper log strings) before commit; 2 intentional historical anchors preserved (renamed-file JSDoc + Migration 005's #90 note).
+- **Sprint 1.3.2 — Detection engine scaffold + conflict + environmental detectors** (commit `2c16c27`). `trackerDetector.js` created, mirroring anomalyDetector.js's pattern; first 2 of 8 detectors live (both live-ingester). Slug-prefix source-feed detection (`acled-` / `usgs-` / `noaa-`, verified in ingester source code, not guessed). Mid-implementation correction: dedup was in BOTH the detector loop AND the composer → centralized at the composer (single source of truth, making `skipped_existing` a meaningful counter and detectors testable in isolation).
+- **Sprint 1.3.3a — sports + entertainment detectors** (commit `d23afed`). Second live-ingester pair; verified slug prefixes `sports-` / `tmdb-`. Q1 ruling: sports writes empty metrics on detection (its confidence vocabulary is temporal — scheduled/live/final — and no temporal state is honestly claimable without score data). Q2 ruling: entertainment `title_kind` derived from the TMDB slug (`tmdb-movie-` → "theatrical-release", `tmdb-tv-` → "series-arc") with defensive fall-through to "unknown" on any other format (verified: `tmdb-podcast-999` → "unknown").
+- **Sprint 1.3.3b — wire-density-only quartet** (commit `9db8435`). outbreak, incident, election, study — **detection layer 8/8 complete.** All four write empty metrics + honest `template_meta` placeholders (see Finding #99 below). Mid-implementation correction: the harness initially assumed one-event-one-tracker; corrected to per-event detector-presence assertions when multi-template fan-out surfaced in real test data (see fan-out note below).
+- **Sprint 1.3.4 — Scheduler hook, engine goes live** (commit `99163db`). `trackerDetector` wired into the production cron: `scheduleCron("16,46 * * * *")` (+3 min after eventPromoter at `13,43` so events are fresh) + 11-min boot timer + `runTrackerDetectorCronCycle` wrapper mirroring eventPromoter's exact shape (warn-guard + structured-error logging). 6 surgical sites, single file, web/scheduler process only (not worker).
+
+**Headline:** Tracker Auto-Detection Engine detection layer is **100% built (8/8 detectors) and LIVE in production.** The engine moved from ~40% built (post Sprint 1.2) to ~85% built this arc (design + data + detection + scheduling). Only frontend Sprint 1.5 remains to close Capability 2 end-to-end.
+
+**Commits this arc:** 5 — `9ca71c9`, `2c16c27`, `d23afed`, `9db8435`, `99163db`.
+
+**Sprint trajectory at arc close:**
+
+- Sprint 1.1 (templates): COMPLETE (prior arc)
+- Sprint 1.2 (schema + DAO + canonical spec): COMPLETE (prior arc)
+- Sprint 1.3 (detection engine): **COMPLETE this arc** — 1.3.1 rename, 1.3.2 + 1.3.3a + 1.3.3b detectors (8/8), 1.3.4 scheduler hook
+- Sprint 1.4: **STATUS UNCERTAIN** — the original Sprint 1.3 decomposition listed a separate "scheduler" Sprint 1.4, but the scheduler hook landed inside 1.3.4. Whether Sprint 1.4 has distinct remaining scope (e.g., scheduler refinement / backfill job / cadence tuning) or is simply folded into 1.3.4 is an **open question to settle next session** — not asserting done or pending.
+- Sprint 1.5 (frontend Layer 1 cards + Layer 2 pages + the read endpoints they require): PENDING — the only remaining Tracker Engine piece. Closes Capability 2 end-to-end.
+
+#### Finding #99 — Honesty-of-derivation as a design principle
+
+**Pattern.** Ruling surfaced while implementing the wire-density-only quartet (outbreak, incident, election, study). The principle: **a metric value is written ONLY when its derivation chain back to ground truth is genuinely sound.** The 4 quartet detectors write empty `metrics: {}` on detection because NONE of their §2 metrics is honestly derivable from "we have N articles about this event" — article count is *media attention*, not epidemiological / investigation / electoral / scholarly signal. Writing `suspected_cases` or `casualties` or `votes_by_contestant` from article count alone would be fabrication. **Refusing to fabricate IS the design statement.**
+
+**Contrast.** conflict + environmental detectors DO write minimal metrics (`event_count` from the event_articles count, `geographic_scope` / `affected_area` from `events.geo_country_codes`) — because those ARE genuinely derivable from the event row. The distinction is not "live ingester vs not"; it's "is this specific value soundly derivable from data we actually have." (Sports + entertainment also write empty metrics despite having live ingesters, because their §2 metrics — scores, box office — aren't in the event row either.)
+
+**Continuity with the templates.** This extends the same discipline already baked into the Sprint 1.1 templates: outbreak's CFR/Rₜ relay-only rule, election's count-completion-% companion invariant, study's GRADE-evidence-badge. The throughline across all of them: **honesty about what's known vs unknown, surfaced rather than hidden.** Detection-layer empty-metrics is the same principle applied one layer down.
+
+**Sub-pattern: JSDoc-as-intent-documentation.** Each quartet detector carries 6–13 lines of load-bearing JSDoc explaining WHY its metrics are empty — specifically so a future contributor reading `metrics: {}` doesn't "helpfully fix" what looks like an oversight and drift back into fabrication. The intent documentation is itself a defense against entropy; worth treating as a named sub-pattern for future detector/ingester work.
+
+**Cumulative findings:** `#99` is added; count goes from 8 (`#90`–`#93`, `#95`–`#98`) to 9.
+
+#### Finding #98 status update — deliberate deferral now multi-session-committed
+
+Finding #98 (Session 6) established the `dark-deliberate` vs `dark-by-drift` distinction for Track 2. **Session 7 update:** DrJ ruled (Session 7 open) to complete the FULL Tracker Engine (Sprint 1.3 + 1.4 + 1.5) before any Track 2 contribution. Track 2 is now **13 consecutive Phase B sessions dark**, with the deliberate deferral extending through Sprint 1.5 — an anticipated ~15–16 session total dark period. Recorded as a **conscious multi-session commitment**, not session-by-session drift.
+
+**Honesty check.** Finding #98's own language flagged that "the 'deliberate' framing only stays honest if Track 2 isn't deferred indefinitely." 15–16 sessions approaches the boundary where that framing strains. Honest note for future capture: **after Sprint 1.3 the engine is functionally complete** (creates trackers from events on a cron); Sprint 1.5 (frontend) is real work but a natural off-ramp point exists if breaking Track 2's streak ever feels right before 1.5 completes. DrJ has not chosen to take that off-ramp — recording it as *available*, not as a criticism. This is not a new finding; it's #98 maturing.
+
+#### Multi-template fan-out vindicated in real data (Q4 ruling)
+
+Sprint 1.2's Q4 decision allowed an event to produce multiple trackers of different `template_type`s. First observed in real test data during 1.3.3b: a **politics event with 7 articles/24h legitimately fired conflict + incident + election trackers** — all three template category-filters include "politics" and the article count exceeded all three thresholds. The composer's `(event_id, template_type)` dedup correctly prevents duplicates WITHIN a type while allowing the cross-type fan-out.
+
+**Implication for Sprint 1.5:** multi-tracker events are NORMAL, not edge-case. The frontend must handle an event carrying N trackers gracefully from day one — Layer 2 (event dossier) needs to render a tracker set, and Layer 1 cards need a rule for which tracker(s) surface when an event has several.
+
+#### Engine confirmed live in production (Session 7 diagnostic)
+
+Post-deploy verification: `/api/health` shows server up, scheduler running, `99163db` deployed (uptime confirms a recent restart picked up the scheduler hook). The `trackerDetector` cron is registered inside the active Reality Index cron block (the `ENABLE_REALITY_INDEX !== "false"` guard at scheduler.js:245) — the same code path as eventPromoter + 11 other working crons; the block's terminal "Reality Index crons scheduled (… trackerDetector 30m …)" summary log only fires if the block reached the end, so registration is proven. Detector fires on the :16/:46 cron + the 11-min boot pulse.
+
+#### Operational note — cosmetic health-reporting gap (carry-forward, low priority)
+
+`/api/health`'s `getSchedulerStatus()` hand-lists which `is*Run` flags to surface; it omits BOTH `isTrackerDetectorRun` AND `isEventPromoterRun` (the latter has never surfaced across many deploys). Neither wrapper maintains a `last*Run` timestamp variable, which is also why neither appears in the status object's `last*` section. **This is pre-existing convention, not a 1.3.4 regression.** Fix (deferred, fold into Sprint 1.5 or a hygiene pass): add `isTrackerDetectorRun` + `lastTrackerDetectorRun` to `getSchedulerStatus` (the wrapper would set the timestamp) — which also closes eventPromoter's identical gap. Cosmetic; does not affect firing.
+
+#### Operational note — no tracker read endpoint yet (expected)
+
+`/api/admin/sql` does not exist; no HTTP route queries `tracker_instances` today (`grep -rln tracker_instances backend/src/routes` → zero matches). This is **expected** — read endpoints (`/api/trackers` or `/scoop-ops/trackers`) are a Sprint 1.5 deliverable, since the frontend requires them. Production tracker inspection is currently only via log-tail (`🎯 trackerDetector:` summary lines). **Sprint 1.5 scope clarification:** it's read API + React components, not just components.
+
+**Phase B retrospective findings count:** 8 (`#90`–`#93`, `#95`–`#98`) at arc start → **9 at arc close** (`#99` added; `#98` got a status update, not a new finding).
+
+**Brief inaccuracy count:** unchanged at 11 of 12.
+
+**Three-track contribution this arc:**
+
+- **Track 1 (Phase B execution):** **Very heavy.** Sprint 1.3 full arc (5 commits); engine production-live; ~40% → ~85% built.
+- **Track 2 (architecture / scoring service):** **Zero — 13 consecutive sessions dark**, now deliberate-multi-session-committed through Sprint 1.5 per the Finding #98 update.
+- **Track 3 (infrastructure performance):** **Zero this arc.** But the distinction matters: Track 3 had a real contribution in Session 6 (`c7267b8` Cache-Control), so this is a 1-session gap, not a streak. Not yet a dark-track concern.
+
+**Known followup work (current state):**
+
+- **Sprint 1.4 status question** — settle whether distinct scope remains or it folded into 1.3.4. Likely a quick investigation next session.
+- **Sprint 1.5** — read endpoints + frontend (Layer 1 cards + Layer 2 pages); MUST handle multi-tracker events (fan-out is normal); re-derive study evidence-badge at render per spec §3.4 (badge is derived, not stored).
+- **Cosmetic health-flag gap** — add `isTrackerDetectorRun` + `lastTrackerDetectorRun` (+ close eventPromoter's gap); fold into 1.5 or a hygiene pass.
+- **Track 2 unblocks after Sprint 1.5** per DrJ ruling.
+- **Production verifications STILL pending (DrJ-side, both quick, carried since Session 6):** Cache-Control headers live on `scoopfeeds.com/assets/...` (`c7267b8`)? Sentry DSN activated in Hostinger env?
+- **Sprint 2.x.3** (mark-as-posted), **Sprint 2.x.1b** (analysis posts as queue source) — carried.
+- **Instagram failure diagnosis** (~77 fails/24h) — carried.
+- **`.env\r` cruft** — carried.
+- **eventPromoter/trackerDetector `last*Run` timestamp wiring** — part of the cosmetic-gap fix.
+
+**Next-session candidates (priority order):**
+
+1. **Sprint 1.5 (frontend + read endpoints)** — closes Capability 2 end-to-end; after it, Track 2 unblocks. The biggest remaining Tracker Engine piece.
+2. **Settle the Sprint 1.4 question first** — may be a quick investigation showing it's folded into 1.3.4, or surfacing a small distinct scope (backfill job / cadence tuning).
+3. **Carry-forwards** — production verifications, cosmetic health-flag gap, Sprint 2.x followups.
+
+#### Session 7 references
+
+- Arc commits: `9ca71c9` (1.3.1 rename), `2c16c27` (1.3.2 scaffold + conflict + environmental), `d23afed` (1.3.3a sports + entertainment), `9db8435` (1.3.3b quartet — 8/8 complete), `99163db` (1.3.4 scheduler hook — live)
+- Session 6 entry above (this file, line 904; commit `7479d2d`) — the design+data-layer arc that immediately preceded this detection+scheduling arc
+- `backend/src/realityIndex/intelligence/trackerDetector.js` — the detection engine (8 detectors + composer)
+- `backend/src/realityIndex/intelligence/eventPromoter.js` — renamed from eventTracker.js (Finding #90 resolution); cluster→event promotion
+- `backend/src/services/scheduler.js` — the 1.3.4 hook (`runTrackerDetectorCronCycle` at `16,46 * * * *` + 11-min boot timer)
+- `docs/content/tracker_templates/{conflict,outbreak,incident,sports,environmental,election,entertainment,study}.md` — the 8 design specs the detectors implement
+- `docs/specs/tracker_metrics_json.md` — canonical metrics JSON contract the detectors write against
+- Production tracker inspection (pre-Sprint-1.5): log-tail for `🎯 trackerDetector:` summary lines
