@@ -41,6 +41,7 @@ import AnalysisPage        from "./pages/AnalysisPage";
 import AnalysisExplainedPage from "./pages/AnalysisExplainedPage";
 import PredictionsPage      from "./pages/PredictionsPage";
 import EventsPage           from "./pages/EventsPage";
+import TrackersPreviewPage  from "./pages/TrackersPreviewPage";  // TEMP Sprint 1.5.2 review surface
 import EventPage            from "./pages/EventPage";
 import TimelinePage          from "./pages/TimelinePage";
 import TruthGapPage         from "./pages/TruthGapPage";
@@ -174,6 +175,7 @@ export default function App() {
           <Route path="/predictions"         element={<PredictionsPage />} />
           <Route path="/events"             element={<EventsPage />} />
           <Route path="/events/:slug"       element={<EventPage />} />
+          <Route path="/trackers-preview"   element={<TrackersPreviewPage />} />{/* TEMP Sprint 1.5.2 review surface */}
           <Route path="/timeline/:slug"     element={<TimelinePage />} />
           <Route path="/health"             element={<HealthEventsPage />} />
           <Route path="/climate"            element={<ClimateEventsPage />} />

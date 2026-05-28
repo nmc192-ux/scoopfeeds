@@ -41,5 +41,41 @@
 
   "truthgap.tooltip": "Difference between media tone and market-implied probability. Useful as a signal, not a verdict.",
   "truthgap.over": "Markets price this higher than media tone suggests.",
-  "truthgap.under": "Media is more confident than markets."
+  "truthgap.under": "Media is more confident than markets.",
+
+  "tracker.no_data": "Tracking · no data yet",
+  "tracker.provenance.verified": "source-verified",
+  "tracker.provenance.wire": "wire-sourced",
+
+  "tracker.type.conflict": "Conflict",
+  "tracker.type.outbreak": "Outbreak",
+  "tracker.type.incident": "Incident",
+  "tracker.type.sports": "Sports",
+  "tracker.type.environmental": "Environmental",
+  "tracker.type.election": "Election",
+  "tracker.type.entertainment": "Entertainment",
+  "tracker.type.study": "Study",
+
+  "tracker.confidence.confirmed": "confirmed",
+  "tracker.confidence.provisional": "provisional",
+  "tracker.confidence.disputed": "disputed",
+  "tracker.confidence.suspected": "suspected",
+  "tracker.confidence.probable": "probable",
+  "tracker.confidence.preliminary": "preliminary",
+  "tracker.confidence.investigating": "investigating",
+  "tracker.confidence.official-finding": "official finding",
+  "tracker.confidence.scheduled": "scheduled",
+  "tracker.confidence.live": "live",
+  "tracker.confidence.final": "final",
+  "tracker.confidence.preliminary-reading": "preliminary reading",
+  "tracker.confidence.revised": "revised",
+  "tracker.confidence.projected": "projected",
+  "tracker.confidence.partial-count": "partial count",
+  "tracker.confidence.certified-official": "certified official",
+  "tracker.confidence.estimated": "estimated",
+  "tracker.confidence.studio-reported": "studio reported",
+  "tracker.confidence.final-actuals": "final actuals",
+  "tracker.confidence.preprint": "preprint",
+  "tracker.confidence.peer-reviewed": "peer reviewed",
+  "tracker.confidence.replicated-or-consensus": "replicated / consensus"
 }
