@@ -73,6 +73,8 @@ let lastRecapRun = null;
 let lastLiveVidRun = null;
 let lastEnrichRun = null;
 let lastEventsRun   = null;
+let lastEventPromoterRun  = null; // Sprint 1.5.1 — close the health-observability gap
+let lastTrackerDetectorRun = null; // Sprint 1.5.1 — close the health-observability gap
 let lastAnalysisRun = null;
 let lastPolymarketRun = null;
 let lastMatcherRun    = null;
@@ -370,6 +372,7 @@ async function runEventPromoterCronCycle() {
   isEventPromoterRun = true;
   try {
     const out = await runEventPromoter();
+    lastEventPromoterRun = Date.now();
     return out;
   } catch (err) {
     logger.error("❌ Event promoter failed", { error: err.message });
@@ -392,6 +395,7 @@ async function runTrackerDetectorCronCycle() {
   isTrackerDetectorRun = true;
   try {
     const out = runTrackerDetector();
+    lastTrackerDetectorRun = Date.now();
     return out;
   } catch (err) {
     logger.error("❌ Tracker detector failed", { error: err.message });
@@ -969,9 +973,10 @@ export function getSchedulerStatus() {
   return {
     started: schedulerStarted,
     isRunning, isVideoRun, isGenRun, isRecapRun, isLiveVidRun, isEnrichRun, isEventsRun, isAnalysisRun,
-    isPublishRun, isPolymarketRun, isMatcherRun,
+    isPublishRun, isPolymarketRun, isMatcherRun, isEventPromoterRun, isTrackerDetectorRun,
     isSentimentRun, isRealityComposeRun, isAnomalyRun, isWatchlistPushRun, isGdeltRun, isBriefRun, isUsgsRun, isNoaaRun, isAcledRun, isFredRun, isWorldBankRun, isSportsdbRun, isTmdbRun, isSyntheticExtractRun, isAiAgentsRun, isOutcomeResolverRun, isBayesianRun,
     lastRun, lastVideoRun, lastGenRun, lastRecapRun, lastLiveVidRun, lastEnrichRun, lastEventsRun, lastAnalysisRun,
+    lastEventPromoterRun, lastTrackerDetectorRun,
     lastPublishRun,
     lastPublishResult,
     lastPolymarketRun,

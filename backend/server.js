@@ -38,6 +38,7 @@ import meterRouter       from "./src/routes/meter.js";
 import analysisRouter    from "./src/routes/analysis.js";
 import predictionsRouter from "./src/routes/predictions.js";
 import eventsRouter      from "./src/routes/events.js";
+import trackersRouter    from "./src/routes/trackers.js";
 import realityIndexRouter from "./src/routes/realityIndex.js";
 import watchlistsRouter  from "./src/routes/watchlists.js";
 import riOpsRouter       from "./src/routes/ri-ops.js";
@@ -258,6 +259,7 @@ app.use("/api/meter",       meterRouter);      // metered paywall: /open (gate c
 app.use("/api/analysis",   analysisLimiter, cacheMiddleware("short"), analysisRouter); // AI-powered news analysis: stories, trends, deep-dive, explained
 app.use("/api/predictions", predictionsLimiter, cacheMiddleware("short"), predictionsRouter); // Reality Index: Polymarket markets bound to news clusters
 app.use("/api/ri/events",  predictionsLimiter, cacheMiddleware("short"), eventsRouter);      // Reality Index Phase 2: event tracker (dossier, timeline, actors)
+app.use("/api/ri/trackers", predictionsLimiter, cacheMiddleware("short"), trackersRouter);   // Tracker Auto-Detection Engine reads (Sprint 1.5.1) — must precede /api/ri catch-all
 app.use("/api/ri",         predictionsLimiter, cacheMiddleware("short"), realityIndexRouter); // Reality Index Phase 3: /truth-gap, /anomalies
 app.use("/api/watchlists", watchlistsRouter);                            // Reality Index Phase 4: per-user follow lists (auth-gated; no caching)
 app.use("/api/briefs",     cacheMiddleware("short"), briefsRouter);      // Reality Index Phase 4: published analyst briefs (drafts in /scoop-ops)

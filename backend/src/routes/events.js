@@ -20,6 +20,8 @@ import { getDb } from "../models/database.js";
 import { logger } from "../services/logger.js";
 import { latestSnapshotsByScope, snapshotHistory } from "../realityIndex/dal/sentimentDao.js";
 import { latestRealityIndex, realityIndexHistory } from "../realityIndex/dal/realityIndexDao.js";
+import { listTrackersByEvent } from "../models/trackers.js";
+import { publicTracker } from "./trackers.js";
 
 const router = express.Router();
 
@@ -254,6 +256,32 @@ router.get("/:slug", (req, res) => {
     res.json(publicEvent(ev));
   } catch (err) {
     logger.error(`GET /api/events/:slug error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/events/:slug/trackers — all Tracker Auto-Detection Engine
+ * trackers attached to this event (Sprint 1.5.1).
+ *
+ * An event can carry multiple trackers of different template_types
+ * (multi-template fan-out — e.g. a politics event firing conflict +
+ * incident + election). Returns ALL of them; the frontend (Sprint 1.5.2)
+ * does any Q1 ranking for which surfaces on the Layer 1 card. Server-side
+ * does no ranking. publicTracker includes template_type, status, metrics
+ * (with confidence values), and data_source_provenance._origin so the
+ * frontend has what it needs to rank + render provenance.
+ */
+router.get("/:slug/trackers", (req, res) => {
+  try {
+    const db = getDb();
+    const ev = db.prepare("SELECT id FROM events WHERE slug = ?").get(req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+
+    const trackers = listTrackersByEvent(ev.id);
+    res.json({ trackers: trackers.map(publicTracker) });
+  } catch (err) {
+    logger.error(`GET /api/events/:slug/trackers error: ${err.message}`);
     res.status(500).json({ error: "Internal server error" });
   }
 });
