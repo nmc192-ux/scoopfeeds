@@ -77,5 +77,24 @@
   "tracker.confidence.final-actuals": "final actuals",
   "tracker.confidence.preprint": "preprint",
   "tracker.confidence.peer-reviewed": "peer reviewed",
-  "tracker.confidence.replicated-or-consensus": "replicated / consensus"
+  "tracker.confidence.replicated-or-consensus": "replicated / consensus",
+
+  "tracker.status.dormant": "dormant",
+  "tracker.status.archived": "archived",
+
+  "tracker.detail.heading_suffix": "tracker",
+  "tracker.detail.metrics": "Metrics",
+  "tracker.detail.history": "Revision history",
+  "tracker.detail.back": "Back to event",
+  "tracker.detail.back_events": "Back to events",
+  "tracker.detail.not_found": "Tracker not found.",
+  "tracker.detail.source": "source",
+  "tracker.detail.updated": "updated",
+
+  "tracker.reason.ingestion-update": "ingestion update",
+  "tracker.reason.source-revision": "source revision",
+  "tracker.reason.editorial-override": "editorial override",
+  "tracker.reason.retraction": "retraction",
+  "tracker.reason.recount": "recount",
+  "tracker.reason.closeout": "closeout"
 }

@@ -242,7 +242,18 @@ export function createTracker({
 
 export function getTracker(id) {
   if (!id) return null;
-  return hydrate(getDb().prepare(`SELECT * FROM tracker_instances WHERE id = ?`).get(id));
+  // LEFT JOIN events to carry the parent event's slug on the hydrated row
+  // (Sprint 1.5.3: the Layer 2 tracker page at /trackers/:id links back to
+  // /events/:slug). Additive — hydrate() spreads the row, so event_slug
+  // passes straight through. The list DAOs (listTrackersByEvent /
+  // listTrackersByType) intentionally do NOT join, so event_slug is present
+  // only on this single-tracker read path — the one place that needs it.
+  return hydrate(getDb().prepare(`
+    SELECT ti.*, e.slug AS event_slug
+    FROM tracker_instances ti
+    LEFT JOIN events e ON e.id = ti.event_id
+    WHERE ti.id = ?
+  `).get(id));
 }
 
 export function listTrackersByEvent(event_id) {

@@ -14,7 +14,7 @@
 
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ChevronLeft, Activity, Users, Newspaper, Clock, Layers, BarChart3, MessageCircle, ExternalLink } from "lucide-react";
+import { ChevronLeft, Activity, Users, Newspaper, Clock, Layers, BarChart3, MessageCircle, ExternalLink, Radar } from "lucide-react";
 import {
   useEvent,
   useEventTimeline,
@@ -25,6 +25,9 @@ import {
   useEventSentiment,
   useEventRealityIndex,
 } from "../hooks/useEvents";
+import { useEventTrackers } from "../hooks/useTrackers";
+import { trackerStrength } from "../lib/trackerRank";
+import TrackerCard from "../components/trackers/TrackerCard";
 import EventHero     from "../components/events/EventHero";
 import EventTimeline from "../components/events/EventTimeline";
 import EventActorPanel from "../components/events/EventActorPanel";
@@ -120,6 +123,7 @@ export default function EventPage() {
   const { data: pvData,  isLoading: loadingPerspectives } = useEventPerspectives(slug);
   const { data: riData,  isLoading: loadingRI }        = useEventRealityIndex(slug);
   const { data: sentData, isLoading: loadingSentiment } = useEventSentiment(slug);
+  const { data: trkData, isLoading: loadingTrackers }  = useEventTrackers(slug);
 
   const timeline     = tlData?.timeline     ?? [];
   const markets      = mkData?.markets      ?? [];
@@ -127,6 +131,16 @@ export default function EventPage() {
   const articles     = artData?.articles    ?? [];
   const perspectives = pvData?.perspectives ?? [];
   const riSnapshot   = riData?.latest                 ?? null;
+
+  // Tracker Auto-Detection Engine scorecards for this event (Sprint 1.5.3).
+  // An event can carry MULTIPLE trackers via multi-template fan-out (e.g. a
+  // politics event → conflict + incident + election). Stack ALL of them,
+  // ordered by confidence strength (highest first; recency tiebreak — the
+  // same ordering pickHeadlineTracker uses for the compact case).
+  const trackers = [...(trkData?.trackers ?? [])].sort((a, b) => {
+    const d = trackerStrength(b) - trackerStrength(a);
+    return d !== 0 ? d : (b.last_updated_at ?? 0) - (a.last_updated_at ?? 0);
+  });
 
   if (loadingEvent) {
     return (
@@ -168,6 +182,27 @@ export default function EventPage() {
             <div className="h-44 rounded-xl bg-[var(--color-surface-2)] animate-pulse" />
           ) : (
             <RealityGauge snapshot={riSnapshot} />
+          )}
+        </section>
+      )}
+
+      {/* Trackers — Tracker Auto-Detection Engine Layer 1 cards (Sprint 1.5.3).
+          Conditional-gated like every other section: renders only when this
+          event has trackers (or while loading). Each card links to its Layer 2
+          page (/trackers/:id). Stacked, confidence-ordered (see above). */}
+      {(trackers.length > 0 || loadingTrackers) && (
+        <section className="mb-8">
+          <SectionHeader icon={Radar} label="Trackers" />
+          {loadingTrackers ? (
+            <div className="grid sm:grid-cols-2 gap-4">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="h-32 rounded-xl bg-[var(--color-surface-2)] animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid sm:grid-cols-2 gap-4">
+              {trackers.map(tr => <TrackerCard key={tr.id} tracker={tr} />)}
+            </div>
           )}
         </section>
       )}

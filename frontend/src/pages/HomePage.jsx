@@ -37,6 +37,14 @@ const XFeedSection    = lazy(() => import("../components/news/XFeedSection"));
 const MagazineSection = lazy(() => import("../components/news/MagazineSection"));
 const CarsSection     = lazy(() => import("../components/news/CarsSection"));
 
+// DEFERRED (Sprint 1.5.3, dark-deliberate): a homepage "live trackers" strip
+// would slot in here, fed by useTrackers(). NOT built yet — today's tracker
+// population is overwhelmingly empty-metrics (environmental wire-density), so
+// a strip would render ~200 "no data yet" pills: low signal. Build when more
+// templates carry real metrics, and gate it to trackerStrength(t) > 0 (only
+// trackers with renderable figures). Trackers currently surface on the
+// EventPage dossier (their honest home — a tracker is a per-event scorecard).
+
 const SectionFallback = () => (
   <div className="h-40 my-8 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] animate-pulse" />
 );

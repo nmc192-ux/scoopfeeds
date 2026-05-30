@@ -41,8 +41,8 @@ import AnalysisPage        from "./pages/AnalysisPage";
 import AnalysisExplainedPage from "./pages/AnalysisExplainedPage";
 import PredictionsPage      from "./pages/PredictionsPage";
 import EventsPage           from "./pages/EventsPage";
-import TrackersPreviewPage  from "./pages/TrackersPreviewPage";  // TEMP Sprint 1.5.2 review surface
 import EventPage            from "./pages/EventPage";
+import TrackerPage          from "./pages/TrackerPage";  // Layer 2 tracker detail (Sprint 1.5.3)
 import TimelinePage          from "./pages/TimelinePage";
 import TruthGapPage         from "./pages/TruthGapPage";
 import DashboardPage        from "./pages/DashboardPage";
@@ -175,7 +175,7 @@ export default function App() {
           <Route path="/predictions"         element={<PredictionsPage />} />
           <Route path="/events"             element={<EventsPage />} />
           <Route path="/events/:slug"       element={<EventPage />} />
-          <Route path="/trackers-preview"   element={<TrackersPreviewPage />} />{/* TEMP Sprint 1.5.2 review surface */}
+          <Route path="/trackers/:id"       element={<TrackerPage />} />
           <Route path="/timeline/:slug"     element={<TimelinePage />} />
           <Route path="/health"             element={<HealthEventsPage />} />
           <Route path="/climate"            element={<ClimateEventsPage />} />

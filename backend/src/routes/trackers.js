@@ -44,12 +44,20 @@ const router = express.Router();
 // from the DAO. data_source_provenance is exposed in full INCLUDING
 // _ingester_status + _origin, because the frontend's provenance indicator
 // (Sprint 1.5 Q4) reads them.
+//
+// event_slug (Sprint 1.5.3) lets the Layer 2 tracker page link back to its
+// parent event (/events/:slug). It is resolved by getTracker's events JOIN,
+// so it is populated on the single-tracker read (GET /trackers/:id) and is
+// null on the list reads (GET /trackers, GET /events/:slug/trackers) — those
+// consumers don't need it (the event page already knows its own slug). Always
+// present in the shape as `event_slug` (null when unresolved); additive.
 
 export function publicTracker(t) {
   if (!t) return null;
   return {
     id:                     t.id,
     event_id:               t.event_id,
+    event_slug:             t.event_slug ?? null,
     template_type:          t.template_type,
     status:                 t.status,
     metrics:                t.metrics ?? {},
