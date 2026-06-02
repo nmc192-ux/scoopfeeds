@@ -17,3 +17,16 @@
 export { RUBRIC, COMPONENT_KEYS } from "./rubric.js";
 export { combineScore, ScoringInputError } from "./combination.js";
 export { getSourceForScoring, writeSourceScore } from "./scoringDao.js";
+
+// Evidence-gathering layer (B.6.2). Re-exported here so the evidence framework
+// isn't orphaned — consumers can import everything from the skill root. The
+// per-module detail + the contract precedent live under ./evidence/ (see
+// evidence/README.md).
+export {
+  EVIDENCE_STATUS,
+  EVIDENCE_MODULES,
+  getEvidence,
+  listEvidenceForSource,
+  gatherForSource,
+  gatherForAllSources,
+} from "./evidence/index.js";
