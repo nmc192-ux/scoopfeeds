@@ -171,24 +171,24 @@ test("evidenceCache — isStale: missing → stale; fresh → not; aged past TTL
 
 // ── Runner ────────────────────────────────────────────────────────────────────
 test("runner — gathers both modules, upserts, then reuses fresh cache (TTL)", async () => {
-  const first = await gatherForSource({ id: GAMMA, name: "Gamma" }, { db, now: NOW });
+  const first = await gatherForSource({ id: GAMMA, name: "Gamma" }, { db, now: NOW, modules: [bylines, sustained] });
   assert.equal(first.length, 2);
   assert.ok(first.every((r) => r.fromCache === false), "first run gathers (not cached)");
   assert.ok(getEvidence(GAMMA, "2.1.c", db));
   assert.ok(getEvidence(GAMMA, "2.3.c", db));
 
-  const second = await gatherForSource({ id: GAMMA, name: "Gamma" }, { db, now: NOW });
+  const second = await gatherForSource({ id: GAMMA, name: "Gamma" }, { db, now: NOW, modules: [bylines, sustained] });
   assert.ok(second.every((r) => r.fromCache === true), "second run reuses fresh cache");
 
-  const aged = await gatherForSource({ id: GAMMA, name: "Gamma" }, { db, now: NOW + 40 * DAY });
+  const aged = await gatherForSource({ id: GAMMA, name: "Gamma" }, { db, now: NOW + 40 * DAY, modules: [bylines, sustained] });
   assert.ok(aged.every((r) => r.fromCache === false), "past TTL → re-gathered");
 
-  const forced = await gatherForSource({ id: GAMMA, name: "Gamma" }, { db, now: NOW, force: true });
+  const forced = await gatherForSource({ id: GAMMA, name: "Gamma" }, { db, now: NOW, force: true, modules: [bylines, sustained] });
   assert.ok(forced.every((r) => r.fromCache === false), "force → re-gathered even if fresh");
 });
 
 test("EVIDENCE-ONLY invariant — sources.quality_score stays NULL after gathering", async () => {
-  await gatherForSource({ id: ALPHA, name: "Alpha" }, { db, now: NOW, force: true });
+  await gatherForSource({ id: ALPHA, name: "Alpha" }, { db, now: NOW, force: true, modules: [bylines, sustained] });
   const q = db.prepare("SELECT quality_score FROM sources WHERE id=?").get(ALPHA).quality_score;
   assert.equal(q, null, "B.6.2 must not write any quality_score");
 });

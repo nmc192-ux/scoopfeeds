@@ -22,6 +22,7 @@ import { RUBRIC } from "../rubric.js";
 import { EVIDENCE_MODULES } from "./registry.js";
 import { getEvidence, upsertEvidence, isStale } from "./evidenceCache.js";
 import { assertEvidenceShape, EVIDENCE_STATUS, DEFAULT_SAMPLE_SIZE } from "./contract.js";
+import { discoverSite } from "./pageDiscovery.js";
 
 /**
  * gatherForSource — run the registered modules for one source.
@@ -43,9 +44,26 @@ export async function gatherForSource(source, {
   sampleSize = DEFAULT_SAMPLE_SIZE,
   methodologyVersion = RUBRIC.methodology_version,
   force = false,
+  structureBudget = 7,        // per-source homepage+convention budget for scrape detectors (leaves ≤5 for B.6.2b-4 byline)
+  maxConventionAttempts = 3,  // convention-path guesses per scrape detector
+  transport,                  // optional fetch transport (tests inject; prod uses default axios)
+  timeoutMs,                  // optional per-fetch timeout override
 } = {}) {
-  const ctx = { db, now, sampleSize, methodologyVersion };
+  const ctx = { db, now, sampleSize, methodologyVersion, maxConventionAttempts, transport, timeoutMs };
   const results = [];
+
+  // ── Discovery pre-pass (B.6.2b-2b) ──────────────────────────────────────────
+  // Scrape-presence detectors (needsDiscovery) share ONE homepage discovery per
+  // source. Run it once iff ≥1 scrape detector is stale (else skip entirely →
+  // zero fetches, the politeness win). Own-DB modules ignore ctx.discovery.
+  const scrapeModules = modules.filter((m) => m.needsDiscovery);
+  const anyScrapeStale = scrapeModules.some((m) => force || isStale(getEvidence(source.id, m.id, db), m.ttlDays, now));
+  ctx.discovery = null;
+  if (scrapeModules.length > 0 && anyScrapeStale) {
+    // discoverSite → openSite uses ctx; cap the structure budget here so a
+    // later byline pass keeps its share of the shared per-source budget.
+    ctx.discovery = await discoverSite(source, { ...ctx, maxFetchesPerSource: structureBudget });
+  }
 
   for (const mod of modules) {
     const cached = getEvidence(source.id, mod.id, db);

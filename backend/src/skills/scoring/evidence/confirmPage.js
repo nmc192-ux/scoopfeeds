@@ -74,11 +74,18 @@ function checkPathPreserved(finalUrl, requestedPath) {
 
 /**
  * confirmPage(doc, finalUrl, requestedPath, config)
- * @param config { confirmKeywords: string[] }
+ * @param config { confirmKeywords: string[], allowSlug?: boolean }
+ *   allowSlug (default true): whether a type keyword in the URL slug counts as
+ *   a positive signal. TRUE for nav-advertised URLs (the SITE chose that path,
+ *   so its slug is real evidence — e.g. Guardian /corrections-and-clarifications).
+ *   FALSE for CONVENTION GUESSES (we constructed /ethics ourselves, so matching
+ *   "ethics" in our own guessed slug is circular — a guess must be confirmed by
+ *   BODY content, not by the URL we typed). slugSignal is still reported.
  * @returns { confirmed, signals:{negativeMarker, pathPreserved, positiveKeyword, slugSignal, positiveHits}, confidence }
  */
 export function confirmPage(doc, finalUrl, requestedPath, config = {}) {
   const keywords = config.confirmKeywords || [];
+  const allowSlug = config.allowSlug !== false; // default true
   const title = (doc?.querySelector?.("title")?.textContent || "").toLowerCase();
   const h1 = (doc?.querySelector?.("h1")?.textContent || "").toLowerCase();
   const bodyText = (doc?.body?.textContent || "").toLowerCase().replace(/\s+/g, " ").slice(0, MAX_BODY_SCAN);
@@ -99,10 +106,12 @@ export function confirmPage(doc, finalUrl, requestedPath, config = {}) {
   const bodyHits = keywords.filter((k) => bodyHasWord(hay, k));
   const slugHits = keywords.filter((k) => slugHasWord(slug, k));
   const slugSignal = slugHits.length > 0;
-  const positiveKeyword = bodyHits.length > 0 || slugSignal;
+  // The slug only contributes to the CONFIRMED decision when allowed (nav URLs);
+  // for convention guesses, the slug is our own construction → require body.
+  const positiveKeyword = bodyHits.length > 0 || (allowSlug && slugSignal);
 
   const confirmed = !negativeMarker && pathPreserved && positiveKeyword;
-  const totalHits = bodyHits.length + slugHits.length;
+  const totalHits = bodyHits.length + (allowSlug ? slugHits.length : 0);
   const confidence = confirmed ? round2(Math.min(1, 0.5 + 0.15 * totalHits)) : 0;
 
   return {
