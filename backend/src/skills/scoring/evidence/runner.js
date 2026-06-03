@@ -75,6 +75,13 @@ export async function gatherForSource(source, {
     let ev;
     try {
       ev = await mod.gather(source, ctx);
+      // A module may return null/undefined as a NO-OP sentinel (it did nothing
+      // this run, or it resolved another sub_criterion's row directly — e.g. the
+      // 2.1.c byline cross-check upserts "2.1.c" itself). Don't record/upsert.
+      if (ev == null) {
+        results.push({ id: mod.id, status: "noop", confidence: null, fromCache: false, noop: true });
+        continue;
+      }
       assertEvidenceShape(ev, mod.id);
     } catch (err) {
       // Failure isolation: record as blocked, keep the batch moving.

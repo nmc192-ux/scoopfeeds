@@ -18,15 +18,19 @@ import standards_2_1_b from "./modules/standards_2_1_b.js";
 import aiDisclosure_2_2_e from "./modules/aiDisclosure_2_2_e.js";
 import funding_2_4_b from "./modules/funding_2_4_b.js";
 import correctionsPresence from "./modules/correctionsPresence.js";
+// B.6.2b-4 — byline page cross-check. MUST be ordered AFTER bylines_2_1_c: it
+// reads the cached "2.1.c" row and resolves it in place when it's RSS-gap pending.
+import bylineCrossCheck_2_1_c from "./modules/bylineCrossCheck_2_1_c.js";
 
 export const EVIDENCE_MODULES = Object.freeze([
-  bylines_2_1_c,          // 2.1.c — ET  (own-DB)
-  sustainedCoverage_2_3_c, // 2.3.c — DE  (own-DB)
-  leadership_2_1_a,        // 2.1.a — ET  (scrape: leadership page)
-  standards_2_1_b,         // 2.1.b — ET  (scrape: standards/ethics page)
-  aiDisclosure_2_2_e,      // 2.2.e — MT  (scrape: AI-disclosure page)
-  funding_2_4_b,           // 2.4.b — Ind (scrape: funding page)
-  correctionsPresence,     // corrections-presence — feeds 2.1.d/2.5.b/2.5.e
+  bylines_2_1_c,            // 2.1.c — ET  (own-DB; may leave pending on RSS gap)
+  sustainedCoverage_2_3_c,  // 2.3.c — DE  (own-DB)
+  leadership_2_1_a,         // 2.1.a — ET  (scrape: leadership page)
+  standards_2_1_b,          // 2.1.b — ET  (scrape: standards/ethics page)
+  aiDisclosure_2_2_e,       // 2.2.e — MT  (scrape: AI-disclosure page)
+  funding_2_4_b,            // 2.4.b — Ind (scrape: funding page)
+  correctionsPresence,      // corrections-presence — feeds 2.1.d/2.5.b/2.5.e
+  bylineCrossCheck_2_1_c,   // resolves "2.1.c" pending via article-page fetches (after bylines_2_1_c)
 ]);
 
 export function getModule(id) {
