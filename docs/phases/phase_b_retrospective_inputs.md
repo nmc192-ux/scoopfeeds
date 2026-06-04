@@ -1323,3 +1323,96 @@ Unchanged as a strategic-brief metric — none of this arc's findings is a Strat
 - docs/content/source_credibility_methodology.md (the rubric the skill encodes) — Decision 7 honesty-update pending
 - docs/audits/phase_a_source_audit_phase2_calibration.md §1.2/§2 — the 15-source ground-truth (weights + per-source vectors); the validation target
 - docs/specs/source_scoring_service.md — the B.6 implementation blueprint (§6.2 rubric-as-code + coherence test; §6.4 audit-log schema)
+
+### Session 10 — The deterministic evidence layer, completed (B.6.2b-2b → B.6.2d; ten modules, one honesty discipline across four data-acquisition surfaces)
+
+Five sprints since Session 9, all of B.6.2's deterministic evidence-gathering. The layer is now complete: ten evidence modules spanning three data-acquisition patterns (own-DB queries, website scraping, structured-data APIs) plus link-classification, every deterministic sub-criterion the methodology defines, all evidence-only (no quality_score written — that waits for B.6.3 to complete the components, per #104). The arc's defining property: the same honesty discipline — claim exactly what the evidence supports — held across four genuinely different technical surfaces, each with its own way to fabricate confidence, each caught by real-data validation before it shipped. That generalization is the headline finding (#106).
+
+#### The commit ledger (this arc)
+
+5c84ba8/db9f37b/1a25688/d13ada8 were Session 9. This arc:
+
+- 8cd7d1b — B.6.2b-2b: makePresenceDetector factory + 5 detector configs + runner discovery pre-pass (closes B.6.2b site-structure scraping).
+- fe476dd — B.6.2b-4: 2.1.c byline cross-check (article-page DOM; resolves B.6.2a's RSS-gap pending rows).
+- 70bd0fb — B.6.2c-1: fetchJson + Wikidata entity resolver (host-equality + P31-type filter, single-match-or-pending).
+- ae524d5 — B.6.2c-2: 2.4.a ownership module + owner-convergence disambiguation.
+- 786308a — B.6.2d: 2.2.b primary-document link ratio (closes the deterministic evidence layer).
+
+Current HEAD: 786308a.
+
+#### Finding #106 — The honesty-of-derivation discipline generalizes across data-acquisition surfaces
+
+This is the arc's central finding and the maturation of the thread running from #99/#100/#104/#105. The deterministic layer gathered evidence from four structurally different surfaces, and each surface had its own distinct way to accidentally fabricate confidence — yet the same principle (the signal must MEAN what we record it to mean; absence/failure is never a confident negative; recover what is genuinely certain and pend the rest) resolved every one. The instances:
+
+- Own-DB (B.6.2a, prior arc, but the pattern's origin): RSS byline-absence is a metadata gap, not unbylined publishing → pending, never confident "never."
+- Scraping — circular slug (B.6.2b-2a/2b): a convention-guessed URL "confirming" because the URL we typed contains the keyword is self-referential → slug is evidence only for site-chosen nav URLs (allowSlug), guesses require body confirmation.
+- Scraping — publisher-name byline (B.6.2b-4): a JSON-LD author equal to the publisher name ("Al Jazeera") is not a named reporter → publisher-name guard, per-page, so the ratio counts only genuine reporter bylines.
+- Structured-data — wrong entity (B.6.2c-1): naive Wikidata matching returns baseball teams and people named "Forbes" for news domains → host-equality + P31-media-type filter, single-match-or-pending, never guess.
+- Link-classification — over-narrow heuristic (B.6.2d): a too-narrow primary-domain set scored Ars Technica (a heavy primary-linker citing dx.doi.org/nature.com) at zero → broaden the set, but frame the result as a clear-primary lower bound so breadth never over-claims.
+
+The transferable lesson: the discipline is not surface-specific tactics — it is one principle that, applied honestly at each new surface, surfaces that surface's particular fabrication risk. And in every single case it was REAL-DATA validation (not fixtures, which passed) that exposed the risk, because real sources always do something fixtures do not imagine (untyped JSON-LD strings, hyphen-less URLs, dx.doi.org vs doi.org, multi-entity flagship domains). Fixtures prove the logic; live data proves the reality; the principle decides what to do when they diverge. A credibility-scoring system earns the authority to judge others' credibility precisely by refusing to fabricate its own confidence — ten modules, four surfaces, zero confident falsehoods shipped.
+
+#### Finding #107 — Owner-convergence: recovering signal from ambiguity without guessing
+
+Every prior honesty ruling was a refusal — when uncertain, pend. Owner-convergence (B.6.2c-2) is the discipline maturing from refusal to precision: a technique that recovers genuine signal from ambiguity without ever guessing. The problem: the Wikidata resolver correctly lands multi-entity flagship outlets (BBC, Guardian, NYT, each with several legitimate org entities on one domain) at "ambiguous" rather than guessing which entity is canonical. But for 2.4.a the question is ownership, not which sub-entity is canonical — so if all the ambiguous candidates share the same owner (P127) or parent (P749), the entity is ambiguous but the ownership is unanimous, and ownership is all 2.4.a asks. Report the shared owner; mark evidenced; record entityAmbiguous:true + ownershipBasis:"owner-convergence" transparently. The guardrail that keeps it principled rather than a softened guess: convergence requires GENUINE UNANIMITY (every() candidate agrees) — 4-of-5-agree is conflict, not convergence, and pends. No majority, no popularity, no sitelink-count. Live proof: Guardian → Guardian Media Group and NYT → NYT Company recovered via unanimous owner; BBC honestly pended (its candidates' owners conflict). The lesson: honesty is not only "pend when uncertain" — it is also "find precisely what IS certain within the uncertainty, and report exactly that and no more." The rule extracts every bit of honest signal available and not one bit beyond.
+
+#### Finding #108 — Available-but-wrong data is worse than no data (the 2.5.d deferral)
+
+A discipline about WHICH data to refuse. 2.5.d (independent fact-check track record) measures how often a source has been flagged BY fact-checkers — flags against the source's claims (ClaimReview-type data). The keyless data available — the IFCN signatory list — enumerates fact-CHECKERS (organizations that do fact-checking), which is different data answering a different question. Building a keyless 2.5.d off the IFCN list would have measured the wrong thing and labeled it 2.5.d — a plausible-looking signal that is silently incorrect, which is worse than an honest gap because it corrupts the score while appearing complete. So 2.5.d defers entirely to the keyed Google Fact Check Tools sprint; no keyless proxy. (SEC EDGAR also deferred, but for a different reason — low YIELD for a mostly-international corpus, ~25/154 US-tagged, most private/nonprofit/subsidiary; that is a coverage call, not a wrong-data call.) The transferable lesson: when the available data is the wrong data, refuse it — a measured-but-wrong number is more damaging to a credibility system than an honest "not yet measured," because the wrong number gets trusted. This is the same family as the publisher-name and circular-slug catches (the signal must mean what it claims), applied at the level of source-selection rather than within-source classification.
+
+#### Decision — the deterministic evidence modules (the ten, by surface)
+
+The layer, organized by data-acquisition pattern:
+
+- Own-DB (no fetch): 2.1.c bylines (RSS ratio), 2.3.c sustained coverage — both honest about their observation limits (RSS-gap → pending; 30-day-retention → observation-window-limited).
+- Scraping (site structure, presence detection via the makePresenceDetector factory): 2.1.a editorial leadership, 2.1.b standards/ethics, 2.2.e AI-disclosure, 2.4.b funding, corrections-presence (one row, feeds 2.1.d/2.5.b/2.5.e later).
+- Scraping (article pages): 2.1.c byline cross-check (resolves the RSS-gap pendings), 2.2.b primary-document link ratio.
+- Structured-data (Wikidata): 2.4.a ownership (with owner-convergence). That is every deterministic sub-criterion; the remaining sub-criteria are LLM-judgment (B.6.3) or keyed/deferred (2.5.d, EDGAR/Companies House, X state-affiliated).
+
+#### Decision — the design rulings carried into the build (preserved, not findings)
+
+- The makePresenceDetector factory (one tested code path, 5 config objects) — its value proved when the circular-slug fix landed once and protected all five detectors.
+- Strict confirmation + the Q1 nav-vs-guess asymmetry: nav-advertised link → evidenced (a confirm-miss only lowers confidence, never demotes to pending — the site advertising the page is its own claim); convention-guess → requires strict body confirmation. The Guardian thin-bodied-corrections case (#105d, prior arc) motivated it; this arc encoded it.
+- The Wikidata resolver: loose indexed candidate query → strict code filter (exact host-equality AND P31 org/media type via P279* subclass walking, roots Q43229/Q11033/Q5 as reviewable constants) → single-match-or-pending. The naive approaches false-matched badly (proven by live probe); the type filter is the load-bearing discriminator.
+- Coverage-measure-then-build (B.6.2c-2 Phase 1): the disambiguation ruling could not be made in the abstract — ran the resolver across all 70 resolvable corpus domains first, found ambiguity flagship-concentrated (~9 domains), and that data justified building owner-convergence. Measure before designing for an imagined distribution.
+- The 2.2.b link taxonomy: Tier-1 (clear-primary: gov/edu/legal/intl cores + doi.org AND dx.doi.org + curated journal/publisher allowlist) counts; Tier-2 (bare PDFs, unhosted press releases) excluded; Tier-3 non-primary. Per-article-presence ratio (articles-with-≥1-primary / sampled), robust to link-counting noise. Recorded as a clear-primary LOWER BOUND (basis + primaryHostsSeen), MODERATE confidence — overriding the spec's "high" on honesty grounds (the real-page probe proved false-negatives the spec did not account for).
+- Byline cross-check Q6/Q7: ≥1 byline-present page → evidenced with ratio; terminal still-absent → honest low-confidence evidenced (never confident "never", never pending-forever, never pending-llm since byline detection is deterministic DOM).
+
+#### Cumulative findings
+
+Three new this arc — #106 (honesty-discipline generalizes across surfaces), #107 (owner-convergence: recover signal from ambiguity without guessing), #108 (available-but-wrong-data worse than no data). The many honesty INSTANCES (circular-slug, publisher-name, wrong-entity, Ars-false-negative) are recorded as decision-records and as instances under #106/#105 — NOT individually numbered, to keep the finding count honest (a finding is a transferable lesson, not every application of one). Count goes from 15 to 18.
+
+#### Brief inaccuracy count
+
+Unchanged as a strategic-brief metric — none of this arc's findings is a Strategic-Plan/brief claim turning out inaccurate. One internal spec-vs-implementation divergence recorded (consistent with the Session 9 internal-honesty note): the spec's "high confidence" for 2.2.b was overridden to "moderate + lower-bound" on honesty grounds, because the real-page probe proved false-negatives the spec did not anticipate. The spec is older evidence than the probe; the probe won. This is folded into the pending Decision-7 methodology-doc honesty update (now two items: the Position C weights framing AND the 2.2.b confidence override).
+
+#### Three-track contribution this arc
+
+- Track 1 (Phase B execution): Zero — no feature work this arc by design.
+- Track 2 (architecture / scoring service): Heavy — five sprints, the deterministic evidence layer completed (10 modules, three data-acquisition patterns). The Source Scoring Service can now gather every deterministic piece of credibility evidence about a source.
+- Track 3 (infrastructure performance): Zero code; VPS migration (#103) remains decided-but-unscoped.
+
+#### Known followup work (current state)
+
+- B.6.3 — LLM-evaluation sub-criteria: the ~10 sub-criteria requiring judgment (attribution quality, COI disclosure, beat-reporter credentials, posture labeling, correction-process functioning, etc.). The proprietary prompts live here — the real competitive moat (per Position C), handle carefully. Open: LLM provider, multi-run aggregation function (mean/median/consensus), confidence calibration, volatility flagging. This is the hardest test of the honesty discipline yet — LLMs are built to sound confident.
+- B.6.4 — runtime: weekly cron-in-scheduler (per the cron-not-BullMQ ruling), triggered rescores, founder override. INCLUDES the shared-article-page pre-pass optimization (byline cross-check + 2.2.b currently fetch up to 10 article pages/source separately; a shared pre-pass would fetch ≤5 once and run both classifiers on the same docs).
+- B.6.5 — full-corpus run (all sources) + the ±5 validation gate on real evidence; where quality_score finally gets written, AND where the aggregator domainResolver artifact (Hacker News → garbage domain; article URLs point to other sites) needs special handling or honest exclusion.
+- Deferred-keyed evidence: 2.5.d (Google Fact Check Tools), 2.4.a-supplement (SEC EDGAR / Companies House); X state-affiliated labels (not freely available, manual/founder).
+- Recall-gap widening: DW/NASA/Gizmodo/MacRumors have Wikidata entities the wbsearchentities domain/name search missed → currently no-entity→pending; a careful candidate-gathering widening (without re-admitting the noise the strict filter excludes) is a B.6.2c follow-up.
+- Decision 7 methodology-doc honesty update — now TWO items: "proprietary weights" → "proprietary operationalization; published headline weights" (Position C), AND the 2.2.b "high" → "moderate, lower-bound" confidence reconciliation.
+- VPS migration (KVM 2, #103) — decided, needs its own scoping/runbook session; deploy carefully until done.
+- Minor/carried: Q5 institutional own-domain primary edge (NASA→nasa.gov); the coherence-test markdown-parse fragility; ~17 YouTube 404 stale channel IDs; sources table has no homepage column (domain derived from articles.url); .env\r cruft; 9 non-en tracker translations; Cache-Control + Sentry DSN production verifications (carried since Session 6).
+
+#### Next-session candidates (priority order)
+
+1. B.6.3 — LLM-evaluation sub-criteria. The next and final evidence-gathering phase; needs its own investigation (provider, aggregation, confidence calibration, the proprietary prompts). The honesty discipline's hardest test.
+2. B.6.4 → B.6.5 — runtime + full-corpus + the ±5 gate (where quality_score is finally written).
+3. VPS migration scoping — when a dedicated session is available.
+
+#### Session 10 references
+
+- Arc commits: 8cd7d1b (B.6.2b-2b factory + pre-pass), fe476dd (B.6.2b-4 byline cross-check), 70bd0fb (B.6.2c-1 Wikidata resolver), ae524d5 (B.6.2c-2 ownership + owner-convergence), 786308a (B.6.2d link ratio — closes the layer)
+- backend/src/skills/scoring/evidence/ — the layer: presenceDetector.js (factory), the 5 presence configs + bylineCrossCheck_2_1_c.js + primaryLinks_2_2_b.js + ownership_2_4_a.js in modules/, plus the primitives (httpFetch.js incl. fetchJson, robots.js, domainResolver.js, siteFetch.js, pageDiscovery.js, confirmPage.js, wikidataClient.js, primaryLinkClassify.js, bylineDetect.js)
+- docs/content/source_credibility_methodology.md — the rubric (Decision 7 honesty update pending, now two items)
+- docs/specs/source_scoring_service.md — the B.6 blueprint (the 2.2.b "high" confidence is the overridden item)
+- Session 9 entry (this file) — the prior arc (B.6.0 through B.6.2b-2a); findings #103-#105
