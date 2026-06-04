@@ -23,6 +23,8 @@ import correctionsPresence from "./modules/correctionsPresence.js";
 import bylineCrossCheck_2_1_c from "./modules/bylineCrossCheck_2_1_c.js";
 // B.6.2c-2 — ownership via Wikidata structured lookup (needsDiscovery false).
 import ownership_2_4_a from "./modules/ownership_2_4_a.js";
+// B.6.2d — primary-document link ratio (samples article pages; needsDiscovery false).
+import primaryLinks_2_2_b from "./modules/primaryLinks_2_2_b.js";
 
 export const EVIDENCE_MODULES = Object.freeze([
   bylines_2_1_c,            // 2.1.c — ET  (own-DB; may leave pending on RSS gap)
@@ -34,6 +36,7 @@ export const EVIDENCE_MODULES = Object.freeze([
   correctionsPresence,      // corrections-presence — feeds 2.1.d/2.5.b/2.5.e
   bylineCrossCheck_2_1_c,   // resolves "2.1.c" pending via article-page fetches (after bylines_2_1_c)
   ownership_2_4_a,          // 2.4.a — Ind (Wikidata ownership / owner-convergence)
+  primaryLinks_2_2_b,       // 2.2.b — MT  (primary-document link ratio; samples article pages)
 ]);
 
 export function getModule(id) {

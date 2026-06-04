@@ -21,3 +21,5 @@ export { confirmPage } from "./confirmPage.js";
 export { makePresenceDetector } from "./presenceDetector.js";
 export { detectByline } from "./bylineDetect.js";
 export { resolveOrgByDomain } from "./wikidataClient.js";
+// B.6.2d link-ratio layer (the 2.2.b primary-document classification crux).
+export { isPrimaryHost, extractBodyExternalLinks, classifyLinks } from "./primaryLinkClassify.js";
