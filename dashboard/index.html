@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scoopfeeds Mission Control</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0c1220; --panel:#131c2e; --panel2:#0f1726; --line:#22304a;
+    --text:#dce6f5; --dim:#8294b0; --faint:#54637d;
+    --cyan:#3fd0e0; --amber:#f0b541; --red:#ef6a5a; --green:#4fc97e; --purple:#a98aef;
+    --t1:#4fc97e; --t2:#3fd0e0; --t3:#f0b541;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,'Segoe UI',Roboto,Arial,sans-serif;padding:18px;max-width:1180px;margin:0 auto}
+  h1{font-size:20px;letter-spacing:.5px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);margin-bottom:10px}
+  .glyph{font-size:10px;color:var(--faint);margin-left:6px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+  .grid{display:grid;gap:16px}
+  @media(min-width:880px){.cols2{grid-template-columns:1fr 1fr}.cols3{grid-template-columns:1fr 1fr 1fr}}
+  /* header */
+  #hdr{display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between}
+  .badge{background:#1b2a45;border:1px solid var(--line);color:var(--cyan);padding:4px 12px;border-radius:20px;font-weight:600;font-size:12px}
+  .stat{text-align:center;min-width:90px}
+  .stat .v{font-size:22px;font-weight:700}
+  .stat .l{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.8px}
+  #refresh{background:#1b2a45;color:var(--cyan);border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px}
+  #refresh:hover{background:#23365a}
+  .offline{color:var(--red);font-size:11px;margin-left:8px}
+  /* tracks */
+  .track{border-left:4px solid;padding:10px 12px;background:var(--panel2);border-radius:6px;cursor:pointer}
+  .track.sel{outline:1px solid var(--cyan)}
+  .track h3{font-size:13px}
+  .track .meta{font-size:11px;color:var(--dim)}
+  .warn-amber{color:var(--amber);font-weight:600}
+  .warn-red{color:var(--red);font-weight:600}
+  .ok{color:var(--green);font-weight:600}
+  .spark{height:26px;margin-top:6px;display:flex;align-items:flex-end;gap:2px}
+  .spark div{flex:1;border-radius:1px;min-height:2px;opacity:.85}
+  /* criteria */
+  .rings{display:flex;flex-wrap:wrap;gap:18px;justify-content:space-around;margin-bottom:12px}
+  .ring{text-align:center;width:96px}
+  .ring svg{transform:rotate(-90deg)}
+  .ring .pct{font-size:15px;font-weight:700}
+  .ring .gl{font-size:10px;color:var(--dim)}
+  .crit{display:flex;gap:8px;align-items:flex-start;padding:5px 8px;border-radius:5px;cursor:pointer;font-size:12.5px}
+  .crit:hover{background:#18233a}
+  .crit .dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:5px}
+  .crit .def{display:none;color:var(--dim);font-size:11.5px;margin-top:2px}
+  .crit.open .def{display:block}
+  .met{background:var(--green)} .in-progress{background:var(--amber)} .not-started{background:#3a4a66}
+  /* gantt */
+  #gantt{position:relative;overflow-x:auto}
+  .grow{display:flex;align-items:center;gap:8px;height:24px}
+  .grow .lbl{flex:none;width:172px;font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gbarwrap{position:relative;flex:1;height:14px;background:#0d1524;border-radius:3px}
+  .gbar{position:absolute;height:14px;border-radius:3px;opacity:.9;min-width:3px}
+  .gbar:hover{opacity:1;outline:1px solid #fff3}
+  .todayline{position:absolute;top:0;bottom:0;width:2px;background:var(--red);z-index:5;opacity:.8}
+  .mst{position:absolute;top:-2px;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid var(--purple);cursor:default}
+  .overdue{outline:1px solid var(--red)}
+  #gtip{position:fixed;background:#1d2a44;border:1px solid var(--line);padding:8px 10px;border-radius:6px;font-size:11.5px;display:none;z-index:50;max-width:280px;pointer-events:none}
+  /* commits */
+  .commit{display:flex;gap:8px;padding:6px 4px;border-bottom:1px solid var(--line);font-size:12px}
+  .commit:last-child{border-bottom:none}
+  .tag{flex:none;font-size:10px;font-weight:700;padding:1px 7px;border-radius:9px;color:#0c1220}
+  .risk{display:flex;gap:10px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--line);font-size:12.5px}
+  .risk:last-child{border-bottom:none}
+  .risk .age{flex:none;color:var(--amber);font-size:11px;min-width:60px;text-align:right}
+  .placeholder{border:1px dashed var(--line);color:var(--faint);text-align:center;padding:14px;border-radius:8px;font-size:12px}
+  footer{color:var(--faint);font-size:11px;text-align:center;margin:18px 0}
+  a{color:var(--cyan)}
+</style>
+</head>
+<body>
+<div class="panel" id="hdr">
+  <div>
+    <h1>SCOOPFEEDS <span style="color:var(--cyan)">MISSION CONTROL</span></h1>
+    <div style="margin-top:6px"><span class="badge" id="phaseBadge">Phase B</span>
+      <span class="offline" id="netState"></span></div>
+  </div>
+  <div style="display:flex;gap:18px;flex-wrap:wrap">
+    <div class="stat"><div class="v" id="daysIn">–</div><div class="l">days into phase</div></div>
+    <div class="stat"><div class="v" id="daysLeft">–</div><div class="l">days to exit target</div></div>
+    <div class="stat"><div class="v" id="lastCommit">–</div><div class="l">since last commit</div></div>
+    <div class="stat"><div class="v" id="sessCount">–</div><div class="l">sessions <span class="glyph">⚙</span></div></div>
+    <div class="stat"><div class="v" id="findCount">–</div><div class="l">findings <span class="glyph">⚙</span></div></div>
+  </div>
+  <button id="refresh">↻ Refresh</button>
+</div>
+
+<div class="grid cols3">
+  <div class="panel track" style="border-color:var(--t1)" data-track="T1">
+    <h3>TRACK 1 · Product</h3><div class="meta" id="t1meta">–</div><div class="spark" id="t1spark"></div>
+  </div>
+  <div class="panel track" style="border-color:var(--t2)" data-track="T2">
+    <h3>TRACK 2 · Architecture</h3><div class="meta" id="t2meta">–</div><div class="spark" id="t2spark"></div>
+  </div>
+  <div class="panel track" style="border-color:var(--t3)" data-track="T3">
+    <h3>TRACK 3 · Infrastructure</h3><div class="meta" id="t3meta">–</div><div class="spark" id="t3spark"></div>
+  </div>
+</div>
+
+<div class="grid cols2">
+  <div class="panel">
+    <h2>Phase B exit criteria <span class="glyph">✎ status.json (updated <span id="statusDate">?</span>)</span></h2>
+    <div class="rings" id="rings"></div>
+    <div id="critList"></div>
+  </div>
+  <div>
+    <div class="panel">
+      <h2>Momentum <span class="glyph">⚙ auto from repo</span></h2>
+      <canvas id="trend" height="110"></canvas>
+      <div id="commits" style="margin-top:10px"></div>
+    </div>
+    <div class="panel">
+      <h2>Risk watchlist <span class="glyph">✎ status.json</span></h2>
+      <div id="risks"></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Sequence plan — Phase B workstreams &amp; milestones <span class="glyph">plan of 2026-06-04 · red line = today</span></h2>
+  <div id="gantt"></div>
+  <div style="margin-top:8px;font-size:11px;color:var(--dim)">
+    <span style="color:var(--t1)">■</span> Track 1 &nbsp; <span style="color:var(--t2)">■</span> Track 2 &nbsp;
+    <span style="color:var(--t3)">■</span> Track 3 &nbsp; <span style="color:var(--purple)">▲</span> milestone &nbsp;
+    <span style="color:var(--red)">│</span> today &nbsp; red outline = past end date, not marked met
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Production metrics</h2>
+  <div class="placeholder">Wire to <code>/api/stats</code> when Layer 1 instrumentation lands (Phase B foundation work) — DAU, queries, alert latency will render here.</div>
+</div>
+
+<footer>
+  Auto data <span class="glyph">⚙</span> = GitHub API (cached 10 min) · Manual data <span class="glyph">✎</span> = dashboard/status.json ·
+  <a href="https://github.com/nmc192-ux/scoopfeeds" target="_blank">repo</a>
+</footer>
+<div id="gtip"></div>
+
+<script>
+"use strict";
+/* ============ CONFIG & EMBEDDED PLAN DATA ============ */
+const REPO = "nmc192-ux/scoopfeeds";
+const CACHE_TTL = 10 * 60 * 1000;
+const PHASE_KICKOFF = "2026-05-17", PHASE_EXIT = "2026-12-31";
+
+const CRITERIA = [
+ ["c1","User-facing","Homepage above-the-fold = intelligence + comprehension content only"],
+ ["c2","User-facing","Mobile Lighthouse score ≥ 90"],
+ ["c3","User-facing","Tracker Auto-Detection Engine operational with ≥10 active trackers (8 signal types)"],
+ ["c4","User-facing","Breaking news alerts live: web push + email + Telegram"],
+ ["c5","User-facing","Op-ed perspectives on ≥80% of major events"],
+ ["c6","User-facing","Video clips on ≥60% of major events"],
+ ["c7","User-facing","3 newsletter products with ≥30% open rates"],
+ ["c8","User-facing","≥150 active sources with quality scores (most-cited criterion)"],
+ ["c9","User-facing","Combined social followers ≥10,000 (X + LinkedIn + Instagram)"],
+ ["c10","User-facing","≥3% average engagement rate on social"],
+ ["c11","User-facing","≥10,000 Scoop search queries per month"],
+ ["c12","User-facing","Scoop returns dossiers/trackers top results for ≥60% of relevant queries"],
+ ["c13","User-facing","Returning user rate ≥25%"],
+ ["c14","User-facing","Telegram channel subscribers ≥5,000"],
+ ["a1","Architecture","Codebase organized by skill folders (B.1 taxonomy)"],
+ ["a2","Architecture","Skill contract documentation exists and is followed"],
+ ["a3","Architecture","Lint rules enforce skill boundaries"],
+ ["a4","Architecture","Image/video pipeline isolated as POC"],
+ ["a5","Architecture","5 BullMQ migrations live in production"],
+ ["p1","Performance","Immutable Cache-Control on hashed assets"],
+ ["p2","Performance","CDN edge fronts scoopfeeds.com HTML"],
+ ["p3","Performance","HTML s-maxage=120 + stale-while-revalidate=600"],
+ ["p4","Performance","SWR pattern on content API responses"],
+ ["p5","Performance","≥1 hot route server-rendered"],
+ ["x1","Close-out","Phase B Retrospective written"],
+ ["x2","Close-out","Phase C Kickoff Brief drafted"]
+];
+
+const WORKSTREAMS = [
+ ["B-01","VPS migration (KVM 2)","T3","2026-06-08","2026-06-21"],
+ ["B-02","Scoring: deterministic evidence","T2","2026-06-04","2026-07-05"],
+ ["PF-05","Scoop spec amendments session","T1","2026-06-29","2026-07-05"],
+ ["B-03","Scoring: LLM eval + runtime (B.6.3–5)","T2","2026-07-06","2026-08-16"],
+ ["B-05","Breaking news + alert engine v1","T1","2026-06-22","2026-08-09"],
+ ["B-04","Source services + corpus ≥150 scored","T1","2026-07-13","2026-09-27"],
+ ["B-06","Social Media Engine v2 + X/LinkedIn","T1","2026-07-20","2026-09-13"],
+ ["B-16","Audience ramp (continuous)","T1","2026-07-20","2026-12-27"],
+ ["B-07","Newsletter products ×3","T1","2026-08-17","2026-09-20"],
+ ["B-08","Internal Scoop search + portal v1","T1","2026-08-17","2026-10-11"],
+ ["PF-02+04","Event lifecycle states + ClaimReview","T1","2026-09-07","2026-09-13"],
+ ["B-13","Perf: CDN + SWR + SSR hot route","T3","2026-09-14","2026-10-25"],
+ ["B-09","Homepage + Event Dossier redesign","T1","2026-09-28","2026-11-01"],
+ ["B-10","Op-ed MVP + video integration","T1","2026-09-28","2026-11-08"],
+ ["PF-01","Novelty scoring at ingestion","T1","2026-10-12","2026-10-25"],
+ ["B-14","Skill reorg (B.1–B.4) + BullMQ ×5","T2","2026-10-12","2026-12-06"],
+ ["B-11","Entertainment surfaces","T1","2026-11-02","2026-11-29"],
+ ["B-12","Reality Index v1","T1","2026-11-02","2026-11-22"],
+ ["B-15","Foundation + provenance grammar (PF-07)","T1","2026-11-02","2026-12-13"],
+ ["B-17","Retro + Phase C kickoff brief","T1","2026-12-14","2026-12-31"]
+];
+const MILESTONES = [
+ ["2026-06-21","M1 VPS migrated"],["2026-08-16","M2 scoring complete"],["2026-09-27","M3 ≥150 scored sources"],
+ ["2026-12-31","M4 PHASE B EXIT"]
+];
+const GSTART = new Date("2026-06-01"), GEND = new Date("2027-01-10");
+
+/* ============ HELPERS ============ */
+const $ = id => document.getElementById(id);
+const days = ms => Math.floor(ms / 864e5);
+const fmt = d => new Date(d).toISOString().slice(0,10);
+function rel(d){ const dd = days(Date.now() - new Date(d).getTime());
+  return dd <= 0 ? "today" : dd === 1 ? "1d" : dd + "d"; }
+function classifyTrack(msg){
+  const m = (msg||"").toLowerCase();
+  if (/^docs\(retrospective\)/.test(m)) return "S";
+  if (/^perf|\(cache\)|\(deploy\)|\(infra\)|\(ops\)|vps|cdn/.test(m)) return "T3";
+  if (/^(feat|fix|refactor|test|docs)\((scoring|skills?|db|queue|bullmq|arch|migrate)/.test(m)) return "T2";
+  if (/^(feat|fix|refactor|docs)\((trackers?|social|alerts?|newsletter|search|scoop|entertainment|frontend|seo|oped|video|breaking|sources?|realityindex|homepage|dossier|i18n|brand)/.test(m)) return "T1";
+  return "O";
+}
+const TRACK_COLORS = { T1:"#4fc97e", T2:"#3fd0e0", T3:"#f0b541", S:"#a98aef", O:"#54637d" };
+
+async function cachedFetch(key, url, parse){
+  const c = localStorage.getItem(key);
+  if (c){ try{ const o = JSON.parse(c); if (Date.now()-o.t < CACHE_TTL) return o.d; }catch(e){} }
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(r.status);
+  const d = parse === "json" ? await r.json() : await r.text();
+  try{ localStorage.setItem(key, JSON.stringify({t:Date.now(), d})); }catch(e){}
+  return d;
+}
+
+/* ============ RENDERERS ============ */
+function renderHeader(status){
+  $("phaseBadge").textContent = (status && status.phaseLabel) || "Phase B — Scale & Stabilize";
+  $("daysIn").textContent = days(Date.now() - new Date(PHASE_KICKOFF)) ;
+  const left = days(new Date(PHASE_EXIT) - Date.now());
+  $("daysLeft").textContent = left;
+  $("daysLeft").style.color = left < 60 ? "var(--amber)" : "var(--text)";
+}
+
+function renderTracks(commits, sel){
+  const now = Date.now();
+  ["T1","T2","T3"].forEach(tr => {
+    const list = commits.filter(c => c.track === tr);
+    const last = list[0] ? new Date(list[0].date) : null;
+    const idle = last ? days(now - last) : 999;
+    const recent = list.filter(c => now - new Date(c.date) < 14*864e5).length;
+    let cls = "ok", note = "active";
+    if (idle > 21){ cls = "warn-red"; note = "DARK"; } else if (idle > 14){ cls = "warn-amber"; note = "going dark"; }
+    $(tr.toLowerCase()+"meta").innerHTML =
+      `last: <b>${last ? rel(last) + " ago" : "n/a"}</b> · 14d commits: <b>${recent}</b> · <span class="${cls}">${note}</span>`;
+    // 8-week sparkline
+    const weeks = Array(8).fill(0);
+    list.forEach(c => { const w = Math.floor(days(now - new Date(c.date))/7); if (w>=0 && w<8) weeks[7-w]++; });
+    const max = Math.max(1, ...weeks);
+    $(tr.toLowerCase()+"spark").innerHTML = weeks.map(v =>
+      `<div style="height:${Math.round(v/max*100)}%;background:${TRACK_COLORS[tr]}"></div>`).join("");
+  });
+  document.querySelectorAll(".track").forEach(el =>
+    el.classList.toggle("sel", el.dataset.track === sel));
+}
+
+function ringSVG(pct, color){
+  const r = 26, c = 2*Math.PI*r;
+  return `<svg width="64" height="64" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="${r}" fill="none" stroke="#22304a" stroke-width="7"/>
+    <circle cx="32" cy="32" r="${r}" fill="none" stroke="${color}" stroke-width="7"
+      stroke-dasharray="${c}" stroke-dashoffset="${c*(1-pct)}" stroke-linecap="round"/></svg>`;
+}
+
+function renderCriteria(status){
+  const st = (status && status.criteria) || {};
+  const groups = {};
+  CRITERIA.forEach(([id,g]) => { (groups[g] = groups[g] || []).push(id); });
+  const colors = { "User-facing":"var(--green)", "Architecture":"var(--cyan)", "Performance":"var(--amber)", "Close-out":"var(--purple)" };
+  let ringsHtml = "", total = 0, met = 0;
+  Object.entries(groups).forEach(([g, ids]) => {
+    const m = ids.filter(i => st[i] === "met").length;
+    const ip = ids.filter(i => st[i] === "in-progress").length;
+    const pct = (m + ip*0.5) / ids.length;
+    total += ids.length; met += m;
+    ringsHtml += `<div class="ring">${ringSVG(pct, colors[g])}
+      <div class="pct">${m}/${ids.length}</div><div class="gl">${g}</div></div>`;
+  });
+  ringsHtml += `<div class="ring">${ringSVG(met/total, "#dce6f5")}
+      <div class="pct">${Math.round(met/total*100)}%</div><div class="gl">Overall met</div></div>`;
+  $("rings").innerHTML = ringsHtml;
+  $("critList").innerHTML = CRITERIA.map(([id, g, def]) => {
+    const s = st[id] || "not-started";
+    return `<div class="crit" data-id="${id}">
+      <span class="dot ${s}"></span>
+      <div><div>${id.toUpperCase()} · ${def.length > 72 ? def.slice(0,72)+"…" : def}
+        <span style="color:var(--faint);font-size:10px">[${s}]</span></div>
+        <div class="def">${def} — group: ${g}. Status is maintained in status.json.</div></div></div>`;
+  }).join("");
+  document.querySelectorAll(".crit").forEach(el =>
+    el.addEventListener("click", () => el.classList.toggle("open")));
+  $("statusDate").textContent = (status && status.lastUpdated) || "?";
+}
+
+function renderGantt(status){
+  const span = GEND - GSTART;
+  const pos = d => Math.max(0, Math.min(100, (new Date(d) - GSTART) / span * 100));
+  const st = (status && status.criteria) || {};
+  const today = new Date();
+  let html = `<div style="position:relative">`;
+  html += WORKSTREAMS.map(([id, name, tr, s, e]) => {
+    const overdue = today > new Date(e) && !(id === "B-02" ? false : st["__"+id] === "met");
+    const od = today > new Date(e) ? "overdue" : "";
+    return `<div class="grow"><div class="lbl" title="${id} ${name}">${id} · ${name}</div>
+      <div class="gbarwrap">
+        <div class="gbar ${od}" data-tip="${id} — ${name}&#10;${s} → ${e} · Track ${tr.slice(1)}"
+          style="left:${pos(s)}%;width:${Math.max(0.8, pos(e)-pos(s))}%;background:${TRACK_COLORS[tr]}"></div>
+        <div class="todayline" style="left:${pos(today)}%"></div>
+        ${MILESTONES.map(([d,l]) => `<div class="mst" data-tip="${l} (${d})" style="left:calc(${pos(d)}% - 5px)"></div>`).join("")}
+      </div></div>`;
+  }).join("");
+  html += `</div>`;
+  $("gantt").innerHTML = html;
+  const tip = $("gtip");
+  document.querySelectorAll("[data-tip]").forEach(el => {
+    el.addEventListener("mousemove", ev => {
+      tip.style.display = "block";
+      tip.innerHTML = el.dataset.tip.replace(/\n/g, "<br>");
+      tip.style.left = Math.min(ev.clientX + 12, innerWidth - 290) + "px";
+      tip.style.top = (ev.clientY + 14) + "px";
+    });
+    el.addEventListener("mouseleave", () => tip.style.display = "none");
+  });
+}
+
+let trendChart = null;
+function renderMomentum(commits, filter){
+  const list = filter ? commits.filter(c => c.track === filter) : commits;
+  // weekly buckets, 12 weeks
+  const now = Date.now(), buckets = Array(12).fill(0), labels = [];
+  list.forEach(c => { const w = Math.floor(days(now - new Date(c.date))/7); if (w>=0 && w<12) buckets[11-w]++; });
+  for (let i = 11; i >= 0; i--) labels.push(i === 0 ? "now" : "-" + i + "w");
+  if (trendChart) trendChart.destroy();
+  if (typeof Chart !== "undefined"){
+    trendChart = new Chart($("trend"), {
+      type: "bar",
+      data: { labels, datasets: [{ data: buckets, backgroundColor: filter ? TRACK_COLORS[filter] : "#3fd0e0", borderRadius: 3 }] },
+      options: { plugins: { legend: { display: false } }, scales: {
+        x: { ticks: { color: "#54637d", font: { size: 9 } }, grid: { display: false } },
+        y: { ticks: { color: "#54637d", font: { size: 9 }, stepSize: 5 }, grid: { color: "#1a2538" } } } }
+    });
+  }
+  $("commits").innerHTML = list.slice(0, 5).map(c =>
+    `<div class="commit"><span class="tag" style="background:${TRACK_COLORS[c.track]}">${c.track}</span>
+     <span style="color:var(--faint);flex:none">${rel(c.date)}</span>
+     <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c.msg.replace(/"/g,"&quot;")}">${c.msg}</span></div>`
+  ).join("") || `<div style="color:var(--faint);font-size:12px;padding:8px">no commits in this filter window</div>`;
+}
+
+function renderRisks(status){
+  const risks = ((status && status.risks) || []).filter(r => r.active);
+  $("risks").innerHTML = risks.length ? risks.map(r =>
+    `<div class="risk"><span style="color:var(--red)">⚠</span><span style="flex:1">${r.label}</span>
+     <span class="age">${days(Date.now() - new Date(r.since))}d old</span></div>`).join("")
+    : `<div style="color:var(--green);padding:8px">No active risks. Suspicious. Check status.json is current.</div>`;
+}
+
+/* ============ DATA LOADING ============ */
+const FALLBACK_COMMITS = [
+  { msg: "feat(scoring): Track 2 B.6.2c-1 — fetchJson + Wikidata entity resolver", date: "2026-06-04T15:00:00Z", track: "T2" },
+  { msg: "feat(scoring): Track 2 B.6.2b-4 — byline cross-check", date: "2026-06-03T12:00:00Z", track: "T2" },
+  { msg: "docs(retrospective): Phase B Session 9", date: "2026-06-02T10:00:00Z", track: "S" },
+  { msg: "feat(trackers): Sprint 1.5.3 — Layer 2 tracker page (closes Capability 2)", date: "2026-05-26T10:00:00Z", track: "T1" },
+  { msg: "perf(cache): Cache-Control immutable on hashed assets (Track 3 Sprint 0)", date: "2026-05-20T10:00:00Z", track: "T3" }
+];
+
+async function loadAll(force){
+  if (force){ ["mc_commits","mc_retro","mc_status"].forEach(k => localStorage.removeItem(k)); }
+  let offline = false;
+
+  // status.json — relative first (works on Pages / local server), then raw GitHub
+  let status = null;
+  try { status = await cachedFetch("mc_status", "./status.json?cb=" + Date.now(), "json"); }
+  catch(e){
+    try { status = await cachedFetch("mc_status", `https://raw.githubusercontent.com/${REPO}/main/dashboard/status.json`, "json"); }
+    catch(e2){ offline = true; }
+  }
+
+  // commits
+  let commits = [];
+  try {
+    const raw = await cachedFetch("mc_commits", `https://api.github.com/repos/${REPO}/commits?per_page=100`, "json");
+    commits = raw.map(c => ({ msg: c.commit.message.split("\n")[0], date: c.commit.author.date, track: classifyTrack(c.commit.message) }));
+  } catch(e){ offline = true; commits = FALLBACK_COMMITS; }
+
+  // retrospective parse (raw.githubusercontent — no API rate limit)
+  let sessions = "–", findings = "–";
+  try {
+    const md = await cachedFetch("mc_retro", `https://raw.githubusercontent.com/${REPO}/main/docs/phases/phase_b_retrospective_inputs.md`, "text");
+    const sN = [...md.matchAll(/Session (\d+)/g)].map(m => +m[1]);
+    const fN = [...md.matchAll(/[Ff]inding #(\d+)/g)].map(m => +m[1]);
+    if (sN.length) sessions = Math.max(...sN);
+    if (fN.length) findings = Math.max(...fN);
+  } catch(e){ /* leave dashes */ }
+
+  $("netState").textContent = offline ? "⊘ offline / rate-limited — showing cached or fallback data" : "";
+  $("lastCommit").textContent = commits[0] ? rel(commits[0].date) : "–";
+  $("sessCount").textContent = sessions;
+  $("findCount").textContent = findings;
+
+  renderHeader(status);
+  renderTracks(commits, state.filter);
+  renderCriteria(status);
+  renderGantt(status);
+  renderMomentum(commits, state.filter);
+  renderRisks(status);
+  state.commits = commits;
+}
+
+/* ============ STATE & EVENTS ============ */
+const state = { filter: null, commits: [] };
+document.querySelectorAll(".track").forEach(el =>
+  el.addEventListener("click", () => {
+    state.filter = state.filter === el.dataset.track ? null : el.dataset.track;
+    renderTracks(state.commits, state.filter);
+    renderMomentum(state.commits, state.filter);
+  }));
+$("refresh").addEventListener("click", () => loadAll(true));
+
+loadAll(false).catch(e => {
+  $("netState").textContent = "⊘ load error — fallback view";
+  renderHeader(null); renderTracks(FALLBACK_COMMITS, null); renderCriteria(null);
+  renderGantt(null); renderMomentum(FALLBACK_COMMITS, null); renderRisks(null);
+});
+</script>
+</body>
+</html>

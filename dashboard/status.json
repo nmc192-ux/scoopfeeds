@@ -1,0 +1,30 @@
+{
+  "lastUpdated": "2026-06-04",
+  "phase": "B",
+  "phaseLabel": "Phase B — Scale & Stabilize",
+  "phaseKickoff": "2026-05-17",
+  "phaseExitTarget": "2026-12-31",
+  "audience": {
+    "socialFollowers": null,
+    "telegramSubscribers": null,
+    "scoopQueriesPerMonth": null,
+    "returningUserRate": null,
+    "newsletterOpenRate": null
+  },
+  "criteria": {
+    "c1": "not-started", "c2": "not-started", "c3": "in-progress", "c4": "not-started",
+    "c5": "not-started", "c6": "not-started", "c7": "not-started", "c8": "in-progress",
+    "c9": "not-started", "c10": "not-started", "c11": "not-started", "c12": "not-started",
+    "c13": "not-started", "c14": "not-started",
+    "a1": "in-progress", "a2": "in-progress", "a3": "not-started", "a4": "not-started", "a5": "not-started",
+    "p1": "in-progress", "p2": "not-started", "p3": "not-started", "p4": "not-started", "p5": "not-started",
+    "x1": "not-started", "x2": "not-started"
+  },
+  "risks": [
+    { "id": "vps", "label": "VPS migration pending — every deploy risks crash-and-recover (finding #103)", "since": "2026-05-28", "active": true },
+    { "id": "llm", "label": "B.6.3 LLM provider + prompts undecided — gates the ≥150-scored-sources exit criterion", "since": "2026-06-01", "active": true },
+    { "id": "audience", "label": "Audience metrics (followers / Telegram / queries) have no ramp started yet", "since": "2026-05-17", "active": true },
+    { "id": "track1", "label": "Track 1 dark during scoring arc — no-track-dark rule pressure", "since": "2026-06-04", "active": true }
+  ],
+  "notes": "Seed file generated 2026-06-04 alongside Path Forward v1. Edit statuses each session: met | in-progress | not-started."
+}
