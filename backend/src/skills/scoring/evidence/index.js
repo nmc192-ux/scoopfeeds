@@ -20,3 +20,4 @@ export { discoverSite, CONVENTION_PATHS } from "./pageDiscovery.js";
 export { confirmPage } from "./confirmPage.js";
 export { makePresenceDetector } from "./presenceDetector.js";
 export { detectByline } from "./bylineDetect.js";
+export { resolveOrgByDomain } from "./wikidataClient.js";

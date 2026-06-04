@@ -21,6 +21,8 @@ import correctionsPresence from "./modules/correctionsPresence.js";
 // B.6.2b-4 — byline page cross-check. MUST be ordered AFTER bylines_2_1_c: it
 // reads the cached "2.1.c" row and resolves it in place when it's RSS-gap pending.
 import bylineCrossCheck_2_1_c from "./modules/bylineCrossCheck_2_1_c.js";
+// B.6.2c-2 — ownership via Wikidata structured lookup (needsDiscovery false).
+import ownership_2_4_a from "./modules/ownership_2_4_a.js";
 
 export const EVIDENCE_MODULES = Object.freeze([
   bylines_2_1_c,            // 2.1.c — ET  (own-DB; may leave pending on RSS gap)
@@ -31,6 +33,7 @@ export const EVIDENCE_MODULES = Object.freeze([
   funding_2_4_b,            // 2.4.b — Ind (scrape: funding page)
   correctionsPresence,      // corrections-presence — feeds 2.1.d/2.5.b/2.5.e
   bylineCrossCheck_2_1_c,   // resolves "2.1.c" pending via article-page fetches (after bylines_2_1_c)
+  ownership_2_4_a,          // 2.4.a — Ind (Wikidata ownership / owner-convergence)
 ]);
 
 export function getModule(id) {

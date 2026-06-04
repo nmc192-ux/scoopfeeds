@@ -150,7 +150,22 @@ export async function resolveOrgByDomain(editorialDomain, ctx = {}) {
 
   if (survivors.length === 0) return { resolved: false, reason: "no-entity" };
   if (survivors.length > 1) {
-    return { resolved: false, reason: "ambiguous", candidates: survivors.map((s) => ({ qid: s.qid, label: s.label })) };
+    // Include each candidate's owner/parent (already grouped from the same
+    // SPARQL — no extra fetch) so the module can apply owner-convergence.
+    return {
+      resolved: false,
+      reason: "ambiguous",
+      candidates: survivors.map((s) => {
+        const o = [...s.owners.entries()][0];
+        const p = [...s.parents.entries()][0];
+        return {
+          qid: s.qid,
+          label: s.label,
+          owner: o ? { qid: o[0], label: o[1] } : null,
+          parent: p ? { qid: p[0], label: p[1] } : null,
+        };
+      }),
+    };
   }
 
   const it = survivors[0];
