@@ -152,3 +152,35 @@ export function parseHtml(html) {
   const { document } = parseHTML(String(html || ""));
   return document;
 }
+
+/**
+ * fetchJson(url, ctx) — GET a JSON API (B.6.2c structured-data lookup).
+ *
+ * Unlike fetchRaw (browser-UA rotation, for scraping outlet sites), this sends
+ * a single DESCRIPTIVE user-agent + Accept: application/json — the polite-citizen
+ * profile for public APIs (Wikidata/Wikimedia request a contact UA). No linkedom,
+ * no robots.txt (fixed trusted API hosts) — but isSafeUrl STILL gates it
+ * (defense-in-depth). Result-style (never throws): {ok:true, json, status} or
+ * {ok:false, reason}. Inject ctx.transport for offline tests.
+ */
+export async function fetchJson(url, ctx = {}) {
+  if (!isSafeUrl(url)) return { ok: false, reason: "unsafe-url" };
+  const transport = ctx.transport || defaultTransport;
+  const timeout = ctx.timeoutMs ?? TIMEOUT_MS;
+  const userAgent = ctx.userAgent || "Scoopfeeds/1.0";
+  try {
+    const r = await transport(url, {
+      timeout,
+      maxContentLength: MAX_CONTENT,
+      maxRedirects: 5,
+      responseType: "text",
+      validateStatus: (s) => s >= 200 && s < 400,
+      headers: { "User-Agent": userAgent, Accept: "application/json" },
+    });
+    let json;
+    try { json = JSON.parse(r.data); } catch { return { ok: false, reason: "parse-error", status: r.status }; }
+    return { ok: true, json, status: r.status, finalUrl: r.finalUrl || url };
+  } catch (err) {
+    return { ok: false, reason: classifyError(err).kind, status: err?.response?.status ?? null };
+  }
+}
