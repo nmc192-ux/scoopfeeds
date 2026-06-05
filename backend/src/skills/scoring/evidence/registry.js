@@ -25,6 +25,11 @@ import bylineCrossCheck_2_1_c from "./modules/bylineCrossCheck_2_1_c.js";
 import ownership_2_4_a from "./modules/ownership_2_4_a.js";
 // B.6.2d — primary-document link ratio (samples article pages; needsDiscovery false).
 import primaryLinks_2_2_b from "./modules/primaryLinks_2_2_b.js";
+// B.6.3b — LLM judgment-on-presence. Each reads a deterministic feeder row and
+// applies the honest-confidence harness. MUST be ordered AFTER their feeders:
+// 2.1.d reads "corrections-presence"; 2.4.b-judgment upgrades "2.4.b" in place.
+import functioningCorrections_2_1_d from "./modules/functioningCorrections_2_1_d.js";
+import fundingMixJudgment_2_4_b from "./modules/fundingMixJudgment_2_4_b.js";
 
 export const EVIDENCE_MODULES = Object.freeze([
   bylines_2_1_c,            // 2.1.c — ET  (own-DB; may leave pending on RSS gap)
@@ -32,11 +37,13 @@ export const EVIDENCE_MODULES = Object.freeze([
   leadership_2_1_a,         // 2.1.a — ET  (scrape: leadership page)
   standards_2_1_b,          // 2.1.b — ET  (scrape: standards/ethics page)
   aiDisclosure_2_2_e,       // 2.2.e — MT  (scrape: AI-disclosure page)
-  funding_2_4_b,            // 2.4.b — Ind (scrape: funding page)
+  funding_2_4_b,            // 2.4.b — Ind (scrape: funding page — presence)
   correctionsPresence,      // corrections-presence — feeds 2.1.d/2.5.b/2.5.e
   bylineCrossCheck_2_1_c,   // resolves "2.1.c" pending via article-page fetches (after bylines_2_1_c)
   ownership_2_4_a,          // 2.4.a — Ind (Wikidata ownership / owner-convergence)
   primaryLinks_2_2_b,       // 2.2.b — MT  (primary-document link ratio; samples article pages)
+  functioningCorrections_2_1_d, // 2.1.d — ET  (LLM judgment; reads corrections-presence feeder)
+  fundingMixJudgment_2_4_b,     // 2.4.b — Ind (LLM judgment; UPGRADES "2.4.b" in place, after funding_2_4_b)
 ]);
 
 export function getModule(id) {

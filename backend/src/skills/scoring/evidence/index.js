@@ -28,3 +28,4 @@ export { isPrimaryHost, extractBodyExternalLinks, classifyLinks } from "./primar
 export { evaluateWithConfidence } from "./llm/judgmentHarness.js";
 export { loadPrompt } from "./llm/promptLoader.js";
 export { groundedRubricInstruction, parseJudgment, GROUNDED_RUBRIC_SCHEMA } from "./llm/groundedSchema.js";
+export { pageText } from "./llm/pageText.js";
