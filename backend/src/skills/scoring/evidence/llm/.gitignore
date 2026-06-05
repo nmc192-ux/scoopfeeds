@@ -1,0 +1,10 @@
+# Position C: LLM-evaluation PROMPTS are proprietary IP (the operationalization
+# moat). This repo is PUBLIC — committing the prompts would publish the moat. So
+# everything under prompts/ is gitignored EXCEPT the redacted example template and
+# the README that document the contract.
+#
+# ⚠ The gitignored prompt files are therefore NOT repo-backed-up. Keep a durable
+# backup of prompts/ OUTSIDE this repo (see prompts/README.md).
+prompts/*
+!prompts/_example.template.js
+!prompts/README.md
