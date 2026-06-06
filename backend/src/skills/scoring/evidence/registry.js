@@ -38,6 +38,10 @@ import sourceAttribution_2_2_a from "./modules/sourceAttribution_2_2_a.js";
 import sourcingQuality_2_3_d from "./modules/sourcingQuality_2_3_d.js";
 // B.6.3c-2a — first find-relevant judgment (relevance-gate → not-applicable sentinel).
 import sourceMethodologyDisclosure_2_2_c from "./modules/sourceMethodologyDisclosure_2_2_c.js";
+// B.6.3c-2b — COI disclosure (find-relevant; reads 2.4.a owner from the store) + correction
+// severity (single-page corrections judgment, 2.1.d sibling on the corrections-presence feeder).
+import conflictOfInterestDisclosure_2_2_d from "./modules/conflictOfInterestDisclosure_2_2_d.js";
+import correctionSeverity_2_5_b from "./modules/correctionSeverity_2_5_b.js";
 
 export const EVIDENCE_MODULES = Object.freeze([
   bylines_2_1_c,            // 2.1.c — ET  (own-DB; may leave pending on RSS gap)
@@ -55,6 +59,8 @@ export const EVIDENCE_MODULES = Object.freeze([
   sourceAttribution_2_2_a,      // 2.2.a — MT  (LLM judgment; article-body sample → aggregate)
   sourcingQuality_2_3_d,        // 2.3.d — DE  (LLM judgment; article-body sample → aggregate)
   sourceMethodologyDisclosure_2_2_c, // 2.2.c — MT (find-relevant: data-journalism only; gate → not-applicable)
+  conflictOfInterestDisclosure_2_2_d, // 2.2.d — MT (find-relevant; reads 2.4.a owner, after ownership_2_4_a)
+  correctionSeverity_2_5_b,         // 2.5.b — HA (single-page corrections severity, after corrections-presence)
   // 2.1.e — PARKED for B.6.3c-2c (find-relevant index-locus rework); module/prompt on disk, unregistered.
 ]);
 
