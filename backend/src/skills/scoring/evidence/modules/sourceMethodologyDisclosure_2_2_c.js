@@ -12,8 +12,14 @@
  */
 import { makeFindRelevantJudgment } from "../llm/findRelevantJudgment.js";
 
-export default makeFindRelevantJudgment({
-  id: "2.2.c",
-  component: "MT",
-  levels: ["no disclosure", "partial", "most elements", "full (method+N+MoE+limits)"],
-});
+// requiresCapableModel (B.6.4a / #109): the relevance gate only abstains correctly on
+// a gate-validated model; the runner guards this module against running on a too-small
+// one. Additive flag — the factory/gate logic is unchanged.
+export default {
+  ...makeFindRelevantJudgment({
+    id: "2.2.c",
+    component: "MT",
+    levels: ["no disclosure", "partial", "most elements", "full (method+N+MoE+limits)"],
+  }),
+  requiresCapableModel: true,
+};

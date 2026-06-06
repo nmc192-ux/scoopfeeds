@@ -24,6 +24,7 @@ import { getEvidence, upsertEvidence, isStale } from "./evidenceCache.js";
 import { assertEvidenceShape, EVIDENCE_STATUS, DEFAULT_SAMPLE_SIZE } from "./contract.js";
 import { discoverSite } from "./pageDiscovery.js";
 import { fetchArticleBodies } from "./llm/articleBodyPrepass.js";
+import { isModelValidated, resolvedModelForTier } from "./llm/modelGuard.js";
 
 /**
  * gatherForSource — run the registered modules for one source.
@@ -49,8 +50,10 @@ export async function gatherForSource(source, {
   maxConventionAttempts = 3,  // convention-path guesses per scrape detector
   transport,                  // optional fetch transport (tests inject; prod uses default axios)
   timeoutMs,                  // optional per-fetch timeout override
+  llmCall,                    // optional LLM caller (tests/proof inject for counting; prod = callJson default)
+  resolvedModel,              // optional override of the tier's resolved model (model-tier guard; tests inject)
 } = {}) {
-  const ctx = { db, now, sampleSize, methodologyVersion, maxConventionAttempts, transport, timeoutMs };
+  const ctx = { db, now, sampleSize, methodologyVersion, maxConventionAttempts, transport, timeoutMs, llmCall, resolvedModel };
   const results = [];
 
   // ── Discovery pre-pass (B.6.2b-2b) ──────────────────────────────────────────
@@ -83,6 +86,25 @@ export async function gatherForSource(source, {
     if (!force && !isStale(cached, mod.ttlDays, now)) {
       results.push({ id: mod.id, status: cached.status, confidence: cached.confidence, fromCache: true });
       continue;
+    }
+
+    // ── Model-tier guard (B.6.4a / #109) ────────────────────────────────────
+    // A judgment flagged requiresCapableModel must NOT run on an unvalidated model
+    // (a too-small model scores instead of abstaining at the relevance gate). Resolve
+    // the model the standard tier will use; if it isn't gate-validated, abstain to
+    // unavailable "model-not-validated" BEFORE any LLM call (no gather).
+    if (mod.requiresCapableModel) {
+      const model = ctx.resolvedModel ?? resolvedModelForTier("standard");
+      if (!isModelValidated(model)) {
+        const guardedEv = {
+          status: EVIDENCE_STATUS.UNAVAILABLE,
+          value: { reason: "model-not-validated", model: model ?? null, basis: "model-guard" },
+          confidence: 0, evidenceUrl: null, gatheredAt: now,
+        };
+        upsertEvidence(source.id, mod.id, guardedEv, methodologyVersion, db);
+        results.push({ id: mod.id, status: guardedEv.status, confidence: 0, fromCache: false, guarded: true });
+        continue;
+      }
     }
 
     let ev;

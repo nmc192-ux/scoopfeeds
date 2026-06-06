@@ -50,6 +50,7 @@ export default {
   component: "MT",
   ttlDays: 120,
   needsArticleBodies: true, // so the runner builds the shared ctx.articleBodies
+  requiresCapableModel: true, // B.6.4a / #109 — runner guards against an unvalidated model
 
   async gather(source, ctx) {
     const now = ctx.now;

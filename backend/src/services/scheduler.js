@@ -28,6 +28,7 @@ import { runMarketMatcherCycle } from "../realityIndex/intelligence/marketMatche
 import { runSnapshotDownsampler } from "../realityIndex/jobs/snapshotDownsampler.js";
 import { runEventPromoter } from "../realityIndex/intelligence/eventPromoter.js";
 import { runTrackerDetector } from "../realityIndex/intelligence/trackerDetector.js";
+import { runScoringJob } from "../skills/scoring/runtime/scoringRun.js";
 import { runEventTimelineBuilder } from "../realityIndex/intelligence/eventTimelineBuilder.js";
 import { runEventActorExtractor } from "../realityIndex/intelligence/eventActorExtractor.js";
 import { runMediaSentimentForActiveEvents } from "../realityIndex/intelligence/mediaSentimentScorer.js";
@@ -171,6 +172,18 @@ export function startScheduler() {
   scheduleCron("17 * * * *", () => runWelcomeSequenceCycle({ maxPerStage: 50 }).catch(err =>
     logger.warn(`welcomeSequence cron failed: ${err.message}`)
   ));
+  // ─── Source scoring cron (B.6.4a) ───────────────────────────────────────────
+  // Weekly full-corpus re-score (methodology §6.2). REGISTERED BUT DISABLED by
+  // default — set SCORING_CRON_ENABLED=true to activate, and only after the scoring
+  // migrations 006/007 are applied in the target env (#112). Never auto-fires.
+  if (String(process.env.SCORING_CRON_ENABLED || "").toLowerCase() === "true") {
+    scheduleCron("0 3 * * 0", () => runScoringJob().catch(err =>
+      logger.warn(`scoring cron failed: ${err.message}`)
+    ));
+    logger.info("🧮 Source scoring cron ENABLED (weekly, Sun 03:00)");
+  } else {
+    logger.info("🧮 Source scoring cron registered but DISABLED (set SCORING_CRON_ENABLED=true to activate)");
+  }
   // Daily digest at 07:00 server time — no-op if SMTP is not configured.
   scheduleCron("0 7 * * *", async () => {
     try {
