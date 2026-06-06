@@ -1416,3 +1416,53 @@ Unchanged as a strategic-brief metric — none of this arc's findings is a Strat
 - docs/content/source_credibility_methodology.md — the rubric (Decision 7 honesty update pending, now two items)
 - docs/specs/source_scoring_service.md — the B.6 blueprint (the 2.2.b "high" confidence is the overridden item)
 - Session 9 entry (this file) — the prior arc (B.6.0 through B.6.2b-2a); findings #103-#105
+
+### Session 11 — B.6.3c close (LLM-judgment layer complete, bar 2.1.e)
+
+Branch state at capture: main at 7012427, level with origin/main. B.6.3 (LLM-judgment layer) is built and pushed; one sub-criterion (2.1.e) is deferred with a precise spec.
+
+#### What shipped this arc
+
+- B.6.3c-1 (4d3bef4): shared article-body pre-pass (needsArticleBodies → ctx.articleBodies [{url,finalUrl,language,category,title,text,truncated,ok,reason?}], ≤5 fetched once per source); the aggregator aggregateAcrossArticles (committed-only; N=0 → pending-llm; tie → lower bucket; conf = round2(mean(committed.confidence) × modalShare); locus quotes from modal-bucket articles; founderFlag set-not-consumed); the makeArticleTextJudgment factory; judgments 2.2.a (source attribution) + 2.3.d (sourcing quality).
+- B.6.3c-2a (c88374f): the find-relevant relevance-gate (Option B) — parseJudgment recognises a reserved not-applicable sentinel → {bucket:null, notApplicable:true}; harness surfaces reason "not-applicable" when a body's runs are sentinel-dominant (inert for non-gated criteria); makeFindRelevantJudgment partitions per-article results: committed>0 → aggregate over relevant only; NA-dominant → unavailable "no-relevant-article-in-sample"; no-ok-bodies → pending; genuine split → pending-llm. No aggregator surgery, no DB migration (unavailable already in the status CHECK; diagnostic via value.reason). Plus 2.2.c (data-journalism methodology disclosure).
+- B.6.3c-2b (7012427): 2.2.d (COI disclosure, gated) — pre-flight store-read of ownership_2_4_a → unavailable "owner-unknown" (no LLM) when no named owner/parent; else wraps makeFindRelevantJudgment with a buildInput injecting owner/parent names; scope = owner/parent COI + in-body named-writer affiliations, advertiser COI out-of-scope (2.4.a carries no advertisers — recorded gap). Plus 2.5.b (correction severity) — single-page judgment cloning 2.1.d (no factory/aggregator); severity-only (no story-count denominator → no rate).
+
+Net: seven LLM sub-criteria live — 2.1.d, 2.4.b (B.6.3b); 2.2.a, 2.3.d (c-1); 2.2.c (c-2a); 2.2.d, 2.5.b (c-2b) — on the harness / gate / aggregator / pre-pass substrate. All on origin/main.
+
+#### Deferred: 2.1.e (news/opinion separation)
+
+Pulled from c-1 after its body-only form over-credited "clear in product" on arbitrary prose. A read-only label-capture probe settled its locus: pageText surfaces a leading "Opinion" kicker at offset 0 on some outlets (The Hill, NYT) and discriminates perfectly there (news controls carry no spurious leading label, 0/6), but on LA Times the kicker is stripped in extraction (real label exists; marker tokens that appear are footer section-nav at offset 4k–9k). The asymmetry is load-bearing: a body can confirm "labelled" when the kicker survives, but can never safely assign "no separation" from absence (absence conflates genuinely-unlabelled with extractor-stripped). A one-sided judgment that can only credit, never penalise, would inflate parser-friendly outlets and be blind to the ones that don't separate — negative value in a credibility score, so it was rejected. Correct locus = an index/section fetch (the rubric's "on the index"): a labelled opinion section present = separation, absent = genuine no-separation — positive, two-sided, sound. New mechanism, its own sprint. Deferred behind B.6.4/B.6.5 unless a later scoping finds other criteria that also need index/section structure (→ shared infra, pull forward).
+
+#### Finding #109 — Relevance-gate is model-sensitive
+
+The in-prompt not-applicable sentinel fires only on a capable model. qwen2.5-coder:7b abstains correctly; llama3.2 (small) ignores the gate and scores non-relevant articles to a false lowest-ish bucket — partially caught by confidence + founderFlag (wrong bucket came back ~0.40 + flagged), but the bucket was wrong. Gated find-relevant judgments require a validated-capable tier; gate behaviour must be validated on whatever production model ships. Dev rule: gated dry-runs use qwen, never llama3.2.
+
+#### Finding #110 — Small-committed-sample over-confidence
+
+Find-relevant verdicts on committed=1 reach conf 1.0 with no consistency tempering (modalShare trivially 1.0), compounded by #111 (Al Jazeera 2.2.d "disclosed", conf 1.0, committed=1). Candidate fix: a sample-size term in the aggregator confidence (full re-validation of 2.2.a/2.3.d/2.2.c numbers) or scorer-side weighting on committed-count. Decide in B.6.5.
+
+#### Finding #111 — Verbatim-grounding verifies presence, not relevance
+
+A verbatim-in-text quote passes the grounding factor even if semantically off-point. The honesty net catches hallucinated/paraphrased quotes (NYT 2.5.b: paraphrased → ungrounded → conf 0.4 + founderFlag) but not present-but-irrelevant ones (Al Jazeera loose quote at conf 1.0; the original c-1 2.1.e over-credit). Candidate future "grounding-relevance" pass that checks the quote actually evidences the bucket. Research thread, not near-term.
+
+#### Finding #112 — Production news.db lacks the scoring tables
+
+Migrations 006/007 are unapplied on the production DB. Dev runs on a copy with idempotent CREATE TABLE IF NOT EXISTS. The VPS deploy (#103) must apply the scoring migrations.
+
+#### Carried (still open)
+
+- Language down-weighting wired-but-unfed: languageFactor neutral; article language carried but NOT fed (articles.language defaults to 'en'; feeding an unverified default would over-trust mislabelled non-English). Verify ingest language detection before B.6.5 feeds it.
+- Decision-7 doc-honesty items (2).
+- VPS migration #103 — now also gated on applying the scoring migrations (#112).
+
+#### Next
+
+1. B.6.4 runtime — get the seven judgments into the pipeline; founderFlag consumption (the escalation hook, set-but-unconsumed since B.6.3a) lands here.
+2. B.6.5 full-corpus + ±5 gate — where quality_score is written and #109–#111 land as model-tier / aggregator-confidence / scorer-weighting decisions.
+3. 2.1.e index/section-fetch sprint — deferred; pull forward only if shared with other index-needing criteria.
+
+#### Architecture notes (for cold-start)
+
+- Judgment seam: evaluateWithConfidence({subCriterion, input, rubric:{levels}, ctx}) judges one text; confidence = agreement × grounding × languageFactor; founderFlag = conf<0.5 || ungrounded (set, not consumed). Buckets per-criterion; levels[0] is lowest, assignable only from a positive locus quote. Prompts gitignored at evidence/llm/prompts/<id>.js (Position C moat).
+- Two article-sample factories: makeArticleTextJudgment (any-article: 2.2.a, 2.3.d) and makeFindRelevantJudgment (gated: 2.2.c, 2.2.d). Both run the harness per body ×3 then aggregateAcrossArticles — never concatenate (concatenation destroys per-article verbatim grounding). Single-page judgments (2.1.d, 2.5.b) call the harness once on a feeder-fetched page.
+- Honest status vocabulary: evidenced | pending | pending-llm | unavailable | blocked. Invariant throughout: couldn't-observe ≠ observed-absence. feeder-pending → pending; no relevant article → unavailable "no-relevant-article-in-sample"; owner unknown → unavailable "owner-unknown"; fetch failure → blocked. None ever bottoms out to levels[0].
