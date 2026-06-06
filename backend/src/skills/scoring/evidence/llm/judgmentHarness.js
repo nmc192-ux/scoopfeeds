@@ -149,10 +149,17 @@ export async function evaluateWithConfidence({ subCriterion, input, rubric, tier
   const committed = runs.filter((r) => r.bucket); // runs that picked an in-rubric level
   const perRunBuckets = runs.map((r) => r.bucket); // includes nulls — honest record
 
-  // No run committed → unresolved (calls failed / model refused / can't-tell).
+  // No run committed → unresolved. Distinguish the find-relevant sentinel
+  // ("not-applicable" — wrong TYPE of article) from a genuine can't-decide. Non-gated
+  // criteria never emit the sentinel → naCount is always 0 → reason stays
+  // "no-committed-runs" (the existing path, untouched for 2.2.a/2.3.d/etc.).
   if (committed.length === 0) {
+    const naCount = runs.filter((r) => r.notApplicable).length;
+    const naDominant = naCount > N / 2;
     return evidence(EVIDENCE_STATUS.PENDING_LLM, {
-      reason: "no-committed-runs", runs: N, buckets: perRunBuckets,
+      reason: naDominant ? "not-applicable" : "no-committed-runs",
+      ...(naDominant ? { notApplicable: true } : {}),
+      runs: N, buckets: perRunBuckets,
       founderFlag: true, languageFactor, language, basis: BASIS,
     }, 0, evidenceUrl, now);
   }

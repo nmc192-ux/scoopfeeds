@@ -34,3 +34,5 @@ export { fetchArticleBodies } from "./llm/articleBodyPrepass.js";
 // B.6.3c-1 — article-text judgment factory + cross-article aggregator.
 export { makeArticleTextJudgment } from "./llm/articleTextJudgment.js";
 export { aggregateAcrossArticles } from "./llm/aggregateAcrossArticles.js";
+// B.6.3c-2 — find-relevant judgment factory (relevance-gate + not-applicable sentinel).
+export { makeFindRelevantJudgment } from "./llm/findRelevantJudgment.js";

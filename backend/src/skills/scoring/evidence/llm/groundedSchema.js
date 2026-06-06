@@ -58,6 +58,12 @@ export function groundedRubricInstruction(levels) {
  * bucket is null when the run did not commit to an allowed level (refusal,
  * out-of-rubric value, malformed/!object) — a non-committal run, NOT a guess.
  */
+// Reserved find-relevant sentinel (B.6.3c-2): a gated prompt returns this bucket when
+// the article is not the relevant TYPE. It is OUTSIDE every rubric's levels, so it never
+// commits — but it is flagged distinctly (notApplicable:true) so the find-relevant
+// factory can tell "not the right kind of article" from "model said garbage / can't decide".
+const NOT_APPLICABLE = "not-applicable";
+
 export function parseJudgment(raw, levels) {
   if (!raw || typeof raw !== "object") return { bucket: null, groundingQuote: null, reasoning: null };
   const lv = Array.isArray(levels) ? levels : [];
@@ -65,5 +71,10 @@ export function parseJudgment(raw, levels) {
   const bucket = bucketRaw && lv.includes(bucketRaw) ? bucketRaw : null;
   const groundingQuote = typeof raw.groundingQuote === "string" && raw.groundingQuote.trim() ? raw.groundingQuote : null;
   const reasoning = typeof raw.reasoning === "string" && raw.reasoning.trim() ? raw.reasoning : null;
+  // The reserved sentinel → bucket:null + notApplicable:true. Any OTHER out-of-levels
+  // value → bucket:null with NO flag (unchanged: garbage stays garbage).
+  if (bucket === null && bucketRaw && bucketRaw.toLowerCase() === NOT_APPLICABLE) {
+    return { bucket: null, notApplicable: true, groundingQuote, reasoning };
+  }
   return { bucket, groundingQuote, reasoning };
 }

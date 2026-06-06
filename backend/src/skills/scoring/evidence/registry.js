@@ -36,6 +36,8 @@ import fundingMixJudgment_2_4_b from "./modules/fundingMixJudgment_2_4_b.js";
 // prompt remain on disk but are intentionally NOT imported/registered here.
 import sourceAttribution_2_2_a from "./modules/sourceAttribution_2_2_a.js";
 import sourcingQuality_2_3_d from "./modules/sourcingQuality_2_3_d.js";
+// B.6.3c-2a — first find-relevant judgment (relevance-gate → not-applicable sentinel).
+import sourceMethodologyDisclosure_2_2_c from "./modules/sourceMethodologyDisclosure_2_2_c.js";
 
 export const EVIDENCE_MODULES = Object.freeze([
   bylines_2_1_c,            // 2.1.c — ET  (own-DB; may leave pending on RSS gap)
@@ -52,7 +54,8 @@ export const EVIDENCE_MODULES = Object.freeze([
   fundingMixJudgment_2_4_b,     // 2.4.b — Ind (LLM judgment; UPGRADES "2.4.b" in place, after funding_2_4_b)
   sourceAttribution_2_2_a,      // 2.2.a — MT  (LLM judgment; article-body sample → aggregate)
   sourcingQuality_2_3_d,        // 2.3.d — DE  (LLM judgment; article-body sample → aggregate)
-  // 2.1.e — PARKED for B.6.3c-2 (find-relevant); module/prompt on disk, intentionally unregistered.
+  sourceMethodologyDisclosure_2_2_c, // 2.2.c — MT (find-relevant: data-journalism only; gate → not-applicable)
+  // 2.1.e — PARKED for B.6.3c-2c (find-relevant index-locus rework); module/prompt on disk, unregistered.
 ]);
 
 export function getModule(id) {
