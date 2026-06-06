@@ -30,6 +30,12 @@ import primaryLinks_2_2_b from "./modules/primaryLinks_2_2_b.js";
 // 2.1.d reads "corrections-presence"; 2.4.b-judgment upgrades "2.4.b" in place.
 import functioningCorrections_2_1_d from "./modules/functioningCorrections_2_1_d.js";
 import fundingMixJudgment_2_4_b from "./modules/fundingMixJudgment_2_4_b.js";
+// B.6.3c-1 — article-text judgments (needsArticleBodies; share the runner's article-
+// body pre-pass). Per ok body → harness → aggregateAcrossArticles → one source row.
+// NOTE: 2.1.e (newsOpinionSeparation) is PARKED for c-2 (find-relevant) — its module +
+// prompt remain on disk but are intentionally NOT imported/registered here.
+import sourceAttribution_2_2_a from "./modules/sourceAttribution_2_2_a.js";
+import sourcingQuality_2_3_d from "./modules/sourcingQuality_2_3_d.js";
 
 export const EVIDENCE_MODULES = Object.freeze([
   bylines_2_1_c,            // 2.1.c — ET  (own-DB; may leave pending on RSS gap)
@@ -44,6 +50,9 @@ export const EVIDENCE_MODULES = Object.freeze([
   primaryLinks_2_2_b,       // 2.2.b — MT  (primary-document link ratio; samples article pages)
   functioningCorrections_2_1_d, // 2.1.d — ET  (LLM judgment; reads corrections-presence feeder)
   fundingMixJudgment_2_4_b,     // 2.4.b — Ind (LLM judgment; UPGRADES "2.4.b" in place, after funding_2_4_b)
+  sourceAttribution_2_2_a,      // 2.2.a — MT  (LLM judgment; article-body sample → aggregate)
+  sourcingQuality_2_3_d,        // 2.3.d — DE  (LLM judgment; article-body sample → aggregate)
+  // 2.1.e — PARKED for B.6.3c-2 (find-relevant); module/prompt on disk, intentionally unregistered.
 ]);
 
 export function getModule(id) {

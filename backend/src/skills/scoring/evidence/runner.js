@@ -23,6 +23,7 @@ import { EVIDENCE_MODULES } from "./registry.js";
 import { getEvidence, upsertEvidence, isStale } from "./evidenceCache.js";
 import { assertEvidenceShape, EVIDENCE_STATUS, DEFAULT_SAMPLE_SIZE } from "./contract.js";
 import { discoverSite } from "./pageDiscovery.js";
+import { fetchArticleBodies } from "./llm/articleBodyPrepass.js";
 
 /**
  * gatherForSource — run the registered modules for one source.
@@ -63,6 +64,18 @@ export async function gatherForSource(source, {
     // discoverSite → openSite uses ctx; cap the structure budget here so a
     // later byline pass keeps its share of the shared per-source budget.
     ctx.discovery = await discoverSite(source, { ...ctx, maxFetchesPerSource: structureBudget });
+  }
+
+  // ── Article-body pre-pass (B.6.3c) ──────────────────────────────────────────
+  // Article-text judgments (needsArticleBodies) share ONE ≤5-body fetch per source.
+  // Run it once iff ≥1 such judgment is stale (else skip → zero body fetches).
+  // Modules READ ctx.articleBodies; they never fetch bodies themselves. SCOPE: this
+  // pre-pass is B.6.3c-only — byline/primaryLinks keep their own sampling for now.
+  const bodyModules = modules.filter((m) => m.needsArticleBodies);
+  const anyBodyStale = bodyModules.some((m) => force || isStale(getEvidence(source.id, m.id, db), m.ttlDays, now));
+  ctx.articleBodies = null;
+  if (bodyModules.length > 0 && anyBodyStale) {
+    ctx.articleBodies = await fetchArticleBodies(source, ctx, { limit: 5 });
   }
 
   for (const mod of modules) {

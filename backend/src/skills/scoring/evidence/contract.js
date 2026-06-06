@@ -11,6 +11,12 @@
  *     id:        string   // sub-criterion id, e.g. "2.1.c"
  *     component: string   // methodology component key: ET|MT|DE|Ind|HA
  *     ttlDays:   number   // staleness threshold — re-gather only when older
+ *     needsDiscovery?:     boolean  // opt-in (default false): runner builds a shared
+ *                                   //   homepage-discovery (ctx.discovery) ONCE per source
+ *     needsArticleBodies?: boolean  // opt-in (default false, B.6.3c): runner builds a
+ *                                   //   shared article-body sample (ctx.articleBodies — ≤5
+ *                                   //   fetched bodies) ONCE per source; modules READ it,
+ *                                   //   never fetch themselves
  *     gather(source, ctx): Evidence | Promise<Evidence>
  *   }
  *

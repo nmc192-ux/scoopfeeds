@@ -29,3 +29,8 @@ export { evaluateWithConfidence } from "./llm/judgmentHarness.js";
 export { loadPrompt } from "./llm/promptLoader.js";
 export { groundedRubricInstruction, parseJudgment, GROUNDED_RUBRIC_SCHEMA } from "./llm/groundedSchema.js";
 export { pageText } from "./llm/pageText.js";
+// B.6.3c — shared article-body pre-pass (infra; ctx.articleBodies built by the runner).
+export { fetchArticleBodies } from "./llm/articleBodyPrepass.js";
+// B.6.3c-1 — article-text judgment factory + cross-article aggregator.
+export { makeArticleTextJudgment } from "./llm/articleTextJudgment.js";
+export { aggregateAcrossArticles } from "./llm/aggregateAcrossArticles.js";
