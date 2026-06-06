@@ -44,6 +44,34 @@ export function listEvidenceForSource(sourceId, db = getDb()) {
     .map(hydrate);
 }
 
+// ── Founder-review surface (B.6.4b) ──────────────────────────────────────────
+// founderFlag lives INSIDE the value JSON (not a column); query via json_extract
+// (no migration). The flag stored as JSON true → json_extract returns 1.
+const FLAGGED_SQL = `
+  SELECT s.name AS source_name, e.*
+  FROM scoring_evidence_cache e
+  JOIN sources s ON s.id = e.source_id
+  WHERE json_extract(e.value, '$.founderFlag') = 1
+  ORDER BY e.confidence ASC, e.source_id
+`;
+const MODEL_NOT_VALIDATED_SQL = `
+  SELECT s.name AS source_name, e.*
+  FROM scoring_evidence_cache e
+  JOIN sources s ON s.id = e.source_id
+  WHERE json_extract(e.value, '$.reason') = 'model-not-validated'
+  ORDER BY e.source_id, e.sub_criterion
+`;
+
+/** Corpus-wide flagged judgments (founderFlag=1), lowest-confidence first, value hydrated. */
+export function listFlaggedEvidence(db = getDb()) {
+  return db.prepare(FLAGGED_SQL).all().map(hydrate);
+}
+
+/** Operational anomalies: gated judgments the model-tier guard refused (B.6.4a / #109). */
+export function listModelNotValidatedEvidence(db = getDb()) {
+  return db.prepare(MODEL_NOT_VALIDATED_SQL).all().map(hydrate);
+}
+
 /**
  * upsertEvidence — write/replace the current evidence for (source, sub-criterion).
  * @returns {number} rows changed.
