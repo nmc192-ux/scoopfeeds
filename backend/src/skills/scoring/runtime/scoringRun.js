@@ -16,6 +16,9 @@ import { getDb } from "../../../models/database.js";
 import { logger } from "../../../services/logger.js";
 import { gatherForAllSources } from "../evidence/runner.js";
 import { listEvidenceForSource } from "../evidence/evidenceCache.js";
+import { writeSourceScore, insertAuditLog, getLatestOverride } from "../scoringDao.js";
+import { scoreSource, SCORER_VERSION, MIN_COVERAGE, N_COMPONENTS } from "../scorer.js";
+import { COMPONENT_KEYS } from "../rubric.js";
 import { loadScoreableSources } from "./corpus.js";
 import { buildRunSummary } from "./runSummary.js";
 
@@ -40,17 +43,83 @@ export async function runScoringJob(opts = {}) {
   if (opts.limit) sources = sources.slice(0, opts.limit);
 
   const runResults = await gatherForAllSources(sources, { db, now: startedAt, ...(opts.gatherOpts || {}) });
-  const finishedAt = opts.finishedAt ?? Date.now();
 
-  // flaggedCount: founderFlag lives inside value JSON — read it back per processed source.
+  // ── Scoring pass (B.6.5): evidence → component → quality_score + audit row. ──────
+  // One read of each source's evidence serves both the flagged tally and the scorer.
+  // writeScores defaults on; pass {writeScores:false} for an evidence-only run.
+  const scoringRunId = opts.scoringRunId || `scoring-${startedAt}`;
+  const writeScores = opts.writeScores !== false;
   let flaggedCount = 0;
+  let scoredCount = 0, insufficientCount = 0, overriddenCount = 0;
+
   for (const s of sources) {
-    for (const ev of listEvidenceForSource(s.id, db)) {
+    const evidence = listEvidenceForSource(s.id, db);
+    // flaggedCount: founderFlag lives inside value JSON — read it back per source.
+    for (const ev of evidence) {
       if (ev.value && ev.value.founderFlag === true) flaggedCount += 1;
     }
+    if (!writeScores) continue;
+
+    const card = scoreSource(evidence, { minCoverage: MIN_COVERAGE, nComponents: N_COMPONENTS });
+    const scored = card.status === "scored";
+
+    // Per-component score (null where insufficient) + coverage + confidence for the audit row.
+    const componentScores = {}, coverage = {}, confidence = {};
+    for (const c of COMPONENT_KEYS) {
+      const comp = card.components[c] || {};
+      componentScores[c] = comp.insufficient ? null : comp.score;
+      coverage[c] = comp.coverage ?? 0;
+      confidence[c] = comp.insufficient ? null : (comp.confidence ?? null);
+    }
+    const reasoning = scored
+      ? { status: "scored", presentComponents: card.presentComponents, presentCount: card.presentCount, coverage, floorTriggered: card.floorTriggered }
+      : { status: "insufficient-data", reason: "insufficient-data", presentComponents: card.presentComponents, presentCount: card.presentCount, coverage };
+
+    // Read-only forward-guard: never clobber a human override (none exist yet).
+    const override = getLatestOverride(s.id, db);
+    const overrideInEffect = !!(override && override.override_present === 1);
+
+    if (!overrideInEffect) {
+      // Scored → write the number. Insufficient → write NULL quality_score but stamp
+      // quality_score_last_updated (= startedAt) so it reads "evaluated → insufficient",
+      // NOT "never evaluated"; partial components JSON kept for transparency.
+      writeSourceScore(s.id, {
+        quality_score: scored ? card.quality_score : null,
+        components: componentScores,
+        posture: null,
+        methodology_version: SCORER_VERSION,
+        scored_at: startedAt,
+      }, db);
+      if (scored) scoredCount += 1; else insufficientCount += 1;
+    } else {
+      overriddenCount += 1; // sources.quality_score left as the human's value
+    }
+
+    insertAuditLog({
+      source_id: s.id,
+      scoring_run_id: scoringRunId,
+      methodology_version: SCORER_VERSION,
+      component_scores: componentScores,
+      posture_label: null,
+      combined_score: scored ? card.quality_score : null, // the automated value (even when overridden — for the record)
+      reasoning_per_subcriterion: reasoning,
+      confidence_per_subcriterion: { components: confidence, source: scored ? (card.confidence ?? null) : null },
+      override_present: overrideInEffect ? 1 : 0,
+      override_rationale: overrideInEffect
+        ? (override.override_rationale || "override in effect — automated score not written")
+        : null,
+      created_at: startedAt,
+    }, db);
   }
 
+  const finishedAt = opts.finishedAt ?? Date.now();
   const summary = buildRunSummary({ runResults, flaggedCount, startedAt, finishedAt, sourcesProcessed: sources.length });
+  if (writeScores) {
+    summary.scoringRunId = scoringRunId;
+    summary.scored = scoredCount;
+    summary.insufficientData = insufficientCount;
+    summary.overridden = overriddenCount;
+  }
 
   if (opts.writeStatus !== false) {
     const statusPath = opts.statusPath || defaultStatusPath();
