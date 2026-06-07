@@ -1513,3 +1513,41 @@ Among the 28 sources that yielded bodies (and were actually judged), ~86% of 2.3
 1. Sequencing: **capture (this entry) → read-only diagnostic on the 32 fetch-failure sources → scope B.6.5 against established real coverage.** Scorer is deliberately third; the body-fetch probe is the hinge. Ingestion (#114) and blocked (#116) queue behind.
 2. B.6.5 scope redrawn: insufficient-data / coverage-threshold contract becomes the centerpiece (not edge-case); validate against the ~28 (or ~60 if body-fetch recovers); fold in #115 `founderFlag` de-pollution; plan the #111 grounding-relevance pass.
 3. Before the B.6.4a cron: land the #113 resilience fix and apply scoring migrations on the VPS (#103/#112).
+
+### Session 13 — B.6.5 scorer (Phase 1+2) + resilience/fetch diagnostics; #113 corrected
+
+**Arc:** post-run analysis → fetch-failure diagnostic → resilience scoping → B.6.5 scoping → design (d45f43e) → Phase 1 scorer-core + calibration (20c527b) → Phase 2 orchestration/audit-write (86e5dca). The evidence→component scorer is complete end-to-end at v1-provisional.
+
+#### Finding #113 — CORRECTED (mechanism disproven)
+The Session 12 #113 ("a single model-call timeout crashes the run via uncaught throw") is WRONG. Code scoping shows the committed path is already resilient: the Ollama handler returns `null` on error (never throws); the harness catches any throw (`raw=null`, judgmentHarness.js:136); the runner has per-module isolation; the throwaway harness wraps each source in try/catch. The #23 death was the OS suspending/killing the node process during Mac idle-sleep — OPERATIONAL, not a code gap. Real committed gaps found instead: (a) `gatherForAllSources` lacks a per-source try/catch (cron path; narrow trigger via an unguarded pre-pass throw); (b) `ECONNABORTED` is absent from the model transient-retry set (slow/contended calls → immediate null, no retry). Both small, cron-prep, NOT built this session. A distinct `model-call-failed` reason needs a minimal `llmQueue` signal (`callJson` flattens all failures to null) — deferred honesty refinement.
+
+#### Fetch-failure diagnostic — the coverage cliff was ~88% transient
+Of the 32 "fetch-failure" sources (= 81 `no-article-bodies` − 49 zero-article #114), 28/32 fetch cleanly on a no-LLM re-run → run-time failures were TRANSIENT (local-qwen↔fetch contention during the run), not a broken fetcher. Classification: 28 recoverable, 1 cheap fix (New Scientist 406 → `Accept`-header), 3 dead/low (Bloomberg ×2 bot-block/paywall; Gizmodo DNS-dead → re-ingest). Body-fetch is sound; the lever is a clean re-run under low contention (28→~56 bodied). Deploy note: do not co-locate heavy local inference with the fetch pre-pass.
+
+#### B.6.5 scoping
+combineScore + writeSourceScore (migration 002) + scoring_audit_log (006, incl. override columns) + the 15-source hand-rated calibration ground truth all EXIST; the missing seam was evidence→component. Hard problem = partial-evidence + insufficient-data (50 sources zero-evidenced; ~28 richly). The 15-source GT is holistic v1.0; applicability to the sparse automated v1.1 scorer is the open validation question.
+
+#### B.6.5 design (committed d45f43e)
+Principle: honesty-of-derivation extends to scoring — never impute a score from absence. Per-component roll-up over evidenced sub-criteria only (renormalized); coverage fraction; emit if ≥MIN_COVERAGE else `insufficient`; overall `quality_score` only if ≥N_COMPONENTS present, else `insufficient-data`. Down-weight (not exclude) flagged/thin evidence (#110/#111). Validation = direction-calibration, not a universal ±5 gate. Language parked; DE category-mix + posture deferred.
+
+#### Phase 1 — scorer-core + calibration (committed 20c527b; scorer.js; SCORER_VERSION=v1.1-scorer-p1-provisional)
+- Mechanics sound on real data: insufficient-data contract, partial-renormalization, floor-over-present, honest declines.
+- LOCKED: MIN_COVERAGE=0.25, N_COMPONENTS=3 (the natural histogram gap at 2→3 present components).
+- Principled mapping (NOT GT-overfit, uniform): A — 2.2.b=0 excluded (uninformative lower bound); B — 2.3.c `insufficient` below a 180-day observation window (couldn't-observe ≠ low sustained coverage; parks corpus-wide at current ~34-day windows, un-parks as ingestion accumulates); C — presence anchor 100→67 (mechanism exists ≠ excellence). Ordinals untouched.
+- KEY CONCLUSION: the residual gap to the holistic GT (e.g. NASA ~71 vs human 84) is an EVIDENCE gap, not a mapping error — the automated v1.1 scorer is structurally more conservative than holistic-human v1.0 once over-credits are removed. Chasing the GT would re-introduce over-credits. GT used for direction only; real levers = coverage recovery + premium model.
+- DEFERRED biases: D single-criterion component fragility (e.g. HA=2.5.b alone); E qwen weakness in 2.3.d/2.2.a ordinals (model error — separated via a premium re-run, NOT compensated in mapping); final anchor lock — all pending a clean re-run (→56) + premium pass.
+- Result: 17/109 scored honestly; rest decline. Coverage-gated, not mapping-gated.
+
+#### Phase 2 — orchestration + audit-write (committed 86e5dca)
+Scoring pass wired after `gatherForAllSources` (folded into the per-source loop; evidence read once). Scored → `writeSourceScore`(quality_score, components, version) + audit row. Insufficient → `quality_score` NULL + `quality_score_last_updated` stamped (distinguishes evaluated-insufficient from never-evaluated) + audit row (combined_score null, reasoning `insufficient-data`, coverage). Override read-guard honors an existing `override_present` (none yet). `scoring_run_id` per run; run summary extended (scored/insufficientData/overridden). `writeScores` gate (default on; false = evidence-only). DB handle threaded + hard production-path guard → writes pinned to the working copy. Working-copy run: 17 scored / 92 insufficient / 109 audit rows (matches Phase 1). Production verified untouched. 221/221 tests pass. No new migration.
+
+#### Finding #117 — production-path guard vs the cron
+The Phase 2 hard guard (refuse writing to production `data/news.db`) is correct for dev, but the B.6.4a weekly cron's purpose is to write production scores on the VPS. Before the cron goes live (with the #112 migration), the guard needs an explicit production-allow path, else the cron cannot write.
+
+#### Decisions / next steps
+Scorer complete at v1-provisional. Leverage pivots upstream:
+1. Coverage recovery — #116 Wikidata owner resolution + AI-disclosure scrape (2.2.e) + body re-fetch (28→56). Lifts count + MT/Ind coverage; the flagship declines (BBC/France24/DW) are coverage-recoverable, not genuine voids.
+2. Premium-tier re-run on the calibration subset — separates structural (#111) from qwen model error (bias E); makes GT validation meaningful.
+3. Re-validate the scorer at higher coverage; finalize anchors (D + lock); un-provision the version.
+4. Cron-enablement: #112 VPS migration + lift the production guard (#117) + the #113 resilience bundle (gatherForAllSources isolation + ECONNABORTED retry).
+Hygiene: remove `_fetch_diag.mjs` + `_phase2_verify.mjs`; keep `_scoring_run.mjs` for the clean re-run.
