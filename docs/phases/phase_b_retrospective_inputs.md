@@ -1466,3 +1466,50 @@ Migrations 006/007 are unapplied on the production DB. Dev runs on a copy with i
 - Judgment seam: evaluateWithConfidence({subCriterion, input, rubric:{levels}, ctx}) judges one text; confidence = agreement × grounding × languageFactor; founderFlag = conf<0.5 || ungrounded (set, not consumed). Buckets per-criterion; levels[0] is lowest, assignable only from a positive locus quote. Prompts gitignored at evidence/llm/prompts/<id>.js (Position C moat).
 - Two article-sample factories: makeArticleTextJudgment (any-article: 2.2.a, 2.3.d) and makeFindRelevantJudgment (gated: 2.2.c, 2.2.d). Both run the harness per body ×3 then aggregateAcrossArticles — never concatenate (concatenation destroys per-article verbatim grounding). Single-page judgments (2.1.d, 2.5.b) call the harness once on a feeder-fetched page.
 - Honest status vocabulary: evidenced | pending | pending-llm | unavailable | blocked. Invariant throughout: couldn't-observe ≠ observed-absence. feeder-pending → pending; no relevant article → unavailable "no-relevant-article-in-sample"; owner unknown → unavailable "owner-unknown"; fetch failure → blocked. None ever bottoms out to levels[0].
+
+### Session 12 — First real full-corpus scoring run (B.6.5-PREP)
+
+**What ran:** First real-DB run of the B.6.3/B.6.4 evidence layer — 109 scoreable sources, local Ollama `qwen2.5-coder:7b`, on a migrated working copy at `backend/data/scoring-run/news.db` (production untouched; no commit/push; cron disabled). Throwaway harness `backend/_scoring_run.mjs` (uncommitted). The initial run (PID 10023) died at source #23 on an Ollama timeout (Mac idle-sleep, ~01:57). A single restart with corrected env (PID 12229) resumed from the checkpoint via TTL-skip and completed all 109 (~49.6 min) — no data lost.
+
+**Run summary (full Part D, n=109):** evidenced 270 · pending 167 · pending-llm 245 · unavailable 663 · blocked 290 · noop 218 · flagged 307.
+
+**Per-criterion evidenced coverage (n=109):** 2.1.d corrections 4 · 2.4.b funding 5 · 2.2.a attribution 28 · 2.3.d sourcing 28 · 2.2.c data-journalism 6 · 2.2.d COI 6 · 2.5.b corr-severity 5 · 2.4.a ownership 10. **Body-fetch coverage: 28/109** sources yielded fetchable bodies.
+
+#### Coverage decomposition (the hinge for B.6.5 sequencing)
+
+The 81 `no-article-bodies` split into two distinct problems:
+- **~49 ingestion** — zero ingested articles (see #114); nothing to fetch.
+- **~32 fetch-failure** — sources that HAVE ingested articles but yielded no usable body from the pre-pass (bot-blocks / dead URLs / text-extraction). Body-fetch is failing on ~32 of the 60 ingested sources (>half).
+
+Implication: recovering the 32 could take scoreable-with-bodies from 28 → ~60 with no ingestion work — likely the fastest, highest-leverage coverage lever. **Next step: read-only diagnostic on the 32 to classify recoverable-vs-dead BEFORE scoping B.6.5.**
+
+#### Finding #113 — A single model-call timeout crashes the entire run (resilience gap)
+
+Run died at #23 on an Ollama `ECONNABORTED timeout of 120000ms`. Root cause: Mac idle-slept → Ollama unresponsive → call timed out. A model-call failure has no honest status (unlike a fetch failure → `blocked`); it throws and kills the whole unattended run. **Fatal for the B.6.4a weekly cron.** Fix before cron: wrap model calls so timeout/abort → honest `blocked`/`unavailable "model-call-failed"`, plus per-source try/catch isolation. Operational corollary: `caffeinate -i` blocks idle sleep only (lid-close/battery still sleeps); use `-dimsu` on AC — but the durable answer is the resilience fix.
+
+#### Finding #114 — Ingestion gap: 49/109 sources have zero ingested articles
+
+Only ~60 of 109 scoreable sources are ingested (33,300 articles across 61 distinct `source_name`s). `articles` has NO `source_id` FK — source↔article linkage is the `source_name` string only, so the body-sample query's exact-name match defines the unscoreable set by construction (no FK-mismatch bug is possible; genuine ingestion gap, not a join bug). **Not regionally skewed** — ARY News is the #1 ingested source (2,536), with Dawn (997) and Pakistan Observer (735) also top; the gap is scattered across categories (all crypto, most health, most international desks, defense, some science/finance). B.6.5 is gated on ingestion for ~45% of the corpus.
+
+#### Finding #115 — `founderFlag` polluted by coverage-noise
+
+flaggedCount 307, but ~243 are `pending-llm "no-article-bodies"` (81 × 2.2.a/2.3.d/2.2.c) carrying `founderFlag:true` — a coverage/fetch gap, NOT a low-confidence judgment. The B.6.4b founder-review surface (`listFlaggedEvidence`) would be swamped. Fix: don't set `founderFlag` on `no-article-bodies` pendings, or exclude that reason in the review query.
+
+#### Finding #116 — `blocked` exploded at 109-scale (290 vs 2 in the major-outlet slice)
+
+Causes: Wikidata SPARQL failures (2.4.a blocked 34 — the B.6.2c host-extraction timeout biting at scale), corrections/funding presence-page fetches failing (feeder-blocked propagated to 2.1.d and 2.5.b, 32 each), DNS failures (2.4.b 31). The tail is full of DNS-dead / bot-blocking / Wikidata-timing-out sources the slice hid. Needs a retry-cadence policy and a feeder-blocked propagation decision for B.6.5/deploy.
+
+#### Finding #111 (B.6.3) — confirmed on real data
+
+Among the 28 sources that yielded bodies (and were actually judged), ~86% of 2.3.d remained flagged — the verbatim-grounding-verifies-presence-not-relevance gap holds on real data, independent of the coverage noise. Caveat: still qwen; the parked premium-model slice on those 28 would separate structural (#111) from model-weakness if certainty is wanted. Plan the grounding-relevance pass regardless.
+
+#### Operational / safety notes
+
+- **Production-rail near-miss:** a relaunch command that omits `SCOOP_PERSISTENT_DATA_DIR` defaults `getDb()` to the production `data/news.db`. Caught pre-launch (Claude Code restored the env). **Dev runs must set the data-dir env explicitly; never rely on the default.**
+- Throwaway harness `_scoring_run.mjs` still uncommitted — remove once re-run decisions are settled.
+
+#### Decisions / next steps
+
+1. Sequencing: **capture (this entry) → read-only diagnostic on the 32 fetch-failure sources → scope B.6.5 against established real coverage.** Scorer is deliberately third; the body-fetch probe is the hinge. Ingestion (#114) and blocked (#116) queue behind.
+2. B.6.5 scope redrawn: insufficient-data / coverage-threshold contract becomes the centerpiece (not edge-case); validate against the ~28 (or ~60 if body-fetch recovers); fold in #115 `founderFlag` de-pollution; plan the #111 grounding-relevance pass.
+3. Before the B.6.4a cron: land the #113 resilience fix and apply scoring migrations on the VPS (#103/#112).
