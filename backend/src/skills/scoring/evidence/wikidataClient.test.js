@@ -122,6 +122,58 @@ test("org resolved but NO owner → resolved, owner null (B.6.2c-2 maps this)", 
   assert.equal(r.owner, null);
 });
 
+// ── retry + backoff (#116, scoped to the Wikidata client) ───────────────────────
+test("retry — transient (timeout) on search retries then succeeds", async () => {
+  let attempts = 0;
+  const transport = async (url) => {
+    if (url.includes("/w/api.php")) {
+      attempts += 1;
+      if (attempts < 3) { const e = new Error("aborted"); e.code = "ECONNABORTED"; throw e; } // → timeout
+      return { status: 200, data: JSON.stringify({ search: [{ id: "Q300" }] }), headers: {}, finalUrl: url };
+    }
+    return { status: 200, data: JSON.stringify({ results: { bindings: [row({ qid: "Q300", label: "Outlet", website: "https://outlet.example/", isMedia: true, p31: "online newspaper", owner: "Q301", ownerLabel: "Owner Co" })] } }), headers: {}, finalUrl: url };
+  };
+  const r = await resolveOrgByDomain("outlet.example", { transport, wikidataBackoffMs: 0 });
+  assert.equal(attempts, 3, "two transient failures + success = 3 attempts");
+  assert.equal(r.resolved, true);
+  assert.equal(r.owner.label, "Owner Co");
+});
+
+test("retry — exhausts on persistent transient (dns) → query-failed:dns after maxAttempts", async () => {
+  let attempts = 0;
+  const transport = async (url) => {
+    if (url.includes("/w/api.php")) { attempts += 1; const e = new Error("dns"); e.code = "EAI_AGAIN"; throw e; } // → dns
+    return { status: 200, data: "{}", headers: {}, finalUrl: url };
+  };
+  const r = await resolveOrgByDomain("flaky.example", { transport, wikidataBackoffMs: 0 });
+  assert.equal(attempts, 3, "1 initial + 2 retries");
+  assert.equal(r.resolved, false);
+  assert.equal(r.reason, "query-failed:dns");
+});
+
+test("retry — NON-transient (404 not-found) is NOT retried", async () => {
+  let attempts = 0;
+  const transport = async (url) => {
+    if (url.includes("/w/api.php")) { attempts += 1; const e = new Error("nf"); e.response = { status: 404 }; throw e; } // → not-found
+    return { status: 200, data: "{}", headers: {}, finalUrl: url };
+  };
+  const r = await resolveOrgByDomain("x.example", { transport, wikidataBackoffMs: 0 });
+  assert.equal(attempts, 1, "non-transient → single attempt");
+  assert.equal(r.reason, "query-failed:not-found");
+});
+
+test("retry — successful-but-empty search is not a failure (no retry → no-entity)", async () => {
+  let attempts = 0;
+  const transport = async (url) => {
+    attempts += 1;
+    if (url.includes("/w/api.php")) return { status: 200, data: JSON.stringify({ search: [] }), headers: {}, finalUrl: url };
+    return { status: 200, data: "{}", headers: {}, finalUrl: url };
+  };
+  const r = await resolveOrgByDomain("nowhere.example", { transport, wikidataBackoffMs: 0 });
+  assert.equal(attempts, 1, "a clean empty response is not retried");
+  assert.equal(r.reason, "no-entity");
+});
+
 // ── fetchJson ─────────────────────────────────────────────────────────────────
 test("fetchJson — parses JSON; HTML body → parse-error; bad URL → unsafe-url", async () => {
   const okT = async () => ({ status: 200, data: '{"a":1}', headers: {}, finalUrl: "u" });

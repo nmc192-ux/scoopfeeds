@@ -96,6 +96,11 @@ export function upsertEvidence(sourceId, subCriterion, ev, methodologyVersion, d
  */
 export function isStale(row, ttlDays, now) {
   if (!row) return true;
+  // A `blocked` row records a TRANSIENT gather failure (e.g. Wikidata DNS/timeout),
+  // not an observation. Per the evidence contract it must be retried next run — so it
+  // is ALWAYS stale regardless of age (#116). evidenced/unavailable/pending/pending-llm
+  // keep normal TTL behavior below.
+  if (row.status === "blocked") return true;
   const ageMs = now - row.gathered_at;
   return ageMs > ttlDays * 24 * 60 * 60 * 1000;
 }

@@ -50,6 +50,40 @@ const Q_HUMAN = "Q5";
 
 const MAX_CANDIDATES = 20;
 
+// ── Reliability: bounded retry + backoff, SCOPED to the Wikidata client (#116). ──
+// The 109-scale run blocked 34/109 on 2.4.a — 31 query-failed:dns + 3 :timeout — all
+// TRANSIENT burst/contention artifacts (the endpoints were reachable in the same run).
+// fetchJson is single-shot by design; we wrap ONLY the Wikidata calls so other fetchJson
+// callers are unaffected. Only transient kinds are retried; everything else (parse-error,
+// not-found, blocked, unsafe-url) returns immediately. A successful-but-empty response is
+// NOT a failure (→ no retry; resolves to no-entity downstream).
+const TRANSIENT_REASONS = new Set(["dns", "timeout", "rate-limited", "server-error"]);
+const DEFAULT_MAX_ATTEMPTS = 3;   // 1 initial + up to 2 retries
+const DEFAULT_BACKOFF_MS = 400;   // base for exponential backoff with full jitter
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * fetchJsonRetrying — fetchJson with bounded retry on transient failures only.
+ * Backoff is exponential with full jitter: delay ∈ [0, base·2^(attempt-1)). Tunable via
+ * ctx.wikidataMaxAttempts / ctx.wikidataBackoffMs (set backoff 0 in tests → no real wait).
+ */
+async function fetchJsonRetrying(url, ctx = {}) {
+  const maxAttempts = ctx.wikidataMaxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const base = ctx.wikidataBackoffMs ?? DEFAULT_BACKOFF_MS;
+  const opts = { ...ctx, userAgent: ctx.userAgent || WIKIMEDIA_UA };
+  let last;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    last = await fetchJson(url, opts);
+    if (last.ok) return last;
+    if (!TRANSIENT_REASONS.has(last.reason) || attempt === maxAttempts) return last;
+    const ceil = base * Math.pow(2, attempt - 1);
+    const delay = ceil > 0 ? Math.floor(Math.random() * ceil) : 0;
+    if (delay > 0) await sleep(delay);
+  }
+  return last;
+}
+
 function normDomain(d) {
   return String(d || "").toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").trim();
 }
@@ -64,7 +98,7 @@ function qidOf(uri) {
 async function searchEntities(term, ctx) {
   const url = `${WIKIDATA_API}?action=wbsearchentities&search=${encodeURIComponent(term)}`
     + `&language=en&format=json&type=item&limit=10&origin=*`;
-  const r = await fetchJson(url, { ...ctx, userAgent: ctx.userAgent || WIKIMEDIA_UA });
+  const r = await fetchJsonRetrying(url, ctx);
   if (!r.ok) return { ok: false, reason: r.reason };
   return { ok: true, ids: (r.json?.search || []).map((s) => s.id).filter(Boolean) };
 }
@@ -86,7 +120,7 @@ function buildClaimsQuery(qids) {
 
 async function fetchClaims(qids, ctx) {
   const url = `${WIKIDATA_SPARQL}?format=json&query=${encodeURIComponent(buildClaimsQuery(qids))}`;
-  const r = await fetchJson(url, { ...ctx, userAgent: ctx.userAgent || WIKIMEDIA_UA });
+  const r = await fetchJsonRetrying(url, ctx);
   if (!r.ok) return { ok: false, reason: r.reason };
   return { ok: true, rows: r.json?.results?.bindings || [] };
 }

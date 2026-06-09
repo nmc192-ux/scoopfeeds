@@ -169,6 +169,17 @@ test("evidenceCache — isStale: missing → stale; fresh → not; aged past TTL
   assert.equal(isStale({ gathered_at: NOW - 40 * DAY }, 30, NOW), true);
 });
 
+test("evidenceCache — isStale: a 'blocked' row is ALWAYS stale (#116); other statuses keep TTL", () => {
+  // blocked → stale even when fresh by age (transient failure must be retried next run)
+  assert.equal(isStale({ status: "blocked", gathered_at: NOW }, 270, NOW), true);
+  assert.equal(isStale({ status: "blocked", gathered_at: NOW - DAY }, 270, NOW), true);
+  // evidenced / unavailable / pending / pending-llm → unchanged TTL behavior
+  assert.equal(isStale({ status: "evidenced", gathered_at: NOW }, 30, NOW), false);
+  assert.equal(isStale({ status: "unavailable", gathered_at: NOW - 40 * DAY }, 30, NOW), true);
+  assert.equal(isStale({ status: "pending", gathered_at: NOW }, 30, NOW), false);
+  assert.equal(isStale({ status: "pending-llm", gathered_at: NOW - 40 * DAY }, 30, NOW), true);
+});
+
 // ── Runner ────────────────────────────────────────────────────────────────────
 test("runner — gathers both modules, upserts, then reuses fresh cache (TTL)", async () => {
   const first = await gatherForSource({ id: GAMMA, name: "Gamma" }, { db, now: NOW, modules: [bylines, sustained] });
