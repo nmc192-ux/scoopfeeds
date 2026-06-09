@@ -173,11 +173,41 @@ test("evidenceCache — isStale: a 'blocked' row is ALWAYS stale (#116); other s
   // blocked → stale even when fresh by age (transient failure must be retried next run)
   assert.equal(isStale({ status: "blocked", gathered_at: NOW }, 270, NOW), true);
   assert.equal(isStale({ status: "blocked", gathered_at: NOW - DAY }, 270, NOW), true);
-  // evidenced / unavailable / pending / pending-llm → unchanged TTL behavior
+  // evidenced / unavailable / pending / pending-llm (no recoverable reason) → unchanged TTL
   assert.equal(isStale({ status: "evidenced", gathered_at: NOW }, 30, NOW), false);
   assert.equal(isStale({ status: "unavailable", gathered_at: NOW - 40 * DAY }, 30, NOW), true);
   assert.equal(isStale({ status: "pending", gathered_at: NOW }, 30, NOW), false);
   assert.equal(isStale({ status: "pending-llm", gathered_at: NOW - 40 * DAY }, 30, NOW), true);
+});
+
+test("evidenceCache — isStale: recoverable coverage-gap rows are ALWAYS stale; non-listed reasons keep TTL (#116 ext.)", () => {
+  const fresh = NOW; // age 0 → fresh by TTL; recoverable gaps must override that
+  // RECOVERABLE gaps → stale even when age-fresh
+  assert.equal(isStale({ status: "pending-llm", value: { reason: "no-article-bodies" }, gathered_at: fresh }, 120, NOW), true);
+  assert.equal(isStale({ status: "unavailable", value: { reason: "owner-unknown" }, gathered_at: fresh }, 270, NOW), true);
+  // COMPLETED observations (same status, NON-listed reason) → TTL behavior (fresh → not stale)
+  assert.equal(isStale({ status: "pending-llm", value: { reason: "runs-disagree" }, gathered_at: fresh }, 120, NOW), false);
+  assert.equal(isStale({ status: "unavailable", value: { reason: "no-relevant-article-in-sample" }, gathered_at: fresh }, 120, NOW), false);
+  // INGESTION-conditional unavailables → TTL behavior (a scoring re-run can't fix them)
+  assert.equal(isStale({ status: "unavailable", value: { reason: "no-editorial-domain" }, gathered_at: fresh }, 270, NOW), false);
+  assert.equal(isStale({ status: "unavailable", value: { reason: "no-articles" }, gathered_at: fresh }, 120, NOW), false);
+  // evidenced fresh → not stale (LLM judgments preserved)
+  assert.equal(isStale({ status: "evidenced", value: { bucket: "x" }, gathered_at: fresh }, 120, NOW), false);
+  // reason readable from RAW JSON string value too (defensive: unhydrated row)
+  assert.equal(isStale({ status: "pending-llm", value: JSON.stringify({ reason: "no-article-bodies" }), gathered_at: fresh }, 120, NOW), true);
+});
+
+test("evidenceCache — body-pre-pass gate flips: a hydrated pending-llm/no-article-bodies row reads STALE (anyBodyStale=true)", () => {
+  // Seed via upsert → read via getEvidence (the exact path the runner's body-pre-pass gate
+  // uses: isStale(getEvidence(source.id, m.id, db), m.ttlDays, now)). 2.2.d ttlDays=120.
+  upsertEvidence(ALPHA, "2.2.a", { status: "pending-llm", value: { reason: "no-article-bodies" }, confidence: 0, evidenceUrl: null, gatheredAt: NOW }, "v1.1", db);
+  const row = getEvidence(ALPHA, "2.2.a", db);
+  assert.equal(row.status, "pending-llm");
+  assert.equal(row.value.reason, "no-article-bodies", "reason survives the hydrate round-trip");
+  assert.equal(isStale(row, 120, NOW), true, "anyBodyStale predicate now flips → body pre-pass re-runs");
+  // Contrast: a completed split (runs-disagree) at the same status stays fresh → pre-pass NOT forced by it.
+  upsertEvidence(ALPHA, "2.2.a", { status: "pending-llm", value: { reason: "runs-disagree" }, confidence: 0, evidenceUrl: null, gatheredAt: NOW }, "v1.1", db);
+  assert.equal(isStale(getEvidence(ALPHA, "2.2.a", db), 120, NOW), false);
 });
 
 // ── Runner ────────────────────────────────────────────────────────────────────

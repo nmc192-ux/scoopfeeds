@@ -90,17 +90,48 @@ export function upsertEvidence(sourceId, subCriterion, ev, methodologyVersion, d
   return info.changes;
 }
 
+// Recoverable COVERAGE-GAP rows (#116 extension): a row that records a transient/resolvable
+// gap — NOT a completed observation — is never "fresh"; it re-attempts next run, exactly like
+// `blocked`. Keyed status → the set of value.reason values that a clean low-contention scoring
+// re-run can resolve (the underlying articles exist, or an upstream criterion can resolve):
+//   - pending-llm / no-article-bodies : the body pre-pass found no bodies (fetch contended);
+//       a low-contention re-run re-fetches → the article-text judgments can finally run.
+//   - unavailable / owner-unknown     : 2.2.d COI pre-flight had no resolved owner; resolves
+//       once 2.4.a (itself re-attempted when blocked) resolves with a named owner.
+// DELIBERATELY EXCLUDED (kept on normal TTL):
+//   - completed observations          : unavailable/no-relevant-article-in-sample,
+//       pending-llm/runs-disagree — a judgment DID run (nothing relevant / model split).
+//   - ingestion-conditional gaps      : no-editorial-domain, no-articles, no-ingested-articles,
+//       feeder-unavailable — a scoring re-run cannot fix these (they need ingestion, #114).
+const RECOVERABLE_GAP_REASONS = Object.freeze({
+  "pending-llm": new Set(["no-article-bodies"]),
+  "unavailable": new Set(["owner-unknown"]),
+});
+
+// Read value.reason whether the row's value is hydrated (object — the getEvidence path used
+// at every runner call site) or raw JSON (string — defensive, in case an unhydrated row arrives).
+function reasonOf(row) {
+  let v = row.value;
+  if (typeof v === "string") { try { v = JSON.parse(v); } catch { return null; } }
+  return v && typeof v === "object" ? (v.reason ?? null) : null;
+}
+
 /**
- * isStale — true if there is no cached row, or it is older than ttlDays.
- * Drives "re-gather only when stale" in the weekly run.
+ * isStale — true if there is no cached row, it records a recoverable gap (blocked, or a
+ * listed coverage-gap reason), or it is older than ttlDays. Drives "re-gather only when
+ * stale" at all three runner gates (discovery pre-pass, body pre-pass, per-module skip).
  */
 export function isStale(row, ttlDays, now) {
   if (!row) return true;
   // A `blocked` row records a TRANSIENT gather failure (e.g. Wikidata DNS/timeout),
   // not an observation. Per the evidence contract it must be retried next run — so it
-  // is ALWAYS stale regardless of age (#116). evidenced/unavailable/pending/pending-llm
-  // keep normal TTL behavior below.
+  // is ALWAYS stale regardless of age (#116).
   if (row.status === "blocked") return true;
+  // #116 extension: a recoverable COVERAGE GAP (resolvable on a clean re-run) is never
+  // fresh either — same principle as blocked. Completed observations + ingestion-conditional
+  // gaps are NOT listed, so they fall through to normal TTL behavior below.
+  const recoverable = RECOVERABLE_GAP_REASONS[row.status];
+  if (recoverable && recoverable.has(reasonOf(row))) return true;
   const ageMs = now - row.gathered_at;
   return ageMs > ttlDays * 24 * 60 * 60 * 1000;
 }
