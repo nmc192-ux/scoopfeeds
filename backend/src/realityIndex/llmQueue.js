@@ -35,6 +35,7 @@ const PROVIDER = _PROVIDER_ENV || (() => {
   if (process.env.CEREBRAS_API_KEY)   return "cerebras";
   if (process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID) return "cloudflare";
   if (process.env.GROQ_API_KEY)       return "groq";
+  if (process.env.DEEPSEEK_API_KEY)   return "deepseek";
   if (process.env.GEMINI_API_KEY)     return "gemini";
   return "ollama";
 })();
@@ -101,6 +102,12 @@ const CLOUDFLARE_EMBED_ENDPOINT = CLOUDFLARE_ACCOUNT_ID
 const GROQ_API_KEY  = process.env.GROQ_API_KEY || "";
 const GROQ_MODEL    = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
 const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
+
+// DeepSeek (OpenAI-compatible). Default to the durable current id "deepseek-v4-flash"
+// (the "deepseek-chat" alias retires 2026-07-24). Override via DEEPSEEK_MODEL.
+const DEEPSEEK_API_KEY  = process.env.DEEPSEEK_API_KEY || "";
+const DEEPSEEK_MODEL    = process.env.DEEPSEEK_MODEL    || "deepseek-v4-flash";
+const DEEPSEEK_ENDPOINT = "https://api.deepseek.com/chat/completions";
 
 // Ollama
 const OLLAMA_BASE        = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/$/, "");
@@ -194,6 +201,10 @@ async function _callOpenAICompat({ endpoint, apiKey, model, prompt, temperature,
       );
       const text = data?.choices?.[0]?.message?.content;
       if (!text) return null;
+      // Most OpenAI-compat providers (cerebras/groq/nim) return content as a JSON STRING;
+      // Cloudflare Workers AI returns it as an ALREADY-PARSED object. Accept both. A string
+      // that fails to parse still falls through to the _rawText fallback.
+      if (typeof text === "object") return text;
       try { return JSON.parse(text); }
       catch { return { _rawText: text }; }
     } catch (err) {
@@ -237,6 +248,15 @@ async function rawCallJsonGroq({ prompt, temperature = 0.2, maxOutputTokens = 20
     endpoint: GROQ_ENDPOINT, apiKey: GROQ_API_KEY,
     model: model || GROQ_MODEL,
     prompt, temperature, maxOutputTokens, label: "Groq", timeout: 30_000,
+  });
+}
+
+async function rawCallJsonDeepseek({ prompt, temperature = 0.2, maxOutputTokens = 2048, model }) {
+  if (!DEEPSEEK_API_KEY) return null;
+  return _callOpenAICompat({
+    endpoint: DEEPSEEK_ENDPOINT, apiKey: DEEPSEEK_API_KEY,
+    model: model || DEEPSEEK_MODEL,
+    prompt, temperature, maxOutputTokens, label: "DeepSeek", timeout: 30_000,
   });
 }
 
@@ -331,6 +351,7 @@ const GEN_HANDLERS = {
   cerebras:   rawCallJsonCerebras,
   cloudflare: rawCallJsonCloudflare,
   groq:       rawCallJsonGroq,
+  deepseek:   rawCallJsonDeepseek,
   nim:        rawCallJsonNim,
   ollama:     rawCallJsonOllama,
   gemini:     rawCallJsonGemini,
@@ -496,6 +517,7 @@ const GEN_MODEL_BY_PROVIDER = {
   cerebras:   CEREBRAS_MODEL,
   cloudflare: CLOUDFLARE_GEN_MODEL,
   groq:       GROQ_MODEL,
+  deepseek:   DEEPSEEK_MODEL,
   ollama:     OLLAMA_MODEL,
   nim:        NIM_MODEL,
   gemini:     GEMINI_GEN_MODEL,
