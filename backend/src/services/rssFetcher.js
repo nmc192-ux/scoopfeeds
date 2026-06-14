@@ -1,7 +1,8 @@
 import Parser from "rss-parser";
 import { v5 as uuidv5 } from "uuid";
 import { logger, logIngestion, logSourceHealth } from "./logger.js";
-import { upsertArticle, markDuplicateIfSimilar, logIngestionEvent, updateSourceHealth } from "../models/database.js";
+import { upsertArticle, markDuplicateIfSimilar, logIngestionEvent, updateSourceHealth, getDb } from "../models/database.js";
+import { embedDocument } from "../realityIndex/embeddings/embeddingService.js";
 
 const NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
 
@@ -182,6 +183,17 @@ export async function fetchSource(source) {
         // ingested article (same story from a different wire/source). Mark the
         // lower-credibility copy as is_duplicate=1 so the feed hides it.
         try { markDuplicateIfSimilar(article); } catch (_e) { /* non-fatal */ }
+        // Best-effort: embed genuinely-new, non-duplicate articles for semantic
+        // clustering (Sprint 1). Fire-and-forget — must NEVER block or break ingestion;
+        // scripts/backfill-article-embeddings.mjs is the catch-all, and the global
+        // EMBED_CONCURRENCY cap bounds concurrency. No-ops gracefully if vec is unavailable.
+        try {
+          const dup = getDb().prepare("SELECT is_duplicate FROM articles WHERE id = ?").get(article.id)?.is_duplicate;
+          if (dup === 0) {
+            const text = ((article.title || "") + ". " + (article.description || "")).trim() || (article.title || "");
+            if (text) embedDocument({ scope: "article", scope_id: article.id, text }).catch(() => {});
+          }
+        } catch (_e) { /* embedding is best-effort — never fail ingest */ }
       }
     }
 
