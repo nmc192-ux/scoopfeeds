@@ -28,6 +28,8 @@ import {
   listRelatedStories,
 } from "../models/database.js";
 import { logger } from "./logger.js";
+import { clusterWindow } from "../realityIndex/clustering/semanticClusterer.js";
+import { detectTemplates } from "../realityIndex/clustering/templateFilter.js";
 
 const GEMINI_MODEL    = "gemini-flash-latest";
 const GEMINI_ENDPOINT = (key) =>
@@ -185,6 +187,36 @@ export function clusterRecentArticles({ windowHours = 24, minArticles = 3 } = {}
     .slice(0, 8);
 }
 
+/**
+ * semanticClusterArticles — production grouping (Sprint 2). Replaces the bigram grouping:
+ * load the window's non-dup cred>=5 articles, EXCLUDE recurring templates (K=4/D=3), cluster
+ * their STORED vectors (semantic cosine @ TAU 0.78 + merge guard @ 0.84), and ADAPT each
+ * cluster to the SAME output shape clusterRecentArticles produced (anchor = most-credible,
+ * sha256-title id, plurality category, bigram keywords, full ordered .articles). No top-N
+ * cap here — caps live at the brief step. Window defaults to now-24h; override for backfill/tests.
+ */
+function semanticClusterArticles({ windowStart, windowEnd, minArticles = 2 } = {}) {
+  const db = getDb();
+  const end = windowEnd ?? Date.now();
+  const start = windowStart ?? (end - 24 * 60 * 60 * 1000);
+  const { templateIds } = detectTemplates({ db });
+  const { clusters } = clusterWindow({ db, windowStart: start, windowEnd: end, minSize: minArticles, excludeIds: templateIds });
+  return clusters.map((c) => {
+    const arts = c.members; // full objects, most-credible first (loader orders cred desc)
+    const anchor = arts[0];
+    const cats = {};
+    for (const a of arts) cats[a.category] = (cats[a.category] || 0) + 1;
+    const category = Object.entries(cats).sort((a, b) => b[1] - a[1])[0][0];
+    const id = crypto.createHash("sha256").update(anchor.title.toLowerCase()).digest("hex").slice(0, 16);
+    const keywords = [...new Set(arts.flatMap((a) => extractBigrams(a.title).bigrams).flatMap((b) => b.split(" ")))].slice(0, 12);
+    return {
+      id, title: anchor.title, category, keywords,
+      articles: arts.slice(0, 25), article_count: arts.length,
+      image_url: arts.find((a) => a.image_url)?.image_url || null,
+    };
+  });
+}
+
 // ─── Prompt builders ──────────────────────────────────────────────────────
 
 function buildBriefingPrompt(cluster) {
@@ -293,7 +325,7 @@ function fallbackBrief(cluster) {
 
 // ─── Main refresh cycle ───────────────────────────────────────────────────
 
-export async function refreshAnalysis() {
+export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
   const now   = Date.now();
   const TTL_CLUSTER   = 24 * 60 * 60 * 1000; // 24h
   const TTL_EXPLAINED = 12 * 60 * 60 * 1000; // 12h
@@ -305,40 +337,46 @@ export async function refreshAnalysis() {
 
   logger.info("📊 Analysis refresh starting");
 
-  // 1. Cluster articles heuristically (no LLM cost)
-  const clusters = clusterRecentArticles({ windowHours: 24, minArticles: 3 });
+  // 1. Cluster articles semantically over stored vectors (template-excluded). The bigram
+  //    clusterRecentArticles is retired as the grouping basis (#119); kept in-module for ref.
+  const clusters = semanticClusterArticles({ windowStart, windowEnd });
   logger.info(`📊 Found ${clusters.length} story clusters`);
 
-  // 2. For each cluster: generate brief + (for top 3) perspectives
-  for (let ci = 0; ci < clusters.length; ci++) {
-    const cluster = clusters[ci];
-
-    // — Brief —
-    let briefData = fallbackBrief(cluster);
-    if (hasGemini) {
-      const result = await callGemini(buildBriefingPrompt(cluster));
-      if (result?.brief) {
-        briefData = {
-          summary: result.summary || briefData.summary,
-          brief: (result.brief || []).map(p => ({
-            ts:      p.ts,
-            text:    p.text,
-            sources: (p.sourceIndices || [])
-              .map(i => cluster.articles[i - 1])
-              .filter(Boolean)
-              .map(a => ({ name: a.source_name, url: a.url })),
-          })),
-        };
-      }
-      await sleep(4000); // rate limit: 4s between calls
-    }
-
-    // — Perspectives (top 3 clusters only to conserve quota) —
+  // 2. Persist ALL clusters (clusters are size-sorted). Brief only substantial ones
+  //    (article_count >= 5, top 20 by size — Gemini quota); smaller clusters persist with
+  //    an empty brief. Perspectives: the top 3 briefed clusters. Empty brief is safe
+  //    downstream — eventPromoter keys off article_count/article_ids/title, not brief.
+  const briefable = new Set(clusters.filter(c => c.article_count >= 5).slice(0, 20).map(c => c.id));
+  let perspCount = 0;
+  for (const cluster of clusters) {
+    let briefData = { summary: null, brief: [] };
     let perspectives = null;
-    if (hasGemini && ci < 3) {
-      const perspResult = await callGemini(buildPerspectivesPrompt(cluster));
-      if (Array.isArray(perspResult)) perspectives = perspResult;
-      await sleep(4000);
+
+    if (briefable.has(cluster.id)) {
+      briefData = fallbackBrief(cluster); // deterministic baseline (also the no-Gemini path)
+      if (hasGemini) {
+        const result = await callGemini(buildBriefingPrompt(cluster));
+        if (result?.brief) {
+          briefData = {
+            summary: result.summary || briefData.summary,
+            brief: (result.brief || []).map(p => ({
+              ts:      p.ts,
+              text:    p.text,
+              sources: (p.sourceIndices || [])
+                .map(i => cluster.articles[i - 1])
+                .filter(Boolean)
+                .map(a => ({ name: a.source_name, url: a.url })),
+            })),
+          };
+        }
+        await sleep(4000); // rate limit: 4s between calls
+        if (perspCount < 3) { // perspectives only for the top-3 briefed
+          const perspResult = await callGemini(buildPerspectivesPrompt(cluster));
+          if (Array.isArray(perspResult)) perspectives = perspResult;
+          perspCount++;
+          await sleep(4000);
+        }
+      }
     }
 
     upsertStoryCluster({

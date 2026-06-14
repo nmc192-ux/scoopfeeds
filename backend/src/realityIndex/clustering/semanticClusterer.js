@@ -18,17 +18,22 @@ export const DEFAULT_TAU = 0.78;
 export const GUARD_TAU = 0.84;
 const DIMS = 768;
 
-/** Load window articles + their stored unit-vectors, in the #119 order (cred desc, pub desc). */
-export function loadWindowVectors({ db = getDb(), windowStart, windowEnd }) {
+/** Load window articles (full fields the persist/brief layer needs) + their stored
+ *  unit-vectors, in the #119 order (cred desc, pub desc). `excludeIds` (e.g. recurring
+ *  templates) are skipped pre-clustering. */
+export function loadWindowVectors({ db = getDb(), windowStart, windowEnd, excludeIds = null }) {
   const rows = db.prepare(
-    `SELECT a.id, a.source_name AS source, a.title, e.embedding AS vec
+    `SELECT a.id, a.title, a.description, a.url, a.source_name, a.category,
+            a.published_at, a.credibility, a.image_url, e.embedding AS vec
        FROM articles a
        JOIN embedding_meta m ON m.scope = 'article' AND m.scope_id = a.id
        JOIN embeddings     e ON e.rowid = m.rowid
       WHERE a.published_at >= ? AND a.published_at < ? AND a.is_duplicate = 0
       ORDER BY a.credibility DESC, a.published_at DESC`
   ).all(windowStart, windowEnd);
-  return rows.map((r) => {
+  const out = [];
+  for (const r of rows) {
+    if (excludeIds && excludeIds.has(r.id)) continue;
     const buf = r.vec; // Uint8Array, 768*4 bytes (Float32 LE)
     const f = new Float32Array(buf.buffer, buf.byteOffset, buf.length / 4);
     const v = new Float64Array(DIMS);
@@ -36,8 +41,9 @@ export function loadWindowVectors({ db = getDb(), windowStart, windowEnd }) {
     for (let k = 0; k < DIMS; k++) { v[k] = f[k]; n += f[k] * f[k]; }
     n = Math.sqrt(n) || 1;            // normalize → cosine = dot (bge is already ~unit)
     for (let k = 0; k < DIMS; k++) v[k] /= n;
-    return { id: r.id, source: r.source, title: r.title, vec: v };
-  });
+    out.push({ id: r.id, title: r.title, description: r.description, url: r.url, source_name: r.source_name, category: r.category, published_at: r.published_at, credibility: r.credibility, image_url: r.image_url, vec: v });
+  }
+  return out;
 }
 
 /** Greedy centroid-cosine clustering: each item joins the first cluster whose centroid
@@ -69,7 +75,7 @@ function greedy(items, tau) {
 
 const summarize = (groups, minSize) => {
   const cs = groups.filter((g) => g.length >= minSize)
-    .map((m) => ({ members: m.map((x) => ({ id: x.id, source: x.source, title: x.title })), size: m.length, sources: new Set(m.map((x) => x.source)).size }))
+    .map((m) => ({ members: m.map(({ vec, ...rest }) => rest), size: m.length, sources: new Set(m.map((x) => x.source_name)).size }))
     .sort((a, b) => b.size - a.size);
   const grouped = cs.reduce((s, c) => s + c.size, 0);
   return { clusters: cs, count: cs.length, multiSource: cs.filter((c) => c.sources >= 2).length, grouped };
@@ -80,8 +86,8 @@ const summarize = (groups, minSize) => {
  *   raw      = clusters before the guard (the #119-comparable view)
  *   clusters = clusters after the merge guard (the production output)
  */
-export function clusterWindow({ db = getDb(), windowStart, windowEnd, tau = DEFAULT_TAU, guardTau = GUARD_TAU, minSize = 2 } = {}) {
-  const items = loadWindowVectors({ db, windowStart, windowEnd });
+export function clusterWindow({ db = getDb(), windowStart, windowEnd, tau = DEFAULT_TAU, guardTau = GUARD_TAU, minSize = 2, excludeIds = null } = {}) {
+  const items = loadWindowVectors({ db, windowStart, windowEnd, excludeIds });
 
   // 1) raw greedy clustering at TAU
   const rawGroups = greedy(items, tau).map((c) => c.members);
