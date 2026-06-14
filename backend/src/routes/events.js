@@ -47,6 +47,7 @@ function publicEvent(ev) {
     severity:         ev.severity,
     hero_image_url:   ev.hero_image_url,
     article_count:    ev.article_count ?? 0,
+    source_count:     ev.source_count ?? 0,
     market_count:     ev.market_count ?? 0,
     top_probability:  ev.top_probability ?? null,
     truth_gap:        ev.truth_gap ?? null,
@@ -104,12 +105,17 @@ function publicActor(a) {
 // the AnomalyChip on cards/headers. Older anomalies live in the dedicated
 // /api/ri/anomalies feed.
 const ANOM_FRESH_MS = 6 * 60 * 60 * 1000;
+// Prominence sort (Phase 5a): rank by (2·source_count + article_count), recency-decayed.
+// Divisor 1 + age/HALFLIFE → an event last active PROMINENCE_HALFLIFE_MS ago counts at ~half weight.
+const PROMINENCE_HALFLIFE_MS = 24 * 60 * 60 * 1000;
 
 function getEventBySlug(db, slug) {
   const cutoff = Date.now() - ANOM_FRESH_MS;
   return db.prepare(`
     SELECT e.*,
       (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)     AS article_count,
+      (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
+         JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = e.id)  AS source_count,
       (SELECT COUNT(*) FROM event_market_links eml WHERE eml.event_id = e.id) AS market_count,
       (SELECT pm.yes_price
        FROM event_market_links eml
@@ -192,6 +198,7 @@ router.get("/", (req, res) => {
     const db = getDb();
     const status   = req.query.status   ?? "active";
     const category = req.query.category ?? null;
+    const sort     = req.query.sort     ?? "recency"; // "recency" (default, existing callers) | "prominence"
     const limit    = Math.min(parseInt(req.query.limit  ?? "30", 10), 100);
     const offset   = parseInt(req.query.offset ?? "0", 10);
 
@@ -199,6 +206,8 @@ router.get("/", (req, res) => {
     let sql = `
       SELECT e.*,
         (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)       AS article_count,
+        (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
+           JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = e.id)     AS source_count,
         (SELECT COUNT(*) FROM event_market_links eml WHERE eml.event_id = e.id) AS market_count,
         (SELECT pm.yes_price
          FROM event_market_links eml
@@ -223,22 +232,34 @@ router.get("/", (req, res) => {
          ORDER BY a.detected_at DESC LIMIT 1) AS anom_detected_at,
         (SELECT a.payload      FROM anomaly_alerts a
          WHERE a.event_id = e.id AND a.acknowledged = 0 AND a.detected_at >= ?
-         ORDER BY a.detected_at DESC LIMIT 1) AS anom_payload
+         ORDER BY a.detected_at DESC LIMIT 1) AS anom_payload,
+        (
+          (2.0 * (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
+                    JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = e.id)
+           + (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id))
+          / (1.0 + (CAST(? AS REAL) - e.last_activity_at) / ?)
+        ) AS prominence
       FROM events e
       WHERE e.status = ?
     `;
-    const params = [cutoff, cutoff, cutoff, cutoff, cutoff, status];
+    const now = Date.now();
+    const params = [cutoff, cutoff, cutoff, cutoff, cutoff, now, PROMINENCE_HALFLIFE_MS, status];
 
     if (category) {
       sql += " AND e.category = ?";
       params.push(category);
     }
 
-    sql += " ORDER BY e.last_activity_at DESC LIMIT ? OFFSET ?";
+    // recency is the default (existing callers unaffected); prominence leads with the biggest
+    // current multi-source stories. ORDER BY references the `prominence` output-column alias.
+    sql += sort === "prominence"
+      ? " ORDER BY prominence DESC, e.last_activity_at DESC"
+      : " ORDER BY e.last_activity_at DESC";
+    sql += " LIMIT ? OFFSET ?";
     params.push(limit, offset);
 
     const rows = db.prepare(sql).all(...params);
-    res.json({ events: rows.map(publicEvent), limit, offset });
+    res.json({ events: rows.map(publicEvent), limit, offset, sort });
   } catch (err) {
     logger.error(`GET /api/events error: ${err.message}`);
     res.status(500).json({ error: "Internal server error" });
@@ -253,6 +274,18 @@ router.get("/:slug", (req, res) => {
     const db  = getDb();
     const ev  = getEventBySlug(db, req.params.slug);
     if (!ev) return res.status(404).json({ error: "Event not found" });
+    // Phase 4 durable identity: a merged event's old slug is an alias for its survivor.
+    // Redirect to the survivor instead of serving the stale merged row. 302 + Location for
+    // HTTP clients; the {redirect} body lets the SPA replace its route to the canonical slug.
+    if (ev.status === "merged") {
+      const meta = safeJsonParse(ev.meta);
+      if (meta?.merged_into_slug) {
+        return res
+          .status(302)
+          .set("Location", `/api/ri/events/${meta.merged_into_slug}`)
+          .json({ redirect: meta.merged_into_slug, merged_into: meta.merged_into ?? null, status: "merged" });
+      }
+    }
     res.json(publicEvent(ev));
   } catch (err) {
     logger.error(`GET /api/events/:slug error: ${err.message}`);
