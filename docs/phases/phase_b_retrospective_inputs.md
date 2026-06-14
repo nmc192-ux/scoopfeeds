@@ -1551,3 +1551,22 @@ Scorer complete at v1-provisional. Leverage pivots upstream:
 3. Re-validate the scorer at higher coverage; finalize anchors (D + lock); un-provision the version.
 4. Cron-enablement: #112 VPS migration + lift the production guard (#117) + the #113 resilience bundle (gatherForAllSources isolation + ECONNABORTED retry).
 Hygiene: remove `_fetch_diag.mjs` + `_phase2_verify.mjs`; keep `_scoring_run.mjs` for the clean re-run.
+
+### Session 14 — DeepSeek settled as the scoring judge; calibration biases attributed; scorer-design fixes deferred to Phase C
+
+**Arc:** the cloud-judge search closed. Local qwen (laptop-sleep process deaths) and Cloudflare-qwen (429 rate-limit storm — 266 throttles, never finished) were both dead ends; **DeepSeek (deepseek-v4-flash, OpenAI-compatible) is the settled judge.** Provider registered + committed (`8b58081`, infrastructure only — NOT added to `VALIDATED_CAPABLE_MODELS`, makes no scoring-validation claim). Full 15-source GT calibration run end-to-end.
+
+#### Finding #118 — DeepSeek is a viable judge; the residual scorer biases are systematic and attributable (mapping vs model)
+- **Mechanics (settled):** 606 calls / **0 failures** / slowest 7.2s / 0 calls >30s; ~75% prompt-cache hit when warm. Cost: $0.114 for 15 sources, **~$0.0076/source settled**, **~$0.83 per 109-source corpus** (miss + output dominate; robust to the unverified cache-hit rate).
+- **Accuracy:** **3 of 7 scored sources within ±5** (NPR, The Atlantic, Dawn — all at |1|); 4 miss; 8/15 insufficient-data (coverage, not the model). The misses are **systematic, not random** — attributed from DeepSeek's actual stored verdicts (bucket + grounding quote):
+  - **DE saturation** — 2.3.d returns the top bucket ("experts/primary sources") → **100 on every source with DE evidence**, incl. low-GT ones. **MODEL** over-grade enabled by **#111** (verbatim grounding verifies a citation is *present*, not that the article is *predominantly* expert/primary). Mapping correct; the verdict (degree) is too generous.
+  - **MT collapse → floor trip** — France 24 2.2.c `"no disclosure"` on a non-data-journalism war dispatch = **#109 gate-failure** (a capable model should abstain `not-applicable`). One MT sub <30 then trips the `<30 → cap 50` floor on thin MT coverage → France 24/Politico forced to combined 50. **MIXED: model verdict error + MAPPING floor over-fire.**
+  - **ET aggregator-blindness** — Hacker News ET=77 rests on **deterministic** 2.1.a (about-page present → 67) + 2.1.c (byline ratio 0.8 → 80); no 2.1 sub-criterion distinguishes aggregator from editorial org. **Pure MAPPING/criteria gap — DeepSeek not involved.**
+  - **Single-criterion fragility (bias D)** — Bloomberg ET=0 rests on 2.1.c alone (the rest fetch-blocked). **MAPPING/coverage**, not the model.
+
+#### Decision — ship honest-with-caveats; defer scorer redesign to Phase C
+- Scoring ships at **v1-provisional, honest-with-caveats**. **Do NOT publish production scores from the current biased scorer** — the systematic DE-saturation / MT-collapse / ET-aggregator distortions would mislead.
+- Scorer-design fixes deferred to **Phase C** (where clustering becomes the scoring input, **PF-08**): grounding-relevance pass (#111), find-relevant gate hardening (#109), an aggregator discriminator in ET, single-criterion-component handling (bias D), and the floor sparse-coverage guard.
+- **Cheapest resume item:** the **floor sparse-coverage guard** — don't let one <30 sub-criterion cap a source when component coverage is thin; it alone un-floors France 24/Politico.
+- **Cost-discipline win:** DeepSeek pay-per-token replaces the dead local/free paths (laptop-sleep deaths, Cloudflare 429 storm) — **~$4/mo at weekly cron cadence**.
+- Hygiene: removed the four dead throwaway harnesses; kept `_calib_deepseek.mjs` as the resume tool.
