@@ -9,13 +9,12 @@ import axios from "axios";
 
 const api = axios.create({ baseURL: "/api/ri" });
 
-export function useEvents({ category, status = "active", limit = 30, sort } = {}) {
+export function useEvents({ category, status = "active", limit = 30 } = {}) {
   return useQuery({
-    queryKey: ["events-list", { category, status, limit, sort }],
+    queryKey: ["events-list", { category, status, limit }],
     queryFn: async () => {
       const params = new URLSearchParams({ status, limit: String(limit) });
       if (category) params.set("category", category);
-      if (sort) params.set("sort", sort);
       const { data } = await api.get(`/events?${params}`);
       return data;
     },

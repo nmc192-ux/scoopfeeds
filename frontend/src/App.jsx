@@ -202,7 +202,7 @@ export default function App() {
         </Routes>
       </main>
 
-      <Footer kofiUrl={publicConfig?.kofi?.url} />
+      <Footer health={health} />
 
       <ReaderModal />
       <OnboardingModal />
@@ -220,31 +220,126 @@ export default function App() {
 }
 
 /* ─── Footer ─────────────────────────────────────────────────────────────── */
-function Footer({ kofiUrl }) {
+function Footer({ health }) {
   return (
-    <footer className="mt-16 py-8 border-t border-[var(--color-border)]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-2.5">
-          <ScoopMascot size="sm" animated={false} />
-          <span
-            className="text-[var(--color-text)]"
-            style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "14px", fontWeight: 800, letterSpacing: "-0.04em" }}
-          >Scoop<span style={{ color: "var(--color-orange)" }}>feeds</span></span>
-          <span className="text-[var(--color-text-tertiary)] font-editorial text-[13px]">— Intelligent news, curated.</span>
+    <footer className="mt-12 py-8 border-t border-[var(--color-border)]">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[var(--color-text-tertiary)]">
+          <div className="flex items-center gap-2.5">
+            <ScoopMascot size="sm" animated={false} />
+            <div>
+              <span
+                className="text-[var(--color-text)]"
+                style={{ fontFamily: "'Inter', system-ui, sans-serif", fontSize: "14px", fontWeight: 800, letterSpacing: "-0.04em" }}
+              >Scoop<span style={{ color: "var(--color-orange)" }}>feeds</span></span>
+              <span className="ml-2 text-[var(--color-text-tertiary)] font-editorial text-[13px]">— Intelligent news, curated.</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <span>📰 {health?.articles || 0} articles</span>
+            <span>•</span>
+            <span>📺 {health?.videos || 0} videos</span>
+            <span>•</span>
+            <span>🔄 Refreshes every 30 min</span>
+            <span>•</span>
+            <span>🌐 EN + اردو</span>
+            <span>•</span>
+            <span className="text-emerald-500">● Live</span>
+          </div>
         </div>
-        <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-[var(--color-text-tertiary)]">
-          {kofiUrl && (
-            <a href={kofiUrl} target="_blank" rel="noopener noreferrer"
-               className="inline-flex items-center gap-1 font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">
-              ☕ Support Scoop
-            </a>
-          )}
-          <a href="/markets"          className="hover:text-[var(--color-text)] transition-colors">Markets</a>
-          <a href="/editorial-policy" className="hover:text-[var(--color-text)] transition-colors">Sources</a>
-          <a href="/about"            className="hover:text-[var(--color-text)] transition-colors">About</a>
-          <a href="/privacy"          className="hover:text-[var(--color-text)] transition-colors">Privacy</a>
-          <a href="/terms"            className="hover:text-[var(--color-text)] transition-colors">Terms</a>
-        </nav>
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-4 text-xs text-[var(--color-text-tertiary)]">
+          <a href="/about"             className="hover:text-[var(--color-text)] transition-colors">About</a>
+          <span>·</span>
+          <a href="/live-tv"           className="hover:text-[var(--color-text)] transition-colors">Live TV</a>
+          <span>·</span>
+          <a href="/markets"           className="hover:text-[var(--color-text)] transition-colors">Markets</a>
+          <span>·</span>
+          <a href="/predictions"       className="hover:text-[var(--color-text)] transition-colors">Reality Index</a>
+          <span>·</span>
+          <a href="/events"            className="hover:text-[var(--color-text)] transition-colors">Event Tracker</a>
+          <span>·</span>
+          <a href="/truth-gap"         className="hover:text-[var(--color-text)] transition-colors">Truth Gap</a>
+          <span>·</span>
+          <a href="/anomalies"         className="hover:text-[var(--color-text)] transition-colors">Anomalies</a>
+          <span>·</span>
+          <a href="/briefs"            className="hover:text-[var(--color-text)] transition-colors">Briefs</a>
+          <span>·</span>
+          <a href="/world-map"         className="hover:text-[var(--color-text)] transition-colors">World Map</a>
+          <span>·</span>
+          <a href="/finance"           className="hover:text-[var(--color-text)] transition-colors">Finance</a>
+          <span>·</span>
+          <a href="/dashboard"         className="hover:text-[var(--color-text)] transition-colors">Dashboard</a>
+          <span>·</span>
+          <a href="/weather"           className="hover:text-[var(--color-text)] transition-colors">Weather</a>
+          <span>·</span>
+          <a href="/newsletter"        className="hover:text-[var(--color-text)] transition-colors">Newsletter</a>
+          <span>·</span>
+          <a href="/saved"             className="hover:text-[var(--color-text)] transition-colors">Saved</a>
+          <span>·</span>
+          <a href="/editorial-policy"  className="hover:text-[var(--color-text)] transition-colors">Editorial policy</a>
+          <span>·</span>
+          <a href="/contact"           className="hover:text-[var(--color-text)] transition-colors">Contact</a>
+          <span>·</span>
+          <a href="/privacy"           className="hover:text-[var(--color-text)] transition-colors">Privacy</a>
+          <span>·</span>
+          <a href="/sponsor"           className="hover:text-[var(--color-text)] transition-colors">Advertise</a>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-tertiary)]">
+          <span className="font-semibold text-[var(--color-text-secondary)]">Topics:</span>
+          <a href="/topic/ai"            className="hover:text-[var(--color-text)] transition-colors">AI</a>
+          <a href="/topic/politics"      className="hover:text-[var(--color-text)] transition-colors">Politics</a>
+          <a href="/topic/pakistan"      className="hover:text-[var(--color-text)] transition-colors">Pakistan</a>
+          <a href="/topic/international" className="hover:text-[var(--color-text)] transition-colors">International</a>
+          <a href="/topic/science"       className="hover:text-[var(--color-text)] transition-colors">Science</a>
+          <a href="/topic/health"        className="hover:text-[var(--color-text)] transition-colors">Health</a>
+          <a href="/topic/cars"          className="hover:text-[var(--color-text)] transition-colors">Cars</a>
+          <a href="/topic/sports"        className="hover:text-[var(--color-text)] transition-colors">Sports</a>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-tertiary)]">
+          <span className="font-semibold text-[var(--color-text-secondary)]">Regions:</span>
+          <a href="/region/world"    className="hover:text-[var(--color-text)] transition-colors">World</a>
+          <a href="/region/americas" className="hover:text-[var(--color-text)] transition-colors">Americas</a>
+          <a href="/region/europe"   className="hover:text-[var(--color-text)] transition-colors">Europe</a>
+          <a href="/region/asia"     className="hover:text-[var(--color-text)] transition-colors">Asia</a>
+          <a href="/region/mena"     className="hover:text-[var(--color-text)] transition-colors">MENA</a>
+          <a href="/region/africa"   className="hover:text-[var(--color-text)] transition-colors">Africa</a>
+          <a href="/region/oceania"  className="hover:text-[var(--color-text)] transition-colors">Oceania</a>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-tertiary)]">
+          <span className="font-semibold text-[var(--color-text-secondary)]">Trending:</span>
+          <a href="/tag/openai"     className="hover:text-[var(--color-text)] transition-colors">OpenAI</a>
+          <a href="/tag/tesla"      className="hover:text-[var(--color-text)] transition-colors">Tesla</a>
+          <a href="/tag/ukraine"    className="hover:text-[var(--color-text)] transition-colors">Ukraine</a>
+          <a href="/tag/climate"    className="hover:text-[var(--color-text)] transition-colors">Climate</a>
+          <a href="/tag/crypto"     className="hover:text-[var(--color-text)] transition-colors">Crypto</a>
+          <a href="/tag/olympics"   className="hover:text-[var(--color-text)] transition-colors">Olympics</a>
+          <a href="/tag/space"      className="hover:text-[var(--color-text)] transition-colors">Space</a>
+          <a href="/tag/world-cup"  className="hover:text-[var(--color-text)] transition-colors">World Cup</a>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-tertiary)]">
+          <span className="font-semibold text-[var(--color-text-secondary)]">Publishers:</span>
+          <a href="/source/reuters"        className="hover:text-[var(--color-text)] transition-colors">Reuters</a>
+          <a href="/source/bbc-news"       className="hover:text-[var(--color-text)] transition-colors">BBC</a>
+          <a href="/source/al-jazeera"     className="hover:text-[var(--color-text)] transition-colors">Al Jazeera</a>
+          <a href="/source/guardian"       className="hover:text-[var(--color-text)] transition-colors">The Guardian</a>
+          <a href="/source/bloomberg"      className="hover:text-[var(--color-text)] transition-colors">Bloomberg</a>
+          <a href="/source/nhk"            className="hover:text-[var(--color-text)] transition-colors">NHK World</a>
+          <a href="/source/dw"             className="hover:text-[var(--color-text)] transition-colors">DW</a>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-tertiary)]">
+          <span className="font-semibold text-[var(--color-text-secondary)]">Countries:</span>
+          <a href="/country/us" className="hover:text-[var(--color-text)] transition-colors">🇺🇸 USA</a>
+          <a href="/country/gb" className="hover:text-[var(--color-text)] transition-colors">🇬🇧 UK</a>
+          <a href="/country/in" className="hover:text-[var(--color-text)] transition-colors">🇮🇳 India</a>
+          <a href="/country/pk" className="hover:text-[var(--color-text)] transition-colors">🇵🇰 Pakistan</a>
+          <a href="/country/jp" className="hover:text-[var(--color-text)] transition-colors">🇯🇵 Japan</a>
+          <a href="/country/cn" className="hover:text-[var(--color-text)] transition-colors">🇨🇳 China</a>
+          <a href="/country/de" className="hover:text-[var(--color-text)] transition-colors">🇩🇪 Germany</a>
+          <a href="/country/fr" className="hover:text-[var(--color-text)] transition-colors">🇫🇷 France</a>
+          <a href="/country/br" className="hover:text-[var(--color-text)] transition-colors">🇧🇷 Brazil</a>
+          <a href="/country/au" className="hover:text-[var(--color-text)] transition-colors">🇦🇺 Australia</a>
+          <a href="/country/ng" className="hover:text-[var(--color-text)] transition-colors">🇳🇬 Nigeria</a>
+        </div>
       </div>
     </footer>
   );

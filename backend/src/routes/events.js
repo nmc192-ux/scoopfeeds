@@ -48,7 +48,6 @@ function publicEvent(ev) {
     hero_image_url:   ev.hero_image_url,
     article_count:    ev.article_count ?? 0,
     source_count:     ev.source_count ?? 0,
-    top_sources:      ev.top_sources_raw ? ev.top_sources_raw.split("||") : [],
     market_count:     ev.market_count ?? 0,
     top_probability:  ev.top_probability ?? null,
     truth_gap:        ev.truth_gap ?? null,
@@ -117,11 +116,6 @@ function getEventBySlug(db, slug) {
       (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)     AS article_count,
       (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
          JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = e.id)  AS source_count,
-      (SELECT group_concat(sn, '||') FROM (
-         SELECT a.source_name AS sn, COUNT(*) AS c
-         FROM event_articles ea JOIN articles a ON a.id = ea.article_id
-         WHERE ea.event_id = e.id AND a.source_name IS NOT NULL AND a.source_name <> ''
-         GROUP BY a.source_name ORDER BY c DESC, sn ASC LIMIT 5))           AS top_sources_raw,
       (SELECT COUNT(*) FROM event_market_links eml WHERE eml.event_id = e.id) AS market_count,
       (SELECT pm.yes_price
        FROM event_market_links eml
@@ -214,11 +208,6 @@ router.get("/", (req, res) => {
         (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)       AS article_count,
         (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
            JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = e.id)     AS source_count,
-        (SELECT group_concat(sn, '||') FROM (
-           SELECT a.source_name AS sn, COUNT(*) AS c
-           FROM event_articles ea JOIN articles a ON a.id = ea.article_id
-           WHERE ea.event_id = e.id AND a.source_name IS NOT NULL AND a.source_name <> ''
-           GROUP BY a.source_name ORDER BY c DESC, sn ASC LIMIT 5))             AS top_sources_raw,
         (SELECT COUNT(*) FROM event_market_links eml WHERE eml.event_id = e.id) AS market_count,
         (SELECT pm.yes_price
          FROM event_market_links eml
@@ -257,16 +246,8 @@ router.get("/", (req, res) => {
     const params = [cutoff, cutoff, cutoff, cutoff, cutoff, now, PROMINENCE_HALFLIFE_MS, status];
 
     if (category) {
-      // Accept a single category or a comma-separated list (super-category sections,
-      // e.g. "tech,ai,computer-science,agentic-ai") → WHERE e.category IN (...).
-      const cats = String(category).split(",").map(c => c.trim()).filter(Boolean);
-      if (cats.length === 1) {
-        sql += " AND e.category = ?";
-        params.push(cats[0]);
-      } else if (cats.length > 1) {
-        sql += ` AND e.category IN (${cats.map(() => "?").join(",")})`;
-        params.push(...cats);
-      }
+      sql += " AND e.category = ?";
+      params.push(category);
     }
 
     // recency is the default (existing callers unaffected); prominence leads with the biggest

@@ -115,6 +115,18 @@ export default function TopicNav() {
               >
                 <span className="text-base leading-none">{topic.emoji}</span>
                 <span>{topic.label}{localSuffix}</span>
+                {!isLocal && topic.count > 0 && (
+                  <span
+                    className={clsx(
+                      "text-xs px-1.5 py-0.5 rounded-full font-semibold",
+                      isActive
+                        ? "bg-white/25 text-white"
+                        : "bg-[var(--color-surface2)] text-[var(--color-text-tertiary)]"
+                    )}
+                  >
+                    {topic.count > 999 ? "999+" : topic.count}
+                  </span>
+                )}
               </motion.button>
             );
           })}

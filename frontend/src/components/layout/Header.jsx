@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sun, Moon, Search, X, RefreshCw,
-  Grid3x3, List, UserCircle, Tv, Sparkles,
-  Rows3, Rows4, Menu,
+  Activity, Grid3x3, List, UserCircle, Tv, Sparkles,
+  Rows3, Rows4
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useNewsStore } from "../../store/newsStore";
@@ -12,6 +12,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { ScoopLogo } from "../mascot/ScoopMascot";
 import CountryPicker from "./CountryPicker";
 import LanguagePicker from "./LanguagePicker";
+import MoreMenu from "./MoreMenu";
 import { isRtl } from "../../lib/languages";
 import { useReaderStore } from "../../hooks/useReader";
 import clsx from "clsx";
@@ -32,11 +33,9 @@ export default function Header() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
   const readerOpen = useReaderStore((s) => s.open);
-  const onLiveTv   = location.pathname === "/live-tv";
-  const onAnalysis = location.pathname.startsWith("/analysis");
+  const onLiveTv      = location.pathname === "/live-tv";
+  const onAnalysis    = location.pathname.startsWith("/analysis");
 
   const submitSearch = (e) => {
     e.preventDefault();
@@ -53,28 +52,20 @@ export default function Header() {
     return () => window.removeEventListener("scroll", handler);
   }, []);
 
-  // Close the overflow menu on outside click / Escape.
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onClick = (e) => { if (!menuRef.current?.contains(e.target)) setMenuOpen(false); };
-    const onKey   = (e) => { if (e.key === "Escape") setMenuOpen(false); };
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
-
   const handleRefresh = async () => {
     setIsRefreshing(true);
     await refresh();
     setTimeout(() => setIsRefreshing(false), 4000);
   };
 
+  const articleCount = health?.articles || 0;
+  const rtl = isRtl(language);
   const isUrdu = language === "ur"; // keeps legacy Urdu-specific styling for the search box
 
-  // Hide the global Header entirely while ReaderModal is open (self-contained surface).
+  // Hide the global Header entirely while ReaderModal is open. The modal is
+  // a self-contained reading surface with its own minimal nav (logo + tagline
+  // linking to "/"). The 12+ Header controls for homepage browsing aren't
+  // appropriate while a user is focused on a single article. See session 17.
   if (readerOpen) return null;
 
   return (
@@ -113,7 +104,25 @@ export default function Header() {
             </motion.div>
           </Link>
 
-          {/* ── Search bar (expands inline) ─────────────────────────────── */}
+          {/* ── Live indicator ──────────────────────────────────────────── */}
+          <AnimatePresence>
+            {articleCount > 0 && !showSearch && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                className="hidden sm:flex items-center gap-2 text-xs text-[var(--color-text-tertiary)]"
+              >
+                <Activity size={12} className="text-emerald-500" />
+                <span>{articleCount.toLocaleString()} articles</span>
+                {health?.scheduler?.isRunning && (
+                  <span className="breaking-badge">Live</span>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ── Search bar ──────────────────────────────────────────────── */}
           <AnimatePresence>
             {showSearch && (
               <motion.form
@@ -151,13 +160,47 @@ export default function Header() {
                     </button>
                   )}
                 </div>
+                {/* Keyboard-accessible submit (form Enter handles primary path) */}
                 <button type="submit" className="sr-only">Search</button>
               </motion.form>
             )}
           </AnimatePresence>
 
-          {/* ── Actions: search · overflow menu · account ───────────────── */}
+          {/* ── Actions ─────────────────────────────────────────────────── */}
           <div className="flex items-center gap-1 sm:gap-1.5 rtl:flex-row-reverse">
+            {/* Live TV pill — high-visibility entry point */}
+            <Link
+              to="/live-tv"
+              title="Live TV channels"
+              className={clsx(
+                "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all",
+                "border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50",
+                onLiveTv
+                  ? "bg-red-500 text-white border-red-500"
+                  : "bg-red-500/10 text-red-600 border-red-500/30 hover:bg-red-500 hover:text-white hover:border-red-500"
+              )}
+            >
+              <Tv size={13} />
+              <span className="hidden sm:inline">Live TV</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+            </Link>
+
+            {/* Analysis pill */}
+            <Link
+              to="/analysis"
+              title="AI News Analysis"
+              className={clsx(
+                "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all",
+                "border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-600/40",
+                onAnalysis
+                  ? "bg-electric-600 text-white border-electric-600"
+                  : "bg-electric-500/10 text-electric-600 border-electric-500/30 hover:bg-electric-600 hover:text-white hover:border-electric-600"
+              )}
+            >
+              <Sparkles size={13} />
+              <span className="hidden sm:inline">Analysis</span>
+            </Link>
+
             <HeaderBtn
               onClick={() => { setShowSearch(s => !s); if (showSearch) setSearchQuery(""); }}
               title="Search"
@@ -165,58 +208,77 @@ export default function Header() {
               {showSearch ? <X size={16} /> : <Search size={16} />}
             </HeaderBtn>
 
-            {/* ── ONE overflow menu — everything else lives here ──────────── */}
-            <div ref={menuRef} className="relative">
-              <HeaderBtn onClick={() => setMenuOpen(v => !v)} title="Menu" active={menuOpen}>
-                {menuOpen ? <X size={16} /> : <Menu size={16} />}
-              </HeaderBtn>
+            <HeaderBtn onClick={handleRefresh} title="Refresh news" disabled={isRefreshing}>
+              <RefreshCw size={16} className={clsx(isRefreshing && "animate-spin")} />
+            </HeaderBtn>
 
-              <AnimatePresence>
-                {menuOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -6, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -6, scale: 0.98 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute right-0 mt-2 w-60 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl z-50 p-1.5"
-                  >
-                    <MenuLink to="/live-tv"  icon={Tv}       label="Live TV"  active={onLiveTv}   accent="red"   onClick={() => setMenuOpen(false)} />
-                    <MenuLink to="/analysis" icon={Sparkles} label="Analysis" active={onAnalysis}                onClick={() => setMenuOpen(false)} />
-                    <MenuButton icon={RefreshCw} label={isRefreshing ? "Refreshing…" : "Refresh news"} spinning={isRefreshing} onClick={handleRefresh} />
-
-                    <Divider />
-
-                    <MenuField label="View">
-                      <div className="flex items-center rounded-lg bg-[var(--color-surface2)] border border-[var(--color-border)] p-0.5 gap-0.5">
-                        <ViewBtn active={viewMode === "grid"} onClick={() => setViewMode("grid")}><Grid3x3 size={14} /></ViewBtn>
-                        <ViewBtn active={viewMode === "list"} onClick={() => setViewMode("list")}><List size={14} /></ViewBtn>
-                      </div>
-                    </MenuField>
-
-                    <Divider />
-
-                    <MenuField label="Translate"><LanguagePicker /></MenuField>
-                    <MenuField label="Region"><CountryPicker /></MenuField>
-
-                    <Divider />
-
-                    <MenuButton icon={darkMode ? Sun : Moon} label={darkMode ? "Light mode" : "Dark mode"} onClick={toggleDarkMode} />
-                    <MenuButton
-                      icon={density === "compact" ? Rows3 : Rows4}
-                      label={density === "compact" ? "Comfortable spacing" : "Compact (Pro) spacing"}
-                      onClick={toggleDensity}
-                    />
-                  </motion.div>
+            {/* View mode */}
+            <div className="hidden sm:flex items-center rounded-lg bg-[var(--color-surface2)] border border-[var(--color-border)] p-0.5 gap-0.5">
+              <button
+                onClick={() => setViewMode("grid")}
+                className={clsx(
+                  "p-1.5 rounded-md transition-all",
+                  viewMode === "grid"
+                    ? "bg-[var(--color-surface)] shadow-sm text-[var(--color-text)]"
+                    : "text-[var(--color-text-tertiary)] hover:text-[var(--color-text)]"
                 )}
-              </AnimatePresence>
+              >
+                <Grid3x3 size={14} />
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                className={clsx(
+                  "p-1.5 rounded-md transition-all",
+                  viewMode === "list"
+                    ? "bg-[var(--color-surface)] shadow-sm text-[var(--color-text)]"
+                    : "text-[var(--color-text-tertiary)] hover:text-[var(--color-text)]"
+                )}
+              >
+                <List size={14} />
+              </button>
             </div>
+
+            {/* RI / category mega-menu */}
+            <MoreMenu />
+
+            {/* Language picker (21 languages + auto) */}
+            <LanguagePicker />
+
+            {/* Country picker */}
+            <CountryPicker />
 
             {/* Sign in / profile */}
             <HeaderBtn
               onClick={() => setAuthOpen(true)}
               title={isLoggedIn ? "Your profile" : "Sign in"}
             >
-              <UserCircle size={16} className={isLoggedIn ? "text-electric-600" : undefined} />
+              <UserCircle
+                size={16}
+                className={isLoggedIn ? "text-electric-600" : undefined}
+              />
+            </HeaderBtn>
+
+            {/* Density toggle (Comfortable ↔ Compact / Pro mode) */}
+            <HeaderBtn
+              onClick={toggleDensity}
+              title={density === "compact" ? "Switch to comfortable spacing" : "Switch to compact (Pro) spacing"}
+            >
+              {density === "compact" ? <Rows3 size={16} /> : <Rows4 size={16} />}
+            </HeaderBtn>
+
+            {/* Dark mode */}
+            <HeaderBtn onClick={toggleDarkMode} title="Toggle dark mode">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={darkMode ? "moon" : "sun"}
+                  initial={{ rotate: -90, opacity: 0 }}
+                  animate={{ rotate: 0, opacity: 1 }}
+                  exit={{ rotate: 90, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+                </motion.div>
+              </AnimatePresence>
             </HeaderBtn>
           </div>
         </div>
@@ -225,7 +287,7 @@ export default function Header() {
   );
 }
 
-function HeaderBtn({ children, onClick, title, disabled = false, active = false }) {
+function HeaderBtn({ children, onClick, title, disabled = false }) {
   return (
     <motion.button
       whileTap={{ scale: 0.9 }}
@@ -233,74 +295,13 @@ function HeaderBtn({ children, onClick, title, disabled = false, active = false 
       disabled={disabled}
       title={title}
       className={clsx(
-        "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center transition-all duration-200",
-        active
-          ? "bg-[var(--color-surface2)] text-[var(--color-text)]"
-          : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface2)]",
+        "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center",
+        "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
+        "hover:bg-[var(--color-surface2)] transition-all duration-200",
         disabled && "opacity-50 cursor-not-allowed"
       )}
     >
       {children}
     </motion.button>
   );
-}
-
-// ── Overflow-menu primitives ──────────────────────────────────────────────
-function MenuLink({ to, icon: Icon, label, active, accent, onClick }) {
-  return (
-    <Link
-      to={to}
-      onClick={onClick}
-      className={clsx(
-        "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors",
-        active
-          ? "bg-[var(--color-surface2)] text-[var(--color-text)] font-medium"
-          : "text-[var(--color-text)] hover:bg-[var(--color-surface2)]"
-      )}
-    >
-      <Icon size={16} className={accent === "red" ? "text-red-500" : "text-[var(--color-text-tertiary)]"} />
-      <span>{label}</span>
-    </Link>
-  );
-}
-
-function MenuButton({ icon: Icon, label, onClick, spinning = false }) {
-  return (
-    <button
-      onClick={onClick}
-      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-[var(--color-text)] hover:bg-[var(--color-surface2)] transition-colors text-left"
-    >
-      <Icon size={16} className={clsx("text-[var(--color-text-tertiary)]", spinning && "animate-spin")} />
-      <span>{label}</span>
-    </button>
-  );
-}
-
-function MenuField({ label, children }) {
-  return (
-    <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
-      <span className="text-sm text-[var(--color-text-secondary)]">{label}</span>
-      {children}
-    </div>
-  );
-}
-
-function ViewBtn({ active, onClick, children }) {
-  return (
-    <button
-      onClick={onClick}
-      className={clsx(
-        "p-1.5 rounded-md transition-all",
-        active
-          ? "bg-[var(--color-surface)] shadow-sm text-[var(--color-text)]"
-          : "text-[var(--color-text-tertiary)] hover:text-[var(--color-text)]"
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Divider() {
-  return <div className="my-1 border-t border-[var(--color-border)]" />;
 }

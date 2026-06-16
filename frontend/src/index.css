@@ -12,7 +12,6 @@
     --color-bg: #f8faff;
     --color-surface: #ffffff;
     --color-surface2: #f0f4ff;
-    --color-surface-2: var(--color-surface2); /* alias: ~63 latent usages typo'd the hyphenated name; resolves per-theme */
     --color-border: #dbe4f5;
     --color-text: #0f172a;
     --color-text-secondary: #475569;
