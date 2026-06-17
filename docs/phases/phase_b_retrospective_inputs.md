@@ -21,7 +21,7 @@ Phase B duration estimate per [reconciliation v1 §8.4](../strategy/strategic_ta
 - **Estimated:** Months 4–7
 - **Realistic** (1.3–1.8× per Execution Method v1 §2): Months 6–9
 
-At Phase A observed velocity (~2-4 hour sessions, ~3–5 per week with bursts), this maps to approximately **25–40 Phase B sessions**. Phase B is materially larger than Phase A both in execution scope and in exit-criterion count (22 conditions across 4 groups per Phase B Brief §8).
+At Phase A observed velocity (~2-4 hour sessions, ~3–5 per week with bursts), this maps to approximately **60–110 Phase B sessions estimated / 90–145 realistic** — the locked figure per [Phase B Brief §9](phase_b_kickoff_brief.md) (line 80) and reconciliation §8.4. (An earlier **25–40** figure reflected the original Track-1-only scope, before Tracks 2+3 were folded in and the 1.3–1.8× realism multiplier applied.) Phase B is materially larger than Phase A both in execution scope and in exit-criterion count (22 conditions across 4 groups per Phase B Brief §8).
 
 ### Three-track structure
 
