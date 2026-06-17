@@ -16,10 +16,13 @@
     "test:admin-auth": "node scripts/test-admin-auth.mjs",
     "db:backup": "node scripts/db-backup.mjs",
     "db:migrate": "node src/db/migrate.js",
-    "scoring:flagged": "node scripts/scoring-flagged.mjs"
+    "scoring:flagged": "node scripts/scoring-flagged.mjs",
+    "signal:http": "node src/signal/httpServer.js",
+    "signal:mcp": "node src/signal/mcpServer.js"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "^0.6.0",
     "@resvg/resvg-js": "^2.6.2",
     "@sentry/node": "^10.51.0",
