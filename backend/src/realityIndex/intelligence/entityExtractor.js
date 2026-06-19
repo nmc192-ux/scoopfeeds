@@ -62,6 +62,24 @@ export function extractArticleEntities({ title, description, content } = {}) {
   return [...out.values()];
 }
 
+/**
+ * extractWithCandidates(article) → { entities, candidates }
+ *   entities   — the step-1 set (compromise; surface-fallback only when compromise is empty). KEPT
+ *                as-is — these were never the problem.
+ *   candidates — the hardened fallback's MULTI-WORD runs compromise MISSED. The batch keeps each
+ *                ONLY if it resolves to a QID (a real canonical name like "Elon Musk"→Q317521),
+ *                never as raw surface noise (step-2a: the blunt supplement's unresolved fragments
+ *                lowered the floor). This recovers out-of-lexicon names without re-inflating distinct.
+ */
+export function extractWithCandidates(article = {}) {
+  const entities = extractArticleEntities(article);
+  const baseKeys = new Set(entities.map((e) => e.surface_norm));
+  const { title, description, content } = article;
+  const text = `${title || ""}. ${description || ""} ${(content || "").slice(0, 500)}`;
+  const candidates = capitalizedFallback(text).filter((f) => f.surface_norm.includes(" ") && !baseKeys.has(f.surface_norm));
+  return { entities, candidates };
+}
+
 /** resolve a normalized surface via the cache (positive+negative). Returns {qid,label,hit}.
  *  A TRANSIENT resolver failure (network/rate-limit, reported via .error) is NOT cached — caching
  *  it would permanently poison the surface. Only a genuine empty result is negative-cached. */
@@ -108,11 +126,13 @@ export async function runEntityExtractionBatch({ limit = 100, articleIds = null,
   const stats = { articles: 0, entities: 0, resolved: 0, surfacesResolved: 0, cacheHits: 0, calls: 0 };
   if (!rows.length) return stats;
 
-  const perArticle = rows.map((a) => ({ a, ents: extractArticleEntities(a) }));
+  const perArticle = rows.map((a) => { const { entities, candidates } = extractWithCandidates(a); return { a, ents: entities, cands: candidates }; });
 
   if (resolve) {
+    // Resolve base-entity surfaces AND supplement candidates — candidates must be resolved to decide
+    // keep/drop (resolve-gated supplement); non-resolving junk negative-caches so it isn't re-queried.
     const df = new Map();
-    for (const { ents } of perArticle) for (const e of ents) df.set(e.surface_norm, (df.get(e.surface_norm) || 0) + 1);
+    for (const { ents, cands } of perArticle) for (const e of [...ents, ...cands]) df.set(e.surface_norm, (df.get(e.surface_norm) || 0) + 1);
     let surfaces = [...df.entries()].filter(([, n]) => n >= resolveMinDf).sort((x, y) => y[1] - x[1]).map(([s]) => s);
     if (resolveCap > 0) surfaces = surfaces.slice(0, resolveCap);
     await mapLimit(surfaces, concurrency, async (s) => {
@@ -126,19 +146,33 @@ export async function runEntityExtractionBatch({ limit = 100, articleIds = null,
   const insProc = db.prepare("INSERT OR IGNORE INTO article_entity_processed (article_id, processed_at, entity_count) VALUES (?,?,?)");
   const cacheGet = db.prepare("SELECT qid, label FROM surface_qid_cache WHERE surface_norm = ?");
   const now = Date.now();
+  let suppl = 0;
   const persist = db.transaction(() => {
-    for (const { a, ents } of perArticle) {
+    for (const { a, ents, cands } of perArticle) {
+      const seen = new Set();
+      let count = 0;
       for (const e of ents) {
+        if (seen.has(e.surface_norm)) continue; seen.add(e.surface_norm);
         const c = resolve ? cacheGet.get(e.surface_norm) : null;
         const qid = c?.qid ?? null, label = c?.label ?? null;
         insEnt.run(a.id, e.surface, e.surface_norm, qid, e.entity_type, label, now);
         if (qid) stats.resolved++;
-        stats.entities++;
+        stats.entities++; count++;
       }
-      insProc.run(a.id, now, ents.length);
+      // resolve-gated supplement: keep a candidate ONLY if it resolved to a QID (else drop as noise)
+      for (const e of cands) {
+        if (seen.has(e.surface_norm)) continue;
+        const c = resolve ? cacheGet.get(e.surface_norm) : null;
+        if (!c?.qid) continue;
+        seen.add(e.surface_norm);
+        insEnt.run(a.id, e.surface, e.surface_norm, c.qid, e.entity_type, c.label ?? null, now);
+        stats.resolved++; stats.entities++; count++; suppl++;
+      }
+      insProc.run(a.id, now, count);
       stats.articles++;
     }
   });
   persist();
+  stats.supplemented = suppl;
   return stats;
 }
