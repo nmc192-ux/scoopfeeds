@@ -103,6 +103,28 @@ async function searchEntities(term, ctx) {
   return { ok: true, ids: (r.json?.search || []).map((s) => s.id).filter(Boolean) };
 }
 
+/**
+ * resolveEntityMention(surface, ctx) → { qid, label } | { qid:null, label:null }
+ *
+ * Article-body entity canonicalization (entity-matching build, STEP 1). Maps a free-text
+ * mention to the TOP wbsearchentities item — reusing this client's retry/backoff/UA. Unlike
+ * resolveOrgByDomain (which type-gates to exactly-one org/owner for source scoring), this is a
+ * deterministic top-hit lookup: for MATCHING we need a stable, consistent canonical key per
+ * surface (same surface → same QID across articles), not a verified real-world identity — the
+ * matcher's cosine guard handles the rare ambiguous case. Callers cache the result
+ * (positive AND negative) so each surface hits Wikidata at most once.
+ */
+export async function resolveEntityMention(surface, ctx = {}) {
+  const term = String(surface || "").trim();
+  if (!term) return { qid: null, label: null };
+  const url = `${WIKIDATA_API}?action=wbsearchentities&search=${encodeURIComponent(term)}`
+    + `&language=en&format=json&type=item&limit=1&origin=*`;
+  const r = await fetchJsonRetrying(url, ctx);
+  if (!r.ok) return { qid: null, label: null, error: r.reason };
+  const top = (r.json?.search || [])[0];
+  return top?.id ? { qid: top.id, label: top.label || null } : { qid: null, label: null };
+}
+
 function buildClaimsQuery(qids) {
   const values = qids.map((q) => `wd:${q}`).join(" ");
   return `SELECT ?item ?itemLabel ?website ?isOrg ?isMedia ?isHuman ?p31Label ?owner ?ownerLabel ?parent ?parentLabel WHERE {

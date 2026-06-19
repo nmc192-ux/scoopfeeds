@@ -31,6 +31,7 @@
     "better-sqlite3": "^11.10.0",
     "bullmq": "^5.76.5",
     "compression": "^1.7.4",
+    "compromise": "^14.15.1",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "express-rate-limit": "^7.2.0",

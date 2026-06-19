@@ -31,6 +31,7 @@ import { runTrackerDetector } from "../realityIndex/intelligence/trackerDetector
 import { runScoringJob } from "../skills/scoring/runtime/scoringRun.js";
 import { runEventTimelineBuilder } from "../realityIndex/intelligence/eventTimelineBuilder.js";
 import { runEventActorExtractor } from "../realityIndex/intelligence/eventActorExtractor.js";
+import { runEntityExtractionBatch } from "../realityIndex/intelligence/entityExtractor.js";
 import { runMediaSentimentForActiveEvents } from "../realityIndex/intelligence/mediaSentimentScorer.js";
 import { runSentimentCycle } from "../realityIndex/intelligence/sentimentScorer.js";
 import { runRealityIndexCycle } from "../realityIndex/intelligence/realityIndex.js";
@@ -786,6 +787,14 @@ export async function runEnrichCycle({ batchSize = 40, concurrency = 4 } = {}) {
   lastEnrichRun = new Date().toISOString();
   try {
     await enrichBatch({ batchSize, concurrency });
+    // Entity-matching build STEP 1: extract article-body entities → article_entities.
+    // Behind a flag, default OFF → production behavior unchanged. Tail step; never breaks enrich.
+    if (String(process.env.ENTITY_EXTRACTION_ENABLED ?? "false").toLowerCase() === "true") {
+      try {
+        const stats = await runEntityExtractionBatch({ limit: parseInt(process.env.ENTITY_EXTRACTION_BATCH || "100", 10) });
+        logger.info(`🔖 entity extraction — ${JSON.stringify(stats)}`);
+      } catch (err) { logger.error("❌ Entity extraction failed", { error: err.message }); }
+    }
   } catch (err) {
     logger.error("❌ Enrich failed", { error: err.message });
   } finally {
