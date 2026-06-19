@@ -32,6 +32,7 @@ import { runScoringJob } from "../skills/scoring/runtime/scoringRun.js";
 import { runEventTimelineBuilder } from "../realityIndex/intelligence/eventTimelineBuilder.js";
 import { runEventActorExtractor } from "../realityIndex/intelligence/eventActorExtractor.js";
 import { runEntityExtractionBatch } from "../realityIndex/intelligence/entityExtractor.js";
+import { runEntityIdfRecompute } from "../realityIndex/intelligence/entityIdf.js";
 import { runMediaSentimentForActiveEvents } from "../realityIndex/intelligence/mediaSentimentScorer.js";
 import { runSentimentCycle } from "../realityIndex/intelligence/sentimentScorer.js";
 import { runRealityIndexCycle } from "../realityIndex/intelligence/realityIndex.js";
@@ -184,6 +185,15 @@ export function startScheduler() {
     logger.info("🧮 Source scoring cron ENABLED (weekly, Sun 03:00)");
   } else {
     logger.info("🧮 Source scoring cron registered but DISABLED (set SCORING_CRON_ENABLED=true to activate)");
+  }
+  // ─── Entity IDF recompute (step 2b) ─────────────────────────────────────────
+  // Daily rolling-window rarity weights for entity matching. DISABLED by default
+  // (set ENTITY_IDF_ENABLED=true) — prod-neutral until the matcher (step 3) reads it.
+  if (String(process.env.ENTITY_IDF_ENABLED || "").toLowerCase() === "true") {
+    scheduleCron("30 3 * * *", () => runEntityIdfRecompute().catch(err =>
+      logger.warn(`entity IDF recompute failed: ${err.message}`)
+    ));
+    logger.info("📐 Entity IDF recompute cron ENABLED (daily, 03:30)");
   }
   // Daily digest at 07:00 server time — no-op if SMTP is not configured.
   scheduleCron("0 7 * * *", async () => {
