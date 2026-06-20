@@ -36,6 +36,26 @@ const MERGE_TAU          = Number.parseFloat(process.env.EVENT_MERGE_TAU || "0.8
 const CANDIDATE_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 const DIMS = 768;
 
+// ── Entity gate (step 3) ─────────────────────────────────────────────────────
+// Adds a rarity-weighted shared-entity requirement to BOTH match and merge: a pair qualifies only
+// if entity overlap ≥ EVENT_ENTITY_MIN AND cosine ≥ the cosine floor. EVENT_ENTITY_MIN = 0 → OFF
+// (overlap ≥ 0 is always true) → today's behavior EXACTLY. The cosine floors default to the
+// existing MATCH_TAU / MERGE_TAU (relaxation is a step-3b knob). Weights come from entity_idf;
+// an empty table degrades to UNWEIGHTED overlap rather than blocking everything.
+const ENTITY_MIN          = Number.parseFloat(process.env.EVENT_ENTITY_MIN || "0");
+const MATCH_COSINE_FLOOR  = process.env.EVENT_MATCH_COSINE_FLOOR ? Number.parseFloat(process.env.EVENT_MATCH_COSINE_FLOOR) : MATCH_TAU;
+const MERGE_COSINE_FLOOR  = process.env.EVENT_MERGE_COSINE_FLOOR ? Number.parseFloat(process.env.EVENT_MERGE_COSINE_FLOOR) : MERGE_TAU;
+const ENTITY_TOPK         = parseInt(process.env.EVENT_ENTITY_TOPK || "40", 10);
+// 3b-1: an EVENT's matching identity = its CORE entities (shared by ≥ CORE_FRAC of members), not
+// the blended union of all members' entities. A coherent event has a strong core; a blob has a
+// weak/empty core (no entity spans enough of its disparate stories) → it can't absorb cross-story
+// clusters. Swept in the harness.
+const CORE_FRAC           = Number.parseFloat(process.env.EVENT_ENTITY_CORE_FRAC || "0.3");
+// 3b-1b: exclude category-PROMISCUOUS hub entities (cat_span > MAX_CATSPAN) from cores + overlap.
+// Document-rarity (IDF) ≠ discriminativeness — a key spanning many categories bridges distinct
+// stories regardless of how rare it is. 999 = no exclusion (default; swept in the harness).
+const MAX_CATSPAN         = parseInt(process.env.EVENT_ENTITY_MAX_CATSPAN || "999", 10);
+
 function slugify(str) {
   return str
     .toLowerCase()
@@ -112,8 +132,61 @@ function meanCentroid(vecs) {
 }
 function cosine(a, b) { if (!a || !b) return -1; let s = 0; for (let k = 0; k < DIMS; k++) s += a[k] * b[k]; return s; }
 
+// ── entity helpers (step 3) — aggregated canonical-key sets + rarity-weighted overlap ────────
+// Key = qid where resolved else surface_norm (article_entities). For large sets, keep the top-K
+// most discriminative (highest idf) so a blob can't dilute its own signal. idfMap/fallbackIdf are
+// preloaded once per run from entity_idf (fallback = ln(N) for unseen keys; = 1 when the table is
+// empty → unweighted, so the gate degrades instead of blocking everything).
+function loadEntityKeys(db, ids, idfMap, catSpanMap, topK = ENTITY_TOPK) {
+  if (!ids.length) return new Set();
+  const keys = new Set();
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500); if (!chunk.length) continue;
+    const ph = chunk.map(() => "?").join(",");
+    for (const r of db.prepare(`SELECT DISTINCT COALESCE(qid, surface_norm) k FROM article_entities WHERE article_id IN (${ph})`).all(...chunk)) {
+      if ((catSpanMap.get(r.k) ?? 1) > MAX_CATSPAN) continue; // drop category-promiscuous hubs
+      keys.add(r.k);
+    }
+  }
+  if (keys.size <= topK) return keys;
+  return new Set([...keys].sort((a, b) => (idfMap.get(b) ?? 0) - (idfMap.get(a) ?? 0)).slice(0, topK));
+}
+// CORE entity set for an EVENT (3b-1): keys present in ≥ minFrac of the event's member articles —
+// the entities members genuinely have IN COMMON. A coherent event → strong core; a blob → weak/empty
+// core (no entity spans enough of its stories) → it can't match cross-story clusters against itself.
+function loadEventCore(db, ids, idfMap, catSpanMap, minFrac = CORE_FRAC, topK = ENTITY_TOPK) {
+  if (!ids.length) return new Set();
+  const n = ids.length, count = new Map();
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500); if (!chunk.length) continue;
+    const ph = chunk.map(() => "?").join(",");
+    for (const r of db.prepare(`SELECT DISTINCT article_id, COALESCE(qid, surface_norm) k FROM article_entities WHERE article_id IN (${ph})`).all(...chunk)) {
+      if ((catSpanMap.get(r.k) ?? 1) > MAX_CATSPAN) continue; // hub entities can't enter a core
+      count.set(r.k, (count.get(r.k) || 0) + 1);
+    }
+  }
+  let core = [...count.entries()].filter(([, c]) => c / n >= minFrac).map(([k]) => k);
+  if (core.length > topK) core = core.sort((a, b) => (idfMap.get(b) ?? 0) - (idfMap.get(a) ?? 0)).slice(0, topK);
+  return new Set(core);
+}
+function rarityOverlap(A, B, idfMap, fallbackIdf) {
+  if (!A || !B || !A.size || !B.size) return 0;
+  let inter = 0, uni = 0;
+  for (const k of new Set([...A, ...B])) { const w = idfMap.get(k) ?? fallbackIdf; uni += w; if (A.has(k) && B.has(k)) inter += w; }
+  return uni ? inter / uni : 0;
+}
+
 export async function runEventPromoter({ now = Date.now() } = {}) {
   const db = getDb();
+
+  // Entity gate (step 3): preload the windowed-IDF map once. Empty table → fallbackIdf = 1 so the
+  // overlap degrades to UNWEIGHTED rather than blocking every match. Only when the gate is ON.
+  let idfMap = new Map(), catSpanMap = new Map(), fallbackIdf = 1;
+  if (ENTITY_MIN > 0) {
+    for (const r of db.prepare("SELECT key, idf, cat_span FROM entity_idf").all()) { idfMap.set(r.key, r.idf); catSpanMap.set(r.key, r.cat_span); }
+    const nw = db.prepare("SELECT n_window FROM entity_idf LIMIT 1").get()?.n_window;
+    fallbackIdf = (idfMap.size && nw) ? Math.log(nw) : 1; // unseen key → maximally rare; empty table → unweighted
+  }
 
   // ── 1. Eligible clusters (>= MIN_ARTICLES OR a bound market) ─────────────────
   const eligible = db.prepare(`
@@ -159,20 +232,25 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     const aids = db.prepare("SELECT article_id FROM event_articles WHERE event_id = ?").all(e.id).map(r => r.article_id);
     const vmap = loadArticleVectors(db, aids);
     let titleClusterSize = 0; try { titleClusterSize = JSON.parse(e.meta || "{}").title_cluster_size || 0; } catch { /* default 0 → legacy events rename on first match */ }
-    eventState.set(e.id, { id: e.id, slug: e.slug, started_at: e.started_at, status: e.status, ids: new Set(aids), centroid: meanCentroid([...vmap.values()]), titleClusterSize });
+    eventState.set(e.id, { id: e.id, slug: e.slug, started_at: e.started_at, status: e.status, ids: new Set(aids), centroid: meanCentroid([...vmap.values()]), core: ENTITY_MIN > 0 ? loadEventCore(db, aids, idfMap, catSpanMap) : null, titleClusterSize });
   }
 
   // ── 3. Cluster centroids + article sets ─────────────────────────────────────
   const clusters = eligible.map((c) => {
     let aids = []; try { aids = JSON.parse(c.article_ids || "[]"); } catch { /* skip */ }
     const vmap = loadArticleVectors(db, aids);
-    return { c, aids, idSet: new Set(aids), centroid: meanCentroid([...vmap.values()]), market_count: c.market_count };
+    return { c, aids, idSet: new Set(aids), centroid: meanCentroid([...vmap.values()]), entKeys: ENTITY_MIN > 0 ? loadEntityKeys(db, aids, idfMap, catSpanMap) : null, market_count: c.market_count };
   });
 
+  // qualifies — entity gate (step 3): every accept path ALSO requires entity overlap ≥ ENTITY_MIN.
+  // ENTITY_MIN <= 0 → entityOk always true → today's behavior EXACTLY (shared-article force-match;
+  // else cosine ≥ floor). Gating the shared-article path too is the point: a shared article between
+  // title-disjoint distinct stories no longer force-merges when their rare entities don't overlap.
   const qualifies = (cl, ev) => {
-    for (const a of cl.idSet) if (ev.ids.has(a)) return { ok: true, score: Math.max(cosine(cl.centroid, ev.centroid), 1.0) };
+    const entityOk = ENTITY_MIN <= 0 || rarityOverlap(cl.entKeys, ev.core, idfMap, fallbackIdf) >= ENTITY_MIN; // cluster's full entities vs event's CORE
     const cos = cosine(cl.centroid, ev.centroid);
-    return cos >= MATCH_TAU ? { ok: true, score: cos } : { ok: false };
+    for (const a of cl.idSet) if (ev.ids.has(a)) return entityOk ? { ok: true, score: Math.max(cos, 1.0) } : { ok: false };
+    return (cos >= MATCH_COSINE_FLOOR && entityOk) ? { ok: true, score: cos } : { ok: false };
   };
 
   // ── 4. MERGE: a cluster qualifying against >=2 events → converge into earliest-started ──
@@ -187,7 +265,8 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     if (a === b) return;
     const ea = eventState.get(a), eb = eventState.get(b);
     if (!ea || !eb) return;
-    if (cosine(ea.centroid, eb.centroid) < MERGE_TAU) return; // distinct stories — do NOT merge
+    if (cosine(ea.centroid, eb.centroid) < MERGE_COSINE_FLOOR) return; // distinct stories — do NOT merge
+    if (ENTITY_MIN > 0 && rarityOverlap(ea.core, eb.core, idfMap, fallbackIdf) < ENTITY_MIN) return; // entity gate (step 3) — core↔core
     const survivor = ea.started_at <= eb.started_at ? a : b;
     const absorbed = survivor === a ? b : a;
     parent.set(absorbed, survivor);
@@ -206,7 +285,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
   }
   for (const { survivor } of merges) {
     const ev = eventState.get(survivor);
-    if (ev) ev.centroid = meanCentroid([...loadArticleVectors(db, [...ev.ids]).values()]);
+    if (ev) { ev.centroid = meanCentroid([...loadArticleVectors(db, [...ev.ids]).values()]); if (ENTITY_MIN > 0) ev.core = loadEventCore(db, [...ev.ids], idfMap, catSpanMap); }
   }
 
   // ── 5. Greedy 1-to-1 assignment (argmax) ────────────────────────────────────
@@ -248,7 +327,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
         const slug = uniqueSlug(db, slugify(c.title) || eventId.slice(0, 8));
         insertEvent.run(eventId, slug, c.id, c.title, summary, c.category, "active", severity, hero, c.created_at, now,
           JSON.stringify({ title_cluster_size: clusterSize }), now, now);
-        eventState.set(eventId, { id: eventId, slug, started_at: c.created_at, status: "active", ids: new Set(), centroid: cl.centroid, titleClusterSize: clusterSize });
+        eventState.set(eventId, { id: eventId, slug, started_at: c.created_at, status: "active", ids: new Set(), centroid: cl.centroid, core: ENTITY_MIN > 0 ? loadEventCore(db, cl.aids, idfMap, catSpanMap) : null, titleClusterSize: clusterSize });
         promoted++;
       }
       for (const aid of cl.aids) linkArticle.run(eventId, aid, now);

@@ -26,14 +26,14 @@ export function computeWindowedIdf(db, { windowMs = DEFAULT_WINDOW_MS, now = Dat
   ).get(lo, hi).n;
   if (!N) { logger.warn?.("entityIdf: no extracted articles in window — skipping recompute"); return { keys: 0, n_window: 0, window_end: hi }; }
   const rows = db.prepare(
-    `SELECT COALESCE(ae.qid, ae.surface_norm) key, COUNT(DISTINCT ae.article_id) df
+    `SELECT COALESCE(ae.qid, ae.surface_norm) key, COUNT(DISTINCT ae.article_id) df, COUNT(DISTINCT a.category) cat_span
        FROM article_entities ae JOIN articles a ON a.id = ae.article_id
       WHERE a.published_at >= ? AND a.published_at < ? GROUP BY key`
   ).all(lo, hi);
-  const ins = db.prepare("INSERT OR REPLACE INTO entity_idf (key, idf, df, n_window, window_start, window_end, computed_at) VALUES (?,?,?,?,?,?,?)");
+  const ins = db.prepare("INSERT OR REPLACE INTO entity_idf (key, idf, df, n_window, window_start, window_end, computed_at, cat_span) VALUES (?,?,?,?,?,?,?,?)");
   const tx = db.transaction(() => {
     db.prepare("DELETE FROM entity_idf").run();
-    for (const r of rows) ins.run(r.key, Math.log(N / r.df), r.df, N, lo, hi, now);
+    for (const r of rows) ins.run(r.key, Math.log(N / r.df), r.df, N, lo, hi, now, r.cat_span);
   });
   tx();
   return { keys: rows.length, n_window: N, window_end: hi };
