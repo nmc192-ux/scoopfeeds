@@ -1,13 +1,13 @@
 /**
- * eventBreaker — curative >5-category circuit-breaker (Path A). Post-promotion janitor: finds
- * events spanning more than EVENT_BREAKER_MAX_CATS categories, re-clusters their members through
- * the UNMODIFIED clusterWindow (the op that produced the 61 coherent sub-clusters), and KEEP-CORE
- * splits them — the LARGEST sub-cluster keeps the event id/slug/URL (durable identity preserved);
- * every other sub-cluster spins off as a new event; non-clustering singletons are dropped.
+ * eventBreaker — curative ENTITY-AWARE circuit-breaker (Path A). Post-promotion janitor.
  *
- * Split-durability (minimal): a coherent (≤MAX_CATS) event is never touched; only a RE-BREACHING
- * event is re-split. No do-not-merge lineage yet — the entity gate is meant to carry most of the
- * load and keep re-accretion rare; this measures whether keep-core + re-split-on-breach is stable.
+ * For each event with ≥ MIN_ARTICLES members, re-cluster via the UNMODIFIED clusterWindow. clusterWindow
+ * splits BOTH genuine multi-story blobs AND a single macro-story's cosine-separable sub-threads, so a raw
+ * "≥2 sub-clusters" trigger over-fragments (it shattered the Iran macro-story into ~16 cards). The fix:
+ * spin off a sub-cluster ONLY if it is ENTITY-DISJOINT from the largest sub-cluster's core (rarity-weighted
+ * shared-entity overlap < DISJOINT) — a genuinely foreign absorbed story. Sub-threads that share the core
+ * (the Iran peace-deal/oil/Hormuz/nuclear threads) are KEPT in the event. If nothing is disjoint, the event
+ * is a coherent macro-story → left whole. KEEP-CORE: the kept group retains the event id/slug/URL.
  *
  * Behind EVENT_BREAKER_ENABLED (default OFF → prod-neutral). Mutates events/event_articles.
  */
@@ -16,31 +16,41 @@ import { getDb } from "../../models/database.js";
 import { clusterWindow } from "../clustering/semanticClusterer.js";
 import { logger } from "../../services/logger.js";
 
-const ENABLED   = String(process.env.EVENT_BREAKER_ENABLED ?? "false").toLowerCase() === "true";
-// TRIGGER (refined): re-cluster every event with ≥ MIN_ARTICLES members through clusterWindow and
-// split ONLY if it yields ≥2 sub-clusters (genuine multi-story over-merge) — NOT >category-count
-// (which flags cosine-tight single stories with diverse category tags). clusterWindow is the honest
-// arbiter of "is this one story". The size floor bounds the re-cluster cost (tiny events can't blob).
+const ENABLED      = String(process.env.EVENT_BREAKER_ENABLED ?? "false").toLowerCase() === "true";
 const MIN_ARTICLES = parseInt(process.env.EVENT_BREAKER_MIN_ARTICLES || "6", 10);
+const DISJOINT     = Number.parseFloat(process.env.EVENT_BREAKER_DISJOINT || "0.06"); // core-overlap below this = foreign story → spin off
+const MAX_CATSPAN  = parseInt(process.env.EVENT_ENTITY_MAX_CATSPAN || "5", 10);
+const TOPK         = parseInt(process.env.EVENT_ENTITY_TOPK || "40", 10);
 
 function slugify(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").trim().replace(/\s+/g, "-").replace(/-+/g, "-").slice(0, 80).replace(/^-+|-+$/g, ""); }
 function uniqueSlug(db, base) { let slug = base || crypto.randomUUID().slice(0, 8); let i = 2; while (db.prepare("SELECT 1 FROM events WHERE slug = ?").get(slug)) slug = `${base}-${i++}`; return slug; }
 const domCat = (m) => { const c = {}; for (const x of m) c[x.category] = (c[x.category] || 0) + 1; return Object.entries(c).sort((a, b) => b[1] - a[1])[0]?.[0] || "top"; };
 
-// load-and-cluster lifted from coherenceGuard: window=[min,max published] of the members,
-// excludeIds = the window's other is_dup=0 articles → clusterWindow sees exactly the members.
 function clusterMembers(db, ids) {
   if (!ids.length) return [];
   const set = new Set(ids), ph = ids.map(() => "?").join(",");
   const span = db.prepare(`SELECT MIN(published_at) lo, MAX(published_at) hi FROM articles WHERE id IN (${ph})`).get(...ids);
   if (span.lo == null) return [];
   const win = db.prepare("SELECT id FROM articles WHERE published_at >= ? AND published_at < ? AND is_duplicate = 0").all(span.lo, span.hi + 1).map(r => r.id);
-  return clusterWindow({ db, windowStart: span.lo, windowEnd: span.hi + 1, excludeIds: new Set(win.filter(id => !set.has(id))) }).clusters; // size-desc, size>=2
+  return clusterWindow({ db, windowStart: span.lo, windowEnd: span.hi + 1, excludeIds: new Set(win.filter(id => !set.has(id))) }).clusters;
 }
 
-export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, force = false } = {}) {
+export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, disjoint = DISJOINT, force = false } = {}) {
   if (!ENABLED && !force) return { enabled: false };
   const db = getDb();
+  // rarity weights + category-span (hub exclusion) from entity_idf
+  const idfMap = new Map(), catSpanMap = new Map();
+  for (const r of db.prepare("SELECT key, idf, cat_span FROM entity_idf").all()) { idfMap.set(r.key, r.idf); catSpanMap.set(r.key, r.cat_span); }
+  const nw = db.prepare("SELECT n_window FROM entity_idf LIMIT 1").get()?.n_window;
+  const fallbackIdf = (idfMap.size && nw) ? Math.log(nw) : 1;
+  const entitySet = (ids) => {
+    const keys = new Set();
+    for (let i = 0; i < ids.length; i += 500) { const ch = ids.slice(i, i + 500); if (!ch.length) continue; const ph = ch.map(() => "?").join(","); for (const r of db.prepare(`SELECT DISTINCT COALESCE(qid, surface_norm) k FROM article_entities WHERE article_id IN (${ph})`).all(...ch)) { if ((catSpanMap.get(r.k) ?? 1) > MAX_CATSPAN) continue; keys.add(r.k); } }
+    if (keys.size <= TOPK) return keys;
+    return new Set([...keys].sort((a, b) => (idfMap.get(b) ?? 0) - (idfMap.get(a) ?? 0)).slice(0, TOPK));
+  };
+  const overlap = (A, B) => { if (!A.size || !B.size) return 0; let i = 0, u = 0; for (const k of new Set([...A, ...B])) { const w = idfMap.get(k) ?? fallbackIdf; u += w; if (A.has(k) && B.has(k)) i += w; } return u ? i / u : 0; };
+
   const candidates = db.prepare(
     `SELECT ea.event_id id FROM event_articles ea JOIN events e ON e.id = ea.event_id
       WHERE e.status IN ('active','dormant') GROUP BY ea.event_id HAVING COUNT(*) >= ?`
@@ -51,28 +61,35 @@ export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, 
   const touchEv = db.prepare("UPDATE events SET last_activity_at = ?, updated_at = ? WHERE id = ?");
   const insEvent = db.prepare(`INSERT INTO events (id, slug, cluster_id, title, summary, category, status, severity, hero_image_url, started_at, last_activity_at, meta, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
-  let genuineBlobs = 0, created = 0; const splitIds = [];
+  let split = 0, created = 0, foreignSpun = 0; const splitIds = [];
   for (const b of candidates) {
     const members = db.prepare("SELECT article_id id FROM event_articles WHERE event_id = ?").all(b.id).map(r => r.id);
     const subs = clusterMembers(db, members);
-    if (subs.length <= 1) continue; // clusterWindow sees ONE story (coherent / cosine-tight) → leave
-    genuineBlobs++; splitIds.push(b.id);
+    if (subs.length <= 1) continue; // one story
+    const core = entitySet(subs[0].members.map(m => m.id));
+    const spin = []; // ENTITY-DISJOINT sub-clusters (foreign stories)
+    for (let i = 1; i < subs.length; i++) {
+      const ov = overlap(entitySet(subs[i].members.map(m => m.id)), core);
+      if (ov < disjoint) spin.push(subs[i]); // foreign → spin off; else same-story sub-thread → keep
+    }
+    if (!spin.length) continue; // macro-story with sub-threads only → leave whole (the over-fragmentation fix)
+    const spinMembers = new Set(spin.flatMap(s => s.members.map(m => m.id)));
+    splitIds.push(b.id); split++;
     const apply = db.transaction(() => {
       delLinks.run(b.id);
-      for (const m of subs[0].members) linkArticle.run(b.id, m.id, now); // KEEP-CORE: largest keeps the id/slug
+      for (const m of members) if (!spinMembers.has(m)) linkArticle.run(b.id, m, now); // KEEP core + same-story threads + singletons
       touchEv.run(now, now, b.id);
-      for (let i = 1; i < subs.length; i++) {
-        const sub = subs[i];
+      for (const sub of spin) {
         const id = crypto.randomUUID();
         const slug = uniqueSlug(db, slugify(sub.members[0]?.title) || id.slice(0, 8));
         insEvent.run(id, slug, null, sub.members[0]?.title ?? id.slice(0, 8), null, domCat(sub.members), "active", 0, null, now, now, "{}", now, now);
         for (const m of sub.members) linkArticle.run(id, m.id, now);
-        created++;
+        created++; foreignSpun++;
       }
     });
     apply();
   }
-  const stats = { enabled: true, candidates: candidates.length, genuineBlobs, split: genuineBlobs, created, splitIds };
-  logger.info?.(`🔪 eventBreaker — ${JSON.stringify({ ...stats, splitIds: splitIds.length })}`);
+  const stats = { enabled: true, candidates: candidates.length, split, foreignSpun, created, splitIds };
+  logger.info?.(`🔪 eventBreaker(entity-aware) — ${JSON.stringify({ ...stats, splitIds: splitIds.length })}`);
   return stats;
 }
