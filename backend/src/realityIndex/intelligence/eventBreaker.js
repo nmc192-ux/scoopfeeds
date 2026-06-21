@@ -21,6 +21,10 @@ const MIN_ARTICLES = parseInt(process.env.EVENT_BREAKER_MIN_ARTICLES || "6", 10)
 const DISJOINT     = Number.parseFloat(process.env.EVENT_BREAKER_DISJOINT || "0.06"); // core-overlap below this = foreign story → spin off
 const MAX_CATSPAN  = parseInt(process.env.EVENT_ENTITY_MAX_CATSPAN || "5", 10);
 const TOPK         = parseInt(process.env.EVENT_ENTITY_TOPK || "40", 10);
+const DETACH       = String(process.env.EVENT_BREAKER_DETACH ?? "false").toLowerCase() === "true"; // Build B: trim un-clusterable orphan tail from kept events
+const MATCH_TAU    = Number.parseFloat(process.env.EVENT_MATCH_TAU || "0.78"); // matcher cosine floor — detach guard (an orphan must be cosine-far AND entity-disjoint)
+const MAX_PASSES   = parseInt(process.env.EVENT_BREAKER_MAX_PASSES || "6", 10); // sweep convergence bound (Phase 1 converged in 4)
+const DIMS         = 768;
 
 function slugify(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").trim().replace(/\s+/g, "-").replace(/-+/g, "-").slice(0, 80).replace(/^-+|-+$/g, ""); }
 function uniqueSlug(db, base) { let slug = base || crypto.randomUUID().slice(0, 8); let i = 2; while (db.prepare("SELECT 1 FROM events WHERE slug = ?").get(slug)) slug = `${base}-${i++}`; return slug; }
@@ -35,10 +39,8 @@ function clusterMembers(db, ids) {
   return clusterWindow({ db, windowStart: span.lo, windowEnd: span.hi + 1, excludeIds: new Set(win.filter(id => !set.has(id))) }).clusters;
 }
 
-export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, disjoint = DISJOINT, force = false } = {}) {
-  if (!ENABLED && !force) return { enabled: false };
-  const db = getDb();
-  // rarity weights + category-span (hub exclusion) from entity_idf
+// rarity-weighted entity context (idf + cat_span hub exclusion) — shared by the breaker and the detach pass.
+function buildEntityCtx(db) {
   const idfMap = new Map(), catSpanMap = new Map();
   for (const r of db.prepare("SELECT key, idf, cat_span FROM entity_idf").all()) { idfMap.set(r.key, r.idf); catSpanMap.set(r.key, r.cat_span); }
   const nw = db.prepare("SELECT n_window FROM entity_idf LIMIT 1").get()?.n_window;
@@ -50,6 +52,31 @@ export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, 
     return new Set([...keys].sort((a, b) => (idfMap.get(b) ?? 0) - (idfMap.get(a) ?? 0)).slice(0, TOPK));
   };
   const overlap = (A, B) => { if (!A.size || !B.size) return 0; let i = 0, u = 0; for (const k of new Set([...A, ...B])) { const w = idfMap.get(k) ?? fallbackIdf; u += w; if (A.has(k) && B.has(k)) i += w; } return u ? i / u : 0; };
+  return { idfMap, catSpanMap, fallbackIdf, entitySet, overlap };
+}
+
+// embedding helpers — only used by the detach guard (cosine-far test).
+function loadVecs(db, ids) {
+  const m = new Map();
+  for (let i = 0; i < ids.length; i += 500) {
+    const ch = ids.slice(i, i + 500); if (!ch.length) continue;
+    const ph = ch.map(() => "?").join(",");
+    for (const r of db.prepare(`SELECT mt.scope_id id, e.embedding v FROM embedding_meta mt JOIN embeddings e ON e.rowid=mt.rowid WHERE mt.scope='article' AND mt.scope_id IN (${ph})`).all(...ch)) {
+      const b = r.v, f = new Float32Array(b.buffer, b.byteOffset, b.length / 4), u = new Float64Array(DIMS);
+      let n = 0; for (let k = 0; k < DIMS; k++) { u[k] = f[k]; n += f[k] * f[k]; } n = Math.sqrt(n) || 1; for (let k = 0; k < DIMS; k++) u[k] /= n;
+      m.set(r.id, u);
+    }
+  }
+  return m;
+}
+const meanVec = (vs) => { if (!vs.length) return null; const m = new Float64Array(DIMS); for (const v of vs) for (let k = 0; k < DIMS; k++) m[k] += v[k]; let n = 0; for (let k = 0; k < DIMS; k++) n += m[k] * m[k]; n = Math.sqrt(n) || 1; for (let k = 0; k < DIMS; k++) m[k] /= n; return m; };
+const cosVec = (a, b) => { if (!a || !b) return -1; let s = 0; for (let k = 0; k < DIMS; k++) s += a[k] * b[k]; return s; };
+
+export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, disjoint = DISJOINT, force = false } = {}) {
+  if (!ENABLED && !force) return { enabled: false };
+  const db = getDb();
+  // rarity weights + category-span (hub exclusion) from entity_idf
+  const { entitySet, overlap } = buildEntityCtx(db);
 
   const candidates = db.prepare(
     `SELECT ea.event_id id FROM event_articles ea JOIN events e ON e.id = ea.event_id
@@ -91,5 +118,77 @@ export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, 
   }
   const stats = { enabled: true, candidates: candidates.length, split, foreignSpun, created, splitIds };
   logger.info?.(`🔪 eventBreaker(entity-aware) — ${JSON.stringify({ ...stats, splitIds: splitIds.length })}`);
+  return stats;
+}
+
+/**
+ * Build B — singleton-detach. After spin-off, a kept event can carry a tail of UN-CLUSTERABLE orphans
+ * (articles with no cosine peer ≥ tau, so clusterWindow never groups them; they inflate the kept event's
+ * category span without belonging to its story). Detach an orphan ONLY if it is BOTH (i) entity-disjoint
+ * from the kept core (rarity-weighted overlap < disjoint) AND (ii) cosine-far from the kept centroid
+ * (cos < MATCH_TAU). The AND is the safety guard: an entity-sparse but cosine-close article (a real facet
+ * with few named entities) STAYS. Detached articles are UN-EVENTED (link removed) — not spun into
+ * 1-article events; they remain in articles/feeds and the entity gate keeps them from re-merging.
+ *
+ * Scoped to the events passed in (the kept events the breaker just curated). Conservative: when in doubt, keep.
+ */
+export function detachOrphans({ eventIds = [], now = Date.now(), disjoint = DISJOINT } = {}) {
+  const db = getDb();
+  const { entitySet, overlap } = buildEntityCtx(db);
+  const memIds = (id) => db.prepare("SELECT article_id id FROM event_articles WHERE event_id = ?").all(id).map(r => r.id);
+  const delLink = db.prepare("DELETE FROM event_articles WHERE event_id = ? AND article_id = ?");
+  const touchEv = db.prepare("UPDATE events SET last_activity_at = ?, updated_at = ? WHERE id = ?");
+  let detached = 0; const touched = [];
+  for (const eid of new Set(eventIds)) {
+    const members = memIds(eid);
+    const subs = clusterMembers(db, members);
+    if (!subs.length) continue;                                   // ghost/empty → nothing to clean
+    const coreIds = subs[0].members.map(m => m.id);
+    const core = entitySet(coreIds);
+    const centroid = meanVec([...loadVecs(db, coreIds).values()]);
+    if (!centroid) continue;
+    const clustered = new Set(subs.flatMap(s => s.members.map(m => m.id))); // anything in a ≥2 sub-cluster is a real thread → never detach
+    const orphans = members.filter(m => !clustered.has(m));
+    if (!orphans.length) continue;
+    const ovec = loadVecs(db, orphans);
+    const drop = [];
+    for (const a of orphans) {
+      if (overlap(entitySet([a]), core) >= disjoint) continue;     // (i) entity-close → keep
+      const v = ovec.get(a);
+      if (v && cosVec(v, centroid) >= MATCH_TAU) continue;         // (ii) cosine-close → keep
+      drop.push(a);
+    }
+    if (!drop.length) continue;
+    const apply = db.transaction(() => { for (const a of drop) delLink.run(eid, a); touchEv.run(now, now, eid); });
+    apply();
+    detached += drop.length; touched.push({ id: eid, n: drop.length });
+  }
+  const stats = { detached, touchedEvents: touched.length };
+  logger.info?.(`🧹 detachOrphans — ${JSON.stringify(stats)}`);
+  return stats;
+}
+
+/**
+ * Build A — curative SWEEP for the scheduler. Runs the breaker over ALL active durable events (not just
+ * those touched this cycle) to CONVERGENCE (bounded by MAX_PASSES) so a pre-existing blob fully dissolves
+ * in one enabled cycle rather than lingering partially-split. Then, if EVENT_BREAKER_DETACH is on, trims
+ * the un-clusterable orphan tail from the kept events. keep-core preserves event ids/slugs throughout.
+ *
+ * Behind EVENT_BREAKER_ENABLED (default OFF → scheduler unchanged). force bypasses the flag for harness use.
+ */
+export function runEventBreakerSweep({ now = Date.now(), maxPasses = MAX_PASSES, force = false } = {}) {
+  if (!ENABLED && !force) return { enabled: false };
+  let passes = 0, split = 0, created = 0; const keptIds = new Set();
+  for (let p = 0; p < maxPasses; p++) {
+    const s = runEventBreaker({ now, force: true }); // gated once at the sweep level; force the inner passes
+    passes++;
+    split += s.split || 0; created += s.created || 0;
+    for (const id of (s.splitIds || [])) keptIds.add(id);
+    if (!s.split) break; // converged — no event split this pass
+  }
+  let detached = 0, touchedEvents = 0;
+  if (DETACH && keptIds.size) { const d = detachOrphans({ eventIds: [...keptIds], now }); detached = d.detached; touchedEvents = d.touchedEvents; }
+  const stats = { enabled: true, passes, split, created, keptEvents: keptIds.size, detached, touchedEvents };
+  logger.info?.(`🔁 eventBreakerSweep — ${JSON.stringify(stats)}`);
   return stats;
 }

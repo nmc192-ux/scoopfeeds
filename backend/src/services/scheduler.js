@@ -27,6 +27,7 @@ import { snapshotActiveMarkets } from "../realityIndex/ingest/predictionMarkets/
 import { runMarketMatcherCycle } from "../realityIndex/intelligence/marketMatcher.js";
 import { runSnapshotDownsampler } from "../realityIndex/jobs/snapshotDownsampler.js";
 import { runEventPromoter } from "../realityIndex/intelligence/eventPromoter.js";
+import { runEventBreakerSweep } from "../realityIndex/intelligence/eventBreaker.js";
 import { runTrackerDetector } from "../realityIndex/intelligence/trackerDetector.js";
 import { runScoringJob } from "../skills/scoring/runtime/scoringRun.js";
 import { runEventTimelineBuilder } from "../realityIndex/intelligence/eventTimelineBuilder.js";
@@ -396,6 +397,13 @@ async function runEventPromoterCronCycle() {
   isEventPromoterRun = true;
   try {
     const out = await runEventPromoter();
+    // Curative breaker sweep (Phase 2) — post-promotion janitor that dissolves over-merged events to
+    // convergence. Behind EVENT_BREAKER_ENABLED (default OFF) → when off this is a no-op and the cycle
+    // is byte-identical to before. keep-core preserves dossier ids/slugs across the dissolution.
+    if (String(process.env.EVENT_BREAKER_ENABLED ?? "false").toLowerCase() === "true") {
+      try { runEventBreakerSweep({}); }
+      catch (e) { logger.error("❌ Event breaker sweep failed", { error: e.message }); }
+    }
     lastEventPromoterRun = Date.now();
     return out;
   } catch (err) {
