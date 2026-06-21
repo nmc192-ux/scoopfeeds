@@ -22,6 +22,7 @@ import { latestSnapshotsByScope, snapshotHistory } from "../realityIndex/dal/sen
 import { latestRealityIndex, realityIndexHistory } from "../realityIndex/dal/realityIndexDao.js";
 import { listTrackersByEvent } from "../models/trackers.js";
 import { publicTracker } from "./trackers.js";
+import { groupTopEvents } from "../realityIndex/intelligence/eventGrouping.js";
 
 const router = express.Router();
 
@@ -259,6 +260,16 @@ router.get("/", (req, res) => {
     params.push(limit, offset);
 
     const rows = db.prepare(sql).all(...params);
+    // Display-layer story grouping (read-only). Behind HOMEPAGE_GROUPING (default OFF) — when off,
+    // this branch is skipped and the response below is byte-identical to before (prod-neutral).
+    if (String(process.env.HOMEPAGE_GROUPING ?? "false").toLowerCase() === "true") {
+      const enriched = rows.map((r) => ({ ...r, ids: db.prepare("SELECT article_id FROM event_articles WHERE event_id = ?").all(r.id).map((x) => x.article_id) }));
+      const grouped = groupTopEvents(db, enriched);
+      return res.json({
+        events: grouped.map((g) => ({ ...publicEvent(g), related: (g.related ?? []).map((x) => ({ id: x.id, title: x.title, slug: x.slug, source_count: x.source_count })) })),
+        limit, offset, sort, grouped: true,
+      });
+    }
     res.json({ events: rows.map(publicEvent), limit, offset, sort });
   } catch (err) {
     logger.error(`GET /api/events error: ${err.message}`);
