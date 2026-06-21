@@ -52,10 +52,21 @@ Full stack on `main`, flags OFF. The 3b-2 merge trigger is reverted/discarded (p
 - Validate the wired path on COW reproduces the harness-tested behavior.
 - **GATE:** flag OFF → scheduler unchanged; flag ON (COW) → breaker runs as validated.
 
-### Phase 3 — Deploy code to Hostinger (flags OFF)
-- Deploy `main`. Migrations 008/009/010 run (add empty tables). Prod behavior unchanged.
-- **GATE:** migrations applied cleanly; flags confirmed OFF; homepage byte-identical to pre-deploy (smoke).
-- **ROLLBACK:** `git revert` + redeploy — trivial while flag-OFF.
+### Phase 3 — Deploy code to Hostinger (flags OFF) — DONE
+**Prod run model (actual):** Hostinger **LiteSpeed Node** — a single `lsnode` process, **not** Docker (docker is not installed on the box). The committed `Dockerfile` / `docker-compose.production.yml` describe an intended container model that prod does not currently use.
+- **App dir:** `nodejs/` under the `scoopfeeds.com` domain root.
+- **Live DB:** `news.db` (~8 GB) under the account's persisted data dir (outside the web root).
+
+**Deploy mechanism (actual):** hPanel → **Deployments → "Settings and Deploy"** (Hostinger Git deploy; pulls the repo via the `scoop`→`scoopfeeds` 301 redirect). It advances the checkout to `origin/main` and **resets local working-tree edits to committed versions** — the local `scripts/*.sh` tweaks were discarded (confirmed not load-bearing).
+
+**Migrations:** auto-apply on restart (`getDb` → `runMigrations`, idempotent via `schema_migrations`). 008/009/010 applied against the live DB — **new empty tables only; existing data untouched.**
+
+**Delta deployed:** `66e1bfb → afdcfa8` = the entity stack (all flags default OFF) + docs. Verified clean / near-neutral; one new npm dep (`compromise`) is present but **not exercised until Phase 4a**.
+
+- **GATE (met):** migrations applied cleanly; flags confirmed OFF/inert; site healthy (homepage 200, health 200).
+- **ROLLBACK:** redeploy a prior commit via the same Git-deploy flow — trivial while flag-OFF.
+
+> **Known issue (tracked).** `stderr.log` shows a Rust/tokio panic — *"OS can't spawn worker thread (os error 11)"* — a background worker hitting Hostinger's process/thread cap. **Not affecting the live site** (homepage/health return 200). **Investigate the thread ceiling before the Phase 4a backfill** (the backfill adds concurrent work and must not trip the same limit).
 
 ### Phase 4 — Ordered enablement on prod *(the actual go-live)*
 > **Take a full prod DB backup before 4c** — the restore-point for the first graph-mutating step.
@@ -99,4 +110,6 @@ The incoherent over-merge blob no longer exists in the durable graph; the homepa
 
 **Phase 2 — Scheduler wiring + singleton-detach: DONE** (`694d12f`, flags OFF). The breaker runs to convergence as a post-promotion curative sweep over active events (`EVENT_BREAKER_ENABLED`); `detachOrphans()` un-events orphans that are both entity-disjoint and cosine-far (`EVENT_BREAKER_DETACH`). Validated on COW: blob → 278a/9c clean (46 orphans detached / 0 from the Iran core, 20/20 spot-check foreign), ids 100% stable, no re-absorb, homepage clean.
 
-**Next:** Phase 3 — deploy `main` to Hostinger flags-OFF.
+**Phase 3 — Deploy to prod (flags OFF): DONE.** Deployed `afdcfa8` via Hostinger Git deploy (`66e1bfb → afdcfa8`) onto the **LiteSpeed Node** run model (single `lsnode` process, not Docker). Migrations 008/009/010 applied on restart (new empty tables only; existing data untouched); site healthy (homepage 200, health 200); all flags OFF/inert. **Known:** a Rust/tokio thread-spawn panic (*os error 11*) from a background worker hitting the host's thread cap — env/resource, non-blocking to the live site.
+
+**Next:** Phase 4a — entity extraction ON + corpus backfill, **after** the thread-ceiling check.
