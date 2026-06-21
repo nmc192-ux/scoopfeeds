@@ -34,3 +34,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Scratch replay/validation harnesses (reused locally, not committed)
+backend/_*.mjs
