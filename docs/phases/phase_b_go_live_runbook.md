@@ -80,8 +80,14 @@ Full stack on `main`, flags OFF. The 3b-2 merge trigger is reverted/discarded (p
   - **Status — backfill DONE (off-host):**
     - Local copy = the gitignored copy of the snapshot. Pilot (300) + working-set (3,206) = **3,506 processed.**
     - Working-set coverage **3,209 / 3,209 = 100%**; QID resolution **78%** (pilot 75%); **46 min** wall, **~865 ms/article** warm. Prod untouched (snapshot pristine).
-    - **SYNC TO PROD — PENDING (next step):** export `article_entities`, `surface_qid_cache`, `article_entity_processed` from the local copy → small SQL file → transfer → load on prod with `INSERT OR IGNORE` (idempotent). **Back up the live DB first.** Light I/O, no compute → LVE-safe. Inert until 4c (matcher gate, OFF).
-  - **GATE:** `article_entities` covers the working set on prod (≈100% of the ~3,209) after sync.
+    - **SYNC TO PROD — DONE & VERIFIED.** Built a **2 MB sync DB** locally (3 tables; `article_entities` sans the autoincrement `id` so prod re-assigns — dedup is on the unique key `(article_id, COALESCE(qid,surface_norm))`), transferred, loaded on prod via atomic `INSERT OR IGNORE` (`BEGIN IMMEDIATE` + `busy_timeout=30000`; lock-tolerant, LVE-safe — 2 MB of finished rows, zero compute on host).
+      - **Prod pre-load:** 0/0/0 (tables empty — the aborted flag-on run wrote nothing → clean first load).
+      - **Prod post-load (VERIFIED):** `article_entities`=**14,283**, `surface_qid_cache`=**10,361**, `article_entity_processed`=**3,506**, `resolved_qids`=**11,048 (77%)** — exact match to the local working set. Site stayed **200** throughout.
+      - **Rollback (unused):** `DELETE FROM` the 3 tables (inert until 4c).
+    - `ENTITY_EXTRACTION_ENABLED` remains **OFF** on prod; tables inert behind the matcher gate (4c, OFF).
+  - **GATE (met):** `article_entities` covers the working set on prod (100% of the ~3,209).
+
+> **Host / LVE note.** The transfer hit the CloudLinux LVE ceiling a **3rd time** — SSH/SCP refused (*"connection reset / closed by remote host"*) under process/memory pressure; a redeploy did **not** clear it; it cleared only after a **Hostinger resource boost**, after which `scp` succeeded. The pattern (tokio panic → extraction fork-storm → SSH/SCP refusal) makes the **VPS migration** (Hostinger KVM: root, real process headroom, Docker for the committed stack, no LVE wall) increasingly **non-optional**. Scope it before 4b/4c add scheduler-side entity load.
 - **4b. Entity IDF.** Set `ENTITY_IDF_ENABLED`. Run/await the IDF recompute (needs `article_entities` populated). **GATE:** `entity_idf` populated, `cat_span` computed and sane (spot-check a known hub has high `cat_span`).
 - **4c. Gate + breaker.** Set `EVENT_ENTITY_MIN > 0` and `EVENT_BREAKER_ENABLED`. The matcher now uses entities; the breaker splits the existing blob. The blob dissolves on the FIRST enabled cycle (the sweep converges within-cycle, bounded by `EVENT_BREAKER_MAX_PASSES`=6); steady-state is ~2 small splits/cycle. **GATE:** blob dissolved, new matching coherent, dossier ids stable, no oscillation. *(Backup taken before this step.)*
 - **4d. Display grouping.** Set `HOMEPAGE_GROUPING`. Facet cards consolidate. **GATE:** Iran → one card (+ related), distinct stories separate, lead coherent.
@@ -124,4 +130,6 @@ The incoherent over-merge blob no longer exists in the durable graph; the homepa
 
 **Phase 4a (off-host extraction) — backfill DONE, sync pending.** Confirmed in-process extraction is **not viable** (LVE ceiling: `fork` exhaustion at batch 50 + restart double-up; site stayed 200; recovered via hPanel stop/start). Pivoted **off-host**: working set **3,209 / 3,209 = 100%**, 78% resolved; prod untouched; `ENTITY_EXTRACTION_ENABLED=OFF` on prod. Env mechanism mapped (`$HOME/.scoopfeeds.env`, deploy-safe; `ENABLE_SCHEDULER=true`).
 
-**Next:** sync entity tables to prod (backup + `INSERT OR IGNORE`, LVE-safe), then **4b** (IDF) → **4c** (gate + breaker, backup first) → **4d** (`HOMEPAGE_GROUPING`) → **4e** (re-apply homepage).
+**Phase 4a — COMPLETE** (extraction off-host + sync to prod). **VERIFIED on prod: 14,283 / 10,361 / 3,506** (`article_entities` / `surface_qid_cache` / `article_entity_processed`), resolved **11,048**; prod **200** throughout; `ENTITY_EXTRACTION_ENABLED=OFF`. The transfer cleared an LVE block via a Hostinger resource boost (redeploy did not clear it).
+
+**Next:** **4b** (`ENTITY_IDF_ENABLED` → IDF recompute over the now-populated entities). **PRE-CHECK:** the IDF recompute runs in the scheduler — confirm it fits under the LVE ceiling, else apply the same **off-host-compute-then-sync** pattern. Then **4c** (gate + breaker, DB backup first) → **4d** (`HOMEPAGE_GROUPING`) → **4e** (re-apply homepage). **VPS migration scoping recommended** before scheduler-side entity load.
