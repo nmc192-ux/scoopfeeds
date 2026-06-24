@@ -37,3 +37,6 @@ Thumbs.db
 
 # Scratch replay/validation harnesses (reused locally, not committed)
 backend/_*.mjs
+
+# Local off-host extraction working copy of the prod snapshot (disposable, multi-GB)
+backend/_pilot_data/
