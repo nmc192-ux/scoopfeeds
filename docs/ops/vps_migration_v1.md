@@ -31,13 +31,15 @@ If any session finds us polishing infra or the matcher instead of advancing this
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
-| TLS | Edge / certs | **Cloudflare proxy** (orange-cloud) + origin cert | Free, adds CDN + DDoS, hides origin IP, matches Mac-mini runbook posture |
+| TLS | Edge / certs | **Cloudflare Tunnel** (`cloudflared` container -> `web:3000`) | Free; no inbound ports (outbound-only); origin IP hidden; TLS at Cloudflare edge (no origin cert to manage); matches committed `deploy/cloudflared-config.yml` |
 | Jobs | Redis/BullMQ | **In-process first**; BullMQ a clean follow-up | One variable at a time; BullMQ is coded-but-not-live (Phase B audit) — enable after migration is stable |
 | Cutover | DB window | **Short off-peak window** (~15-30 min) | Traffic is low; a clean snapshot-and-place is far simpler than bulk+delta sync |
 
 **Target spec:** Hostinger KVM 2 — 2 vCPU / 8 GB RAM / 100 GB NVMe, Ubuntu 24.04 LTS. ~$7-9/mo intro (24-mo term holds the rate), ~$12-18/mo at renewal; 30-day money-back covers the trial.
 
 **Standing rollback principle:** the old shared host stays **live and authoritative** until DNS is cut AND verified AND a stability soak passes. Every step before decommission is reversible. Nothing irreversible happens until M6's decommission, days later.
+
+**Cloudflare onboarding — PREREQUISITE before M4.** `scoopfeeds.com` must be added to Cloudflare and its nameservers moved off Hostinger (currently NS = `dns-parking.com`). **Verify ALL imported DNS records — especially MX/email — before flipping nameservers.** The live site is unaffected by this (imported records are identical and still resolve to the old host). Domain registration **stays at Hostinger**; Cloudflare is **DNS + tunnel only**; **$0** added cost.
 
 ---
 
@@ -78,22 +80,22 @@ If any session finds us polishing infra or the matcher instead of advancing this
 **Verify:** on the VPS DB — `article_entities`~=14,283, `surface_qid_cache`~=10,361, `article_entity_processed`~=3,506, `entity_idf` populated; `PRAGMA integrity_check`=ok; article/event counts match the snapshot; `curl localhost:3000/api/health` 200; homepage serves real data on the VPS IP.
 **Rollback:** old host is still live and serving the public — nothing has cut over yet. Re-pull snapshot if integrity fails.
 
-### M4 — TLS + domain (Cloudflare)
-**Goal:** HTTPS terminates correctly in front of the stack.
-**Steps:**
-1. Ensure `scoopfeeds.com` is on Cloudflare (nameservers pointed). SSL/TLS mode: **Full (strict)**.
-2. Generate a Cloudflare **Origin Certificate**; install it on a lightweight reverse proxy on the VPS (Caddy or nginx) terminating 443 and proxying to `web:3000`. (Caddy is simplest: a 3-line Caddyfile with the origin cert.) Add the proxy as a small service alongside the compose stack, or front the web container with it.
-3. Test against the VPS directly (host header override) before any DNS change.
-**Verify:** `curl -H 'Host: scoopfeeds.com' https://<VPS_IP> --resolve scoopfeeds.com:443:<VPS_IP>` returns 200 with a valid cert chain.
-**Rollback:** none (DNS still points at old host).
+### M4 — TLS + domain (Cloudflare Tunnel)
+**Goal:** HTTPS via a **Cloudflare Tunnel**, tested on a staging hostname before any live cutover.
+**Steps:** *(prereq: Cloudflare onboarding above is done — zone added, NS moved, records verified)*
+1. Install/run `cloudflared` (as a container in the compose stack, or via the committed `deploy/cloudflared-config.yml`).
+2. `cloudflared tunnel login` — **the USER does the Cloudflare auth in the browser; the assistant never logs in.**
+3. Create the tunnel; route a **STAGING** hostname (`vps.scoopfeeds.com`) to the tunnel -> `web:3000`; bring the tunnel up.
+**Verify:** `https://vps.scoopfeeds.com` serves the VPS with valid TLS (edge-terminated); live `scoopfeeds.com` untouched.
+**Rollback:** remove the staging DNS/route; nothing live affected.
 
-### M5 — Cutover (DNS)
-**Goal:** public traffic on the VPS, old host as rollback.
+### M5 — Cutover (route apex to the tunnel)
+**Goal:** public traffic on the VPS via the tunnel, old host as rollback.
 **Steps:**
 1. **A day before:** lower the `scoopfeeds.com` DNS TTL to ~5 min (in Cloudflare).
-2. **In the off-peak window:** point the `scoopfeeds.com` A-record -> VPS IP, **proxied (orange cloud)**. Old host still answers stale resolvers until propagation.
+2. **In the off-peak window:** **route `scoopfeeds.com` (apex) to the tunnel** in Cloudflare (-> `web:3000`). Old host still answers stale resolvers until propagation. *(Take a final fresh snapshot just before, if the live DB has moved since M3.)*
 **Verify:** `https://scoopfeeds.com` serves from the VPS (check response + Cloudflare headers); cert valid; `scoop.urbenofficial.com` -> 301 to scoopfeeds.com intact; AdSense + analytics tags present in page source; `/api/health` 200.
-**Rollback:** point the A-record back to the old host IP (<=5 min TTL). Fully reversible.
+**Rollback:** remove/repoint the tunnel route back to the old host (<=5 min TTL). Fully reversible.
 
 ### M6 — Close + the payoff
 **Goal:** the migration's whole point — extraction live, coverage self-sustaining.
@@ -117,7 +119,7 @@ If any session finds us polishing infra or the matcher instead of advancing this
 | DNS propagation lag | Low | Low | Pre-lowered TTL; old host answers during; reversible |
 | Renewal price jump (140-232%) | Certain | Low | Budgeted ~$15/mo long-term; 24-mo term holds intro |
 | Self-managed security exposure | Low | Medium | ufw + fail2ban + no root SSH + Cloudflare proxy hides origin IP |
-| TLS/reverse-proxy misconfig (M4) | Medium | Low | Tested against VPS IP before DNS cut; old host unaffected |
+| Tunnel / Cloudflare onboarding misconfig (esp. MX records on NS move) | Medium | Low | Verify all imported records before flipping nameservers; test on staging hostname first |
 | Scope creep into infra-land | **Medium** | **Medium** | Section 0 definition-of-done + mandatory return-to-build-plan |
 
 **BullMQ note:** deliberately OUT of this migration (decision: one variable at a time). After migration is stable, enabling Redis/BullMQ is a clean, separate follow-up.
