@@ -58,7 +58,7 @@ If any session finds us polishing infra or the matcher instead of advancing this
 **Steps:**
 1. Create a non-root sudo deploy user; copy your SSH key to it; disable root SSH login + password auth (`/etc/ssh/sshd_config`: `PermitRootLogin no`, `PasswordAuthentication no`; restart sshd — keep your current session open until verified).
 2. Install Docker Engine + Compose plugin (official convenience script or apt repo).
-3. `ufw default deny incoming` / allow `22,80,443` / `ufw enable`. Install `fail2ban`.
+3. `ufw default deny incoming` / allow `22,80,443` / `ufw enable`. Install `fail2ban`. *(80/443 kept open during migration as a direct-serve fallback for diagnostics; with the outbound-only tunnel these inbound ports aren't required for serving — tighten to 22-only at M6 once the tunnel is verified.)*
 4. Clone: `git clone https://github.com/nmc192-ux/scoopfeeds.git /opt/scoopfeeds`.
 **Verify:** `docker --version` + `docker compose version` ok; `ufw status` shows 22/80/443; repo present; new SSH session as deploy user works.
 **Rollback:** none needed.
@@ -102,7 +102,8 @@ If any session finds us polishing infra or the matcher instead of advancing this
 **Steps:**
 1. Confirm scheduler running on the VPS (`/api/health` scheduler lastRun fresh).
 2. **Set `ENTITY_EXTRACTION_ENABLED=true`** in the VPS env; restart the stack. With 8 GB + root, in-process extraction runs on every new article — **no LVE wall.** Watch a few enrich cycles: `article_entity_processed` climbs, new articles get entities, the daily IDF cron (03:30) keeps weights fresh.
-3. Stability soak (a few days). Then **decommission the old host** (keep its final snapshot as a cold archive briefly).
+3. **Harden firewall to match the tunnel posture:** `ufw deny 80/443` (keep `22`), since the `cloudflared` tunnel is outbound-only and needs no inbound web ports. **Verify the site still serves through the tunnel after closing them.**
+4. Stability soak (a few days). Then **decommission the old host** (keep its final snapshot as a cold archive briefly).
 **Verify:** extraction processing new articles; coverage no longer goes stale; site stable on VPS over the soak.
 **Rollback:** until decommission, DNS-back to old host remains available.
 
