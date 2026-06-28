@@ -127,3 +127,9 @@ If any session finds us polishing infra or the matcher instead of advancing this
 ## 4. Execution log
 
 - *(append per session: phase reached, verify results, decisions, next step)*
+
+**2026-06-28 (Session) — M0–M2 COMPLETE.**
+- **M0 DONE** — KVM 2 provisioned (Ubuntu 24.04.4, 2 vCPU / 7.8 GB / 96 GB, Malaysia region); SSH key auth confirmed.
+- **M1 DONE** — apt upgraded (33 LTS security patches); 2 GB swap added; `ufw` active (22/80/443 only); `fail2ban` installed; Docker 29.6.1 + Compose v5.2.0 installed; non-root `deploy` user (sudo + docker groups, passwordless sudo) created and key-login verified; SSH hardened (`PermitRootLogin no`, `PasswordAuthentication no` across main config + `50-cloud-init.conf` + `60-cloudimg-settings.conf`) — gate passed: root REFUSED, deploy ACCEPTED; repo cloned to `/opt/scoopfeeds` at `31235d6`.
+- **M2 DONE** — committed Docker stack built for the FIRST time (frontend compiled, better-sqlite3 rebuilt fresh against `node:20` — no ABI issue), web container Healthy on empty DB, `/api/healthz` 200. Used a `docker-compose.override.yml` to neutralize BullMQ for the isolated test (in-process-first decision); `backend/.env` minimal placeholder (real secrets come at M3). Test stack torn down + empty `scoop_data` volume removed to park clean.
+- **NEXT = M3 (DB cutover).** Prep: (1) pull real prod env secrets from old host's `$HOME/.scoopfeeds.env` + hPanel-injected vars into VPS `backend/.env` (secrets — never in chat); (2) snapshot pull from old host (`VACUUM INTO`, then `scp` direct old->VPS or via Mac); off-peak window. Old shared host remains live + authoritative until M5 cutover.
