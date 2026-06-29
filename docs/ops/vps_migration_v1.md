@@ -31,7 +31,7 @@ If any session finds us polishing infra or the matcher instead of advancing this
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
-| TLS | Edge / certs | **Cloudflare Tunnel** (`cloudflared` container -> `web:3000`) | Free; no inbound ports (outbound-only); origin IP hidden; TLS at Cloudflare edge (no origin cert to manage); matches committed `deploy/cloudflared-config.yml` |
+| TLS | Edge / certs | **Cloudflare proxy** (orange-cloud) on Full setup; nameservers on Cloudflare; free Universal SSL at edge | The tunnel's only advantage was avoiding the NS move — which the free tier can't do anyway (Partial/CNAME setup is Business-plan only). With the domain on Cloudflare, the standard proxy is simpler. *(Supersedes the earlier `cloudflared` tunnel plan.)* |
 | Jobs | Redis/BullMQ | **In-process first**; BullMQ a clean follow-up | One variable at a time; BullMQ is coded-but-not-live (Phase B audit) — enable after migration is stable |
 | Cutover | DB window | **Short off-peak window** (~15-30 min) | Traffic is low; a clean snapshot-and-place is far simpler than bulk+delta sync |
 
@@ -39,7 +39,7 @@ If any session finds us polishing infra or the matcher instead of advancing this
 
 **Standing rollback principle:** the old shared host stays **live and authoritative** until DNS is cut AND verified AND a stability soak passes. Every step before decommission is reversible. Nothing irreversible happens until M6's decommission, days later.
 
-**Cloudflare onboarding — PREREQUISITE before M4.** `scoopfeeds.com` must be added to Cloudflare and its nameservers moved off Hostinger (currently NS = `dns-parking.com`). **Verify ALL imported DNS records — especially MX/email — before flipping nameservers.** The live site is unaffected by this (imported records are identical and still resolve to the old host). Domain registration **stays at Hostinger**; Cloudflare is **DNS + tunnel only**; **$0** added cost.
+**Cloudflare onboarding — PREREQUISITE before M4.** `scoopfeeds.com` must be added to Cloudflare and its nameservers moved off Hostinger (currently NS = `dns-parking.com`). **Verify ALL imported DNS records — especially MX/email — before flipping nameservers.** The live site is unaffected by this (imported records are identical and still resolve to the old host). Domain registration **stays at Hostinger**; Cloudflare is **DNS + edge proxy only**; **$0** added cost.
 
 ---
 
@@ -58,7 +58,7 @@ If any session finds us polishing infra or the matcher instead of advancing this
 **Steps:**
 1. Create a non-root sudo deploy user; copy your SSH key to it; disable root SSH login + password auth (`/etc/ssh/sshd_config`: `PermitRootLogin no`, `PasswordAuthentication no`; restart sshd — keep your current session open until verified).
 2. Install Docker Engine + Compose plugin (official convenience script or apt repo).
-3. `ufw default deny incoming` / allow `22,80,443` / `ufw enable`. Install `fail2ban`. *(80/443 kept open during migration as a direct-serve fallback for diagnostics; with the outbound-only tunnel these inbound ports aren't required for serving — tighten to 22-only at M6 once the tunnel is verified.)*
+3. `ufw default deny incoming` / allow `22,80,443` / `ufw enable`. Install `fail2ban`. *(80/443 must stay open — the Cloudflare proxy reaches the origin on them. At M6, restrict inbound 80/443 to Cloudflare's published IP ranges so only the edge can hit the origin directly.)*
 4. Clone: `git clone https://github.com/nmc192-ux/scoopfeeds.git /opt/scoopfeeds`.
 **Verify:** `docker --version` + `docker compose version` ok; `ufw status` shows 22/80/443; repo present; new SSH session as deploy user works.
 **Rollback:** none needed.
@@ -80,29 +80,29 @@ If any session finds us polishing infra or the matcher instead of advancing this
 **Verify:** on the VPS DB — `article_entities`~=14,283, `surface_qid_cache`~=10,361, `article_entity_processed`~=3,506, `entity_idf` populated; `PRAGMA integrity_check`=ok; article/event counts match the snapshot; `curl localhost:3000/api/health` 200; homepage serves real data on the VPS IP.
 **Rollback:** old host is still live and serving the public — nothing has cut over yet. Re-pull snapshot if integrity fails.
 
-### M4 — TLS + domain (Cloudflare Tunnel)
-**Goal:** HTTPS via a **Cloudflare Tunnel**, tested on a staging hostname before any live cutover.
-**Steps:** *(prereq: Cloudflare onboarding above is done — zone added, NS moved, records verified)*
-1. Install/run `cloudflared` (as a container in the compose stack, or via the committed `deploy/cloudflared-config.yml`).
-2. `cloudflared tunnel login` — **the USER does the Cloudflare auth in the browser; the assistant never logs in.**
-3. Create the tunnel; route a **STAGING** hostname (`vps.scoopfeeds.com`) to the tunnel -> `web:3000`; bring the tunnel up.
-**Verify:** `https://vps.scoopfeeds.com` serves the VPS with valid TLS (edge-terminated); live `scoopfeeds.com` untouched.
-**Rollback:** remove the staging DNS/route; nothing live affected.
+### M4 — TLS + domain (Cloudflare proxy, staging subdomain)
+**Goal:** HTTPS via the **Cloudflare proxy**, validated on a staging hostname before any live cutover. *(Supersedes the earlier `cloudflared` tunnel plan — the domain is now on Cloudflare Full setup, so use the standard proxy.)*
+**Steps:** *(prereq: Cloudflare onboarding above is done — zone Active, NS on Cloudflare, records verified)*
+1. In Cloudflare DNS, create `vps.scoopfeeds.com` as a **PROXIED (orange) A record -> VPS IP**.
+2. Bring up the stack on the VPS (web serving real data; expose the origin on 80/443 for the edge to reach).
+3. Cloudflare's free Universal SSL covers the subdomain — no origin cert to manage.
+**Verify:** `https://vps.scoopfeeds.com` serves the VPS with valid edge TLS; live `scoopfeeds.com` untouched (apex still grey -> old host).
+**Rollback:** delete the `vps.scoopfeeds.com` staging record; nothing live affected.
 
-### M5 — Cutover (route apex to the tunnel)
-**Goal:** public traffic on the VPS via the tunnel, old host as rollback.
+### M5 — Cutover (point apex at the VPS, proxied)
+**Goal:** public traffic on the VPS via the Cloudflare proxy, old host as rollback.
 **Steps:**
-1. **A day before:** lower the `scoopfeeds.com` DNS TTL to ~5 min (in Cloudflare).
-2. **In the off-peak window:** **route `scoopfeeds.com` (apex) to the tunnel** in Cloudflare (-> `web:3000`). Old host still answers stale resolvers until propagation. *(Take a final fresh snapshot just before, if the live DB has moved since M3.)*
+1. **In the off-peak window:** change the apex `scoopfeeds.com` A record (and `www`) from the old host IP to the **VPS IP**, and flip them to **PROXIED (orange)**. No TTL pre-lowering needed — the Cloudflare proxy switch is instant and reversible by toggling back. *(Take a final fresh snapshot just before, if the live DB has moved since M3.)*
+2. **Email records stay grey/untouched** (MX/DKIM/SPF/autoconfig/autodiscover) — forever.
 **Verify:** `https://scoopfeeds.com` serves from the VPS (check response + Cloudflare headers); cert valid; `scoop.urbenofficial.com` -> 301 to scoopfeeds.com intact; AdSense + analytics tags present in page source; `/api/health` 200.
-**Rollback:** remove/repoint the tunnel route back to the old host (<=5 min TTL). Fully reversible.
+**Rollback:** point the apex `A` record back to the old host IP. Fully reversible.
 
 ### M6 — Close + the payoff
 **Goal:** the migration's whole point — extraction live, coverage self-sustaining.
 **Steps:**
 1. Confirm scheduler running on the VPS (`/api/health` scheduler lastRun fresh).
 2. **Set `ENTITY_EXTRACTION_ENABLED=true`** in the VPS env; restart the stack. With 8 GB + root, in-process extraction runs on every new article — **no LVE wall.** Watch a few enrich cycles: `article_entity_processed` climbs, new articles get entities, the daily IDF cron (03:30) keeps weights fresh.
-3. **Harden firewall to match the tunnel posture:** `ufw deny 80/443` (keep `22`), since the `cloudflared` tunnel is outbound-only and needs no inbound web ports. **Verify the site still serves through the tunnel after closing them.**
+3. **Harden firewall to match the proxy posture:** restrict inbound `80/443` to Cloudflare's published IP ranges (keep `22`), so only the Cloudflare edge can reach the origin directly (no proxy-bypass to the origin IP). **Verify the site still serves through Cloudflare after tightening.**
 4. Stability soak (a few days). Then **decommission the old host** (keep its final snapshot as a cold archive briefly).
 **Verify:** extraction processing new articles; coverage no longer goes stale; site stable on VPS over the soak.
 **Rollback:** until decommission, DNS-back to old host remains available.
@@ -120,7 +120,7 @@ If any session finds us polishing infra or the matcher instead of advancing this
 | DNS propagation lag | Low | Low | Pre-lowered TTL; old host answers during; reversible |
 | Renewal price jump (140-232%) | Certain | Low | Budgeted ~$15/mo long-term; 24-mo term holds intro |
 | Self-managed security exposure | Low | Medium | ufw + fail2ban + no root SSH + Cloudflare proxy hides origin IP |
-| Tunnel / Cloudflare onboarding misconfig (esp. MX records on NS move) | Medium | Low | Verify all imported records before flipping nameservers; test on staging hostname first |
+| Cloudflare onboarding / proxy misconfig (esp. MX records on NS move) | Medium | Low | Verify all imported records before flipping nameservers; test on staging hostname first |
 | Scope creep into infra-land | **Medium** | **Medium** | Section 0 definition-of-done + mandatory return-to-build-plan |
 
 **BullMQ note:** deliberately OUT of this migration (decision: one variable at a time). After migration is stable, enabling Redis/BullMQ is a clean, separate follow-up.
@@ -143,3 +143,11 @@ If any session finds us polishing infra or the matcher instead of advancing this
 - Integrity check `ok`; counts verified: `articles` 24,280, `article_entities` 14,283 (exact match to 4a sync), `entity_idf` 5,101 (exact match to 4b).
 - Brought up `web` only against real data with the no-ingest override (`ENABLE_SCHEDULER=false`, `USE_BULLMQ=false`, `REDIS_URL=""`); health 200, serving real data. Mac retains `snap-m3.db.gz` as offline fallback.
 - **NEXT = Cloudflare onboarding (PREREQUISITE for M4):** `scoopfeeds.com` is NOT yet on Cloudflare (NS = Hostinger `dns-parking.com`). Add zone, VERIFY imported records (esp. MX/email) before flipping nameservers; live site unaffected (records identical, still -> old host). Then **M4** = `cloudflared` tunnel -> `web:3000`, tested on a staging subdomain (`vps.scoopfeeds.com`). Old host authoritative until M5.
+
+**2026-06-30 (Session) — CLOUDFLARE ONBOARDING COMPLETE (M4 prerequisite).**
+- Found `scoopfeeds.com` was NOT on Cloudflare (NS = Hostinger `dns-parking.com`), and Cloudflare Tunnel's free tier requires **Full setup** (nameservers on Cloudflare) — Partial/CNAME setup is **Business-plan only ($200/mo)**.
+- **Decision:** move nameservers to Cloudflare (Full setup), protecting the live email setup (1 active mailbox `admin@scoopfeeds.com` on Hostinger Business Email). *(This also makes the standard Cloudflare proxy available — superseding the tunnel plan; see M4/M5.)*
+- Captured all 13-14 DNS records; added zone to Cloudflare (Free). On import, fixed 5 email CNAMEs (3 DKIM `hostingermail-a/b/c`, `autoconfig`, `autodiscover`) that Cloudflare wrongly set to Proxied -> set **ALL records to DNS-only (grey)** for a behavior-identical migration. Confirmed DNSSEC off at Hostinger.
+- Flipped nameservers Hostinger -> `aaden`/`gigi.ns.cloudflare.com`. Propagated in ~20 min; zone **Active**.
+- **VERIFIED:** NS = Cloudflare; site HTTP 200 (still old host `<OLD_HOST_IP>`, grey/unproxied); MX/DKIM/SPF intact; a real test email to `admin@scoopfeeds.com` arrived in webmail. **Email fully survived.**
+- **NEXT = M4** (staging validation: `vps.scoopfeeds.com` as a PROXIED A record -> VPS IP) -> M5 (point apex at VPS, proxied). Old host authoritative until M5.
