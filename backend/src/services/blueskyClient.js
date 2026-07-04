@@ -210,36 +210,43 @@ async function _createSession() {
   }
 }
 
-async function ensureSession({ force = false } = {}) {
-  if (session && !force) return session;
-  if (!isBlueskyConfigured()) throw new Error("bluesky not configured");
-
-  // 1. Hot in-memory cache (already returned above unless force=true).
-  // 2. Disk cache → try refreshSession first.
+// Do the actual establishment: prefer the cheap refreshSession, fall back to a
+// full createSession only as a last resort. NOT called directly — always via the
+// single-flight ensureSession() below so concurrent callers can't each start one.
+async function _establishSession({ force = false } = {}) {
+  // Disk cache → try the leniently-limited refreshSession first.
   if (!session) {
     const onDisk = _loadSessionFromDisk();
     if (onDisk) {
       const refreshed = await _refreshSession(onDisk);
-      if (refreshed) {
-        session = refreshed;
-        return session;
-      }
-      // Refresh failed — fall through to createSession. The on-disk session
-      // is effectively dead at this point.
+      if (refreshed) return (session = refreshed);
+      // Refresh failed — the on-disk session is dead; fall through to createSession.
     }
   } else if (force) {
-    // Forced refresh of an existing in-memory session — try refresh first
-    // before reaching for createSession (which costs us 1/30 per 5min).
+    // Forced refresh of an existing in-memory session — refresh first before
+    // reaching for createSession (which costs us 1/30 per 5min).
     const refreshed = await _refreshSession(session);
-    if (refreshed) {
-      session = refreshed;
-      return session;
-    }
+    if (refreshed) return (session = refreshed);
   }
+  // Last resort: full login (heavily rate-limited — see cooldown breaker).
+  return (session = await _createSession());
+}
 
-  // Last resort: full login.
-  session = await _createSession();
-  return session;
+// Single-flight guard. Concurrent callers MUST share one session establishment:
+// without this, N operations racing on a cold (or force-invalidated) session each
+// fire their own createSession — a burst that trips Bluesky's strict createSession
+// limit (~30/5min), returns 429, and drops the whole account into a multi-hour
+// cooldown that blocks ALL Bluesky activity (search AND posting). Collapsing the
+// race to a single establishment — then reusing/refreshing it — is the fix.
+let inFlight = null;
+
+async function ensureSession({ force = false } = {}) {
+  if (session && !force) return session;           // hot in-memory reuse
+  if (!isBlueskyConfigured()) throw new Error("bluesky not configured");
+  // Join the in-flight establishment instead of starting a competing one.
+  if (inFlight) return inFlight;
+  inFlight = _establishSession({ force }).finally(() => { inFlight = null; });
+  return inFlight;
 }
 
 async function authed(path, opts = {}) {
@@ -299,12 +306,21 @@ function buildPostRecord({ text, externalUrl, externalTitle, externalDescription
  */
 export async function searchBlueskyPosts(query, { limit = 30 } = {}) {
   if (!isBlueskyConfigured() || !query) return [];
-  try {
-    const s = await ensureSession();
+  const doSearch = (accessJwt) => {
     const url = `https://api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=${encodeURIComponent(query)}&limit=${Math.min(limit, 100)}&sort=latest`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${s.accessJwt}` } });
+    return fetch(url, { headers: { Authorization: `Bearer ${accessJwt}` } });
+  };
+  try {
+    let s = await ensureSession();
+    let res = await doSearch(s.accessJwt);
+    // 401 = stale accessJwt → refresh (via ensureSession force → refreshSession,
+    // NOT createSession) once and retry. Refresh is leniently rate-limited, so
+    // search self-heals a stale token without touching the createSession budget.
+    if (res.status === 401) {
+      s = await ensureSession({ force: true });
+      res = await doSearch(s.accessJwt);
+    }
     if (!res.ok) {
-      // 401 → token stale; ensureSession will refresh on the next call.
       logger.warn(`blueskyClient.searchPosts: HTTP ${res.status}`);
       return [];
     }
