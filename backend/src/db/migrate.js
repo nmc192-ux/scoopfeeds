@@ -14,9 +14,10 @@ import * as migration007 from "./migrations/007_scoring_evidence_cache.js";
 import * as migration008 from "./migrations/008_article_entities.js";
 import * as migration009 from "./migrations/009_entity_idf.js";
 import * as migration010 from "./migrations/010_entity_idf_catspan.js";
+import * as migration011 from "./migrations/011_prune_orphan_event_articles.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010];
+const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011];
 
 function ensureSchemaMigrationsTable(db) {
   db.exec(`

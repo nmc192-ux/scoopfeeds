@@ -910,6 +910,10 @@ export function pruneOldArticles(daysToKeep = 7) {
   const cutoff = Date.now() - daysToKeep * 24 * 60 * 60 * 1000;
   const a = getDb().prepare("DELETE FROM articles WHERE fetched_at < ?").run(cutoff);
   const v = getDb().prepare("DELETE FROM videos WHERE fetched_at < ?").run(cutoff);
+  // event_articles has no FK to articles, so pruning articles would otherwise leave
+  // its links dangling — which accumulated to 91% of the graph and blocked Phase 4c
+  // (see migration 011). Self-healing sweep: drop any link whose article is now gone.
+  getDb().prepare("DELETE FROM event_articles WHERE article_id NOT IN (SELECT id FROM articles)").run();
   return a.changes + v.changes;
 }
 
