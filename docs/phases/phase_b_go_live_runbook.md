@@ -154,3 +154,19 @@ The incoherent over-merge blob no longer exists in the durable graph; the homepa
 - **Step 2 — DEFERRED (the actual breaker flip).** Setting `EVENT_ENTITY_MIN=0.05` + `EVENT_BREAKER_ENABLED` + `EVENT_BREAKER_DETACH` (→ `docker compose restart`) is **not done**, pending (a) a **soak across ≥1 daily 03:00 UTC prune cycle** to confirm `pruneOldArticles` keeps dangling at **0** in production (the recurrence fix has not yet been exercised by a live prune), and (b) an **unresolved product decision on article retention** — the 7-day TTL means event dossiers older than a week go hollow even after this fix (multi-week-dossier value vs. retention cost).
 
 - **HONESTY — two open caveats.** (1) The COW **no-re-absorb** evidence was **INCONCLUSIVE**: the replay's forward re-promotion logged repeated `UNIQUE constraint failed: events.cluster_id` — **unresolved** whether that is a replay artifact (re-promoting into a non-empty graph) or a real matcher bug. The blob did not re-absorb in the replay, but this must be watched **live** at Step 2. (2) The post-breaker **107a/4c "Chip Stocks" lead** is coherent-per-clustering (`✓1story`) but **large and 4-category** — it needs a **human eyeball on the real homepage** after the flip to confirm it is one genuine story, not a residual mild over-merge.
+
+**Retention & storyline architecture — DECIDED DIRECTION** *(2026-07-08; resolves the "unresolved retention decision" flagged in Step 2 above).* This settles the retention question the dangling-link fix exposed: 7-day article retention conflicts with the product promise.
+
+- **Product decision.** ScoopFeeds' promise is **day-1-to-now story coverage** — the full arc of a story from its first article to the present, for both **years-long** threads (e.g. ongoing conflicts) **and** **weeks-long** ones (e.g. tournaments). A 7-day article TTL cannot serve that; the graph must carry durable history without carrying every article body forever.
+
+- **Research convergence** (Google News, GDELT, Event Registry, and the Topic-Detection-and-Tracking literature all point the same way):
+  1. **Long stories are HIERARCHIES, not one immortal event** — bounded **episode-events** chained into a durable **storyline**. The `net-gain` blob's unbounded Jun 14 → Jul 1 accretion into a single event is exactly the pathology this structure prevents.
+  2. **Nobody retains full article bodies long-term.** The durable objects are **event records + article METADATA/references**, not full text (GDELT keeps coded event rows + mentions back to 1979).
+  3. **Aging coverage distills** into summaries + a few representative articles rather than the full member set.
+
+- **Planned phases (post-4c; each is its own INTAKE → … → gate run through the agentic workflow):**
+  - **R1 — archive-on-prune.** Before `pruneOldArticles` deletes an **event-linked** article, snapshot its **metadata** (title / source / url / date / category / credibility) to an archive table. ~**250 MB/yr** at current volume. Fixes hollowing **going forward** — history already pruned is **unrecoverable**, so this is time-sensitive.
+  - **R2 — storyline layer.** Add **temporal bounds** on events (auto-close after N days inactive — which also **structurally prevents future blobs**) plus **storylines** that chain related events via **entity-overlap + time**. This is the durable multi-year dossier object.
+  - **R3 — lifecycle distillation.** Event states **active → dormant → distilled**; optional **differential retention** (event-linked articles keep full text longer than unlinked ones).
+
+- **Sequencing:** soak (confirm `pruneOldArticles` holds dangling at 0 across a prune cycle) → **Step 2** (breaker flip) → **R1** (archive-on-prune) → **R2** (storyline layer). R3 follows R2. Note R1's urgency: every day at 7-day TTL, more event-linked metadata is lost for good.
