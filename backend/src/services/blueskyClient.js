@@ -199,7 +199,11 @@ async function _createSession() {
       // realistic chance to clear before we try again.
       const newFailCount = failCount + 1;
       const stepIdx = Math.min(newFailCount - 1, COOLDOWN_BACKOFF_STEPS_MS.length - 1);
-      const waitMs  = COOLDOWN_BACKOFF_STEPS_MS[stepIdx];
+      // ±15% jitter so our single probe per window doesn't keep aligning with
+      // Bluesky's server-side rate-limit cycle (landing inside a still-hot window
+      // and re-arming the cap indefinitely — the pattern that kept us dark).
+      const base   = COOLDOWN_BACKOFF_STEPS_MS[stepIdx];
+      const waitMs  = Math.round(base * (0.85 + Math.random() * 0.30));
       _writeCooldown(Date.now() + waitMs, newFailCount);
       logger.warn(
         `blueskyClient: createSession 429 (fail #${newFailCount}), ` +
@@ -213,7 +217,7 @@ async function _createSession() {
 // Do the actual establishment: prefer the cheap refreshSession, fall back to a
 // full createSession only as a last resort. NOT called directly — always via the
 // single-flight ensureSession() below so concurrent callers can't each start one.
-async function _establishSession({ force = false } = {}) {
+async function _establishSession({ force = false, createIfMissing = true } = {}) {
   // Disk cache → try the leniently-limited refreshSession first.
   if (!session) {
     const onDisk = _loadSessionFromDisk();
@@ -228,6 +232,9 @@ async function _establishSession({ force = false } = {}) {
     const refreshed = await _refreshSession(session);
     if (refreshed) return (session = refreshed);
   }
+  // Search opts out here: it must never initiate the heavily-limited createSession
+  // (see ensureSession note). Return null so the frequent caller degrades to [].
+  if (!createIfMissing) return null;
   // Last resort: full login (heavily rate-limited — see cooldown breaker).
   return (session = await _createSession());
 }
@@ -238,14 +245,24 @@ async function _establishSession({ force = false } = {}) {
 // limit (~30/5min), returns 429, and drops the whole account into a multi-hour
 // cooldown that blocks ALL Bluesky activity (search AND posting). Collapsing the
 // race to a single establishment — then reusing/refreshing it — is the fix.
+//
+// createIfMissing=false lets the FREQUENT caller (search) use an already-warm or
+// disk-refreshable session but NEVER initiate createSession. Search running every
+// sentiment cycle is what kept re-firing createSession on each cooldown expiry and
+// re-arming the 6h cooldown; createSession is now reserved for the publisher.
 let inFlight = null;
 
-async function ensureSession({ force = false } = {}) {
+async function ensureSession({ force = false, createIfMissing = true } = {}) {
   if (session && !force) return session;           // hot in-memory reuse
   if (!isBlueskyConfigured()) throw new Error("bluesky not configured");
-  // Join the in-flight establishment instead of starting a competing one.
-  if (inFlight) return inFlight;
-  inFlight = _establishSession({ force }).finally(() => { inFlight = null; });
+  // Join any in-flight establishment instead of starting a competing one.
+  if (inFlight) {
+    const s = await inFlight.catch(() => null);
+    if (s) return s;                               // it produced a session → reuse
+    if (!createIfMissing) return null;             // no session, and we won't create one
+    // an in-flight no-create run yielded nothing — fall through and start our own.
+  }
+  inFlight = _establishSession({ force, createIfMissing }).finally(() => { inFlight = null; });
   return inFlight;
 }
 
@@ -311,13 +328,17 @@ export async function searchBlueskyPosts(query, { limit = 30 } = {}) {
     return fetch(url, { headers: { Authorization: `Bearer ${accessJwt}` } });
   };
   try {
-    let s = await ensureSession();
+    // Search must NEVER initiate createSession (createIfMissing:false) — it is the
+    // frequent caller and that pressure is what tripped/kept re-arming the cooldown.
+    // No warm/refreshable session → skip this cycle silently (no createSession, no
+    // "on cooldown" spam); the publisher establishes the session on its own cycle.
+    let s = await ensureSession({ createIfMissing: false });
+    if (!s) return [];
     let res = await doSearch(s.accessJwt);
-    // 401 = stale accessJwt → refresh (via ensureSession force → refreshSession,
-    // NOT createSession) once and retry. Refresh is leniently rate-limited, so
-    // search self-heals a stale token without touching the createSession budget.
+    // 401 = stale accessJwt → refresh (NOT createSession) once and retry.
     if (res.status === 401) {
-      s = await ensureSession({ force: true });
+      s = await ensureSession({ force: true, createIfMissing: false });
+      if (!s) return [];
       res = await doSearch(s.accessJwt);
     }
     if (!res.ok) {
