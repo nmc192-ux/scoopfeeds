@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import * as sqliteVec from "sqlite-vec";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
@@ -34,6 +35,22 @@ export function getDb() {
     db.pragma("cache_size = 10000");
     db.pragma("temp_store = MEMORY");
     db.pragma("busy_timeout = 5000");
+    // Load sqlite-vec on EVERY connection so the vec0 module is available in
+    // every process (web, scheduler, worker) — not only whoever calls
+    // initRealityIndex(). getDb() is a per-process singleton and the scheduler
+    // never runs RI schema init, so before this its connection had no vec0 and
+    // eventPromoter/analysis/clustering failed "no such module: vec0" on prod
+    // after the web/scheduler container split. Idempotent (this runs once per
+    // process; sqlite-vec.load is safe to call again where initRealityIndex also
+    // loads it) and failure-logged — a load failure degrades to keyword match,
+    // it does not crash getDb().
+    try {
+      sqliteVec.load(db);
+      const v = db.prepare("SELECT vec_version() AS v").get()?.v;
+      logger.info(`🧮 sqlite-vec loaded (v${v ?? "?"})`);
+    } catch (err) {
+      logger.warn(`🧮 sqlite-vec NOT loaded — clustering/embedding search disabled: ${err.message}`);
+    }
     initializeSchema(db);
     runMigrations(db);
     logger.info("Database initialized", { path: DB_PATH });
