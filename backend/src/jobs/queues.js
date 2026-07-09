@@ -53,6 +53,24 @@ export async function enqueueSingletonJob(queueName, jobName, data = {}, options
   if (!queue) throw new Error(`Queue '${queueName}' is not initialized`);
 
   const jobId = options.jobId || JOB_IDS[jobName];
+
+  // Singleton-jobId dedup trap: BullMQ refuses to re-add a jobId that still
+  // exists in ANY state — including completed/failed. removeOnComplete{count}
+  // never prunes a queue whose only job is this singleton, so after the first
+  // completion every subsequent add() silently returned the stale finished job
+  // and the cycle never ran again (prod: ingestion/video/enrichment all executed
+  // exactly once post-cutover, then logged "Enqueued" for days while dead).
+  // Self-heal: if the existing job is finished, remove it so the add is real.
+  // A job that is genuinely waiting/active/delayed is left alone — dedup there
+  // is the singleton's whole point (no overlapping cycles).
+  const existing = await queue.getJob(jobId);
+  if (existing) {
+    const state = await existing.getState();
+    if (state === "completed" || state === "failed") {
+      await existing.remove();
+    }
+  }
+
   const job = await queue.add(jobName, data, {
     ...options,
     jobId,
