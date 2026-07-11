@@ -927,6 +927,19 @@ export function getArticleCount() { return getDb().prepare("SELECT COUNT(*) as c
 
 export function pruneOldArticles(daysToKeep = 7) {
   const cutoff = Date.now() - daysToKeep * 24 * 60 * 60 * 1000;
+  // R1 archive-on-prune (retention & storyline architecture): before deleting an
+  // EVENT-LINKED article, snapshot its reference metadata to event_article_archive —
+  // the durable record dossiers keep after full text ages out. Idempotent
+  // (INSERT OR IGNORE on PK (event_id, article_id)); unlinked articles are not
+  // archived (nothing references them). Runs BEFORE the deletes below by necessity:
+  // once the article row and its links are gone, the association is unrecoverable.
+  getDb().prepare(`
+    INSERT OR IGNORE INTO event_article_archive
+      (event_id, article_id, title, source_name, url, category, published_at, credibility, archived_at)
+    SELECT ea.event_id, a.id, a.title, a.source_name, a.url, a.category, a.published_at, a.credibility, ?
+    FROM event_articles ea JOIN articles a ON a.id = ea.article_id
+    WHERE a.fetched_at < ?
+  `).run(Date.now(), cutoff);
   const a = getDb().prepare("DELETE FROM articles WHERE fetched_at < ?").run(cutoff);
   const v = getDb().prepare("DELETE FROM videos WHERE fetched_at < ?").run(cutoff);
   // event_articles has no FK to articles, so pruning articles would otherwise leave
