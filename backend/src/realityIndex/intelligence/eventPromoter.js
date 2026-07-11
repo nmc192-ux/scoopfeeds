@@ -34,6 +34,9 @@ const DORMANT_AFTER_MS   = 7 * 24 * 60 * 60 * 1000;
 const MATCH_TAU          = Number.parseFloat(process.env.EVENT_MATCH_TAU || "0.78"); // calibrated (cluster↔event)
 const MERGE_TAU          = Number.parseFloat(process.env.EVENT_MERGE_TAU || "0.86"); // event↔event DIRECT-similarity gate to confirm a convergence merge — prevents the cascade where a borderline cluster fuses two distinct events into a blob
 const CANDIDATE_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+// Creation freshness: only clusters upserted within this window may spawn NEW events
+// (see the guard in the apply loop). Matching/refresh of existing events is unaffected.
+const PROMOTE_MAX_CLUSTER_AGE_MS = Number.parseInt(process.env.EVENT_PROMOTE_MAX_CLUSTER_AGE_MS || String(48 * 60 * 60 * 1000), 10);
 const DIMS = 768;
 
 // ── Entity gate (step 3) ─────────────────────────────────────────────────────
@@ -220,7 +223,12 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
       meta = ?, status = CASE WHEN status = 'dormant' THEN 'active' ELSE status END
     WHERE id = ?
   `);
-  const markMerged   = db.prepare(`UPDATE events SET status = 'merged', meta = ?, updated_at = ? WHERE id = ?`);
+  // Merged tombstones release their cluster_id claim: merged events are excluded from the
+  // match-candidate set, so a kept claim permanently squats the title-hash identity — every
+  // future recurrence of that anchor title then fails match AND collides on INSERT
+  // (UNIQUE events.cluster_id), which is how prod reached promoted=0 / ~290 collisions per
+  // cycle. The absorbing survivor owns the story; the tombstone keeps id/slug/dossier only.
+  const markMerged   = db.prepare(`UPDATE events SET status = 'merged', cluster_id = NULL, meta = ?, updated_at = ? WHERE id = ?`);
   const linkArticle  = db.prepare(`INSERT OR IGNORE INTO event_articles (event_id, article_id, relevance, added_at) VALUES (?, ?, 1.0, ?)`);
   const linkMarket   = db.prepare(`INSERT OR REPLACE INTO event_market_links (event_id, market_id, weight, rank, matched_at) VALUES (?, ?, ?, ?, ?)`);
 
@@ -300,7 +308,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
   }
 
   // ── 6. Apply: matched (reuse row) or new event ──────────────────────────────
-  let promoted = 0, matched = 0, reactivated = 0;
+  let promoted = 0, matched = 0, reactivated = 0, skippedStale = 0;
   clusters.forEach((cl, ci) => {
     try {
       const c = cl.c;
@@ -323,8 +331,46 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
         }
         matched++;
       } else {
+        // Freshness guard on CREATION only: promote a new event only from a cluster the
+        // analysis layer still asserts (recently upserted). story_clusters accumulates —
+        // stale rows linger with old updated_at, and eligibility's market-link path keeps
+        // them in the top-300 long after their story ended. Before this guard they merely
+        // collided on UNIQUE(cluster_id); with squatted identities now released, promoting
+        // them would flood the graph with resurrected stale events. Matching is untouched:
+        // a stale cluster can still refresh an existing event, it just can't spawn one.
+        if (now - (c.updated_at || 0) > PROMOTE_MAX_CLUSTER_AGE_MS) { skippedStale++; return; }
         eventId = crypto.randomUUID();
         const slug = uniqueSlug(db, slugify(c.title) || eventId.slice(0, 8));
+        // Reclaim a squatted cluster_id: if an event still holds this title-hash claim yet was
+        // NOT matched above (merged tombstone, hollow event whose members were pruned → empty
+        // entity core, aged out of the candidate window, or a gate-rejected distinct story with
+        // the same anchor-title hash), transfer the claim — the new event is the CURRENT one for
+        // this cluster. The old event keeps its id/slug/dossier; it only loses the pointer.
+        // Without this, the INSERT below throws UNIQUE(events.cluster_id) and the cluster can
+        // never promote again.
+        const squatter = db.prepare("SELECT id, status FROM events WHERE cluster_id = ?").get(c.id);
+        // ADOPT, don't steal, when the holder is alive and shares an article with this
+        // cluster: those articles were linked to it by a prior cycle, so it IS this
+        // cluster's event — the matcher just couldn't see that (e.g. the cluster's
+        // articles carry no entity keys, so the entity gate fails even against its own
+        // event). Stealing here would spawn a duplicate event EVERY cycle (churn). No
+        // over-merge surface: adoption requires already-shared articles, so it can't
+        // bridge stories that weren't already linked.
+        if (squatter && squatter.status !== "merged" && cl.aids.length) {
+          const ph = cl.aids.map(() => "?").join(",");
+          const shares = db.prepare(`SELECT 1 FROM event_articles WHERE event_id = ? AND article_id IN (${ph}) LIMIT 1`).get(squatter.id, ...cl.aids);
+          if (shares) {
+            updateKeepTitle.run(summary, severity, hero, now, now, squatter.id);
+            eventId = squatter.id;
+            matched++;
+            for (const aid of cl.aids) linkArticle.run(eventId, aid, now);
+            for (const cm of db.prepare("SELECT * FROM cluster_market_links WHERE cluster_id = ? ORDER BY rank").all(c.id)) {
+              linkMarket.run(eventId, cm.market_id, cm.weight, cm.rank, now);
+            }
+            return;
+          }
+        }
+        if (squatter) db.prepare("UPDATE events SET cluster_id = NULL, updated_at = ? WHERE id = ?").run(now, squatter.id);
         insertEvent.run(eventId, slug, c.id, c.title, summary, c.category, "active", severity, hero, c.created_at, now,
           JSON.stringify({ title_cluster_size: clusterSize }), now, now);
         eventState.set(eventId, { id: eventId, slug, started_at: c.created_at, status: "active", ids: new Set(), centroid: cl.centroid, core: ENTITY_MIN > 0 ? loadEventCore(db, cl.aids, idfMap, catSpanMap) : null, titleClusterSize: clusterSize });
@@ -344,7 +390,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     `UPDATE events SET status = 'dormant', updated_at = ? WHERE status = 'active' AND last_activity_at < ?`
   ).run(now, now - DORMANT_AFTER_MS);
 
-  const stats = { eligible: eligible.length, promoted, matched, merged: merges.length, reactivated, dormanted };
+  const stats = { eligible: eligible.length, promoted, matched, merged: merges.length, reactivated, dormanted, skippedStale };
   logger.info(`🗂️  eventPromoter done — ${JSON.stringify(stats)}`);
   return stats;
 }

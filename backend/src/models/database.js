@@ -6,6 +6,7 @@ import fs from "fs";
 import { runMigrations } from "../db/migrate.js";
 import { timedQuery } from "../db/queryTiming.js";
 import { logger } from "../services/logger.js";
+import { markVecAvailable } from "../realityIndex/schema.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -47,6 +48,7 @@ export function getDb() {
     try {
       sqliteVec.load(db);
       const v = db.prepare("SELECT vec_version() AS v").get()?.v;
+      markVecAvailable(); // vec-gated features (article embedding at ingest) work in this process
       logger.info(`🧮 sqlite-vec loaded (v${v ?? "?"})`);
     } catch (err) {
       logger.warn(`🧮 sqlite-vec NOT loaded — clustering/embedding search disabled: ${err.message}`);
