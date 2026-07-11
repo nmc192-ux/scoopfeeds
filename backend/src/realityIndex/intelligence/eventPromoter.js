@@ -220,7 +220,12 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
       meta = ?, status = CASE WHEN status = 'dormant' THEN 'active' ELSE status END
     WHERE id = ?
   `);
-  const markMerged   = db.prepare(`UPDATE events SET status = 'merged', meta = ?, updated_at = ? WHERE id = ?`);
+  // Merged tombstones release their cluster_id claim: merged events are excluded from the
+  // match-candidate set, so a kept claim permanently squats the title-hash identity — every
+  // future recurrence of that anchor title then fails match AND collides on INSERT
+  // (UNIQUE events.cluster_id), which is how prod reached promoted=0 / ~290 collisions per
+  // cycle. The absorbing survivor owns the story; the tombstone keeps id/slug/dossier only.
+  const markMerged   = db.prepare(`UPDATE events SET status = 'merged', cluster_id = NULL, meta = ?, updated_at = ? WHERE id = ?`);
   const linkArticle  = db.prepare(`INSERT OR IGNORE INTO event_articles (event_id, article_id, relevance, added_at) VALUES (?, ?, 1.0, ?)`);
   const linkMarket   = db.prepare(`INSERT OR REPLACE INTO event_market_links (event_id, market_id, weight, rank, matched_at) VALUES (?, ?, ?, ?, ?)`);
 
@@ -325,6 +330,15 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
       } else {
         eventId = crypto.randomUUID();
         const slug = uniqueSlug(db, slugify(c.title) || eventId.slice(0, 8));
+        // Reclaim a squatted cluster_id: if an event still holds this title-hash claim yet was
+        // NOT matched above (merged tombstone, hollow event whose members were pruned → empty
+        // entity core, aged out of the candidate window, or a gate-rejected distinct story with
+        // the same anchor-title hash), transfer the claim — the new event is the CURRENT one for
+        // this cluster. The old event keeps its id/slug/dossier; it only loses the pointer.
+        // Without this, the INSERT below throws UNIQUE(events.cluster_id) and the cluster can
+        // never promote again.
+        const squatter = db.prepare("SELECT id FROM events WHERE cluster_id = ?").get(c.id);
+        if (squatter) db.prepare("UPDATE events SET cluster_id = NULL, updated_at = ? WHERE id = ?").run(now, squatter.id);
         insertEvent.run(eventId, slug, c.id, c.title, summary, c.category, "active", severity, hero, c.created_at, now,
           JSON.stringify({ title_cluster_size: clusterSize }), now, now);
         eventState.set(eventId, { id: eventId, slug, started_at: c.created_at, status: "active", ids: new Set(), centroid: cl.centroid, core: ENTITY_MIN > 0 ? loadEventCore(db, cl.aids, idfMap, catSpanMap) : null, titleClusterSize: clusterSize });
