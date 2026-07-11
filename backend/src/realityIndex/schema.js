@@ -27,6 +27,17 @@ export function isVecAvailable() {
   return vecAvailable;
 }
 
+// getDb() loads sqlite-vec on every connection (models/database.js) and calls this so
+// vec-gated features (article embedding at ingest, embedding search) work in EVERY
+// process. Before this, vecAvailable was set only inside initRealityIndex(), which only
+// the web process runs — so after the web/scheduler/worker container split, the worker
+// ingested articles with embedDocument() silently no-oping (isVecAvailable()=false):
+// new articles got no vectors, clustering starved, and the promoter had nothing fresh
+// to promote. Same per-process-flag failure class as the vec0 regression.
+export function markVecAvailable() {
+  vecAvailable = true;
+}
+
 export function initRealityIndex(db) {
   if (initialized) return;
   initialized = true;
