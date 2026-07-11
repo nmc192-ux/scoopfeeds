@@ -75,6 +75,7 @@ import {
   requestIdMiddleware,
 } from "./src/config/observability.js";
 import { getDb, getDbStatus } from "./src/models/database.js";
+import { getPipelineHealth } from "./src/services/pipelineHealth.js";
 import { RSS_SOURCES, YOUTUBE_SOURCES } from "./src/config/sources.js";
 import { assertRedisStartup, getRedisStatus } from "./src/jobs/redis.js";
 import { sendError, sendInternalError, sendNotFound } from "./src/utils/apiResponse.js";
@@ -303,6 +304,10 @@ app.get("/api/health", (req, res) => {
     articles: db.prepare("SELECT COUNT(*) as n FROM articles").get().n,
     videos:   db.prepare("SELECT COUNT(*) as n FROM videos").get().n,
     scheduler,
+    // Data-derived liveness for ingest→embed→cluster→promote. Added after three silent
+    // green-logs/dead-pipeline outages; `pipelines.ok:false` or any `stale:true` means a
+    // stage stopped producing even though every process looks healthy.
+    pipelines: getPipelineHealth(db),
     memory: {
       used:  Math.floor(process.memoryUsage().heapUsed  / 1024 / 1024) + "MB",
       total: Math.floor(process.memoryUsage().heapTotal / 1024 / 1024) + "MB",
