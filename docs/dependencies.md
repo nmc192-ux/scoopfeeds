@@ -104,6 +104,7 @@ For each dependency:
 - **Purpose:** Legacy LLM / embedding provider, retained for compatibility
 - **Account owner:** DrJ
 - **Cost:** Free tier — 15 RPM
+- **2026-07-09:** prod currently runs Gemini embeddings on **PAID tier** as an interim measure (see decisions log Decision 32); permanent provider decision scheduled Phase C.
 - **Phase introduced:** Pre-Phase-A
 - **Criticality:** Optional
 - **Code references:** [backend/src/realityIndex/llmQueue.js](../backend/src/realityIndex/llmQueue.js); env: `GEMINI_API_KEY`, `GEMINI_GENERATION_MODEL`, `GEMINI_EMBEDDING_MODEL`

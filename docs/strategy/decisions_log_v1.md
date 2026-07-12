@@ -2,11 +2,11 @@
 ## Final Decisions on All 30 Strategic Questions
 
 **Document type:** Decision reference
-**Version:** 1.0 (Decision 31 appended May 2026)
+**Version:** 1.0 (Decision 32 appended July 2026)
 **Owner:** DrJ (Founder)
 **Decided:** May 2026
 **Companion to:** Scoopfeeds Strategic Plan v6.0
-**Status:** All 31 decisions final unless flagged for review
+**Status:** All 32 decisions final unless flagged for review
 
 ---
 
@@ -220,6 +220,22 @@ When future questions arise about strategic direction, this document is consulte
 - Consider future copyright notices in AI-generated content rendering (e.g., footer on event dossiers: "© Scoopfeeds. Methodology: open. Content: proprietary.")
 **Review trigger:** None for code license (Apache 2.0 is permanent for already-published code). If specific content licensing emerges as a revenue line in Phase D-E (e.g., a publisher offers to license Scoopfeeds tracker data), revisit content posture for those specific assets.
 
+
+---
+
+# Decision 32: Embedding Provider (added July 2026)
+
+## Decision 32 — Embedding provider: interim paid Gemini; permanent decision deferred to Phase C
+**Question:** Which embedding provider powers article vectors for the clustering/matching engine — after the 2026-07-09 discovery that prod embedding was silently capped by the Gemini free tier (~400 requests/day → only ~24% of the ~1,688 daily non-duplicate articles embedded, so the clustering engine saw a quarter of the news)?
+**Decision:** **INTERIM (effective 2026-07-09):** Gemini API key flipped to PAID tier (billing change by DrJ in the Google console; budget alert set). Removes the free-tier request cap immediately; embedding coverage should climb toward ~100% over the next cycles. **PERMANENT provider decision is deferred to Phase C as its own gated work item** — it is explicitly NOT decided here.
+**Rationale (concise):** The paid flip restores 100% clustering coverage immediately at trivial cost (~$/month at current volume) with ZERO risk to the freshly COW-validated matcher calibration (`EVENT_ENTITY_MIN=0.05`, `MATCH_TAU=0.78`, `MERGE_TAU=0.86` — all calibrated against Gemini vector geometry). Any provider switch invalidates those thresholds and forces a re-sweep; the wrong week to do that reactively. **This is a tourniquet, not the destination.**
+**Drift lesson (recorded):** `docs/dependencies.md` documents Gemini as the LEGACY embedding provider (intended default: Cloudflare Workers AI), yet prod runs Gemini — because the embed-provider selector in `backend/src/realityIndex/llmQueue.js` prefers Gemini whenever `GEMINI_API_KEY` is set, and Cloudflare credentials are not set on prod. Configuration drift, not a decision: prod contradicted the documented default, and the quota stall was the symptom that exposed it. *Readiness note (no code change now): consider making `EMBED_PROVIDER` an explicit required env var so provider choice is always a stated decision, not an accident of which keys exist.*
+**Requirements pre-scoped for the PERMANENT Phase-C decision:**
+- **(a) MULTILINGUAL.** Phase E requires 7+ languages; the currently-documented Cloudflare default model `bge-base-en-v1.5` is English-only and therefore CANNOT be the end-state (migrating to it would force a SECOND vector-space break at Phase E). Candidate class: multilingual `bge-m3` (Cloudflare or local ollama) or staying on paid Gemini (already multilingual). Choose once; break the vector space exactly once.
+- **(b) QUOTA-FREE or OWNED/FLAT-COST at scale.** Source trajectory is 110 → 150 (B) → 300 (C) → 500 (D) → 800+/7-languages (E), with DrJ's ambition in the 1000s; at ~15 articles/source/day that is ~12k–30k articles/day. Clustering is the core product promise (group similar coverage so users never see the same story repeated); core-product infra should not sit behind a third-party per-request meter. This quota already broke coverage silently once.
+- **(c) BUNDLED with matcher re-calibration** (threshold re-sweep on a COW snapshot) as part of the same gated item — never ship a provider switch without it.
+- **(d) SEQUENCED alongside R2 (event time-bounding).** Closed events never match new articles, so old-space vectors age out naturally — R2 makes the migration materially smaller. Note also: articles prune at 7 days, so live vectors turn over in ~a week; the migration is a transition window + recalibration, NOT a mass re-embed.
+**Review trigger:** Phase C kickoff (the permanent decision is a scheduled Phase-C gated item). Escalate earlier if paid-tier Gemini cost or reliability materially changes.
 ---
 
 # Summary Table
@@ -297,6 +313,7 @@ These are flagged with explicit review triggers. They should be revisited at the
 | 17 | Translation human-review escalation | If a translation error of consequence is published |
 | 18 | Source licensing budget | Quarterly against Layer 2 revenue |
 | 27 | Layer 2 ad posture | Quarterly check against 3 revisit conditions; default ad-free |
+| 32 | Embedding provider (permanent) | Phase C kickoff — bundled with matcher re-calibration, sequenced with R2 |
 
 ---
 
