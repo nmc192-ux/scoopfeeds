@@ -13,6 +13,7 @@ import {
   getUserCategoryWeights,
 } from "../models/database.js";
 import { getSchedulerStatus, triggerManualRefresh } from "../services/scheduler.js";
+import { triggerReclusterDebounced } from "../services/analysisService.js";
 import { TOPICS, TAB_CATEGORIES, COUNTRY_REGIONS } from "../config/sources.js";
 import { logger } from "../services/logger.js";
 
@@ -237,6 +238,11 @@ router.get("/:id", (req, res) => {
 // POST /api/news/refresh - manual refresh trigger
 router.post("/refresh", async (req, res) => {
   try {
+    // Phase 1.5: also kick a debounced re-cluster (refreshAnalysis + guarded eventPromoter)
+    // so the homepage's semantic clusters refresh on demand, not only on the scheduled cycle.
+    // Fire-and-forget; self-rate-limited (5-min cooldown) and no-wipes on an empty run.
+    triggerReclusterDebounced().catch(err => logger.error("Re-cluster trigger error", { error: err.message }));
+
     const status = getSchedulerStatus();
     if (status.isRunning) {
       return res.json({ success: false, message: "Ingestion already in progress" });

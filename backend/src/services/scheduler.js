@@ -152,7 +152,7 @@ export function startScheduler() {
   scheduleCron("0 * * * *",    () => runDispatch(() => dispatchVideoCycle(), "video ingestion"));
   scheduleCron("*/15 * * * *", () => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"));
   scheduleCron("0 * * * *",    () => runEventsCycle());
-  scheduleCron("0 */2 * * *",  () => runAnalysisCycle()); // every 2 hours
+  scheduleCron("*/30 * * * *",  () => runAnalysisCycle()); // every 30 min (latest-news cadence; was 2h)
   // ─── Video generation crons (in-process) ───────────────────────────────
   // Disabled in production because Hostinger Cloud Hosting blocks subprocess
   // execution at the kernel level (RLIMIT_NPROC). Rendering is delegated to

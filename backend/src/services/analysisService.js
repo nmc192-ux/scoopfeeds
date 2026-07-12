@@ -30,6 +30,7 @@ import {
 import { logger } from "./logger.js";
 import { clusterWindow } from "../realityIndex/clustering/semanticClusterer.js";
 import { detectTemplates } from "../realityIndex/clustering/templateFilter.js";
+import { runEventPromoter } from "../realityIndex/intelligence/eventPromoter.js";
 
 const GEMINI_MODEL    = "gemini-flash-latest";
 const GEMINI_ENDPOINT = (key) =>
@@ -447,6 +448,47 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
 
   logger.info(`📊 Analysis refresh complete — clusters: ${clusters.length}, explained: ${topCategories.length}`);
   return { clusters: clusters.length, explained: topCategories.length };
+}
+
+// ─── Debounced manual re-cluster (Phase 1.5) ───────────────────────────────
+// Wired to the homepage Refresh button so a press re-clusters + re-promotes events
+// instead of waiting for the scheduled cycle. Self-rate-limited by a global cooldown
+// and an in-flight lock; fire-and-forget. NO-WIPE GUARD: refreshAnalysis is upsert-
+// based (never deletes clusters) and we only run the event promoter when the run
+// produced clusters — an empty run keeps the prior events rather than blanking them.
+let lastReclusterAt   = 0;
+let reclusterInFlight = false;
+const RECLUSTER_COOLDOWN_MS = Number(process.env.RECLUSTER_COOLDOWN_MS || 5 * 60 * 1000); // 5 min default
+
+export async function triggerReclusterDebounced() {
+  const now = Date.now();
+  if (reclusterInFlight) {
+    logger.info("🔁 re-cluster already in flight — skipping");
+    return { skipped: "in-flight" };
+  }
+  if (now - lastReclusterAt < RECLUSTER_COOLDOWN_MS) {
+    const leftS = Math.ceil((RECLUSTER_COOLDOWN_MS - (now - lastReclusterAt)) / 1000);
+    logger.info(`🔁 re-cluster cooldown active (${leftS}s left) — skipping`);
+    return { skipped: "cooldown", leftS };
+  }
+  reclusterInFlight = true;
+  try {
+    logger.info("🔁 manual re-cluster starting (refreshAnalysis + eventPromoter)");
+    const res = await refreshAnalysis();
+    if (res.clusters > 0) {
+      const promo = await runEventPromoter();
+      logger.info(`🔁 manual re-cluster done — clusters ${res.clusters}, promoter ${JSON.stringify(promo)}`);
+      return { reclustered: res.clusters, promo };
+    }
+    logger.info("🔁 re-cluster yielded 0 clusters — keeping prior events (no-wipe guard)");
+    return { reclustered: 0, guarded: true };
+  } catch (err) {
+    logger.error(`🔁 manual re-cluster failed: ${err.message}`);
+    return { error: err.message };
+  } finally {
+    lastReclusterAt   = Date.now(); // cooldown measured from completion
+    reclusterInFlight = false;
+  }
 }
 
 // ─── On-demand Article Deep Dive ──────────────────────────────────────────
