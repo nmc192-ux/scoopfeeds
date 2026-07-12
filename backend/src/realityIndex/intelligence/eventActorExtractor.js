@@ -34,7 +34,7 @@ function buildPrompt(event, articles) {
 
 async function extractActors(db, event) {
   const articles = db.prepare(`
-    SELECT a.title, a.summary
+    SELECT a.title, a.description AS summary
     FROM event_articles ea
     JOIN articles a ON a.id = ea.article_id
     WHERE ea.event_id = ?
