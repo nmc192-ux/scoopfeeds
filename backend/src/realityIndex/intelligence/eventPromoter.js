@@ -42,6 +42,11 @@ const PROMOTE_MAX_CLUSTER_AGE_MS = Number.parseInt(process.env.EVENT_PROMOTE_MAX
 // same story becomes a new episode-event, chained by the storyline layer in R2b).
 const CLOSE_ENABLED  = String(process.env.EVENT_CLOSE_ENABLED ?? "false").toLowerCase() === "true";
 const CLOSE_AFTER_MS = Number.parseInt(process.env.EVENT_CLOSE_AFTER_MS || String(21 * 24 * 60 * 60 * 1000), 10);
+// R2b storylines: when a NEW event's signature strongly overlaps a recent prior event's
+// durable signature, chain it as the next episode of that story. OFF = no writes.
+const STORYLINE_ENABLED     = String(process.env.STORYLINE_ENABLED ?? "false").toLowerCase() === "true";
+const STORYLINE_MIN         = Number.parseFloat(process.env.STORYLINE_MIN || "0.3");   // rarity-weighted overlap floor (calibrated on COW)
+const STORYLINE_LOOKBACK_MS = Number.parseInt(process.env.STORYLINE_LOOKBACK_MS || String(90 * 24 * 60 * 60 * 1000), 10);
 const DIMS = 768;
 
 // ── Entity gate (step 3) ─────────────────────────────────────────────────────
@@ -67,7 +72,7 @@ const MAX_CATSPAN         = parseInt(process.env.EVENT_ENTITY_MAX_CATSPAN || "99
 // R2a: persist the event's entity signature (top-K keys + idf) while members are ALIVE —
 // articles prune at 7d, so this durable copy is the only identity an event keeps after
 // its members age out. Upserted on every match/create; R2b chains storylines from it.
-function upsertSignature(db, eventId, keySet, idfMap, fallbackIdf, now) {
+export function upsertSignature(db, eventId, keySet, idfMap, fallbackIdf, now) {
   if (!keySet || !keySet.size) return;
   const keys = [...keySet]
     .map((k) => ({ k, idf: idfMap.get(k) ?? fallbackIdf }))
@@ -75,6 +80,49 @@ function upsertSignature(db, eventId, keySet, idfMap, fallbackIdf, now) {
     .slice(0, ENTITY_TOPK);
   db.prepare("INSERT INTO event_entity_signature (event_id, keys, updated_at) VALUES (?,?,?) ON CONFLICT(event_id) DO UPDATE SET keys=excluded.keys, updated_at=excluded.updated_at")
     .run(eventId, JSON.stringify(keys), now);
+}
+
+// R2b: chain a newly created event to the storyline of its best-overlapping prior episode.
+// Overlap = Σ idf(shared keys) / Σ idf(new event keys) against durable signatures within the
+// lookback — the same rarity-weighted semantics the matcher gate uses, but across episodes.
+// A hit appends the new event; the first recurrence CREATES the storyline (prior + new).
+export function chainStoryline(db, newEventId, newTitle, newSlug, keySet, idfMap, fallbackIdf, now) {
+  if (!keySet || !keySet.size) return null;
+  const wOf = (k) => idfMap.get(k) ?? fallbackIdf;
+  let denom = 0; for (const k of keySet) denom += wOf(k);
+  if (denom <= 0) return null;
+  let best = null, bestOv = 0;
+  const rows = db.prepare("SELECT event_id, keys FROM event_entity_signature WHERE updated_at >= ? AND event_id != ?")
+    .all(now - STORYLINE_LOOKBACK_MS, newEventId);
+  for (const r of rows) {
+    let sig; try { sig = JSON.parse(r.keys); } catch { continue; }
+    const prior = new Set(sig.map((x) => x.k));
+    let shared = 0; for (const k of keySet) if (prior.has(k)) shared += wOf(k);
+    const ov = shared / denom;
+    if (ov > bestOv) { bestOv = ov; best = r.event_id; }
+  }
+  if (!best || bestOv < STORYLINE_MIN) return null;
+  const existing = db.prepare("SELECT storyline_id FROM storyline_events WHERE event_id = ?").get(best);
+  let lineId = existing?.storyline_id;
+  if (!lineId) {
+    const prior = db.prepare("SELECT title, slug FROM events WHERE id = ?").get(best);
+    lineId = crypto.randomUUID();
+    const slug = uniqueStorylineSlug(db, (prior?.slug || newSlug || lineId.slice(0, 8)) + "-story");
+    db.prepare("INSERT INTO storylines (id, slug, title, created_at, updated_at) VALUES (?,?,?,?,?)")
+      .run(lineId, slug, prior?.title || newTitle, now, now);
+    db.prepare("INSERT OR IGNORE INTO storyline_events (storyline_id, event_id, position, added_at) VALUES (?,?,?,?)")
+      .run(lineId, best, 1, now);
+  }
+  const pos = (db.prepare("SELECT MAX(position) p FROM storyline_events WHERE storyline_id = ?").get(lineId)?.p || 0) + 1;
+  db.prepare("INSERT OR IGNORE INTO storyline_events (storyline_id, event_id, position, added_at) VALUES (?,?,?,?)")
+    .run(lineId, newEventId, pos, now);
+  db.prepare("UPDATE storylines SET updated_at = ? WHERE id = ?").run(now, lineId);
+  return { lineId, prior: best, overlap: Math.round(bestOv * 100) / 100 };
+}
+function uniqueStorylineSlug(db, base) {
+  let slug = base, i = 2;
+  while (db.prepare("SELECT 1 FROM storylines WHERE slug = ?").get(slug)) slug = `${base}-${i++}`;
+  return slug;
 }
 
 function slugify(str) {
@@ -258,7 +306,12 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     const aids = db.prepare("SELECT article_id FROM event_articles WHERE event_id = ?").all(e.id).map(r => r.article_id);
     const vmap = loadArticleVectors(db, aids);
     let titleClusterSize = 0; try { titleClusterSize = JSON.parse(e.meta || "{}").title_cluster_size || 0; } catch { /* default 0 → legacy events rename on first match */ }
-    eventState.set(e.id, { id: e.id, slug: e.slug, started_at: e.started_at, status: e.status, ids: new Set(aids), centroid: meanCentroid([...vmap.values()]), core: ENTITY_MIN > 0 ? loadEventCore(db, aids, idfMap, catSpanMap) : null, titleClusterSize });
+    const core = ENTITY_MIN > 0 ? loadEventCore(db, aids, idfMap, catSpanMap) : null;
+    eventState.set(e.id, { id: e.id, slug: e.slug, started_at: e.started_at, status: e.status, ids: new Set(aids), centroid: meanCentroid([...vmap.values()]), core, titleClusterSize });
+    // R2a/R2b: refresh the durable signature for every candidate while its members are
+    // alive — this also back-fills signatures for events created before the signature
+    // system existed (they become chainable within one cycle of being a candidate).
+    if (ENTITY_MIN > 0) upsertSignature(db, e.id, core, idfMap, fallbackIdf, now);
   }
 
   // ── 3. Cluster centroids + article sets ─────────────────────────────────────
@@ -326,7 +379,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
   }
 
   // ── 6. Apply: matched (reuse row) or new event ──────────────────────────────
-  let promoted = 0, matched = 0, reactivated = 0, skippedStale = 0;
+  let promoted = 0, matched = 0, reactivated = 0, skippedStale = 0, chained = 0;
   clusters.forEach((cl, ci) => {
     try {
       const c = cl.c;
@@ -396,7 +449,18 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
           JSON.stringify({ title_cluster_size: clusterSize }), now, now);
         eventState.set(eventId, { id: eventId, slug, started_at: c.created_at, status: "active", ids: new Set(), centroid: cl.centroid, core: ENTITY_MIN > 0 ? loadEventCore(db, cl.aids, idfMap, catSpanMap) : null, titleClusterSize: clusterSize });
         promoted++;
-        if (ENTITY_MIN > 0) upsertSignature(db, eventId, eventState.get(eventId)?.core, idfMap, fallbackIdf, now);
+        if (ENTITY_MIN > 0) {
+          const core = eventState.get(eventId)?.core;
+          upsertSignature(db, eventId, core, idfMap, fallbackIdf, now);
+          // R2b: a brand-new event may be the next EPISODE of a story whose prior episode
+          // closed — chain via durable signatures (flag-gated; no writes when OFF).
+          if (STORYLINE_ENABLED) {
+            try {
+              const chain = chainStoryline(db, eventId, c.title, slug, core, idfMap, fallbackIdf, now);
+              if (chain) { chained++; logger.info(`🧵 storyline: event ${slug} chained to prior ${chain.prior.slice(0, 8)} (overlap ${chain.overlap})`); }
+            } catch (e) { logger.warn(`storyline chain failed for ${eventId}: ${e.message}`); }
+          }
+        }
       }
       for (const aid of cl.aids) linkArticle.run(eventId, aid, now);
       for (const cm of db.prepare("SELECT * FROM cluster_market_links WHERE cluster_id = ? ORDER BY rank").all(c.id)) {
@@ -422,7 +486,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     ).run(now, now - CLOSE_AFTER_MS).changes;
   }
 
-  const stats = { eligible: eligible.length, promoted, matched, merged: merges.length, reactivated, dormanted, closed, skippedStale };
+  const stats = { eligible: eligible.length, promoted, matched, merged: merges.length, reactivated, dormanted, closed, skippedStale, chained };
   logger.info(`🗂️  eventPromoter done — ${JSON.stringify(stats)}`);
   return stats;
 }
