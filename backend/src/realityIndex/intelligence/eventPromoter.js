@@ -45,7 +45,12 @@ const CLOSE_AFTER_MS = Number.parseInt(process.env.EVENT_CLOSE_AFTER_MS || Strin
 // R2b storylines: when a NEW event's signature strongly overlaps a recent prior event's
 // durable signature, chain it as the next episode of that story. OFF = no writes.
 const STORYLINE_ENABLED     = String(process.env.STORYLINE_ENABLED ?? "false").toLowerCase() === "true";
-const STORYLINE_MIN         = Number.parseFloat(process.env.STORYLINE_MIN || "0.3");   // rarity-weighted overlap floor (calibrated on COW)
+const STORYLINE_MIN         = Number.parseFloat(process.env.STORYLINE_MIN || "0.25");  // weighted-Jaccard floor (recalibrated after the subset-degeneracy fix)
+// Chaining must be backed by genuinely RARE shared evidence: at least 2 shared keys whose
+// idf mass clears this floor (one properly rare entity + support). Without it, a tiny event
+// whose few generic keys all sit inside one big prior signature scores as a perfect match —
+// the live failure mode that chained a police seizure and a singer obituary to the same prior.
+const STORYLINE_MIN_SHARED_IDF = Number.parseFloat(process.env.STORYLINE_MIN_SHARED_IDF || "10");
 const STORYLINE_LOOKBACK_MS = Number.parseInt(process.env.STORYLINE_LOOKBACK_MS || String(90 * 24 * 60 * 60 * 1000), 10);
 const DIMS = 768;
 
@@ -88,17 +93,30 @@ export function upsertSignature(db, eventId, keySet, idfMap, fallbackIdf, now) {
 // A hit appends the new event; the first recurrence CREATES the storyline (prior + new).
 export function chainStoryline(db, newEventId, newTitle, newSlug, keySet, idfMap, fallbackIdf, now) {
   if (!keySet || !keySet.size) return null;
-  const wOf = (k) => idfMap.get(k) ?? fallbackIdf;
-  let denom = 0; for (const k of keySet) denom += wOf(k);
-  if (denom <= 0) return null;
+  // Weight discipline: the matcher's fallback treats UNSEEN keys as maximally rare (ln N),
+  // which is right inside one window but poison across months — signature keys age out of
+  // the rolling entity_idf window and would ALL score as top-rarity. For chaining: a key's
+  // rarity comes from the live window if present, else from the PRIOR signature's stored
+  // idf (historical evidence captured while the key was measurable), else a conservative 1.
+  const liveW = (k) => idfMap.get(k);
   let best = null, bestOv = 0;
   const rows = db.prepare("SELECT event_id, keys FROM event_entity_signature WHERE updated_at >= ? AND event_id != ?")
     .all(now - STORYLINE_LOOKBACK_MS, newEventId);
   for (const r of rows) {
     let sig; try { sig = JSON.parse(r.keys); } catch { continue; }
-    const prior = new Set(sig.map((x) => x.k));
-    let shared = 0; for (const k of keySet) if (prior.has(k)) shared += wOf(k);
-    const ov = shared / denom;
+    const priorW = new Map(); let denomPrior = 0;
+    for (const x of sig) { const w = Number(x.idf) || 1; priorW.set(x.k, w); denomPrior += w; }
+    const wOf = (k) => liveW(k) ?? priorW.get(k) ?? 1;
+    let denomNew = 0, shared = 0, sharedCount = 0;
+    for (const k of keySet) {
+      const w = wOf(k); denomNew += w;
+      if (priorW.has(k)) { shared += w; sharedCount++; }
+    }
+    if (denomNew <= 0) continue;
+    // Weighted Jaccard (symmetric — a small key-set inside a big hub signature can't score
+    // 1.0) + rare-evidence floor (≥2 shared keys carrying real idf mass).
+    if (sharedCount < 2 || shared < STORYLINE_MIN_SHARED_IDF) continue;
+    const ov = shared / (denomNew + denomPrior - shared);
     if (ov > bestOv) { bestOv = ov; best = r.event_id; }
   }
   if (!best || bestOv < STORYLINE_MIN) return null;
