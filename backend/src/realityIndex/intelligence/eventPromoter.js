@@ -37,6 +37,11 @@ const CANDIDATE_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 // Creation freshness: only clusters upserted within this window may spawn NEW events
 // (see the guard in the apply loop). Matching/refresh of existing events is unaffected.
 const PROMOTE_MAX_CLUSTER_AGE_MS = Number.parseInt(process.env.EVENT_PROMOTE_MAX_CLUSTER_AGE_MS || String(48 * 60 * 60 * 1000), 10);
+// R2a temporal bounds: dormant events inactive beyond this are CLOSED — they can never
+// match/absorb again (structurally prevents unbounded accretion; new coverage of the
+// same story becomes a new episode-event, chained by the storyline layer in R2b).
+const CLOSE_ENABLED  = String(process.env.EVENT_CLOSE_ENABLED ?? "false").toLowerCase() === "true";
+const CLOSE_AFTER_MS = Number.parseInt(process.env.EVENT_CLOSE_AFTER_MS || String(21 * 24 * 60 * 60 * 1000), 10);
 const DIMS = 768;
 
 // ── Entity gate (step 3) ─────────────────────────────────────────────────────
@@ -58,6 +63,19 @@ const CORE_FRAC           = Number.parseFloat(process.env.EVENT_ENTITY_CORE_FRAC
 // Document-rarity (IDF) ≠ discriminativeness — a key spanning many categories bridges distinct
 // stories regardless of how rare it is. 999 = no exclusion (default; swept in the harness).
 const MAX_CATSPAN         = parseInt(process.env.EVENT_ENTITY_MAX_CATSPAN || "999", 10);
+
+// R2a: persist the event's entity signature (top-K keys + idf) while members are ALIVE —
+// articles prune at 7d, so this durable copy is the only identity an event keeps after
+// its members age out. Upserted on every match/create; R2b chains storylines from it.
+function upsertSignature(db, eventId, keySet, idfMap, fallbackIdf, now) {
+  if (!keySet || !keySet.size) return;
+  const keys = [...keySet]
+    .map((k) => ({ k, idf: idfMap.get(k) ?? fallbackIdf }))
+    .sort((a, b) => b.idf - a.idf)
+    .slice(0, ENTITY_TOPK);
+  db.prepare("INSERT INTO event_entity_signature (event_id, keys, updated_at) VALUES (?,?,?) ON CONFLICT(event_id) DO UPDATE SET keys=excluded.keys, updated_at=excluded.updated_at")
+    .run(eventId, JSON.stringify(keys), now);
+}
 
 function slugify(str) {
   return str
@@ -330,6 +348,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
           updateKeepTitle.run(summary, severity, hero, now, now, eventId);
         }
         matched++;
+        if (ENTITY_MIN > 0) upsertSignature(db, eventId, eventState.get(eventId)?.core, idfMap, fallbackIdf, now);
       } else {
         // Freshness guard on CREATION only: promote a new event only from a cluster the
         // analysis layer still asserts (recently upserted). story_clusters accumulates —
@@ -363,6 +382,8 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
             updateKeepTitle.run(summary, severity, hero, now, now, squatter.id);
             eventId = squatter.id;
             matched++;
+            if (ENTITY_MIN > 0) upsertSignature(db, eventId, cl.entKeys, idfMap, fallbackIdf, now); // cluster keys ≈ the adopted event's live identity
+
             for (const aid of cl.aids) linkArticle.run(eventId, aid, now);
             for (const cm of db.prepare("SELECT * FROM cluster_market_links WHERE cluster_id = ? ORDER BY rank").all(c.id)) {
               linkMarket.run(eventId, cm.market_id, cm.weight, cm.rank, now);
@@ -375,6 +396,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
           JSON.stringify({ title_cluster_size: clusterSize }), now, now);
         eventState.set(eventId, { id: eventId, slug, started_at: c.created_at, status: "active", ids: new Set(), centroid: cl.centroid, core: ENTITY_MIN > 0 ? loadEventCore(db, cl.aids, idfMap, catSpanMap) : null, titleClusterSize: clusterSize });
         promoted++;
+        if (ENTITY_MIN > 0) upsertSignature(db, eventId, eventState.get(eventId)?.core, idfMap, fallbackIdf, now);
       }
       for (const aid of cl.aids) linkArticle.run(eventId, aid, now);
       for (const cm of db.prepare("SELECT * FROM cluster_market_links WHERE cluster_id = ? ORDER BY rank").all(c.id)) {
@@ -389,8 +411,18 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
   const { changes: dormanted } = db.prepare(
     `UPDATE events SET status = 'dormant', updated_at = ? WHERE status = 'active' AND last_activity_at < ?`
   ).run(now, now - DORMANT_AFTER_MS);
+  // R2a temporal bounds: dormant → closed after CLOSE_AFTER_MS of inactivity. Closed events
+  // are excluded from every consumer (candidates, breaker, crons all filter active/dormant),
+  // so an event's lifecycle is now bounded — recurrence becomes a new episode-event (R2b
+  // chains episodes into storylines). Flag-gated; OFF = byte-identical behavior.
+  let closed = 0;
+  if (CLOSE_ENABLED) {
+    closed = db.prepare(
+      `UPDATE events SET status = 'closed', updated_at = ? WHERE status = 'dormant' AND last_activity_at < ?`
+    ).run(now, now - CLOSE_AFTER_MS).changes;
+  }
 
-  const stats = { eligible: eligible.length, promoted, matched, merged: merges.length, reactivated, dormanted, skippedStale };
+  const stats = { eligible: eligible.length, promoted, matched, merged: merges.length, reactivated, dormanted, closed, skippedStale };
   logger.info(`🗂️  eventPromoter done — ${JSON.stringify(stats)}`);
   return stats;
 }
