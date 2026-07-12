@@ -41,7 +41,7 @@ function insertTimelineEntry(db, entry) {
 function buildArticleEntries(db, event) {
   const articles = db.prepare(`
     SELECT a.id, a.title, a.published_at, a.source_name,
-           a.credibility_score, a.summary
+           a.credibility AS credibility_score, a.description AS summary
     FROM event_articles ea
     JOIN articles a ON a.id = ea.article_id
     WHERE ea.event_id = ?
