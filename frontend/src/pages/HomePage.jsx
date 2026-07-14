@@ -166,12 +166,20 @@ function EntertainmentSection() {
 export default function HomePage() {
   // One prominence fetch powers the whole Top Stories band: the main shows the top 7
   // (lead + 6); the rail derives Developing + Most-sourced from the fuller list.
+  // Each story renders at most ONCE above the fold: the rails exclude anything
+  // already placed in the band, and Most-sourced also excludes Developing —
+  // the 2026-07-13 audit found the same event in up to 4 slots (finding P1-12).
   const { data, isLoading, isError } = useEvents({ sort: "prominence", limit: 24 });
   const events = data?.events ?? [];
   const [lead, ...rest] = events;
-  const topGrid     = rest.slice(0, 6);
-  const developing  = events.filter(isDeveloping).slice(0, 6);
-  const mostSourced = [...events].sort((a, b) => (b.source_count || 0) - (a.source_count || 0)).slice(0, 6);
+  const topGrid = rest.slice(0, 6);
+  const placed = new Set([lead, ...topGrid].filter(Boolean).map(ev => ev.id));
+  const developing = events.filter(ev => isDeveloping(ev) && !placed.has(ev.id)).slice(0, 6);
+  developing.forEach(ev => placed.add(ev.id));
+  const mostSourced = [...events]
+    .filter(ev => !placed.has(ev.id))
+    .sort((a, b) => (b.source_count || 0) - (a.source_count || 0))
+    .slice(0, 6);
 
   return (
     <div className="space-y-14 py-2">
