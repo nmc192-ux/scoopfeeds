@@ -24,6 +24,8 @@ function relTime(ms) {
 }
 
 export default function LiveAnomaliesStrip({ limit = 8, className = "" }) {
+  // useAnomalies quantizes sinceMs into 10-min buckets; without that, a raw
+  // Date.now() here changes the queryKey every render and fetches unboundedly.
   const { data, isLoading } = useAnomalies({ limit, sinceMs: Date.now() - 6 * 60 * 60 * 1000 });
   const items = data?.items ?? [];
 
