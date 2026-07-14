@@ -115,7 +115,7 @@ export default function EventPage() {
   const { slug } = useParams();
   const [timelineKind, setTimelineKind] = useState(undefined);
 
-  const { data: event,   isLoading: loadingEvent }     = useEvent(slug);
+  const { data: event,   isLoading: loadingEvent, error: eventError, refetch: refetchEvent } = useEvent(slug);
   const { data: tlData,  isLoading: loadingTimeline }  = useEventTimeline(slug, { kind: timelineKind, limit: 60 });
   const { data: mkData,  isLoading: loadingMarkets }   = useEventMarkets(slug);
   const { data: actData, isLoading: loadingActors }    = useEventActors(slug);
@@ -146,6 +146,27 @@ export default function EventPage() {
     return (
       <div className="max-w-3xl mx-auto px-4 py-10">
         <div className="h-64 rounded-xl bg-[var(--color-surface-2)] animate-pulse" />
+      </div>
+    );
+  }
+
+  // "Event not found" is reserved for a definitive 404. A rate limit, server
+  // error, or network failure is a *transient* condition — telling the user
+  // the story doesn't exist was audit finding P0-1's worst UX leg.
+  const transientFailure = eventError && eventError.response?.status !== 404;
+  if (transientFailure && !event) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-16 text-center">
+        <p className="text-[var(--color-text)] text-sm font-medium">Temporarily busy — retrying…</p>
+        <p className="mt-2 text-[var(--color-text-secondary)] text-xs">
+          This story exists but we couldn't load it just now.
+        </p>
+        <button
+          onClick={() => refetchEvent()}
+          className="mt-4 inline-flex items-center gap-1 text-sm text-[var(--color-accent)] hover:underline"
+        >
+          Retry now
+        </button>
       </div>
     );
   }

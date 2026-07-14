@@ -30,7 +30,7 @@ function relativeTime(ms) {
 export default function TimelinePage() {
   const { slug } = useParams();
   const [kind, setKind] = useState("");
-  const { data: ev,  isLoading: loadingEvent } = useEvent(slug);
+  const { data: ev,  isLoading: loadingEvent, error: eventError, refetch: refetchEvent } = useEvent(slug);
   const { data: tl,  isLoading: loadingTl }    = useEventTimeline(slug, { kind, limit: 100 });
 
   const event   = ev?.event;
@@ -45,6 +45,22 @@ export default function TimelinePage() {
         <div className="space-y-3">{Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className="h-16 rounded-lg bg-[var(--color-surface-2)] animate-pulse" />
         ))}</div>
+      </div>
+    );
+  }
+
+  // Same split as EventPage: "not found" only on a definitive 404; transient
+  // failures (429/5xx/network) say so and keep retrying.
+  if (!event && eventError && eventError.response?.status !== 404) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-12 text-center">
+        <p className="text-sm text-[var(--color-text)] font-medium mb-1">Temporarily busy — retrying…</p>
+        <p className="text-xs text-[var(--color-text-secondary)] mb-3">
+          This timeline exists but we couldn't load it just now.
+        </p>
+        <button onClick={() => refetchEvent()} className="text-xs text-[var(--color-accent)] hover:underline">
+          Retry now
+        </button>
       </div>
     );
   }

@@ -98,10 +98,10 @@ export default function EventsPage({
         </div>
       )}
 
-      {/* Error */}
+      {/* Error — retry is automatic (useEvents polls at 30s while failing) */}
       {error && (
-        <p className="text-sm text-red-500 py-6 text-center">
-          Failed to load events — please try again.
+        <p className="text-sm text-[var(--color-text-secondary)] py-6 text-center">
+          Temporarily busy — retrying…
         </p>
       )}
 

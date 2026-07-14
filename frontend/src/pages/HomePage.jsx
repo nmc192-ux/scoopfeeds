@@ -166,7 +166,7 @@ function EntertainmentSection() {
 export default function HomePage() {
   // One prominence fetch powers the whole Top Stories band: the main shows the top 7
   // (lead + 6); the rail derives Developing + Most-sourced from the fuller list.
-  const { data, isLoading } = useEvents({ sort: "prominence", limit: 24 });
+  const { data, isLoading, isError } = useEvents({ sort: "prominence", limit: 24 });
   const events = data?.events ?? [];
   const [lead, ...rest] = events;
   const topGrid     = rest.slice(0, 6);
@@ -189,7 +189,13 @@ export default function HomePage() {
           ) : events.length === 0 ? (
             <div className="flex flex-col items-center gap-4 py-20 text-center">
               <ScoopMascot size="lg" mood="reading" animated />
-              <p className="text-sm text-[var(--color-text-tertiary)]">No stories yet — run a clustering pass.</p>
+              {/* Transient failure and genuinely-no-stories are different facts;
+                  neither is the reader's fault and neither gets debug jargon. */}
+              <p className="text-sm text-[var(--color-text-tertiary)]">
+                {isError
+                  ? "Temporarily busy — stories will be back in a moment. Retrying…"
+                  : "No stories right now — check back shortly."}
+              </p>
             </div>
           ) : (
             <div className="space-y-4">
