@@ -71,7 +71,7 @@ export default function SyntheticMarketsPage() {
           </span>
         </div>
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {COPY.brandTagline} Binary markets for stories Polymarket doesn't cover. Editorial + LLM-drafted, you trade with virtual currency.
+          {COPY.brandTagline()} Binary markets for stories Polymarket doesn't cover. Editorial + LLM-drafted, you trade with virtual currency.
         </p>
       </header>
 
@@ -114,7 +114,7 @@ export default function SyntheticMarketsPage() {
       )}
 
       <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-6 text-center">
-        {COPY.brandTagline}
+        {COPY.brandTagline()}
       </p>
     </div>
   );

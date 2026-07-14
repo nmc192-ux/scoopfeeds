@@ -87,7 +87,7 @@ export default function FinancePage() {
           <h1 className="font-editorial italic text-2xl text-[var(--color-text)]">Finance</h1>
         </div>
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {COPY.brandTagline} Reality Index across the global event-market complex.
+          {COPY.brandTagline()} Reality Index across the global event-market complex.
         </p>
       </header>
 
@@ -218,7 +218,7 @@ export default function FinancePage() {
         </Link>
       </div>
 
-      <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-6 text-center">{COPY.brandTagline}</p>
+      <p className="text-[10px] text-[var(--color-text-tertiary)] italic mt-6 text-center">{COPY.brandTagline()}</p>
     </div>
   );
 }
