@@ -167,7 +167,15 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(compression());
+// SSE must be exempt: compression buffers small writes, so an event-stream
+// response never flushes to the client — Cloudflare sees zero bytes from the
+// origin and returns 524 after ~100s (audit finding P0-2, 2026-07-13).
+app.use(compression({
+  filter: (req, res) =>
+    String(res.getHeader("Content-Type") || "").includes("text/event-stream")
+      ? false
+      : compression.filter(req, res),
+}));
 app.use(cors({
   origin: corsOrigin,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -403,15 +411,21 @@ app.get("/api/public-config", (req, res) => {
   });
 });
 
-// SSE live stream
+// SSE live stream. flushHeaders + per-write flush so bytes reach the client
+// immediately even if a middleware re-wraps the response; the heartbeat is a
+// public endpoint, so it carries no scheduler internals.
 app.get("/api/events", (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("Access-Control-Allow-Origin", "*");
-  const send = (ev, data) => res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`);
+  res.flushHeaders();
+  const send = (ev, data) => {
+    res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`);
+    res.flush?.();
+  };
   send("connected", { message: "📡 Connected to NewsFlow stream" });
-  const hb = setInterval(() => send("heartbeat", { time: new Date().toISOString(), scheduler: getSchedulerStatus() }), 30000);
+  const hb = setInterval(() => send("heartbeat", { time: new Date().toISOString() }), 30000);
   req.on("close", () => clearInterval(hb));
 });
 
