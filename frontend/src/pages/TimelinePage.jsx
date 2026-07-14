@@ -49,9 +49,22 @@ export default function TimelinePage() {
     );
   }
 
-  // Same split as EventPage: "not found" only on a definitive 404; transient
-  // failures (429/5xx/network) say so and keep retrying.
-  if (!event && eventError && eventError.response?.status !== 404) {
+  // Positive-evidence rule, same as EventPage: "not found" requires a
+  // definitive 404. Anything else data-less — error OR a paused retry
+  // (offline: no data, no error) — is transient and says so.
+  if (!event) {
+    if (eventError?.response?.status === 404) {
+      return (
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-12 text-center">
+          <p className="text-sm text-[var(--color-text-secondary)] mb-3">
+            Event not found.
+          </p>
+          <Link to="/events" className="text-xs text-[var(--color-accent)] hover:underline">
+            ← Back to all events
+          </Link>
+        </div>
+      );
+    }
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-12 text-center">
         <p className="text-sm text-[var(--color-text)] font-medium mb-1">Temporarily busy — retrying…</p>
@@ -61,19 +74,6 @@ export default function TimelinePage() {
         <button onClick={() => refetchEvent()} className="text-xs text-[var(--color-accent)] hover:underline">
           Retry now
         </button>
-      </div>
-    );
-  }
-
-  if (!event) {
-    return (
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-12 text-center">
-        <p className="text-sm text-[var(--color-text-secondary)] mb-3">
-          Event not found.
-        </p>
-        <Link to="/events" className="text-xs text-[var(--color-accent)] hover:underline">
-          ← Back to all events
-        </Link>
       </div>
     );
   }
