@@ -91,15 +91,10 @@ export default function App() {
 
   const hideTopicNav = HIDE_TOPICNAV_ON.some(p => location.pathname.startsWith(p));
 
-  // SSE live update stream
-  useEffect(() => {
-    let es;
-    try {
-      es = new EventSource("/api/events");
-      es.onerror = () => es.close();
-    } catch {}
-    return () => es?.close();
-  }, []);
+  // The old /api/events EventSource was removed here: no handler ever consumed
+  // its messages, and holding an idle SSE connection per visitor triggered
+  // Cloudflare 524s when compression buffered the stream (audit finding P0-2).
+  // Reintroduce only together with a consumer.
 
   // Analytics: fire a page_view on load + wire up scroll/dwell observers.
   // Also persist ?ref= token so newsletter referral attribution survives SPA navigation.
