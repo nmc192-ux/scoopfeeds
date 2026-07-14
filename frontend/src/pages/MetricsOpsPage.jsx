@@ -12,7 +12,7 @@
  * Auto-refreshes every 60s while page is open.
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Activity, AlertTriangle, BarChart3, Clock, Users,
   Key, RefreshCw,
@@ -86,8 +86,10 @@ export default function MetricsOpsPage() {
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || "Unknown error");
       setData(json);
+      return true;
     } catch (e) {
       setError(e.message);
+      return false;
     } finally {
       setLoading(false);
     }
@@ -95,9 +97,19 @@ export default function MetricsOpsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Auto-refresh every 60s while page is open.
+  // Auto-refresh every 60s while page is open. Skips ticks while the tab is
+  // hidden, and doubles the effective interval per consecutive failure
+  // (capped at 16 min) so a failing backend isn't hammered (audit S1a).
+  const failsRef = useRef(0);
   useEffect(() => {
-    const id = setInterval(() => { fetchData(); }, 60_000);
+    let tick = 0;
+    const id = setInterval(async () => {
+      tick += 1;
+      if (document.hidden) return;
+      if (tick % Math.min(2 ** failsRef.current, 16) !== 0) return;
+      const ok = await fetchData();
+      failsRef.current = ok ? 0 : failsRef.current + 1;
+    }, 60_000);
     return () => clearInterval(id);
   }, [fetchData]);
 
