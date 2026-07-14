@@ -134,15 +134,17 @@ export default function OnboardingModal() {
                 <button
                   key={r.code}
                   onClick={() => pickRegion(r)}
+                  aria-label={r.label}
+                  aria-pressed={r.code === countryCode}
                   className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-sm text-left transition
                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40
                     ${r.code === countryCode
-                      ? "border-electric-500 bg-electric-50"
+                      ? "border-electric-500 bg-electric-50 text-electric-900"
                       : "border-[var(--color-border)] hover:bg-[var(--color-surface2)]"}`}
                 >
                   <span className="text-xl">{r.flag}</span>
                   <span className="flex-1 truncate">{r.label}</span>
-                  <span className="text-[10px] text-[var(--color-text-tertiary)]">{r.currency}</span>
+                  <span className={`text-[10px] ${r.code === countryCode ? "text-electric-700" : "text-[var(--color-text-tertiary)]"}`}>{r.currency}</span>
                 </button>
               ))}
             </div>
@@ -167,15 +169,16 @@ export default function OnboardingModal() {
             </p>
             <button
               onClick={() => { setAutoLanguage(true); setStep(2); }}
+              aria-pressed={autoLanguage}
               className={`w-full px-4 py-3 rounded-xl border text-left mb-2 transition
                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 ${
                 autoLanguage
-                  ? "border-electric-500 bg-electric-50"
+                  ? "border-electric-500 bg-electric-50 text-electric-900"
                   : "border-[var(--color-border)] hover:bg-[var(--color-surface2)]"
               }`}
             >
               <div className="font-semibold text-sm">🌐 Auto — article's language</div>
-              <div className="text-[11px] text-[var(--color-text-tertiary)]">Recommended — original grammar and nuance preserved</div>
+              <div className={`text-[11px] ${autoLanguage ? "text-electric-700" : "text-[var(--color-text-tertiary)]"}`}>Recommended — original grammar and nuance preserved</div>
             </button>
             <div className="grid grid-cols-3 gap-2">
               {LANGUAGE_OPTIONS.map((l) => {
@@ -184,10 +187,12 @@ export default function OnboardingModal() {
                   <button
                     key={l.code}
                     onClick={() => { setAutoLanguage(false); setLanguage(l.code); setStep(2); }}
+                    aria-label={l.native}
+                    aria-pressed={on}
                     className={`px-2 py-2 rounded-xl border text-left transition
                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 ${
                       on
-                        ? "border-electric-500 bg-electric-50"
+                        ? "border-electric-500 bg-electric-50 text-electric-900"
                         : "border-[var(--color-border)] hover:bg-[var(--color-surface2)]"
                     }`}
                   >
@@ -219,6 +224,7 @@ export default function OnboardingModal() {
                   <button
                     key={t.id}
                     onClick={() => togglePick(t.id)}
+                    aria-pressed={on}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border transition
                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 ${
                       on

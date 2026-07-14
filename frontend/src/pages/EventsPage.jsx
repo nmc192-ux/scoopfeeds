@@ -72,7 +72,7 @@ export default function EventsPage({
           </h1>
         </div>
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {pageSubtitle ?? `${COPY.brandTagline} Major stories tracked as live events with market-implied probabilities.`}
+          {pageSubtitle ?? `${COPY.brandTagline(t)} Major stories tracked as live events with market-implied probabilities.`}
         </p>
       </header>
 

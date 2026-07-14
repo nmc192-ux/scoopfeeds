@@ -49,10 +49,10 @@ function dayN(ev) {
 }
 const plural = (n, w) => `${n} ${w}${n !== 1 ? "s" : ""}`;
 
-function SectionHeader({ title, href, cta }) {
+function SectionHeader({ title, href, cta, as: Heading = "h2" }) {
   return (
     <div className="flex items-baseline justify-between mb-4 gap-3">
-      <h2 className="text-xl font-bold tracking-tight text-[var(--color-text)]">{title}</h2>
+      <Heading className="text-xl font-bold tracking-tight text-[var(--color-text)]">{title}</Heading>
       <Link to={href} className="text-sm font-semibold text-[var(--color-accent)] hover:underline whitespace-nowrap">
         {cta} →
       </Link>
@@ -186,7 +186,8 @@ export default function HomePage() {
       {/* ── TOP STORIES band: main + 320px rail ─────────────────────────── */}
       <div className="lg:grid lg:grid-cols-[1fr_320px] lg:gap-10 lg:items-start">
         <div>
-          <SectionHeader title="Top stories" href="/events" cta="See all stories" />
+          {/* The homepage's only h1 (SEO: the page previously had none). */}
+          <SectionHeader title="Top stories" href="/events" cta="See all stories" as="h1" />
           {isLoading ? (
             <div className="space-y-4">
               <SkeletonCard />

@@ -61,11 +61,13 @@ function ssrForBots(handler) {
 }
 
 // ── robots.txt ────────────────────────────────────────────────────────────
+// Decision 30: index the /search landing page, never the query-result pages.
 router.get("/robots.txt", (_req, res) => {
   res.type("text/plain").send(
 `User-agent: *
 Allow: /
 Disallow: /api/
+Disallow: /search?
 
 User-agent: Mediapartners-Google
 Allow: /

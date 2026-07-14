@@ -296,30 +296,25 @@ app.use("/scoop-ops/ri-ops",     riOpsRouter);          // Reality Index live pr
 app.use("/scoop-ops/articles",   articlesOpsRouter);    // per-article remediation: /:id/set-published-at
 app.use("/scoop-ops/metrics-ops", metricsOpsRouter);    // Phase A baseline metrics dashboard (Sprint 3.4) — distinct from SPA route at /scoop-ops/metrics
 
-// Health
+// Health — public. Keeps only the operational contract: status, counts, and
+// the pipelines block (runbook: `curl /api/health | jq .pipelines`). The
+// scheduler-internals blob, DB path, process role, and memory stats were
+// dropped from the public response (2026-07-13 audit: internals disclosure);
+// no consumer read them (frontend sentinel wants {status, articles}; docker
+// healthcheck uses /api/healthz).
 app.get("/api/health", (req, res) => {
-  const scheduler = getSchedulerStatus();
   const db = getDb();
-  const dbStatus = getDbStatus();
-  const embeddedSchedulerEnabled = shouldStartEmbeddedScheduler();
   res.json({
     status: "ok",
-    processRole: PROCESS_ROLE,
-    schedulerEnabled: embeddedSchedulerEnabled,
     uptime: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
-    db: dbStatus,
+    db: { ok: Boolean(getDbStatus()?.ok) },
     articles: db.prepare("SELECT COUNT(*) as n FROM articles").get().n,
     videos:   db.prepare("SELECT COUNT(*) as n FROM videos").get().n,
-    scheduler,
     // Data-derived liveness for ingest→embed→cluster→promote. Added after three silent
     // green-logs/dead-pipeline outages; `pipelines.ok:false` or any `stale:true` means a
     // stage stopped producing even though every process looks healthy.
     pipelines: getPipelineHealth(db),
-    memory: {
-      used:  Math.floor(process.memoryUsage().heapUsed  / 1024 / 1024) + "MB",
-      total: Math.floor(process.memoryUsage().heapTotal / 1024 / 1024) + "MB",
-    },
   });
 });
 
