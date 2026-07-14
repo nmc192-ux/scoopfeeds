@@ -181,3 +181,20 @@ doesn't re-hit the API.
 **Without the key set**, the renderer falls back to the typographic-only
 design — still strong, just not photographic. So this is a "make-it-better"
 upgrade, not a critical dependency.
+
+## Lesson (2026-07-14): identity changes ARE credential changes
+
+A platform **identity** change — a handle/username migration (e.g. Bluesky
+`nmc192.bsky.social` → custom-domain `@scoopfeeds.com`), a page rename, an
+account upgrade — is a **publisher config change**, exactly like a token
+rotation. Treat it with the same runbook:
+
+1. Update the env pair on the VPS (`BLUESKY_HANDLE` + regenerate the app
+   password — the old session cache may be bound to the old identity).
+2. Recreate the affected container so env reloads.
+3. Probe the API directly (expect 200) — do not rely on "the profile looks
+   fine" from a browser, and do not keep watching the OLD profile URL: a
+   retired handle looks like a dark account and sends you diagnosing a
+   healthy publisher (this exactly happened — see vps_migration_v1.md,
+   2026-07-14 entry).
+4. Update every doc/profile link that hardcodes the old identity.
