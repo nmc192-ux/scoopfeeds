@@ -57,7 +57,7 @@ export default function EventsPage({
   const { t } = useT();
   const [chosen, setChosen] = useState("");
   const category = fixedCategory ?? chosen;
-  const { data, isLoading, error } = useEvents({ category: category || undefined, limit: 60 });
+  const { data, isLoading, error, isSuccess } = useEvents({ category: category || undefined, limit: 60 });
   const events = data?.events ?? [];
   const resolvedTitle = pageTitle ?? t("nav.event_tracker", "Event Tracker");
 
@@ -98,10 +98,11 @@ export default function EventsPage({
         </div>
       )}
 
-      {/* Error */}
-      {error && (
-        <p className="text-sm text-red-500 py-6 text-center">
-          Failed to load events — please try again.
+      {/* Transient — errored, or a paused offline retry (no data, no error).
+          Retry is automatic (useEvents polls at 30s while failing). */}
+      {!isLoading && !isSuccess && (
+        <p className="text-sm text-[var(--color-text-secondary)] py-6 text-center">
+          Temporarily busy — retrying…
         </p>
       )}
 
@@ -112,8 +113,9 @@ export default function EventsPage({
         </div>
       )}
 
-      {/* Empty state */}
-      {!isLoading && !error && !events.length && (
+      {/* Empty state — positive evidence only: requires a successful,
+          genuinely-empty response, never inferred from missing data */}
+      {!isLoading && isSuccess && !error && !events.length && (
         <div className="text-center py-16 flex flex-col items-center gap-3">
           <Activity size={32} className="text-[var(--color-text-secondary)]" />
           <p className="text-[var(--color-text-secondary)] text-sm">

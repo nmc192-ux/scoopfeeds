@@ -30,7 +30,7 @@ function relativeTime(ms) {
 export default function TimelinePage() {
   const { slug } = useParams();
   const [kind, setKind] = useState("");
-  const { data: ev,  isLoading: loadingEvent } = useEvent(slug);
+  const { data: ev,  isLoading: loadingEvent, error: eventError, refetch: refetchEvent } = useEvent(slug);
   const { data: tl,  isLoading: loadingTl }    = useEventTimeline(slug, { kind, limit: 100 });
 
   const event   = ev?.event;
@@ -49,15 +49,31 @@ export default function TimelinePage() {
     );
   }
 
+  // Positive-evidence rule, same as EventPage: "not found" requires a
+  // definitive 404. Anything else data-less — error OR a paused retry
+  // (offline: no data, no error) — is transient and says so.
   if (!event) {
+    if (eventError?.response?.status === 404) {
+      return (
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-12 text-center">
+          <p className="text-sm text-[var(--color-text-secondary)] mb-3">
+            Event not found.
+          </p>
+          <Link to="/events" className="text-xs text-[var(--color-accent)] hover:underline">
+            ← Back to all events
+          </Link>
+        </div>
+      );
+    }
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-12 text-center">
-        <p className="text-sm text-[var(--color-text-secondary)] mb-3">
-          Event not found.
+        <p className="text-sm text-[var(--color-text)] font-medium mb-1">Temporarily busy — retrying…</p>
+        <p className="text-xs text-[var(--color-text-secondary)] mb-3">
+          This timeline exists but we couldn't load it just now.
         </p>
-        <Link to="/events" className="text-xs text-[var(--color-accent)] hover:underline">
-          ← Back to all events
-        </Link>
+        <button onClick={() => refetchEvent()} className="text-xs text-[var(--color-accent)] hover:underline">
+          Retry now
+        </button>
       </div>
     );
   }

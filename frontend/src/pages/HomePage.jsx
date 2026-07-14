@@ -166,7 +166,7 @@ function EntertainmentSection() {
 export default function HomePage() {
   // One prominence fetch powers the whole Top Stories band: the main shows the top 7
   // (lead + 6); the rail derives Developing + Most-sourced from the fuller list.
-  const { data, isLoading } = useEvents({ sort: "prominence", limit: 24 });
+  const { data, isLoading, isError, isSuccess } = useEvents({ sort: "prominence", limit: 24 });
   const events = data?.events ?? [];
   const [lead, ...rest] = events;
   const topGrid     = rest.slice(0, 6);
@@ -189,7 +189,15 @@ export default function HomePage() {
           ) : events.length === 0 ? (
             <div className="flex flex-col items-center gap-4 py-20 text-center">
               <ScoopMascot size="lg" mood="reading" animated />
-              <p className="text-sm text-[var(--color-text-tertiary)]">No stories yet — run a clustering pass.</p>
+              {/* Positive evidence only: "no stories" requires a SUCCESSFUL
+                  response with an empty list. An error, or a paused retry
+                  (offline: no data AND no error), is a transient condition —
+                  never claim the feed is empty on its account. */}
+              <p className="text-sm text-[var(--color-text-tertiary)]">
+                {isSuccess && !isError
+                  ? "No stories right now — check back shortly."
+                  : "Temporarily busy — stories will be back in a moment. Retrying…"}
+              </p>
             </div>
           ) : (
             <div className="space-y-4">

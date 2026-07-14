@@ -115,7 +115,7 @@ export default function EventPage() {
   const { slug } = useParams();
   const [timelineKind, setTimelineKind] = useState(undefined);
 
-  const { data: event,   isLoading: loadingEvent }     = useEvent(slug);
+  const { data: event,   isLoading: loadingEvent, error: eventError, refetch: refetchEvent } = useEvent(slug);
   const { data: tlData,  isLoading: loadingTimeline }  = useEventTimeline(slug, { kind: timelineKind, limit: 60 });
   const { data: mkData,  isLoading: loadingMarkets }   = useEventMarkets(slug);
   const { data: actData, isLoading: loadingActors }    = useEventActors(slug);
@@ -150,13 +150,35 @@ export default function EventPage() {
     );
   }
 
+  // Positive-evidence rule (audit P0-1): "Event not found" requires a
+  // definitive 404. EVERY other data-less state — 5xx, network failure,
+  // swallowed 429, or React Query pausing a retry because the device
+  // reports offline (status "pending" + fetchStatus "paused": data and
+  // error are BOTH unset, so it is indistinguishable from "missing" unless
+  // handled explicitly) — is transient and must say so.
   if (!event) {
+    if (eventError?.response?.status === 404) {
+      return (
+        <div className="max-w-3xl mx-auto px-4 py-16 text-center">
+          <p className="text-[var(--color-text-secondary)] text-sm">Event not found.</p>
+          <Link to="/events" className="mt-4 inline-flex items-center gap-1 text-sm text-[var(--color-accent)] hover:underline">
+            <ChevronLeft size={14} /> Back to events
+          </Link>
+        </div>
+      );
+    }
     return (
       <div className="max-w-3xl mx-auto px-4 py-16 text-center">
-        <p className="text-[var(--color-text-secondary)] text-sm">Event not found.</p>
-        <Link to="/events" className="mt-4 inline-flex items-center gap-1 text-sm text-[var(--color-accent)] hover:underline">
-          <ChevronLeft size={14} /> Back to events
-        </Link>
+        <p className="text-[var(--color-text)] text-sm font-medium">Temporarily busy — retrying…</p>
+        <p className="mt-2 text-[var(--color-text-secondary)] text-xs">
+          This story exists but we couldn't load it just now.
+        </p>
+        <button
+          onClick={() => refetchEvent()}
+          className="mt-4 inline-flex items-center gap-1 text-sm text-[var(--color-accent)] hover:underline"
+        >
+          Retry now
+        </button>
       </div>
     );
   }
