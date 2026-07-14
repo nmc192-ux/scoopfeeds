@@ -150,11 +150,23 @@ export default function EventPage() {
     );
   }
 
-  // "Event not found" is reserved for a definitive 404. A rate limit, server
-  // error, or network failure is a *transient* condition — telling the user
-  // the story doesn't exist was audit finding P0-1's worst UX leg.
-  const transientFailure = eventError && eventError.response?.status !== 404;
-  if (transientFailure && !event) {
+  // Positive-evidence rule (audit P0-1): "Event not found" requires a
+  // definitive 404. EVERY other data-less state — 5xx, network failure,
+  // swallowed 429, or React Query pausing a retry because the device
+  // reports offline (status "pending" + fetchStatus "paused": data and
+  // error are BOTH unset, so it is indistinguishable from "missing" unless
+  // handled explicitly) — is transient and must say so.
+  if (!event) {
+    if (eventError?.response?.status === 404) {
+      return (
+        <div className="max-w-3xl mx-auto px-4 py-16 text-center">
+          <p className="text-[var(--color-text-secondary)] text-sm">Event not found.</p>
+          <Link to="/events" className="mt-4 inline-flex items-center gap-1 text-sm text-[var(--color-accent)] hover:underline">
+            <ChevronLeft size={14} /> Back to events
+          </Link>
+        </div>
+      );
+    }
     return (
       <div className="max-w-3xl mx-auto px-4 py-16 text-center">
         <p className="text-[var(--color-text)] text-sm font-medium">Temporarily busy — retrying…</p>
@@ -167,17 +179,6 @@ export default function EventPage() {
         >
           Retry now
         </button>
-      </div>
-    );
-  }
-
-  if (!event) {
-    return (
-      <div className="max-w-3xl mx-auto px-4 py-16 text-center">
-        <p className="text-[var(--color-text-secondary)] text-sm">Event not found.</p>
-        <Link to="/events" className="mt-4 inline-flex items-center gap-1 text-sm text-[var(--color-accent)] hover:underline">
-          <ChevronLeft size={14} /> Back to events
-        </Link>
       </div>
     );
   }

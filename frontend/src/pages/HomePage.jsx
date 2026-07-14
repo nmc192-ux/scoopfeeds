@@ -169,7 +169,7 @@ export default function HomePage() {
   // Each story renders at most ONCE above the fold: the rails exclude anything
   // already placed in the band, and Most-sourced also excludes Developing —
   // the 2026-07-13 audit found the same event in up to 4 slots (finding P1-12).
-  const { data, isLoading, isError } = useEvents({ sort: "prominence", limit: 24 });
+  const { data, isLoading, isError, isSuccess } = useEvents({ sort: "prominence", limit: 24 });
   const events = data?.events ?? [];
   const [lead, ...rest] = events;
   const topGrid = rest.slice(0, 6);
@@ -198,12 +198,14 @@ export default function HomePage() {
           ) : events.length === 0 ? (
             <div className="flex flex-col items-center gap-4 py-20 text-center">
               <ScoopMascot size="lg" mood="reading" animated />
-              {/* Transient failure and genuinely-no-stories are different facts;
-                  neither is the reader's fault and neither gets debug jargon. */}
+              {/* Positive evidence only: "no stories" requires a SUCCESSFUL
+                  response with an empty list. An error, or a paused retry
+                  (offline: no data AND no error), is a transient condition —
+                  never claim the feed is empty on its account. */}
               <p className="text-sm text-[var(--color-text-tertiary)]">
-                {isError
-                  ? "Temporarily busy — stories will be back in a moment. Retrying…"
-                  : "No stories right now — check back shortly."}
+                {isSuccess && !isError
+                  ? "No stories right now — check back shortly."
+                  : "Temporarily busy — stories will be back in a moment. Retrying…"}
               </p>
             </div>
           ) : (
