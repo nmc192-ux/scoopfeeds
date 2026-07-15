@@ -30,6 +30,7 @@ import {
   refreshAnalysis,
 } from "../services/analysisService.js";
 import { logger } from "../services/logger.js";
+import { getUserFromRequest } from "./auth.js";
 
 const router   = express.Router();
 
@@ -68,10 +69,12 @@ router.get("/trends", (req, res) => {
   }
 });
 
-// GET /api/analysis/article/:articleId  — async, cached 6h
+// GET /api/analysis/article/:articleId  — async, cached 6h.
+// Anonymous/bot requests are cache-only: a fresh Gemini call is only
+// triggered for authenticated users (2026-07-15 cost incident, gate a).
 router.get("/article/:articleId", async (req, res) => {
   try {
-    const result = await getOrCreateDeepDive(req.params.articleId);
+    const result = await getOrCreateDeepDive(req.params.articleId, { allowGenerate: Boolean(getUserFromRequest(req)) });
     if (!result) return res.status(404).json({ success: false, error: "Article not found" });
     res.json({ success: true, data: result });
   } catch (err) {

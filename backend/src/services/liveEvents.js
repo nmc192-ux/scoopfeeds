@@ -27,10 +27,20 @@ import {
 import { rankByAuthenticity, scoreFor } from "../config/mediaAuthenticity.js";
 import { fetchEventSocialSignals } from "./socialSignals.js";
 import { logger } from "./logger.js";
+import {
+  buildGeminiGenerationConfig,
+  isGeminiThinkingRejection,
+  markGeminiThinkingRejected,
+  consumeLlmBudget,
+} from "../realityIndex/llmQueue.js";
 
-const GEMINI_MODEL = "gemini-flash-latest";
+// PINNED (2026-07-15 cost incident) — same pin + rates as llmQueue:
+// gemini-2.5-flash, $0.30/1M input, $2.50/1M output. This site also had no
+// output cap while thinking billed as output.
+const GEMINI_MODEL = process.env.GEMINI_GENERATION_MODEL || "gemini-2.5-flash";
 const GEMINI_ENDPOINT = (key) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+const GEMINI_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.LIVE_EVENTS_MAX_OUTPUT_TOKENS || "1536", 10);
 
 // ─── Metric fetchers ───────────────────────────────────────────────────────
 
@@ -144,6 +154,7 @@ async function synthesizeWithGemini(event, articles, socialPosts = []) {
   if (!key) return null;
   if (articles.length === 0 && socialPosts.length === 0) return null;
   const prompt = buildPrompt(event, articles, socialPosts);
+  if (!consumeLlmBudget("live-events")) return null; // global daily rail (gate a)
   const RETRY_DELAYS_MS = [4000, 9000, 18000];
 
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
@@ -152,15 +163,21 @@ async function synthesizeWithGemini(event, articles, socialPosts = []) {
         GEMINI_ENDPOINT(key),
         {
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
+          generationConfig: buildGeminiGenerationConfig({
             temperature: 0.2,
             responseMimeType: "application/json",
-          },
+            maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+          }),
         },
         { timeout: 25000 }
       );
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) return null;
+      if (!text) {
+        const fr = data?.candidates?.[0]?.finishReason;
+        const thought = data?.usageMetadata?.thoughtsTokenCount;
+        logger.warn(`🛰️  Gemini empty text for event ${event.id} (finishReason=${fr ?? "?"}, thoughtsTokenCount=${thought ?? "?"})`);
+        return null;
+      }
       const parsed = JSON.parse(text);
       // Attach source objects using the indices Gemini returned.
       const brief = (parsed.brief || []).map((p) => ({
@@ -177,6 +194,10 @@ async function synthesizeWithGemini(event, articles, socialPosts = []) {
         metrics: parsed.metrics || {},
       };
     } catch (err) {
+      if (isGeminiThinkingRejection(err)) {
+        markGeminiThinkingRejected(logger);
+        continue;
+      }
       const status = err.response?.status;
       const transient = status === 503 || status === 429 || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
       if (transient && attempt < RETRY_DELAYS_MS.length) {

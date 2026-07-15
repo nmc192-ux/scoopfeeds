@@ -146,7 +146,7 @@ async function matchOneCluster(cluster) {
   if (!candidates.length) return { ok: false, reason: "all_below_liquidity" };
 
   const prompt = buildRerankPrompt(cluster, candidates);
-  const llm = await callJson(prompt, { priority: "high", maxOutputTokens: 700 });
+  const llm = await callJson(prompt, { priority: "high", maxOutputTokens: 700, task: "market-match" });
   const matches = Array.isArray(llm?.matches) ? llm.matches : [];
 
   const links = matches
