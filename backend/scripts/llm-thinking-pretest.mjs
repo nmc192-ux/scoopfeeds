@@ -32,8 +32,38 @@ if (!KEY) {
   process.exit(1);
 }
 
+// ── --list-models: what can THIS key actually call? ──────────────────────
+// (Added after the signed-off pin gemini-2.5-flash returned 404 "no longer
+// available to new users" — always pick a pin from this list, never from
+// documentation.) Prints id, display name, generation-method support, and
+// token limits; never the key.
+if (process.argv.includes("--list-models")) {
+  try {
+    const { data } = await axios.get(
+      `https://generativelanguage.googleapis.com/v1beta/models?pageSize=100&key=${KEY}`,
+      { timeout: 30000 }
+    );
+    const models = (data?.models ?? [])
+      .filter(m => (m.supportedGenerationMethods ?? []).includes("generateContent"));
+    console.log(`${models.length} generateContent-capable models on this key:\n`);
+    for (const m of models) {
+      console.log(`${m.name.replace("models/", "")}`);
+      console.log(`   display: ${m.displayName ?? "?"} · in/out limits: ${m.inputTokenLimit ?? "?"}/${m.outputTokenLimit ?? "?"}`);
+      if (m.description) console.log(`   ${m.description.slice(0, 140)}`);
+    }
+    console.log(`\nRe-run the pre-test against a candidate: node scripts/llm-thinking-pretest.mjs --model <id>`);
+  } catch (err) {
+    console.error(`list-models failed: HTTP ${err.response?.status}: ${JSON.stringify(err.response?.data ?? err.message).slice(0, 300)}`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
 const LEGACY_MODEL = "gemini-flash-latest";
-const PINNED_MODEL = process.env.GEMINI_GENERATION_MODEL || "gemini-2.5-flash";
+const modelFlagIdx = process.argv.indexOf("--model");
+const PINNED_MODEL = modelFlagIdx > -1
+  ? process.argv[modelFlagIdx + 1]
+  : (process.env.GEMINI_GENERATION_MODEL || "gemini-2.5-flash");
 
 const DB_PATH = process.env.SCOOP_PERSISTENT_DATA_DIR
   ? path.join(process.env.SCOOP_PERSISTENT_DATA_DIR, "news.db")

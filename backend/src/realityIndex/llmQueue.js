@@ -210,6 +210,26 @@ export function markGeminiThinkingRejected(logger_) {
   }
 }
 
+// A pinned model can be deprecated out from under us (the 2026-07-16
+// pre-test found gemini-2.5-flash returning 404 "no longer available to
+// new users") — the floating-alias problem from the other side. A 404 on
+// generateContent means the pin is DEAD for this key: fail LOUDLY once per
+// model per process and fall back deterministically; never retry, never
+// die silently (silent enrichment death is how this codebase's worst
+// outages started).
+const _modelGoneWarned = new Set();
+
+export function isGeminiModelGone(err) {
+  return err?.response?.status === 404;
+}
+
+export function markGeminiModelGone(model, logger_) {
+  if (!_modelGoneWarned.has(model)) {
+    _modelGoneWarned.add(model);
+    logger_?.error?.(`🧠 GEMINI MODEL GONE: "${model}" returned 404 — the pin is dead for this key. Set GEMINI_GENERATION_MODEL to an available model (list them: node scripts/llm-thinking-pretest.mjs --list-models). Deterministic fallbacks in effect.`);
+  }
+}
+
 // Embedding dimensions — must match the vec0 schema in schema.js (FLOAT[768])
 const EMBED_DIMS = Number.parseInt(process.env.LLM_EMBED_DIMS || process.env.GEMINI_EMBED_DIMS || "768", 10);
 
@@ -427,6 +447,10 @@ async function rawCallJsonGemini({ prompt, temperature = 0.2, maxOutputTokens = 
       if (isGeminiThinkingRejection(err)) {
         markGeminiThinkingRejected(logger);
         continue; // same attempt budget, now without thinkingConfig
+      }
+      if (isGeminiModelGone(err)) {
+        markGeminiModelGone(m, logger);
+        return null; // pin is dead — no retry can help
       }
       const status    = err.response?.status;
       const transient = status === 503 || status === 429 || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
