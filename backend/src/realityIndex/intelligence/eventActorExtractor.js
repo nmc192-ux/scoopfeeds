@@ -96,7 +96,16 @@ async function extractActors(db, event, now) {
     LIMIT 5
   `).all(event.id);
 
-  if (!articles.length) return { called: false, actors: 0 };
+  if (!articles.length) {
+    // Ledger article-less events too (live verify 2026-07-16: wire-generated
+    // NOAA events have no linked articles, were never ledgered, and being
+    // perpetually most-recent they re-occupied candidate slots every cycle —
+    // starving real events out of the LIMIT). Three probes with growing
+    // spacing, then the SQL pre-filter stops selecting them; new activity
+    // re-qualifies them via last_activity_at > last_attempt_at.
+    recordAttempt(db, event.id, "no-articles", now, { succeeded: false });
+    return { called: false, actors: 0 };
+  }
 
   const gate = shouldAttempt(db, event.id, articles, now);
   if (!gate.proceed) return { called: false, actors: 0 };
@@ -151,20 +160,35 @@ export async function runEventActorExtractor() {
   const now = Date.now();
   const cutoff = now - REFRESH_AFTER_MS;
 
-  // Events with no actors yet, OR recently active events needing a refresh.
-  // (The attempts ledger — not this query — decides whether an event is
-  // actually paid for, so the candidate list can stay generous.)
+  // Events with no actors yet, OR recently active events needing a refresh —
+  // MINUS anything the attempts ledger has already settled. The ledger must
+  // be consulted IN the selection (not just in the loop): live verify
+  // 2026-07-16 showed exhausted/junk events occupying every candidate slot
+  // by recency, starving real events out of the LIMIT forever. Eligible =
+  // never attempted, OR a capped retry now due, OR new activity since the
+  // last attempt (article set may have changed — the in-loop content hash
+  // stays as the precise, no-spend guard for that case).
   const events = db.prepare(`
     SELECT e.id, e.title, e.category
     FROM events e
+    LEFT JOIN actor_extraction_attempts att ON att.event_id = e.id
     WHERE e.status = 'active'
       AND (
         (SELECT COUNT(*) FROM event_actors ea WHERE ea.event_id = e.id) = 0
         OR e.last_activity_at >= ?
       )
+      AND (
+        att.event_id IS NULL
+        OR e.last_activity_at > att.last_attempt_at
+        OR (
+          att.succeeded_at IS NULL
+          AND att.attempts < ?
+          AND att.last_attempt_at <= ? - (CASE WHEN att.attempts <= 1 THEN 21600000 ELSE 86400000 END)
+        )
+      )
     ORDER BY e.last_activity_at DESC
     LIMIT ?
-  `).all(cutoff, PER_CYCLE_LIMIT);
+  `).all(cutoff, MAX_ATTEMPTS, now, PER_CYCLE_LIMIT);
 
   let total = 0;
   let llmCalls = 0;
