@@ -31,6 +31,8 @@ import {
   buildGeminiGenerationConfig,
   isGeminiThinkingRejection,
   markGeminiThinkingRejected,
+  isGeminiModelGone,
+  markGeminiModelGone,
   consumeLlmBudget,
 } from "../realityIndex/llmQueue.js";
 
@@ -197,6 +199,10 @@ async function synthesizeWithGemini(event, articles, socialPosts = []) {
       if (isGeminiThinkingRejection(err)) {
         markGeminiThinkingRejected(logger);
         continue;
+      }
+      if (isGeminiModelGone(err)) {
+        markGeminiModelGone(GEMINI_MODEL, logger);
+        return null; // pin is dead — deterministic brief takes over
       }
       const status = err.response?.status;
       const transient = status === 503 || status === 429 || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
