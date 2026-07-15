@@ -134,7 +134,7 @@ export async function runOutcomeResolverCycle({ limit = PER_CYCLE } = {}) {
         skipped++;
         continue;
       }
-      const parsed = await callJson(buildPrompt(m, evidence), { tier: "premium", maxOutputTokens: 500 });
+      const parsed = await callJson(buildPrompt(m, evidence), { tier: "premium", maxOutputTokens: 500, task: "outcome-resolve" });
       const v = validate(parsed);
       if (!v) { skipped++; continue; }
 

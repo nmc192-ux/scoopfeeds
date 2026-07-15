@@ -27,6 +27,7 @@
 
 import axios from "axios";
 import { logger } from "../services/logger.js";
+import { getDb } from "../models/database.js";
 
 // ─── Provider detection ────────────────────────────────────────────────────
 
@@ -81,6 +82,59 @@ const DISABLED        = String(process.env.LLM_DISABLED || process.env.GEMINI_DI
 const RETRY_DELAYS_MS = [4000, 9000, 18000];
 const PRIORITIES      = { high: 0, normal: 1, low: 2 };
 
+// ─── Daily generation-call budget (2026-07-15 cost incident) ──────────────
+// A hard global ceiling on generation calls per UTC day, across every task
+// and every provider (a misroute to a paid provider must still hit the
+// rail). Persisted in llm_daily_calls (migration 016) so restarts do not
+// reset the count. On breach: the call is refused, the caller falls back to
+// its deterministic path, and we log once per task per breach-day. Embeds
+// are NOT counted (tiny, capped upstream); this is a generation rail.
+const DAILY_CALL_CAP = Number.parseInt(process.env.LLM_DAILY_CALL_CAP || "2000", 10);
+const _budgetWarned = new Set(); // "day:task" keys already warned
+
+function _utcDay() { return new Date().toISOString().slice(0, 10); }
+
+/**
+ * Check-and-count one generation call against the daily rail.
+ * Returns true if the call may proceed. Fail-open on DB errors (a broken
+ * counter must not take down the pipeline) but logs at error level.
+ */
+export function consumeLlmBudget(task = "untagged") {
+  try {
+    const db  = getDb();
+    const day = _utcDay();
+    const row = db.prepare(`SELECT SUM(calls) AS total FROM llm_daily_calls WHERE day = ?`).get(day);
+    if ((row?.total || 0) >= DAILY_CALL_CAP) {
+      const key = `${day}:${task}`;
+      if (!_budgetWarned.has(key)) {
+        _budgetWarned.add(key);
+        logger.error(`💸 LLM daily call cap reached (${DAILY_CALL_CAP}) — refusing "${task}" generation calls until UTC midnight (deterministic fallbacks in effect)`);
+      }
+      return false;
+    }
+    db.prepare(`
+      INSERT INTO llm_daily_calls (day, task, calls) VALUES (?, ?, 1)
+      ON CONFLICT(day, task) DO UPDATE SET calls = calls + 1
+    `).run(day, task);
+    return true;
+  } catch (err) {
+    logger.error(`💸 LLM budget counter failed (fail-open): ${err.message}`);
+    return true;
+  }
+}
+
+/** Today's per-task call counts — consumed by ops/status surfaces. */
+export function getLlmBudgetStatus() {
+  try {
+    const day  = _utcDay();
+    const rows = getDb().prepare(`SELECT task, calls FROM llm_daily_calls WHERE day = ? ORDER BY calls DESC`).all(day);
+    const total = rows.reduce((s, r) => s + r.calls, 0);
+    return { day, cap: DAILY_CALL_CAP, total, remaining: Math.max(0, DAILY_CALL_CAP - total), byTask: rows };
+  } catch {
+    return { day: _utcDay(), cap: DAILY_CALL_CAP, total: null, remaining: null, byTask: [] };
+  }
+}
+
 // Cerebras
 const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY || "";
 const CEREBRAS_MODEL   = process.env.CEREBRAS_MODEL   || "llama-3.3-70b";
@@ -120,9 +174,41 @@ const NIM_MODEL      = process.env.NIM_MODEL      || "meta/llama-3.3-70b-instruc
 const NIM_ENDPOINT   = (process.env.NIM_BASE_URL  || "https://integrate.api.nvidia.com/v1").replace(/\/$/, "") + "/chat/completions";
 
 // Gemini
+// PINNED model, never a "-latest" floating alias: on ~2026-07 the alias
+// silently resolved to a THINKING model whose reasoning tokens bill as
+// output — $23.33 of a $25.77 day was output SKU with zero rows persisted
+// (2026-07-15 cost incident). Pricing for the pin (gemini-2.5-flash):
+// $0.30/1M input, $2.50/1M output.
 const GEMINI_KEY         = process.env.GEMINI_API_KEY  || "";
-const GEMINI_GEN_MODEL   = process.env.GEMINI_GENERATION_MODEL || "gemini-flash-latest";
+const GEMINI_GEN_MODEL   = process.env.GEMINI_GENERATION_MODEL || "gemini-2.5-flash";
 const GEMINI_EMBED_MODEL = process.env.GEMINI_EMBEDDING_MODEL  || "gemini-embedding-001";
+// Disable "thinking" on every generateContent call: these are structured-
+// JSON extraction tasks; dynamic thinking multiplies output-billed tokens
+// and can eat maxOutputTokens so the visible JSON comes back empty. Models
+// with a mandatory minimum budget reject thinkingBudget:0 with a 400 —
+// geminiThinkingRejected flips and we degrade gracefully (retry without
+// thinkingConfig) instead of crashing the queue.
+const GEMINI_THINKING_CONFIG = { thinkingBudget: 0 };
+let geminiThinkingRejected = false;
+
+export function buildGeminiGenerationConfig(base) {
+  return geminiThinkingRejected
+    ? { ...base }
+    : { ...base, thinkingConfig: { ...GEMINI_THINKING_CONFIG } };
+}
+
+export function isGeminiThinkingRejection(err) {
+  const status = err?.response?.status;
+  const msg = JSON.stringify(err?.response?.data || err?.message || "");
+  return status === 400 && /thinking/i.test(msg);
+}
+
+export function markGeminiThinkingRejected(logger_) {
+  if (!geminiThinkingRejected) {
+    geminiThinkingRejected = true;
+    logger_?.warn?.(`🧠 ${GEMINI_GEN_MODEL} rejected thinkingBudget:0 — continuing WITHOUT thinkingConfig (thinking tokens will bill as output; consider a different pin)`);
+  }
+}
 
 // Embedding dimensions — must match the vec0 schema in schema.js (FLOAT[768])
 const EMBED_DIMS = Number.parseInt(process.env.LLM_EMBED_DIMS || process.env.GEMINI_EMBED_DIMS || "768", 10);
@@ -322,15 +408,26 @@ async function rawCallJsonGemini({ prompt, temperature = 0.2, maxOutputTokens = 
         _GEMINI_GEN_URL(m),
         {
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { temperature, responseMimeType: "application/json", maxOutputTokens },
+          generationConfig: buildGeminiGenerationConfig({ temperature, responseMimeType: "application/json", maxOutputTokens }),
         },
         { timeout: 30_000 }
       );
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) return null;
+      if (!text) {
+        // Log the shape of empty responses: during the 2026-07-15 incident
+        // thinking silently consumed the output budget and this branch hid it.
+        const fr = data?.candidates?.[0]?.finishReason;
+        const thought = data?.usageMetadata?.thoughtsTokenCount;
+        logger.warn(`🧠 Gemini empty text (finishReason=${fr ?? "?"}, thoughtsTokenCount=${thought ?? "?"})`);
+        return null;
+      }
       try { return JSON.parse(text); }
       catch { return { _rawText: text }; }
     } catch (err) {
+      if (isGeminiThinkingRejection(err)) {
+        markGeminiThinkingRejected(logger);
+        continue; // same attempt budget, now without thinkingConfig
+      }
       const status    = err.response?.status;
       const transient = status === 503 || status === 429 || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
       if (transient && attempt < RETRY_DELAYS_MS.length) {
@@ -367,12 +464,13 @@ function resolveProvider(tier) {
 
 export function callJson(prompt, opts = {}) {
   if (DISABLED) return Promise.resolve(null);
-  const { priority = "normal", tier = "standard", ...rest } = opts;
+  const { priority = "normal", tier = "standard", task = "untagged", ...rest } = opts;
   const provider = resolveProvider(tier);
   if (!provider) {
     logger.warn(`🧠 No handler for tier="${tier}" (provider="${PROVIDER}", premium="${PREMIUM_PROVIDER}")`);
     return Promise.resolve(null);
   }
+  if (!consumeLlmBudget(task)) return Promise.resolve(null);
   return enqueue(() => GEN_HANDLERS[provider]({ prompt, ...rest }), priority, provider);
 }
 

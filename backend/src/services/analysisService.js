@@ -21,6 +21,7 @@ import crypto from "crypto";
 import {
   getDb,
   upsertStoryCluster,
+  getStoryCluster,
   upsertExplainedPiece,
   upsertArticleAnalysisCache,
   getArticleAnalysisCache,
@@ -31,10 +32,22 @@ import { logger } from "./logger.js";
 import { clusterWindow } from "../realityIndex/clustering/semanticClusterer.js";
 import { detectTemplates } from "../realityIndex/clustering/templateFilter.js";
 import { runEventPromoter } from "../realityIndex/intelligence/eventPromoter.js";
+import {
+  buildGeminiGenerationConfig,
+  isGeminiThinkingRejection,
+  markGeminiThinkingRejected,
+  consumeLlmBudget,
+} from "../realityIndex/llmQueue.js";
 
-const GEMINI_MODEL    = "gemini-flash-latest";
+// PINNED (2026-07-15 cost incident): "gemini-flash-latest" silently became a
+// thinking model whose reasoning tokens bill as output. Same pin + rates as
+// llmQueue: gemini-2.5-flash, $0.30/1M input, $2.50/1M output.
+const GEMINI_MODEL    = process.env.GEMINI_GENERATION_MODEL || "gemini-2.5-flash";
 const GEMINI_ENDPOINT = (key) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+// Briefs/perspectives/explainers had NO output cap — with thinking billing
+// as output, per-call spend was unbounded.
+const GEMINI_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.ANALYSIS_MAX_OUTPUT_TOKENS || "1024", 10);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -44,9 +57,10 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // 429 RESOURCE_EXHAUSTED (rate limit). Both are transient — back off and
 // retry. Permanent errors (4xx other than 429) are returned as null on
 // the first failure.
-async function callGemini(prompt) {
+async function callGemini(prompt, task = "analysis") {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
+  if (!consumeLlmBudget(task)) return null; // global daily rail (gate a)
   const RETRY_DELAYS_MS = [4000, 9000, 18000]; // up to 3 retries
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
@@ -54,14 +68,27 @@ async function callGemini(prompt) {
         GEMINI_ENDPOINT(key),
         {
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
+          generationConfig: buildGeminiGenerationConfig({
+            temperature: 0.2,
+            responseMimeType: "application/json",
+            maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+          }),
         },
         { timeout: 25000 }
       );
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) return null;
+      if (!text) {
+        const fr = data?.candidates?.[0]?.finishReason;
+        const thought = data?.usageMetadata?.thoughtsTokenCount;
+        logger.warn(`📊 Gemini empty text (finishReason=${fr ?? "?"}, thoughtsTokenCount=${thought ?? "?"})`);
+        return null;
+      }
       return JSON.parse(text);
     } catch (err) {
+      if (isGeminiThinkingRejection(err)) {
+        markGeminiThinkingRejected(logger);
+        continue;
+      }
       const status = err.response?.status;
       const transient = status === 503 || status === 429 || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
       if (transient && attempt < RETRY_DELAYS_MS.length) {
@@ -355,8 +382,31 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
 
     if (briefable.has(cluster.id)) {
       briefData = fallbackBrief(cluster); // deterministic baseline (also the no-Gemini path)
-      if (hasGemini) {
-        const result = await callGemini(buildBriefingPrompt(cluster));
+
+      // Idempotency (2026-07-15 cost incident): a cluster whose ARTICLE SET
+      // is unchanged since its last LLM brief re-uses that brief instead of
+      // re-paying for it every 30-minute cycle. article_ids is already
+      // persisted with each row, so equality of the id set IS the content
+      // hash; a stale/expired row or any article change falls through to a
+      // fresh call.
+      const currentIds = cluster.articles.map(a => a.id).sort().join("|");
+      let reused = false;
+      const existing = getStoryCluster(cluster.id);
+      if (existing && existing.expires_at > now) {
+        try {
+          const prevIds  = JSON.parse(existing.article_ids || "[]").sort().join("|");
+          const prevBrief = JSON.parse(existing.brief || "[]");
+          if (prevIds === currentIds && Array.isArray(prevBrief) && prevBrief.length) {
+            briefData = { summary: existing.summary, brief: prevBrief };
+            try { perspectives = existing.perspectives ? JSON.parse(existing.perspectives) : null; } catch { perspectives = null; }
+            if (perspectives) perspCount++;
+            reused = true;
+          }
+        } catch { /* malformed stored JSON → treat as no reuse */ }
+      }
+
+      if (!reused && hasGemini) {
+        const result = await callGemini(buildBriefingPrompt(cluster), "analysis-brief");
         if (result?.brief) {
           briefData = {
             summary: result.summary || briefData.summary,
@@ -372,7 +422,7 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
         }
         await sleep(4000); // rate limit: 4s between calls
         if (perspCount < 3) { // perspectives only for the top-3 briefed
-          const perspResult = await callGemini(buildPerspectivesPrompt(cluster));
+          const perspResult = await callGemini(buildPerspectivesPrompt(cluster), "analysis-persp");
           if (Array.isArray(perspResult)) perspectives = perspResult;
           perspCount++;
           await sleep(4000);
@@ -420,7 +470,7 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
 
     if (hasGemini) {
       const topicName = category.charAt(0).toUpperCase() + category.slice(1);
-      const result = await callGemini(buildExplainedPrompt(topicName, catArticles));
+      const result = await callGemini(buildExplainedPrompt(topicName, catArticles), "analysis-explained");
       await sleep(4000);
 
       if (!result) continue;
@@ -493,7 +543,16 @@ export async function triggerReclusterDebounced() {
 
 // ─── On-demand Article Deep Dive ──────────────────────────────────────────
 
-export async function getOrCreateDeepDive(articleId) {
+/**
+ * allowGenerate=false (the default) serves cache or a deterministic
+ * non-cached shell but NEVER triggers a paid LLM call. The route passes
+ * allowGenerate only for authenticated users: an on-demand, publicly
+ * reachable generation endpoint is a standing cost-abuse vector — any
+ * crawler walking the ~10k sitemap article URLs would otherwise mint one
+ * paid call each (2026-07-15 cost incident, gate a — the endpoint wasn't
+ * this incident's burner, but the vector gets closed while we're here).
+ */
+export async function getOrCreateDeepDive(articleId, { allowGenerate = false } = {}) {
   // Return cached result if still fresh (6h TTL)
   const cached = getArticleAnalysisCache(articleId);
   if (cached) return cached;
@@ -504,13 +563,19 @@ export async function getOrCreateDeepDive(articleId) {
   const related = listRelatedStories(article, 4);
   const related_ids = related.map(r => r.id);
 
+  if (!allowGenerate) {
+    // Not cached and requester may not spend: deterministic shell, NOT
+    // cached (so the first authenticated reader still gets the real thing).
+    return { article_id: articleId, takeaways: [], tone: "neutral", tone_reason: "Sign in for AI analysis", related_ids, pending: true };
+  }
+
   if (!process.env.GEMINI_API_KEY) {
     const result = { article_id: articleId, takeaways: [], tone: "neutral", tone_reason: "AI analysis not configured", related_ids };
     upsertArticleAnalysisCache(result);
     return result;
   }
 
-  const parsed = await callGemini(buildDeepDivePrompt(article));
+  const parsed = await callGemini(buildDeepDivePrompt(article), "deep-dive");
   const result = {
     article_id:  articleId,
     takeaways:   parsed?.takeaways || [],

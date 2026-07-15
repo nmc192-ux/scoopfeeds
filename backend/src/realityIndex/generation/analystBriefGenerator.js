@@ -157,7 +157,7 @@ function validateBrief(parsed, allowedIds) {
 
 async function generateForEvent(ctx) {
   const prompt = buildPrompt(ctx);
-  const parsed = await callJson(prompt, { tier: "premium", maxOutputTokens: 1200 });
+  const parsed = await callJson(prompt, { tier: "premium", maxOutputTokens: 1200, task: "analyst-brief" });
   const v = validateBrief(parsed, ctx.allowedIds);
   if (!v.ok) {
     logger.info(`📝 brief skipped (${ctx.ev.event_id.slice(0, 8)}): ${v.reason}`);

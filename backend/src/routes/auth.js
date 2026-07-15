@@ -91,6 +91,17 @@ function requireAuth(req, res, next) {
   next();
 }
 
+/**
+ * Non-throwing session lookup for routes that change behavior by auth
+ * state without requiring it (e.g. the deep-dive endpoint serves
+ * cache-only to anonymous requests — 2026-07-15 cost incident, gate a).
+ */
+export function getUserFromRequest(req) {
+  const sid = getSessionFromRequest(req);
+  if (!sid) return null;
+  return getUserBySession(sid) || null;
+}
+
 // ─── POST /api/auth/request ─────────────────────────────────────────────────
 router.post("/request", authMagicLinkLimiter, validate(authRequestSchema), async (req, res) => {
   const { email } = req.validated.body;

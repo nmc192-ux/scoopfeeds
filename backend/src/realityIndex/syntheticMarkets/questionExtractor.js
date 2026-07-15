@@ -115,7 +115,7 @@ export async function runQuestionExtractor({ limit = PER_CYCLE } = {}) {
   let drafted = 0, skipped = 0;
   for (const ev of candidates) {
     try {
-      const parsed = await callJson(buildPrompt(ev), { tier: "premium", maxOutputTokens: 400 });
+      const parsed = await callJson(buildPrompt(ev), { tier: "premium", maxOutputTokens: 400, task: "synth-question" });
       const v = validate(parsed);
       if (!v) { skipped++; continue; }
       createMarket({
