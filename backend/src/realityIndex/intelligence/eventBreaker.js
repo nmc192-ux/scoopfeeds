@@ -15,6 +15,9 @@ import crypto from "crypto";
 import { getDb } from "../../models/database.js";
 import { clusterWindow } from "../clustering/semanticClusterer.js";
 import { logger } from "../../services/logger.js";
+import {
+  UNIFIED_AFFINITY, buildAffinityCtx, affinity, BANDS, logDecision,
+} from "./storyAffinity.js";
 
 const ENABLED      = String(process.env.EVENT_BREAKER_ENABLED ?? "false").toLowerCase() === "true";
 const MIN_ARTICLES = parseInt(process.env.EVENT_BREAKER_MIN_ARTICLES || "6", 10);
@@ -88,23 +91,44 @@ export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, 
   const touchEv = db.prepare("UPDATE events SET last_activity_at = ?, updated_at = ? WHERE id = ?");
   const insEvent = db.prepare(`INSERT INTO events (id, slug, cluster_id, title, summary, category, status, severity, hero_image_url, started_at, last_activity_at, meta, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
+  // Wave 2: when the unified judgment is on, the spin decision comes from the
+  // SAME banded measure the promoter uses — a sub-cluster spins off only when
+  // FOREIGN (AMBIGUOUS holds; hysteresis is the armistice). The apply is
+  // SURGICAL: only spun members' links are removed — kept links keep their
+  // added_at (the old delete-all-and-relink stamped every link with "now"
+  // each split, destroying the provenance this diagnosis depended on).
+  const affCtx = UNIFIED_AFFINITY ? buildAffinityCtx(db) : null;
+  const delLink = db.prepare("DELETE FROM event_articles WHERE event_id = ? AND article_id = ?");
+
   let split = 0, created = 0, foreignSpun = 0; const splitIds = [];
   for (const b of candidates) {
     const members = db.prepare("SELECT article_id id FROM event_articles WHERE event_id = ?").all(b.id).map(r => r.id);
     const subs = clusterMembers(db, members);
     if (subs.length <= 1) continue; // one story
-    const core = entitySet(subs[0].members.map(m => m.id));
-    const spin = []; // ENTITY-DISJOINT sub-clusters (foreign stories)
+    const anchorIds = subs[0].members.map(m => m.id);
+    const core = UNIFIED_AFFINITY ? affCtx.entitySet(anchorIds) : entitySet(anchorIds);
+    const spin = []; // FOREIGN sub-clusters (genuinely absorbed foreign stories)
     for (let i = 1; i < subs.length; i++) {
-      const ov = overlap(entitySet(subs[i].members.map(m => m.id)), core);
-      if (ov < disjoint) spin.push(subs[i]); // foreign → spin off; else same-story sub-thread → keep
+      const subIds = subs[i].members.map(m => m.id);
+      if (UNIFIED_AFFINITY) {
+        const { ent, band } = affinity(affCtx, affCtx.entitySet(subIds), core);
+        if (band === BANDS.FOREIGN) { spin.push(subs[i]); }
+        else logDecision("breaker-keep", { event: b.id.slice(0, 8), sub: i, subSize: subIds.length, band, ent: +ent.toFixed(3) });
+      } else {
+        const ov = overlap(entitySet(subIds), core);
+        if (ov < disjoint) spin.push(subs[i]); // legacy: foreign → spin off
+      }
     }
     if (!spin.length) continue; // macro-story with sub-threads only → leave whole (the over-fragmentation fix)
     const spinMembers = new Set(spin.flatMap(s => s.members.map(m => m.id)));
     splitIds.push(b.id); split++;
     const apply = db.transaction(() => {
-      delLinks.run(b.id);
-      for (const m of members) if (!spinMembers.has(m)) linkArticle.run(b.id, m, now); // KEEP core + same-story threads + singletons
+      if (UNIFIED_AFFINITY) {
+        for (const m of spinMembers) delLink.run(b.id, m); // surgical: kept links untouched
+      } else {
+        delLinks.run(b.id);
+        for (const m of members) if (!spinMembers.has(m)) linkArticle.run(b.id, m, now); // legacy rewrite
+      }
       touchEv.run(now, now, b.id);
       for (const sub of spin) {
         const id = crypto.randomUUID();
@@ -112,6 +136,7 @@ export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, 
         insEvent.run(id, slug, null, sub.members[0]?.title ?? id.slice(0, 8), null, domCat(sub.members), "active", 0, null, now, now, "{}", now, now);
         for (const m of sub.members) linkArticle.run(id, m.id, now);
         created++; foreignSpun++;
+        if (UNIFIED_AFFINITY) logDecision("breaker-split", { event: b.id.slice(0, 8), spunSlug: slug.slice(0, 44), spunSize: sub.members.length, band: BANDS.FOREIGN });
       }
     });
     apply();
@@ -135,6 +160,7 @@ export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, 
 export function detachOrphans({ eventIds = [], now = Date.now(), disjoint = DISJOINT } = {}) {
   const db = getDb();
   const { entitySet, overlap } = buildEntityCtx(db);
+  const affCtx = UNIFIED_AFFINITY ? buildAffinityCtx(db) : null;
   const memIds = (id) => db.prepare("SELECT article_id id FROM event_articles WHERE event_id = ?").all(id).map(r => r.id);
   const delLink = db.prepare("DELETE FROM event_articles WHERE event_id = ? AND article_id = ?");
   const touchEv = db.prepare("UPDATE events SET last_activity_at = ?, updated_at = ? WHERE id = ?");
@@ -153,7 +179,11 @@ export function detachOrphans({ eventIds = [], now = Date.now(), disjoint = DISJ
     const ovec = loadVecs(db, orphans);
     const drop = [];
     for (const a of orphans) {
-      if (overlap(entitySet([a]), core) >= disjoint) continue;     // (i) entity-close → keep
+      if (UNIFIED_AFFINITY) {
+        // Wave 2: detach only what the unified measure calls FOREIGN.
+        const { band } = affinity(affCtx, affCtx.entitySet([a]), affCtx.entitySet(coreIds));
+        if (band !== BANDS.FOREIGN) continue;                      // (i) not foreign → keep
+      } else if (overlap(entitySet([a]), core) >= disjoint) continue; // (i) legacy entity-close → keep
       const v = ovec.get(a);
       if (v && cosVec(v, centroid) >= MATCH_TAU) continue;         // (ii) cosine-close → keep
       drop.push(a);
