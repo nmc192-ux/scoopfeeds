@@ -295,9 +295,20 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
   // event when the matching cluster is at least as large as the cluster that currently sources the
   // title (meta.title_cluster_size). A small/diffuse tail can't hijack a durable event's title
   // (e.g. a 6-article markets grab-bag renaming a 60-article Musk-trial event to "Susie Wolff F1").
+  // Wave 1 (Sprint 2e): the SUMMARY now gets the exact same protection — it was previously
+  // overwritten unconditionally on every tail match, which is how a Kannada obituary event
+  // ended up wearing a Zelensky summary (one mis-matched tail cluster per cycle = summary
+  // roulette). Summary changes ride updateNewTitle only.
   const updateKeepTitle = db.prepare(`
-    UPDATE events SET summary = COALESCE(?, summary), severity = ?,
+    UPDATE events SET severity = ?,
       hero_image_url = COALESCE(?, hero_image_url), last_activity_at = ?, updated_at = ?,
+      status = CASE WHEN status = 'dormant' THEN 'active' ELSE status END
+    WHERE id = ?
+  `);
+  // Wave 1 (2a no-shells): minimal refresh for an absorbed 1-to-1-loser cluster — activity
+  // only; a loser must not touch severity/hero either (it didn't win the event).
+  const touchActivity = db.prepare(`
+    UPDATE events SET last_activity_at = ?, updated_at = ?,
       status = CASE WHEN status = 'dormant' THEN 'active' ELSE status END
     WHERE id = ?
   `);
@@ -373,12 +384,18 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     const evs = [...new Set([...eventState.values()].filter((ev) => qualifies(cl, ev).ok).map((ev) => find(ev.id)))];
     for (let i = 0; i < evs.length; i++) for (let j = i + 1; j < evs.length; j++) tryMerge(evs[i], evs[j]);
   }
-  for (const { survivor, absorbed } of merges) {
-    const sEv = eventState.get(survivor), aEv = eventState.get(absorbed);
+  for (const { survivor, absorbed: absorbedId } of merges) {
+    const sEv = eventState.get(survivor), aEv = eventState.get(absorbedId);
     if (!sEv || !aEv) continue;
     for (const aid of aEv.ids) { linkArticle.run(survivor, aid, now); sEv.ids.add(aid); }
-    markMerged.run(JSON.stringify({ merged_into: survivor, merged_into_slug: sEv.slug }), now, absorbed);
-    eventState.delete(absorbed);
+    markMerged.run(JSON.stringify({ merged_into: survivor, merged_into_slug: sEv.slug }), now, absorbedId);
+    // Wave 1: 🧭 merge log — the pair + the scores that justified convergence.
+    logger.info(`🧭 promoter-merge ${JSON.stringify({
+      survivor: sEv.slug.slice(0, 48), absorbed: aEv.slug.slice(0, 48),
+      cos: +cosine(sEv.centroid, aEv.centroid).toFixed(3),
+      ent: ENTITY_MIN > 0 ? +rarityOverlap(sEv.core, aEv.core, idfMap, fallbackIdf).toFixed(3) : null,
+    })}`);
+    eventState.delete(absorbedId);
   }
   for (const { survivor } of merges) {
     const ev = eventState.get(survivor);
@@ -386,8 +403,32 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
   }
 
   // ── 5. Greedy 1-to-1 assignment (argmax) ────────────────────────────────────
+  // Wave 1 additions (Sprint 2a): bestQual remembers each cluster's top QUALIFYING
+  // event even when it loses the 1-to-1 race — the apply step absorbs the loser's
+  // articles into that event instead of spawning a shell (the COW replay found 172
+  // merged husks in one family, one minted per cycle, from exactly this path).
+  // bestReject remembers the top REJECTED candidate per cluster for the 🧭 decision
+  // log, so the next diagnosis greps instead of excavating.
   const pairs = [];
-  clusters.forEach((cl, ci) => { for (const ev of eventState.values()) { const q = qualifies(cl, ev); if (q.ok) pairs.push({ ci, eventId: ev.id, score: q.score }); } });
+  const bestQual = new Map();   // ci → { eventId, score }
+  const bestReject = new Map(); // ci → { slug, cos, ent, shared }
+  clusters.forEach((cl, ci) => {
+    for (const ev of eventState.values()) {
+      const q = qualifies(cl, ev);
+      if (q.ok) {
+        pairs.push({ ci, eventId: ev.id, score: q.score });
+        const b = bestQual.get(ci);
+        if (!b || q.score > b.score) bestQual.set(ci, { eventId: ev.id, score: q.score });
+      } else {
+        const cos = cosine(cl.centroid, ev.centroid);
+        const ent = ENTITY_MIN > 0 ? rarityOverlap(cl.entKeys, ev.core, idfMap, fallbackIdf) : 1;
+        let shared = false;
+        for (const a of cl.idSet) if (ev.ids.has(a)) { shared = true; break; }
+        const br = bestReject.get(ci);
+        if (!br || cos > br.cos) bestReject.set(ci, { slug: ev.slug, cos, ent, shared });
+      }
+    }
+  });
   pairs.sort((a, b) => b.score - a.score);
   const clusterDone = new Set(), eventTaken = new Set();
   const assignment = new Map();
@@ -396,8 +437,8 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     assignment.set(p.ci, p.eventId); clusterDone.add(p.ci); eventTaken.add(p.eventId);
   }
 
-  // ── 6. Apply: matched (reuse row) or new event ──────────────────────────────
-  let promoted = 0, matched = 0, reactivated = 0, skippedStale = 0, chained = 0;
+  // ── 6. Apply: matched (reuse row), absorbed (1-to-1 loser), or new event ────
+  let promoted = 0, matched = 0, absorbed = 0, reactivated = 0, skippedStale = 0, chained = 0;
   clusters.forEach((cl, ci) => {
     try {
       const c = cl.c;
@@ -406,6 +447,24 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
       const hero     = firstImageFromCluster(db, cl.aids.slice(0, 10));
       const clusterSize = cl.aids.length;
       let eventId = assignment.get(ci);
+      if (!eventId && bestQual.has(ci)) {
+        // Wave 1 (2a no-shells): this cluster QUALIFIED against an event but lost the
+        // 1-to-1 race (another cluster of the same story won it). Absorb: link this
+        // cluster's articles/markets into that event (union-find root in case it was
+        // merged this cycle) and bump activity — do NOT create a shell event, do NOT
+        // touch title/summary/severity (the winner owns those this cycle).
+        const target = find(bestQual.get(ci).eventId);
+        const tEv = eventState.get(target);
+        if (tEv) {
+          for (const aid of cl.aids) { linkArticle.run(target, aid, now); tEv.ids.add(aid); }
+          for (const cm of db.prepare("SELECT * FROM cluster_market_links WHERE cluster_id = ? ORDER BY rank").all(c.id)) {
+            linkMarket.run(target, cm.market_id, cm.weight, cm.rank, now);
+          }
+          touchActivity.run(now, now, target);
+          absorbed++;
+          return;
+        }
+      }
       if (eventId) {
         const ev = eventState.get(eventId);
         if (ev && ev.status === "dormant") reactivated++;
@@ -415,8 +474,9 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
             JSON.stringify({ title_cluster_size: clusterSize }), eventId); // preserves id, slug, started_at
           if (ev) ev.titleClusterSize = clusterSize;
         } else {
-          // small/diffuse tail → keep the durable title, just refresh activity/severity/hero
-          updateKeepTitle.run(summary, severity, hero, now, now, eventId);
+          // small/diffuse tail → keep the durable title, refresh activity/severity/hero
+          // (summary intentionally NOT updated here — Wave 1 summary protection)
+          updateKeepTitle.run(severity, hero, now, now, eventId);
         }
         matched++;
         if (ENTITY_MIN > 0) upsertSignature(db, eventId, eventState.get(eventId)?.core, idfMap, fallbackIdf, now);
@@ -450,7 +510,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
           const ph = cl.aids.map(() => "?").join(",");
           const shares = db.prepare(`SELECT 1 FROM event_articles WHERE event_id = ? AND article_id IN (${ph}) LIMIT 1`).get(squatter.id, ...cl.aids);
           if (shares) {
-            updateKeepTitle.run(summary, severity, hero, now, now, squatter.id);
+            updateKeepTitle.run(severity, hero, now, now, squatter.id);
             eventId = squatter.id;
             matched++;
             if (ENTITY_MIN > 0) upsertSignature(db, eventId, cl.entKeys, idfMap, fallbackIdf, now); // cluster keys ≈ the adopted event's live identity
@@ -463,6 +523,16 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
           }
         }
         if (squatter) db.prepare("UPDATE events SET cluster_id = NULL, updated_at = ? WHERE id = ?").run(now, squatter.id);
+        // Wave 1 (2a): 🧭 decision log — one structured line per CREATED event stating
+        // why no existing event took this cluster (grep 🧭 instead of doing archaeology).
+        // With the no-shells absorb above, "lost-1to1" can no longer reach this point;
+        // remaining causes are no-candidate (nothing evaluated close) or gate-rejected.
+        const br = bestReject.get(ci);
+        logger.info(`🧭 promoter-create ${JSON.stringify({
+          slug, cluster: String(c.id).slice(0, 16), size: clusterSize,
+          cause: br ? "gate-rejected" : "no-candidate",
+          best_rejected: br ? { slug: br.slug.slice(0, 48), cos: +br.cos.toFixed(3), ent: +br.ent.toFixed(3), shared_article: br.shared } : null,
+        })}`);
         insertEvent.run(eventId, slug, c.id, c.title, summary, c.category, "active", severity, hero, c.created_at, now,
           JSON.stringify({ title_cluster_size: clusterSize }), now, now);
         eventState.set(eventId, { id: eventId, slug, started_at: c.created_at, status: "active", ids: new Set(), centroid: cl.centroid, core: ENTITY_MIN > 0 ? loadEventCore(db, cl.aids, idfMap, catSpanMap) : null, titleClusterSize: clusterSize });
@@ -504,7 +574,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     ).run(now, now - CLOSE_AFTER_MS).changes;
   }
 
-  const stats = { eligible: eligible.length, promoted, matched, merged: merges.length, reactivated, dormanted, closed, skippedStale, chained };
+  const stats = { eligible: eligible.length, promoted, matched, absorbed, merged: merges.length, reactivated, dormanted, closed, skippedStale, chained };
   logger.info(`🗂️  eventPromoter done — ${JSON.stringify(stats)}`);
   return stats;
 }

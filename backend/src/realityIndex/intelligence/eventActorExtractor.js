@@ -186,9 +186,15 @@ export async function runEventActorExtractor() {
           AND att.last_attempt_at <= ? - (CASE WHEN att.attempts <= 1 THEN 21600000 ELSE 86400000 END)
         )
       )
-    ORDER BY e.last_activity_at DESC
+    ORDER BY EXISTS (SELECT 1 FROM event_articles eax WHERE eax.event_id = e.id) DESC,
+             e.last_activity_at DESC
     LIMIT ?
   `).all(cutoff, MAX_ATTEMPTS, now, PER_CYCLE_LIMIT);
+  // Ordering note (gate-a live verify, 2026-07-16): events WITH articles fill the
+  // slots first. Article-less junk (raw NOAA wire events, promoter-churn shells)
+  // mints new ids faster than any per-cycle budget — llm_daily_calls showed ZERO
+  // actor calls across two days because every slot went to free-ledgering junk.
+  // Junk now only occupies leftover slots; it costs nothing until it gains articles.
 
   let total = 0;
   let llmCalls = 0;

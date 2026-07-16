@@ -382,6 +382,7 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
   //    downstream — eventPromoter keys off article_count/article_ids/title, not brief.
   const briefable = new Set(clusters.filter(c => c.article_count >= 5).slice(0, 20).map(c => c.id));
   let perspCount = 0;
+  let briefsReused = 0, briefsCalled = 0; // ♻️ idempotency visibility (2026-07-16 rider)
   for (const cluster of clusters) {
     let briefData = { summary: null, brief: [] };
     let perspectives = null;
@@ -407,11 +408,13 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
             try { perspectives = existing.perspectives ? JSON.parse(existing.perspectives) : null; } catch { perspectives = null; }
             if (perspectives) perspCount++;
             reused = true;
+            briefsReused++;
           }
         } catch { /* malformed stored JSON → treat as no reuse */ }
       }
 
       if (!reused && hasGemini) {
+        briefsCalled++;
         const result = await callGemini(buildBriefingPrompt(cluster), "analysis-brief");
         if (result?.brief) {
           briefData = {
@@ -502,7 +505,7 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
     }
   }
 
-  logger.info(`📊 Analysis refresh complete — clusters: ${clusters.length}, explained: ${topCategories.length}`);
+  logger.info(`📊 Analysis refresh complete — clusters: ${clusters.length}, explained: ${topCategories.length}, ♻️ briefs reused (unchanged): ${briefsReused}, briefs called: ${briefsCalled}`);
   return { clusters: clusters.length, explained: topCategories.length };
 }
 
