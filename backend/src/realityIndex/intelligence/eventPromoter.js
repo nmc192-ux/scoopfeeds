@@ -27,6 +27,9 @@
 
 import crypto from "crypto";
 import { getDb } from "../../models/database.js";
+import {
+  UNIFIED_AFFINITY, buildAffinityCtx, affinity, isIncoherent, BANDS, logDecision,
+} from "./storyAffinity.js";
 import { logger } from "../../services/logger.js";
 
 const MIN_ARTICLES       = parseInt(process.env.EVENT_MIN_ARTICLES || "5", 10);
@@ -266,6 +269,11 @@ function rarityOverlap(A, B, idfMap, fallbackIdf) {
 export async function runEventPromoter({ now = Date.now() } = {}) {
   const db = getDb();
 
+  // Wave 2: the unified affinity context supersedes the local entity plumbing
+  // when EVENT_UNIFIED_AFFINITY is on. One measure, one hub filter, shared
+  // with tryMerge and the breaker (storyAffinity.js).
+  const affCtx = UNIFIED_AFFINITY ? buildAffinityCtx(db) : null;
+
   // Entity gate (step 3): preload the windowed-IDF map once. Empty table → fallbackIdf = 1 so the
   // overlap degrades to UNWEIGHTED rather than blocking every match. Only when the gate is ON.
   let idfMap = new Map(), catSpanMap = new Map(), fallbackIdf = 1;
@@ -336,7 +344,11 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     const vmap = loadArticleVectors(db, aids);
     let titleClusterSize = 0; try { titleClusterSize = JSON.parse(e.meta || "{}").title_cluster_size || 0; } catch { /* default 0 → legacy events rename on first match */ }
     const core = ENTITY_MIN > 0 ? loadEventCore(db, aids, idfMap, catSpanMap) : null;
-    eventState.set(e.id, { id: e.id, slug: e.slug, started_at: e.started_at, status: e.status, ids: new Set(aids), centroid: meanCentroid([...vmap.values()]), core, titleClusterSize });
+    // Wave 2: symmetric TOPK entity set + explicit coherence contract (R1:
+    // newborn events — few members or young — are exempt from incoherence).
+    const entSet = affCtx ? affCtx.entitySet(aids) : null;
+    const incoherent = affCtx ? isIncoherent(affCtx, { memberIds: aids, startedAt: e.started_at, now }) : false;
+    eventState.set(e.id, { id: e.id, slug: e.slug, started_at: e.started_at, status: e.status, ids: new Set(aids), centroid: meanCentroid([...vmap.values()]), core, entSet, incoherent, titleClusterSize });
     // R2a/R2b: refresh the durable signature for every candidate while its members are
     // alive — this also back-fills signatures for events created before the signature
     // system existed (they become chainable within one cycle of being a candidate).
@@ -347,19 +359,38 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
   const clusters = eligible.map((c) => {
     let aids = []; try { aids = JSON.parse(c.article_ids || "[]"); } catch { /* skip */ }
     const vmap = loadArticleVectors(db, aids);
-    return { c, aids, idSet: new Set(aids), centroid: meanCentroid([...vmap.values()]), entKeys: ENTITY_MIN > 0 ? loadEntityKeys(db, aids, idfMap, catSpanMap) : null, market_count: c.market_count };
+    return { c, aids, idSet: new Set(aids), centroid: meanCentroid([...vmap.values()]), entKeys: ENTITY_MIN > 0 ? loadEntityKeys(db, aids, idfMap, catSpanMap) : null, entSet: affCtx ? affCtx.entitySet(aids) : null, market_count: c.market_count };
   });
 
   // qualifies — entity gate (step 3): every accept path ALSO requires entity overlap ≥ ENTITY_MIN.
   // ENTITY_MIN <= 0 → entityOk always true → today's behavior EXACTLY (shared-article force-match;
   // else cosine ≥ floor). Gating the shared-article path too is the point: a shared article between
   // title-disjoint distinct stories no longer force-merges when their rare entities don't overlap.
-  const qualifies = (cl, ev) => {
+  const qualifiesLegacy = (cl, ev) => {
     const entityOk = ENTITY_MIN <= 0 || rarityOverlap(cl.entKeys, ev.core, idfMap, fallbackIdf) >= ENTITY_MIN; // cluster's full entities vs event's CORE
     const cos = cosine(cl.centroid, ev.centroid);
     for (const a of cl.idSet) if (ev.ids.has(a)) return entityOk ? { ok: true, score: Math.max(cos, 1.0) } : { ok: false };
     return (cos >= MATCH_COSINE_FLOOR && entityOk) ? { ok: true, score: cos } : { ok: false };
   };
+
+  // Wave 2 unified judgment. Structural evidence (shared article / cosine)
+  // still opens the door, but the BAND from the shared measure decides:
+  //   shared-article attach  → band must not be FOREIGN (continuation path —
+  //                            carries newborns whose sets are still thin);
+  //   cosine-only attach     → band must be fully AFFINE;
+  //   incoherent target      → never attracts (anti-blob, by contract).
+  const qualifiesUnified = (cl, ev) => {
+    if (ev.incoherent) return { ok: false, band: "INCOHERENT", ent: null };
+    const { ent, band } = affinity(affCtx, cl.entSet, ev.entSet);
+    const cos = cosine(cl.centroid, ev.centroid);
+    let shared = false;
+    for (const a of cl.idSet) if (ev.ids.has(a)) { shared = true; break; }
+    if (shared && band !== BANDS.FOREIGN) return { ok: true, score: Math.max(cos, 1.0), band, ent };
+    if (cos >= MATCH_COSINE_FLOOR && band === BANDS.AFFINE) return { ok: true, score: cos, band, ent };
+    return { ok: false, band, ent, cos, shared };
+  };
+
+  const qualifies = UNIFIED_AFFINITY ? qualifiesUnified : qualifiesLegacy;
 
   // ── 4. MERGE: a cluster qualifying against >=2 events → converge into earliest-started ──
   const parent = new Map();
@@ -374,7 +405,16 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     const ea = eventState.get(a), eb = eventState.get(b);
     if (!ea || !eb) return;
     if (cosine(ea.centroid, eb.centroid) < MERGE_COSINE_FLOOR) return; // distinct stories — do NOT merge
-    if (ENTITY_MIN > 0 && rarityOverlap(ea.core, eb.core, idfMap, fallbackIdf) < ENTITY_MIN) return; // entity gate (step 3) — core↔core
+    if (UNIFIED_AFFINITY) {
+      // Wave 2: merge requires full AFFINE on the SAME measure qualifies and
+      // the breaker use — an AMBIGUOUS pair holds (hysteresis), a FOREIGN
+      // pair can never merge. R2: held pairs are logged.
+      const { ent, band } = affinity(affCtx, ea.entSet, eb.entSet);
+      if (band !== BANDS.AFFINE) {
+        logDecision("merge-hold", { a: ea.slug.slice(0, 44), b: eb.slug.slice(0, 44), band, ent: +ent.toFixed(3) });
+        return;
+      }
+    } else if (ENTITY_MIN > 0 && rarityOverlap(ea.core, eb.core, idfMap, fallbackIdf) < ENTITY_MIN) return; // legacy entity gate — core↔core
     const survivor = ea.started_at <= eb.started_at ? a : b;
     const absorbed = survivor === a ? b : a;
     parent.set(absorbed, survivor);
@@ -390,10 +430,15 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     for (const aid of aEv.ids) { linkArticle.run(survivor, aid, now); sEv.ids.add(aid); }
     markMerged.run(JSON.stringify({ merged_into: survivor, merged_into_slug: sEv.slug }), now, absorbedId);
     // Wave 1: 🧭 merge log — the pair + the scores that justified convergence.
+    // The ent reported MUST be the measure the gate used (unified when on) —
+    // the R3 validation caught this line reporting legacy core↔core numbers
+    // for decisions the unified gate had made on TOPK containment.
     logger.info(`🧭 promoter-merge ${JSON.stringify({
       survivor: sEv.slug.slice(0, 48), absorbed: aEv.slug.slice(0, 48),
       cos: +cosine(sEv.centroid, aEv.centroid).toFixed(3),
-      ent: ENTITY_MIN > 0 ? +rarityOverlap(sEv.core, aEv.core, idfMap, fallbackIdf).toFixed(3) : null,
+      ent: UNIFIED_AFFINITY
+        ? +affinity(affCtx, sEv.entSet, aEv.entSet).ent.toFixed(3)
+        : (ENTITY_MIN > 0 ? +rarityOverlap(sEv.core, aEv.core, idfMap, fallbackIdf).toFixed(3) : null),
     })}`);
     eventState.delete(absorbedId);
   }
@@ -411,7 +456,8 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
   // log, so the next diagnosis greps instead of excavating.
   const pairs = [];
   const bestQual = new Map();   // ci → { eventId, score }
-  const bestReject = new Map(); // ci → { slug, cos, ent, shared }
+  const bestReject = new Map(); // ci → { slug, cos, ent, shared, band? }
+  const bestHold = new Map();   // ci → { slug, ent, band } — best AMBIGUOUS rejection (Wave 2 hysteresis)
   clusters.forEach((cl, ci) => {
     for (const ev of eventState.values()) {
       const q = qualifies(cl, ev);
@@ -419,6 +465,14 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
         pairs.push({ ci, eventId: ev.id, score: q.score });
         const b = bestQual.get(ci);
         if (!b || q.score > b.score) bestQual.set(ci, { eventId: ev.id, score: q.score });
+      } else if (UNIFIED_AFFINITY) {
+        const cos = q.cos ?? cosine(cl.centroid, ev.centroid);
+        const br = bestReject.get(ci);
+        if (!br || cos > br.cos) bestReject.set(ci, { slug: ev.slug, cos, ent: q.ent ?? 0, shared: q.shared ?? false, band: q.band });
+        if (q.band === BANDS.AMBIGUOUS) {
+          const bh = bestHold.get(ci);
+          if (!bh || q.ent > bh.ent) bestHold.set(ci, { slug: ev.slug, ent: q.ent, band: q.band });
+        }
       } else {
         const cos = cosine(cl.centroid, ev.centroid);
         const ent = ENTITY_MIN > 0 ? rarityOverlap(cl.entKeys, ev.core, idfMap, fallbackIdf) : 1;
@@ -438,7 +492,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
   }
 
   // ── 6. Apply: matched (reuse row), absorbed (1-to-1 loser), or new event ────
-  let promoted = 0, matched = 0, absorbed = 0, reactivated = 0, skippedStale = 0, chained = 0;
+  let promoted = 0, matched = 0, absorbed = 0, held = 0, reactivated = 0, skippedStale = 0, chained = 0;
   clusters.forEach((cl, ci) => {
     try {
       const c = cl.c;
@@ -489,6 +543,17 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
         // them would flood the graph with resurrected stale events. Matching is untouched:
         // a stale cluster can still refresh an existing event, it just can't spawn one.
         if (now - (c.updated_at || 0) > PROMOTE_MAX_CLUSTER_AGE_MS) { skippedStale++; return; }
+        // Wave 2 hysteresis: a cluster whose best candidate is AMBIGUOUS holds —
+        // no attach (not AFFINE), but no creation either (not FOREIGN). Its
+        // articles wait a cycle; the story either sharpens into AFFINE or drifts
+        // to FOREIGN. "When in doubt, wait" replaces "when in doubt, mint a
+        // slug". R2: every hold is logged.
+        if (UNIFIED_AFFINITY && bestHold.has(ci)) {
+          const bh = bestHold.get(ci);
+          logDecision("promoter-hold", { cluster: String(c.id).slice(0, 16), title: (c.title || "").slice(0, 44), size: clusterSize, vs: bh.slug.slice(0, 44), ent: +bh.ent.toFixed(3), band: bh.band });
+          held++;
+          return;
+        }
         eventId = crypto.randomUUID();
         const slug = uniqueSlug(db, slugify(c.title) || eventId.slice(0, 8));
         // Reclaim a squatted cluster_id: if an event still holds this title-hash claim yet was
@@ -531,7 +596,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
         logger.info(`🧭 promoter-create ${JSON.stringify({
           slug, cluster: String(c.id).slice(0, 16), size: clusterSize,
           cause: br ? "gate-rejected" : "no-candidate",
-          best_rejected: br ? { slug: br.slug.slice(0, 48), cos: +br.cos.toFixed(3), ent: +br.ent.toFixed(3), shared_article: br.shared } : null,
+          best_rejected: br ? { slug: br.slug.slice(0, 48), cos: +br.cos.toFixed(3), ent: +br.ent.toFixed(3), shared_article: br.shared, band: br.band ?? null } : null,
         })}`);
         insertEvent.run(eventId, slug, c.id, c.title, summary, c.category, "active", severity, hero, c.created_at, now,
           JSON.stringify({ title_cluster_size: clusterSize }), now, now);
@@ -574,7 +639,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     ).run(now, now - CLOSE_AFTER_MS).changes;
   }
 
-  const stats = { eligible: eligible.length, promoted, matched, absorbed, merged: merges.length, reactivated, dormanted, closed, skippedStale, chained };
+  const stats = { eligible: eligible.length, promoted, matched, absorbed, held, merged: merges.length, reactivated, dormanted, closed, skippedStale, chained };
   logger.info(`🗂️  eventPromoter done — ${JSON.stringify(stats)}`);
   return stats;
 }
