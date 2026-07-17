@@ -13,7 +13,7 @@
  */
 
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link } from "react-router-dom";
 import { ChevronLeft, Activity, Users, Newspaper, Clock, Layers, BarChart3, MessageCircle, ExternalLink, Radar } from "lucide-react";
 import {
   useEvent,
@@ -29,6 +29,7 @@ import { useEventTrackers } from "../hooks/useTrackers";
 import { trackerStrength } from "../lib/trackerRank";
 import TrackerCard from "../components/trackers/TrackerCard";
 import EventHero     from "../components/events/EventHero";
+import EventDossier  from "../components/events/EventDossier";
 import EventTimeline from "../components/events/EventTimeline";
 import EventActorPanel from "../components/events/EventActorPanel";
 import ProbabilityBar  from "../components/predictions/ProbabilityBar";
@@ -113,34 +114,8 @@ function ArticleRow({ article }) {
 
 export default function EventPage() {
   const { slug } = useParams();
-  const [timelineKind, setTimelineKind] = useState(undefined);
-
-  const { data: event,   isLoading: loadingEvent, error: eventError, refetch: refetchEvent } = useEvent(slug);
-  const { data: tlData,  isLoading: loadingTimeline }  = useEventTimeline(slug, { kind: timelineKind, limit: 60 });
-  const { data: mkData,  isLoading: loadingMarkets }   = useEventMarkets(slug);
-  const { data: actData, isLoading: loadingActors }    = useEventActors(slug);
-  const { data: artData, isLoading: loadingArticles }  = useEventArticles(slug, { limit: 30 });
-  const { data: pvData,  isLoading: loadingPerspectives } = useEventPerspectives(slug);
-  const { data: riData,  isLoading: loadingRI }        = useEventRealityIndex(slug);
-  const { data: sentData, isLoading: loadingSentiment } = useEventSentiment(slug);
-  const { data: trkData, isLoading: loadingTrackers }  = useEventTrackers(slug);
-
-  const timeline     = tlData?.timeline     ?? [];
-  const markets      = mkData?.markets      ?? [];
-  const actors       = actData?.actors      ?? [];
-  const articles     = artData?.articles    ?? [];
-  const perspectives = pvData?.perspectives ?? [];
-  const riSnapshot   = riData?.latest                 ?? null;
-
-  // Tracker Auto-Detection Engine scorecards for this event (Sprint 1.5.3).
-  // An event can carry MULTIPLE trackers via multi-template fan-out (e.g. a
-  // politics event → conflict + incident + election). Stack ALL of them,
-  // ordered by confidence strength (highest first; recency tiebreak — the
-  // same ordering pickHeadlineTracker uses for the compact case).
-  const trackers = [...(trkData?.trackers ?? [])].sort((a, b) => {
-    const d = trackerStrength(b) - trackerStrength(a);
-    return d !== 0 ? d : (b.last_updated_at ?? 0) - (a.last_updated_at ?? 0);
-  });
+  const [searchParams] = useSearchParams();
+  const { data: event, isLoading: loadingEvent, error: eventError, refetch: refetchEvent } = useEvent(slug);
 
   if (loadingEvent) {
     return (
@@ -153,9 +128,7 @@ export default function EventPage() {
   // Positive-evidence rule (audit P0-1): "Event not found" requires a
   // definitive 404. EVERY other data-less state — 5xx, network failure,
   // swallowed 429, or React Query pausing a retry because the device
-  // reports offline (status "pending" + fetchStatus "paused": data and
-  // error are BOTH unset, so it is indistinguishable from "missing" unless
-  // handled explicitly) — is transient and must say so.
+  // reports offline — is transient and must say so.
   if (!event) {
     if (eventError?.response?.status === 404) {
       return (
@@ -182,6 +155,44 @@ export default function EventPage() {
       </div>
     );
   }
+
+  // A2 dossier restructure — dark-shipped behind ?a2=1. Default stays legacy
+  // until the flip. The A2 layout owns its own data hooks (EventDossier).
+  if (searchParams.get("a2") === "1") {
+    return <EventDossier event={event} />;
+  }
+
+  return <LegacyEventBody event={event} slug={slug} />;
+}
+
+function LegacyEventBody({ event, slug }) {
+  const [timelineKind, setTimelineKind] = useState(undefined);
+
+  const { data: tlData,  isLoading: loadingTimeline }  = useEventTimeline(slug, { kind: timelineKind, limit: 60 });
+  const { data: mkData,  isLoading: loadingMarkets }   = useEventMarkets(slug);
+  const { data: actData, isLoading: loadingActors }    = useEventActors(slug);
+  const { data: artData, isLoading: loadingArticles }  = useEventArticles(slug, { limit: 30 });
+  const { data: pvData,  isLoading: loadingPerspectives } = useEventPerspectives(slug);
+  const { data: riData,  isLoading: loadingRI }        = useEventRealityIndex(slug);
+  const { data: sentData, isLoading: loadingSentiment } = useEventSentiment(slug);
+  const { data: trkData, isLoading: loadingTrackers }  = useEventTrackers(slug);
+
+  const timeline     = tlData?.timeline     ?? [];
+  const markets      = mkData?.markets      ?? [];
+  const actors       = actData?.actors      ?? [];
+  const articles     = artData?.articles    ?? [];
+  const perspectives = pvData?.perspectives ?? [];
+  const riSnapshot   = riData?.latest                 ?? null;
+
+  // Tracker Auto-Detection Engine scorecards for this event (Sprint 1.5.3).
+  // An event can carry MULTIPLE trackers via multi-template fan-out (e.g. a
+  // politics event → conflict + incident + election). Stack ALL of them,
+  // ordered by confidence strength (highest first; recency tiebreak — the
+  // same ordering pickHeadlineTracker uses for the compact case).
+  const trackers = [...(trkData?.trackers ?? [])].sort((a, b) => {
+    const d = trackerStrength(b) - trackerStrength(a);
+    return d !== 0 ? d : (b.last_updated_at ?? 0) - (a.last_updated_at ?? 0);
+  });
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-10">

@@ -158,6 +158,43 @@ function safeJsonParse(s) {
   try { return JSON.parse(s); } catch { return null; }
 }
 
+// Related sub-events for the dossier ANGLES section (A2). Sourced from the
+// DURABLE storyline structure (migration 015): sibling events chained into the
+// same storyline as this one. This is a cheap indexed lookup — no clustering in
+// the request path. Returns [] when the event is in no storyline, which is the
+// state on today's graph (STORYLINE_ENABLED default OFF), so ANGLES stays absent
+// until chaining is enabled — matching the design's "empty related[] → no render".
+function getRelatedEvents(db, eventId) {
+  return db.prepare(`
+    SELECT e.id, e.slug, e.title, e.category, e.status, e.severity, e.hero_image_url,
+           e.started_at, e.last_activity_at,
+      (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
+         JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = e.id) AS source_count,
+      (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)     AS article_count
+    FROM storyline_events se_self
+    JOIN storyline_events se_sib
+      ON se_sib.storyline_id = se_self.storyline_id
+     AND se_sib.event_id <> se_self.event_id
+    JOIN events e ON e.id = se_sib.event_id
+    WHERE se_self.event_id = ?
+      AND e.status IN ('active', 'dormant', 'resolved', 'closed')
+    ORDER BY se_sib.position ASC
+    LIMIT 12
+  `).all(eventId).map(r => ({
+    id:            r.id,
+    slug:          r.slug,
+    title:         r.title,
+    category:      r.category,
+    status:        r.status,
+    severity:      r.severity,
+    hero_image_url: r.hero_image_url,
+    source_count:  r.source_count ?? 0,
+    article_count: r.article_count ?? 0,
+    started_at:    r.started_at,
+    last_activity_at: r.last_activity_at,
+  }));
+}
+
 // ─── Routes ────────────────────────────────────────────────────────────────
 
 /**
@@ -316,7 +353,12 @@ router.get("/:slug", (req, res) => {
           .json({ redirect: meta.merged_into_slug, merged_into: meta.merged_into ?? null, status: "merged" });
       }
     }
-    res.json(publicEvent(ev));
+    // ANGLES (A2): durable storyline siblings. Never let a missing/empty
+    // storyline table break the dossier — degrade to no related sub-events.
+    let related = [];
+    try { related = getRelatedEvents(db, ev.id); }
+    catch (e) { logger.warn(`related lookup failed for ${ev.slug}: ${e.message}`); }
+    res.json({ ...publicEvent(ev), related });
   } catch (err) {
     logger.error(`GET /api/events/:slug error: ${err.message}`);
     res.status(500).json({ error: "Internal server error" });
