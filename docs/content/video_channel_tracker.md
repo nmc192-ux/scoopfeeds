@@ -4,7 +4,7 @@
 **Document type:** Operational tracker
 **Owner:** DrJ (Founder)
 **Companion documents:** Video Production Pipeline Spec v1.0 (`docs/specs/video_production_pipeline.md`), Agentic Build Workflow (`docs/agentic-workflow.md`), Social Credentials runbook (`docs/ops/social_credentials.md`)
-**Last updated:** July 19, 2026 (session 2)
+**Last updated:** July 20, 2026 (session 3)
 **Status:** Active
 
 ---
@@ -68,7 +68,7 @@ Recorded so nobody rebuilds it. All of this predates the current plan.
 |---|---|---|---|
 | **V0** | Spec + tracker written and committed | `BUILT` | Landed |
 | **V1** | Channel activation (accounts, credentials, cron on) | `BLOCKED` | D1 resolved; still needs **D2** (channel identity) |
-| **V2a** | Editorial boundary filter (`videoEditorialPolicy.js`) | `BUILT` | Implements D1. 9/9 unit cases pass locally; not yet run in prod |
+| **V2a** | Editorial boundary filter (`videoEditorialPolicy.js`) | `BUILT` | Implements D1. Committed test (`videoEditorialPolicy.test.js`, `node:test`) 13/13 incl. false-positive traps; not yet run in prod |
 | **V2b** | LLM scriptwriter (`scriptWriter.js`) | `BUILT` | Ships default-off (`SCRIPT_LLM_ENABLED=0`); not yet run against a live model |
 | **V3** | Dossier video generator (landscape long-form) | `SPEC` | Sequenced after V2 |
 | **V4** | Analytics feedback + monetization applications | `NOT STARTED` | Needs V1 live + threshold volume |
@@ -153,6 +153,21 @@ Append one entry per session. Newest last.
 - **NOT verified:** no call has been made against a live model, and nothing has run in production. `scriptWriter.js` is therefore `BUILT`, not `VERIFIED` — the model-response path (real JSON shape, real latency, real cost) is entirely untested. The next session must validate it on a handful of real articles with `SCRIPT_LLM_ENABLED=1` before the flag flips anywhere permanent.
 - **Deliberately not done:** did not enable any flag, did not touch credentials, did not push. All new behaviour is off by default.
 - **Open:** D2 (channel identity) still blocks V1. D3, D4 unchanged.
+
+---
+
+### Jul 20, 2026 — Session 3: V2 verification + D1 test committed
+- **What went wrong first (split-brain checkout):** Two earlier verification runs this session reported all four V2 files missing and could not proceed. Root cause was two divergent checkouts of the repo: the V2 commit had been applied on the server clone (`/opt/scoopfeeds`, branch `main`) [reported by operator, not independently verified from this machine], while this Mac clone sat on `feat/a2-dossier-restructure` at `030b39f` with the files absent and the tree clean [verified: HEAD SHA, branch, `git status`]. Only after the repo was synced and pushed did `main` reach **`6b69f19`** on `origin/main` [verified via `git fetch`], at which point all four files were present. **Lesson:** "committed" in a status line must name the branch/remote — a commit that lives only on an unsynced clone is not verifiable by anyone else and reads as a phantom.
+- **Verified this session (repo at `6b69f19`, branch `main`):**
+  - `videoEditorialPolicy.js` and `scriptWriter.js` exist and parse (`node --check`).
+  - `videoGenerator.js` imports `writeScript` and falls back to `buildVideoScript()` on null (`llmScript?.narration || buildVideoScript(...)`), with `writeScript` wrapped in try/catch → null so a throw also falls back.
+  - `scheduler.js` imports and applies `filterVideoEligible()` once to the combined `rawCandidates`, downstream of both the `REEL_USE_RI_SELECTOR` branch and the default selector — both paths are covered by the single filter.
+- **Built:** `backend/src/services/videoEditorialPolicy.test.js` — 13 cases, all passing. Blocks: PK parties (PTI / PML-N / PPP / Tehreek-e-Insaf), provincial assemblies, ECP, deputy commissioner. Allows the four traps: "Pakistan floods" and "Pakistan India ceasefire" pass the **term scan** (proving there is no bare "pakistan" term); "European Commissioner" and "NFL commissioner" pass via the **global-category short-circuit** — the `"commissioner "` term would otherwise catch them, so a dedicated mechanism test locks that behavior.
+- **Test-runner note:** the repo has **no npm `test` script**; tests are the built-in **`node:test`** runner, run per file, e.g. `node --test src/services/videoEditorialPolicy.test.js`.
+- **Env note (YouTube):** `YOUTUBE_PRIVACY` is optional and **defaults to `"public"`** (`youtubeClient.js` `getPrivacy()`). It must be set **explicitly** at V1 activation — otherwise the very first upload lands publicly, defeating any soft-launch. The three required vars (`YOUTUBE_CLIENT_ID` / `_SECRET` / `_REFRESH_TOKEN`) remain unset on this machine.
+- **`video_jobs` state:** active DB (`backend/data/news.db`) has **0** rows. `backend/data/prod-snapshot.db` holds **32** (28 `ready`, 4 `published`) — identical to `_pilot_data/news.db`. The render pipeline has produced jobs historically, but the working DB on this machine is empty.
+- **Status unchanged:** V2a / V2b remain `BUILT` — nothing ran against a live model or in production this session; the committed test raises local confidence only, per the §0 honesty rule.
+- **Deliberately not done:** enabled no flag, did not touch `.env`, did not activate any channel.
 
 ---
 
