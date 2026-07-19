@@ -516,6 +516,37 @@ router.get("/:slug/coverage", (req, res) => {
 });
 
 /**
+ * GET /api/events/:slug/facets — render-ready facets for the A2 "Threads in this
+ * story" shelf (A5 Phase 2, dark behind ?facets=1 on the frontend).
+ *
+ * Rows in event_facets are ALREADY earn-render-qualified — the breaker's facet pass
+ * applies the gates (size ≥ FACET_MIN_ARTICLES, share ≤ FACET_MAX_SHARE, coherent
+ * hub-filtered core) and member-overlap dedup at write time, and prunes rows that
+ * stop qualifying. This read is a dumb indexed SELECT; the frontend renders the
+ * shelf only when ≥ 2 facets return (absent ≠ broken — the A3 stance). Cards are
+ * display-only: a tombstone-sourced facet's original event URL 302s back to this
+ * survivor, so linking would self-loop.
+ */
+router.get("/:slug/facets", (req, res) => {
+  try {
+    const db = getDb();
+    const ev = db.prepare("SELECT id FROM events WHERE slug = ?").get(req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+
+    const facets = db.prepare(`
+      SELECT facet_id, source, size, sources, label, label_entity, share
+      FROM event_facets WHERE event_id = ?
+      ORDER BY size DESC, facet_id LIMIT 12
+    `).all(ev.id);
+
+    res.json({ facets, count: facets.length });
+  } catch (err) {
+    logger.error(`GET /api/events/:slug/facets error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
  * GET /api/events/:slug/actors
  */
 router.get("/:slug/actors", (req, res) => {

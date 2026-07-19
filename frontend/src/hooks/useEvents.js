@@ -130,6 +130,21 @@ export function useEventCoverage(slug) {
   });
 }
 
+// Render-ready facets for the A5 "Threads in this story" shelf (dark behind
+// ?facets=1 — the `enabled` flag keeps the dark path zero-cost: no fetch at all
+// unless the param is present). Rows are already earn-render-qualified server-side;
+// the shelf renders only when >= 2 come back.
+export function useEventFacets(slug, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: ["event-facets", slug],
+    queryFn: async () => {
+      return unwrapOrThrow(await api.get(`/events/${slug}/facets`));
+    },
+    enabled: !!slug && enabled,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useEventPerspectives(slug) {
   return useQuery({
     queryKey: ["event-perspectives", slug],

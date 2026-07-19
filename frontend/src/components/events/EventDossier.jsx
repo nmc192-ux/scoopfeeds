@@ -6,6 +6,8 @@
  *                    status (developing/dormant), mechanical badge line. NO LLM brief.
  *   2. TIMELINE      latest development first, day-grouped. Mobile: latest-3 + expander.
  *   3. COVERAGE      member articles grouped BY OUTLET, one row per outlet. No cred scores.
+ *   3b. THREADS      A5 facet shelf, DARK behind ?facets=1. Earn-render: >= 2 qualifying
+ *                    facets or no shelf (absent ≠ broken). Display-only cards.
  *   4. ANGLES        related[] sub-events as cards. Absent when related[] is empty.
  *   5. ACTORS        event_actors chips, wrap freely (any number of rows),
  *                    sorted by mentions, cap 8 + "+N". (Flag 2: 3-row wrap is
@@ -18,14 +20,14 @@
  */
 
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Clock, Newspaper, Users, BarChart3, MessageCircle, Activity, ChevronLeft,
-  ExternalLink, TrendingUp, TrendingDown, GitBranch, User, Building2, Globe,
+  ExternalLink, TrendingUp, TrendingDown, GitBranch, User, Building2, Globe, Layers,
 } from "lucide-react";
 import {
   useEventTimeline, useEventMarkets, useEventActors, useEventCoverage,
-  useEventSentiment, useEventRealityIndex,
+  useEventSentiment, useEventRealityIndex, useEventFacets,
 } from "../../hooks/useEvents";
 import ProbabilityBar from "../predictions/ProbabilityBar";
 import RealityGauge   from "../predictions/RealityGauge";
@@ -342,6 +344,40 @@ function CoverageSection({ outlets = [], isLoading }) {
   );
 }
 
+// ─── 3b. THREADS (A5 facets — dark behind ?facets=1) ─────────────────────────
+// Render-ready facets from event_facets (breaker facet pass: dual-source, gated,
+// deduped, mechanically labeled — see docs/specs/a5_event_facets_design.md).
+// EARN-RENDER: the shelf renders only with >= 2 facets; absent ≠ broken (A3 stance).
+// Cards are DISPLAY-ONLY: a tombstone-sourced facet's original URL 302s back to
+// this very dossier, so linking would self-loop.
+
+function FacetShelf({ facets }) {
+  if (!facets || facets.length < 2) return null;   // earn-render: < 2 threads → no shelf
+  return (
+    <section className="mb-8">
+      <SectionHeader icon={Layers} label="Threads in this story" />
+      <div className="grid sm:grid-cols-2 gap-3">
+        {facets.map(f => (
+          <div
+            key={f.facet_id}
+            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 flex flex-col gap-1.5"
+          >
+            {f.label_entity && (
+              <p className="text-[10px] uppercase tracking-wide text-[var(--color-accent)] font-semibold">
+                {f.label_entity}
+              </p>
+            )}
+            <p className="text-sm font-medium text-[var(--color-text)] leading-snug line-clamp-2">{f.label}</p>
+            <p className="text-[10px] text-[var(--color-text-secondary)] mt-auto">
+              {f.size} article{f.size !== 1 ? "s" : ""} · {f.sources} source{f.sources !== 1 ? "s" : ""}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // ─── 4. ANGLES (related sub-events) ──────────────────────────────────────────
 
 function AnglesSection({ related }) {
@@ -546,6 +582,10 @@ function IntelligenceSection({ event, riData, sentData, markets }) {
 
 export default function EventDossier({ event }) {
   const slug = event.slug;
+  // A5 facet shelf — dark-shipped behind ?facets=1 (the A2 playbook). The enabled
+  // flag means the dark path costs nothing: no /facets fetch unless the param is set.
+  const [searchParams] = useSearchParams();
+  const facetsOn = searchParams.get("facets") === "1";
 
   const { data: tlData,   isLoading: loadingTimeline }  = useEventTimeline(slug, { limit: 60 });
   const { data: covData,  isLoading: loadingCoverage }  = useEventCoverage(slug);
@@ -553,6 +593,7 @@ export default function EventDossier({ event }) {
   const { data: mkData }                                = useEventMarkets(slug);
   const { data: riData }                                = useEventRealityIndex(slug, { history: true });
   const { data: sentData }                              = useEventSentiment(slug);
+  const { data: facetData }                             = useEventFacets(slug, { enabled: facetsOn });
 
   const timeline = tlData?.timeline ?? [];
   const outlets  = covData?.outlets ?? [];
@@ -567,6 +608,7 @@ export default function EventDossier({ event }) {
       <DossierHeader event={event} />
       <TimelineSection slug={slug} entries={timeline} isLoading={loadingTimeline} />
       <CoverageSection outlets={outlets} isLoading={loadingCoverage} />
+      {facetsOn && <FacetShelf facets={facetData?.facets} />}
       <AnglesSection related={event.related} />
       <ActorsSection actors={actors} isLoading={loadingActors} />
       <IntelligenceSection event={event} riData={riData} sentData={sentData} markets={markets} />
