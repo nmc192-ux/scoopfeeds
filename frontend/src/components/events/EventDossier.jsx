@@ -22,7 +22,7 @@ import {
   ExternalLink, TrendingUp, TrendingDown, GitBranch, User, Building2, Globe,
 } from "lucide-react";
 import {
-  useEventTimeline, useEventMarkets, useEventActors, useEventArticles,
+  useEventTimeline, useEventMarkets, useEventActors, useEventCoverage,
   useEventSentiment, useEventRealityIndex,
 } from "../../hooks/useEvents";
 import ProbabilityBar from "../predictions/ProbabilityBar";
@@ -275,20 +275,12 @@ function OutletFavicon({ url, name }) {
   );
 }
 
-function CoverageSection({ articles, isLoading }) {
+function CoverageSection({ outlets = [], isLoading }) {
   const [showAll, setShowAll] = useState(false);
 
-  // One row per outlet: latest headline + "+N more". No credibility scores.
-  const byOutlet = new Map();
-  for (const a of articles) {
-    const key = a.source_name || "Unknown";
-    if (!byOutlet.has(key)) byOutlet.set(key, []);
-    byOutlet.get(key).push(a);
-  }
-  // Articles arrive published_at DESC, so each outlet's [0] is its latest.
-  const outlets = [...byOutlet.entries()]
-    .map(([name, arts]) => ({ name, latest: arts[0], count: arts.length }))
-    .sort((a, b) => b.count - a.count || (b.latest?.published_at ?? 0) - (a.latest?.published_at ?? 0));
+  // outlets arrive pre-grouped from /coverage — one row per outlet over ALL
+  // event articles (not the 100-capped /articles), so the count here matches
+  // the header badge exactly. Already sorted by article_count DESC.
 
   if (isLoading) {
     return (
@@ -313,22 +305,22 @@ function CoverageSection({ articles, isLoading }) {
           const hideOnMobile = i >= 3 && !showAll;
           return (
             <a
-              key={o.name}
-              href={o.latest?.url}
+              key={o.source_name}
+              href={o.url}
               target="_blank"
               rel="noopener noreferrer"
               className={`flex items-center gap-3 p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)] transition-colors ${hideOnMobile ? "hidden sm:flex" : "flex"}`}
             >
-              <OutletFavicon url={o.latest?.url} name={o.name} />
+              <OutletFavicon url={o.url} name={o.source_name} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-[var(--color-text)]">{o.name}</span>
-                  {o.count > 1 && (
-                    <span className="text-[10px] text-[var(--color-text-secondary)]">+{o.count - 1} more</span>
+                  <span className="text-xs font-semibold text-[var(--color-text)]">{o.source_name}</span>
+                  {o.article_count > 1 && (
+                    <span className="text-[10px] text-[var(--color-text-secondary)]">+{o.article_count - 1} more</span>
                   )}
                 </div>
                 <p className="text-sm text-[var(--color-text-secondary)] leading-snug line-clamp-1 mt-0.5">
-                  {o.latest?.title}
+                  {o.title}
                 </p>
               </div>
               <ExternalLink size={12} className="text-[var(--color-text-secondary)] flex-shrink-0" />
@@ -554,14 +546,14 @@ export default function EventDossier({ event }) {
   const slug = event.slug;
 
   const { data: tlData,   isLoading: loadingTimeline }  = useEventTimeline(slug, { limit: 60 });
-  const { data: artData,  isLoading: loadingArticles }  = useEventArticles(slug, { limit: 100 });
+  const { data: covData,  isLoading: loadingCoverage }  = useEventCoverage(slug);
   const { data: actData,  isLoading: loadingActors }    = useEventActors(slug);
   const { data: mkData }                                = useEventMarkets(slug);
   const { data: riData }                                = useEventRealityIndex(slug, { history: true });
   const { data: sentData }                              = useEventSentiment(slug);
 
   const timeline = tlData?.timeline ?? [];
-  const articles = artData?.articles ?? [];
+  const outlets  = covData?.outlets ?? [];
   const actors   = actData?.actors  ?? [];
   const markets  = mkData?.markets  ?? [];
 
@@ -572,7 +564,7 @@ export default function EventDossier({ event }) {
       </Link>
       <DossierHeader event={event} />
       <TimelineSection slug={slug} entries={timeline} isLoading={loadingTimeline} />
-      <CoverageSection articles={articles} isLoading={loadingArticles} />
+      <CoverageSection outlets={outlets} isLoading={loadingCoverage} />
       <AnglesSection related={event.related} />
       <ActorsSection actors={actors} isLoading={loadingActors} />
       <IntelligenceSection event={event} riData={riData} sentData={sentData} markets={markets} />
