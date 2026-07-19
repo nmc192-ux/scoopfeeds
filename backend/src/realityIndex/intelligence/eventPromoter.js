@@ -77,6 +77,26 @@ const CORE_FRAC           = Number.parseFloat(process.env.EVENT_ENTITY_CORE_FRAC
 // stories regardless of how rare it is. 999 = no exclusion (default; swept in the harness).
 const MAX_CATSPAN         = parseInt(process.env.EVENT_ENTITY_MAX_CATSPAN || "999", 10);
 
+// ── W2.1 small-side porosity floor (unified-affinity path only) — SHIPS DISABLED ──
+// Would block an AFFINE event↔event merge when affinity is only MODERATE
+// (ent < FLOOR_ENT) AND the smaller side is thin (min-side < FLOOR_MIN_SIDE member
+// articles). Rationale for the code path: the shipped measure is idf-weighted
+// CONTAINMENT (intersection / smaller-side mass), so a small event's few generic keys
+// can sit inside a macro-event's broad set and score mid-band.
+//
+// SHIPPED OFF (FLOOR_MIN_SIDE default 0 → guard below is false → byte-identical to
+// pre-W2.1 merge behavior). Calibration on the 2026-07-16 COW showed labeled SAME pairs
+// span containment 0.248–0.377 — ENTIRELY below FLOOR_ENT 0.50 — so ent<0.50 is
+// always-true and the floor collapses to "block thin-sided merges", catching the R1
+// newborn continuation (0.248 / min-side 5) and re-opening under-merge churn. That was a
+// POST-HOC measurement; a decision-time gate must be calibrated on decision-time data.
+// The 🧭 promoter-merge line now logs (ent, min-side) at decision time — after ~a week
+// live, re-sweep the floor on that corpus and set a threshold from the real SAME/porous
+// distributions (or conclude "no floor — different discriminator"). Env-enableable then
+// with no code change.
+const MERGE_FLOOR_ENT      = Number.parseFloat(process.env.EVENT_MERGE_FLOOR_ENT || "0.50");
+const MERGE_FLOOR_MIN_SIDE = parseInt(process.env.EVENT_MERGE_FLOOR_MIN_SIDE || "0", 10);
+
 // R2a: persist the event's entity signature (top-K keys + idf) while members are ALIVE —
 // articles prune at 7d, so this durable copy is the only identity an event keeps after
 // its members age out. Upserted on every match/create; R2b chains storylines from it.
@@ -414,17 +434,29 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
         logDecision("merge-hold", { a: ea.slug.slice(0, 44), b: eb.slug.slice(0, 44), band, ent: +ent.toFixed(3) });
         return;
       }
+      // W2.1 small-side porosity floor (SHIPS DISABLED: FLOOR_MIN_SIDE default 0).
+      // AFFINE but moderate + thin small side → hold. See the constant block above:
+      // enable only after recalibrating on decision-time (ent, min-side) data.
+      const minSide = Math.min(ea.ids.size, eb.ids.size);
+      if (MERGE_FLOOR_MIN_SIDE > 0 && ent < MERGE_FLOOR_ENT && minSide < MERGE_FLOOR_MIN_SIDE) {
+        logDecision("merge-floor", { a: ea.slug.slice(0, 44), b: eb.slug.slice(0, 44), ent: +ent.toFixed(3), minSide });
+        return;
+      }
     } else if (ENTITY_MIN > 0 && rarityOverlap(ea.core, eb.core, idfMap, fallbackIdf) < ENTITY_MIN) return; // legacy entity gate — core↔core
     const survivor = ea.started_at <= eb.started_at ? a : b;
     const absorbed = survivor === a ? b : a;
     parent.set(absorbed, survivor);
-    merges.push({ survivor, absorbed });
+    // Capture DECISION-TIME min-side (pre-union sizes) — logged on the merge line so the
+    // W2.1 floor can be recalibrated on real (ent, min-side) merge distributions, not
+    // post-hoc accreted sizes. The apply loop unions ea.ids into the survivor, so min-side
+    // must be measured here, before that happens.
+    merges.push({ survivor, absorbed, minSide: Math.min(ea.ids.size, eb.ids.size) });
   };
   for (const cl of clusters) {
     const evs = [...new Set([...eventState.values()].filter((ev) => qualifies(cl, ev).ok).map((ev) => find(ev.id)))];
     for (let i = 0; i < evs.length; i++) for (let j = i + 1; j < evs.length; j++) tryMerge(evs[i], evs[j]);
   }
-  for (const { survivor, absorbed: absorbedId } of merges) {
+  for (const { survivor, absorbed: absorbedId, minSide } of merges) {
     const sEv = eventState.get(survivor), aEv = eventState.get(absorbedId);
     if (!sEv || !aEv) continue;
     for (const aid of aEv.ids) { linkArticle.run(survivor, aid, now); sEv.ids.add(aid); }
@@ -433,12 +465,15 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     // The ent reported MUST be the measure the gate used (unified when on) —
     // the R3 validation caught this line reporting legacy core↔core numbers
     // for decisions the unified gate had made on TOPK containment.
+    // W2.1: min-side (decision-time, pre-union) rides this line too → the corpus the
+    // merge floor is recalibrated on once this instrumentation has run ~a week live.
     logger.info(`🧭 promoter-merge ${JSON.stringify({
       survivor: sEv.slug.slice(0, 48), absorbed: aEv.slug.slice(0, 48),
       cos: +cosine(sEv.centroid, aEv.centroid).toFixed(3),
       ent: UNIFIED_AFFINITY
         ? +affinity(affCtx, sEv.entSet, aEv.entSet).ent.toFixed(3)
         : (ENTITY_MIN > 0 ? +rarityOverlap(sEv.core, aEv.core, idfMap, fallbackIdf).toFixed(3) : null),
+      minSide,
     })}`);
     eventState.delete(absorbedId);
   }
@@ -515,6 +550,13 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
             linkMarket.run(target, cm.market_id, cm.weight, cm.rank, now);
           }
           touchActivity.run(now, now, target);
+          // 🧭 absorb log — a QUALIFYING cluster that lost the 1-to-1 race and was
+          // folded into its best event (no shell minted). Closes the last silent
+          // promoter path; the score is the qualify score that justified the absorb.
+          logDecision("promoter-absorb", {
+            cluster: String(c.id).slice(0, 16), title: (c.title || "").slice(0, 44),
+            size: clusterSize, into: tEv.slug.slice(0, 44), score: +bestQual.get(ci).score.toFixed(3),
+          });
           absorbed++;
           return;
         }
@@ -522,11 +564,20 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
       if (eventId) {
         const ev = eventState.get(eventId);
         if (ev && ev.status === "dormant") reactivated++;
-        if (clusterSize >= (ev?.titleClusterSize || 0)) {
+        const prevTitleSize = ev?.titleClusterSize || 0;
+        if (clusterSize >= prevTitleSize) {
           // strong continuation → adopt the new anchor title and record its cluster size
           updateNewTitle.run(c.title, summary, severity, hero, now, now,
             JSON.stringify({ title_cluster_size: clusterSize }), eventId); // preserves id, slug, started_at
           if (ev) ev.titleClusterSize = clusterSize;
+          // 🧭 matched-summary log — the adopt branch is the ONLY path that rewrites an
+          // event's summary (updateKeepTitle protects it). "adopt" = incoming summary
+          // stamped; "keep-null" = incoming was null so COALESCE preserved the prior. Makes
+          // summary provenance greppable — the instrument for the 2e contamination class.
+          logDecision("promoter-match", {
+            event: ev?.slug?.slice(0, 44) ?? String(eventId).slice(0, 8), cluster: String(c.id).slice(0, 16),
+            size: clusterSize, prevTitleSize, summary: summary ? "adopt" : "keep-null",
+          });
         } else {
           // small/diffuse tail → keep the durable title, refresh activity/severity/hero
           // (summary intentionally NOT updated here — Wave 1 summary protection)
