@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import {
   useEventTimeline, useEventMarkets, useEventActors, useEventCoverage,
-  useEventSentiment, useEventRealityIndex, useEventFacets,
+  useEventSentiment, useEventRealityIndex, useEventFacets, useEventTimelineLog,
 } from "../../hooks/useEvents";
 import ProbabilityBar from "../predictions/ProbabilityBar";
 import RealityGauge   from "../predictions/RealityGauge";
@@ -37,6 +37,12 @@ import SentimentSmallMultiples from "../predictions/SentimentSmallMultiples";
 // enough measured volume to be meaningful. Below this total-mention count the
 // section stays absent rather than showing a thin, misleading chart.
 const SENTIMENT_VOLUME_FLOOR = 10;
+// A6 audit: the sentiment module is HIDDEN by default. Earn-render must gate on
+// COMPREHENSIBILITY, not just data sufficiency — the module renders one machine
+// "media" polarity as scaleless "streams" with "N mentions" that don't match the
+// article count; a reader can't interpret it. Flip true only when genuine
+// multi-source social sentiment exists to make it a real comparison.
+const SENTIMENT_ENABLED = String(import.meta.env.VITE_SENTIMENT_ENABLED ?? "false").toLowerCase() === "true";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -245,6 +251,117 @@ function TimelineSection({ slug, entries, isLoading }) {
               className="sm:hidden w-full mt-2 text-xs font-medium text-[var(--color-accent)] py-2 rounded-lg border border-[var(--color-border)] hover:bg-[var(--color-surface-2)]"
             >
               Show full timeline (+{entries.length - 3})
+            </button>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+// ─── 2b. EVENT-LOG TIMELINE (A6, occurrence-deduped) — dark behind ?tl=1 ──────
+// One row per OCCURRENCE, not per article. BEATS (multi-outlet: "what happened")
+// are visually distinct from ANALYSIS (single-outlet: "what someone wrote"): solid
+// accent dot + outlet attribution vs a hollow muted dot + lone byline. ~15 shown by
+// significance (outlet count), "show full timeline" reveals the analysis tail.
+
+const TL_RANK_SHOWN = 15;
+
+function OccurrenceRow({ o }) {
+  const attribution = o.article_count > 1
+    ? `${o.outlets.slice(0, 2).join(", ")}${o.outlet_count > 2 ? ` +${o.outlet_count - 2}` : ""}`
+    : o.source_name;
+  return (
+    <div className="flex gap-3 py-3">
+      <div className="flex flex-col items-center gap-1 flex-shrink-0 w-6">
+        <div className={`mt-1 rounded-full ${o.is_beat ? "w-2.5 h-2.5 bg-[var(--color-accent)]" : "w-2 h-2 border border-[var(--color-border)] bg-[var(--color-surface)]"}`} />
+        <div className="w-px flex-1 bg-[var(--color-border)]" />
+      </div>
+      <div className="flex-1 pb-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          {o.is_beat
+            ? <span className="text-[10px] font-medium text-[var(--color-text-secondary)]">{attribution}</span>
+            : <span className="text-[10px] text-[var(--color-text-tertiary)] italic">{attribution}</span>}
+          {o.is_beat && (
+            <span className="text-[10px] text-[var(--color-text-tertiary)]">· {o.article_count} article{o.article_count !== 1 ? "s" : ""}</span>
+          )}
+          <span className="text-[10px] text-[var(--color-text-secondary)] ml-auto">{clockTime(o.ts)}</span>
+        </div>
+        <a
+          href={o.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`text-sm leading-snug hover:text-[var(--color-accent)] transition-colors ${o.is_beat ? "font-medium text-[var(--color-text)]" : "text-[var(--color-text-secondary)]"}`}
+        >
+          {o.headline}
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function OccurrenceTimelineSection({ slug, occurrences = [], isLoading }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Rank by significance (outlet count; article count tiebreak); show the top N,
+  // then display those in the same day-grouped latest-first order as the full log.
+  const shownIds = new Set(
+    [...occurrences]
+      .sort((a, b) => b.significance - a.significance || b.article_count - a.article_count)
+      .slice(0, TL_RANK_SHOWN)
+      .map(o => o.id)
+  );
+  const visible = expanded ? occurrences : occurrences.filter(o => shownIds.has(o.id));
+
+  const groups = [];
+  const seen = new Map();
+  for (const o of visible) {
+    const k = dayKey(o.ts);
+    if (!seen.has(k)) { seen.set(k, groups.length); groups.push({ key: k, ts: o.ts, items: [] }); }
+    groups[seen.get(k)].items.push(o);
+  }
+  const hidden = occurrences.length - visible.length;
+
+  return (
+    <section className="mb-8">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Clock size={15} className="text-[var(--color-accent)]" />
+          <h2 className="font-semibold text-base text-[var(--color-text)]">Timeline</h2>
+        </div>
+        <Link to={`/timeline/${slug}`} className="text-[10px] text-[var(--color-accent)] hover:underline inline-flex items-center gap-1">
+          Open standalone <ExternalLink size={9} />
+        </Link>
+      </div>
+
+      {isLoading ? (
+        <div className="flex flex-col gap-4 py-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="h-12 rounded-lg bg-[var(--color-surface-2)] animate-pulse" />
+          ))}
+        </div>
+      ) : occurrences.length === 0 ? (
+        <p className="text-sm text-[var(--color-text-secondary)] py-8 text-center">
+          No timeline entries yet — check back as the story develops.
+        </p>
+      ) : (
+        <>
+          {groups.map(g => (
+            <div key={g.key} className="mb-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-1 sticky top-0">
+                {dayHeading(g.ts)}
+              </div>
+              <div className="divide-y divide-[var(--color-border)]">
+                {g.items.map(o => <OccurrenceRow key={o.id} o={o} />)}
+              </div>
+            </div>
+          ))}
+          {hidden > 0 && !expanded && (
+            <button
+              onClick={() => setExpanded(true)}
+              className="w-full mt-2 text-xs font-medium text-[var(--color-accent)] py-2 rounded-lg border border-[var(--color-border)] hover:bg-[var(--color-surface-2)]"
+            >
+              Show full timeline (+{hidden})
             </button>
           )}
         </>
@@ -525,9 +642,10 @@ function IntelligenceSection({ event, riData, sentData, markets }) {
   const hasTrend = riHistory.length >= 2;
   const riEarns = !!riSnapshot && hasBoundQuestion && hasTrend && sourceCount > 0;
 
-  // A3 earn-render for Sentiment: total measured volume above the floor.
+  // A3 earn-render for Sentiment: measured volume above the floor AND the module is
+  // enabled (default OFF — hidden pending genuine multi-source social sentiment).
   const totalVolume = (sentData?.latest ?? []).reduce((s, x) => s + (x.volume ?? 0), 0);
-  const sentimentEarns = totalVolume >= SENTIMENT_VOLUME_FLOOR;
+  const sentimentEarns = SENTIMENT_ENABLED && totalVolume >= SENTIMENT_VOLUME_FLOOR;
 
   const marketsEarn = liveMarkets.length > 0;
 
@@ -582,10 +700,11 @@ function IntelligenceSection({ event, riData, sentData, markets }) {
 
 export default function EventDossier({ event }) {
   const slug = event.slug;
-  // A5 facet shelf — dark-shipped behind ?facets=1 (the A2 playbook). The enabled
-  // flag means the dark path costs nothing: no /facets fetch unless the param is set.
+  // Dark-shipped sections behind URL params (the A2 playbook). The enabled flags
+  // mean each dark path costs nothing: no extra fetch unless its param is present.
   const [searchParams] = useSearchParams();
   const facetsOn = searchParams.get("facets") === "1";
+  const tlLogOn  = searchParams.get("tl") === "1";     // A6 event-log timeline
 
   const { data: tlData,   isLoading: loadingTimeline }  = useEventTimeline(slug, { limit: 60 });
   const { data: covData,  isLoading: loadingCoverage }  = useEventCoverage(slug);
@@ -594,6 +713,7 @@ export default function EventDossier({ event }) {
   const { data: riData }                                = useEventRealityIndex(slug, { history: true });
   const { data: sentData }                              = useEventSentiment(slug);
   const { data: facetData }                             = useEventFacets(slug, { enabled: facetsOn });
+  const { data: tlLogData, isLoading: loadingTlLog }    = useEventTimelineLog(slug, { enabled: tlLogOn });
 
   const timeline = tlData?.timeline ?? [];
   const outlets  = covData?.outlets ?? [];
@@ -606,7 +726,9 @@ export default function EventDossier({ event }) {
         <ChevronLeft size={13} /> All events
       </Link>
       <DossierHeader event={event} />
-      <TimelineSection slug={slug} entries={timeline} isLoading={loadingTimeline} />
+      {tlLogOn
+        ? <OccurrenceTimelineSection slug={slug} occurrences={tlLogData?.occurrences ?? []} isLoading={loadingTlLog} />
+        : <TimelineSection slug={slug} entries={timeline} isLoading={loadingTimeline} />}
       <CoverageSection outlets={outlets} isLoading={loadingCoverage} />
       {facetsOn && <FacetShelf facets={facetData?.facets} />}
       <AnglesSection related={event.related} />
