@@ -27,7 +27,36 @@ const TOPK         = parseInt(process.env.EVENT_ENTITY_TOPK || "40", 10);
 const DETACH       = String(process.env.EVENT_BREAKER_DETACH ?? "false").toLowerCase() === "true"; // Build B: trim un-clusterable orphan tail from kept events
 const MATCH_TAU    = Number.parseFloat(process.env.EVENT_MATCH_TAU || "0.78"); // matcher cosine floor — detach guard (an orphan must be cosine-far AND entity-disjoint)
 const MAX_PASSES   = parseInt(process.env.EVENT_BREAKER_MAX_PASSES || "6", 10); // sweep convergence bound (Phase 1 converged in 4)
+// A5 Phase 1: persist the sub-cluster topology as durable facets. Default OFF →
+// the breaker is byte-identical (no facet writes). Requires UNIFIED_AFFINITY (facets
+// use the unified cat_span-3 measure, consistent with the rest of the system).
+const FACETS_PERSIST = String(process.env.EVENT_FACETS_PERSIST ?? "false").toLowerCase() === "true";
 const DIMS         = 768;
+
+// A5 Phase 1: write one durable facet row per sub-cluster (anchor + kept + foreign),
+// keyed on a STABLE hash of the facet's hub-filtered entity keys so the same sub-thread
+// maps to the same row across sweeps and ACCUMULATES its members. Idempotent UPSERT;
+// runs regardless of the split decision so kept-whole macro-events are captured too.
+export function persistEventFacets(db, eventId, recs, now, stmts) {
+  const tx = db.transaction(() => {
+    for (const r of recs) {
+      const keys = [...r.keys].sort();
+      const facetKey = keys.length
+        ? crypto.createHash("sha1").update(keys.join("|")).digest("hex").slice(0, 16)
+        : "t:" + slugify(r.sub.members[0]?.title || "").slice(0, 24);
+      const facetId = crypto.createHash("sha1").update(eventId + "|" + facetKey).digest("hex").slice(0, 20);
+      // label = highest-credibility member's title (cheap, deterministic; no LLM)
+      const rep = r.sub.members.reduce((a, m) => ((m.credibility ?? 0) > (a.credibility ?? 0) ? m : a), r.sub.members[0]);
+      stmts.upsertFacet.run(
+        facetId, eventId, facetKey, r.isAnchor, r.sub.size, r.sub.sources,
+        r.isAnchor ? 1.0 : +Number(r.ent).toFixed(4), r.band, JSON.stringify(keys),
+        (rep?.title || "").slice(0, 200), now, now, now,
+      );
+      for (const m of r.sub.members) stmts.linkFacetArticle.run(facetId, m.id, now);
+    }
+  });
+  tx();
+}
 
 function slugify(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9\s-]/g, " ").trim().replace(/\s+/g, "-").replace(/-+/g, "-").slice(0, 80).replace(/^-+|-+$/g, ""); }
 function uniqueSlug(db, base) { let slug = base || crypto.randomUUID().slice(0, 8); let i = 2; while (db.prepare("SELECT 1 FROM events WHERE slug = ?").get(slug)) slug = `${base}-${i++}`; return slug; }
@@ -100,6 +129,18 @@ export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, 
   const affCtx = UNIFIED_AFFINITY ? buildAffinityCtx(db) : null;
   const delLink = db.prepare("DELETE FROM event_articles WHERE event_id = ? AND article_id = ?");
 
+  // A5 Phase 1 facet writers (used only when FACETS_PERSIST && UNIFIED_AFFINITY).
+  const facetStmts = {
+    upsertFacet: db.prepare(`
+      INSERT INTO event_facets (facet_id, event_id, facet_key, is_anchor, size, sources, ent, band, core_keys, label, created_at, updated_at, last_seen_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(facet_id) DO UPDATE SET
+        is_anchor=excluded.is_anchor, size=excluded.size, sources=excluded.sources, ent=excluded.ent,
+        band=excluded.band, core_keys=excluded.core_keys, label=excluded.label,
+        updated_at=excluded.updated_at, last_seen_at=excluded.last_seen_at`),
+    linkFacetArticle: db.prepare("INSERT OR IGNORE INTO event_facet_articles (facet_id, article_id, added_at) VALUES (?,?,?)"),
+  };
+
   let split = 0, created = 0, foreignSpun = 0; const splitIds = [];
   for (const b of candidates) {
     const members = db.prepare("SELECT article_id id FROM event_articles WHERE event_id = ?").all(b.id).map(r => r.id);
@@ -107,18 +148,27 @@ export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, 
     if (subs.length <= 1) continue; // one story
     const anchorIds = subs[0].members.map(m => m.id);
     const core = UNIFIED_AFFINITY ? affCtx.entitySet(anchorIds) : entitySet(anchorIds);
+    // A5 Phase 1: collect facet records (anchor is facet 0, self-ent 1.0/AFFINE).
+    const persistFacets = FACETS_PERSIST && UNIFIED_AFFINITY && affCtx;
+    const facetRecs = persistFacets ? [{ sub: subs[0], keys: core, ent: 1.0, band: BANDS.AFFINE, isAnchor: 1 }] : null;
     const spin = []; // FOREIGN sub-clusters (genuinely absorbed foreign stories)
     for (let i = 1; i < subs.length; i++) {
       const subIds = subs[i].members.map(m => m.id);
       if (UNIFIED_AFFINITY) {
-        const { ent, band } = affinity(affCtx, affCtx.entitySet(subIds), core);
+        const subKeys = affCtx.entitySet(subIds);
+        const { ent, band } = affinity(affCtx, subKeys, core);
         if (band === BANDS.FOREIGN) { spin.push(subs[i]); }
         else logDecision("breaker-keep", { event: b.id.slice(0, 8), sub: i, subSize: subIds.length, band, ent: +ent.toFixed(3) });
+        if (persistFacets) facetRecs.push({ sub: subs[i], keys: subKeys, ent, band, isAnchor: 0 });
       } else {
         const ov = overlap(entitySet(subIds), core);
         if (ov < disjoint) spin.push(subs[i]); // legacy: foreign → spin off
       }
     }
+    // A5 Phase 1: persist facets BEFORE the split-decision early-return, so coherent
+    // macro-events left whole (the A5 case) are captured too. Presentation/persistence
+    // only — the split logic below is untouched.
+    if (persistFacets) persistEventFacets(db, b.id, facetRecs, now, facetStmts);
     if (!spin.length) continue; // macro-story with sub-threads only → leave whole (the over-fragmentation fix)
     const spinMembers = new Set(spin.flatMap(s => s.members.map(m => m.id)));
     splitIds.push(b.id); split++;
