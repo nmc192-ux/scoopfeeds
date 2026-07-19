@@ -117,7 +117,8 @@ function getEventBySlug(db, slug) {
     SELECT e.*,
       (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)     AS article_count,
       (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
-         JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = e.id)  AS source_count,
+         JOIN articles a ON a.id = ea.article_id
+         WHERE ea.event_id = e.id AND a.source_name IS NOT NULL AND a.source_name <> '') AS source_count,
       (SELECT group_concat(sn, '||') FROM (
          SELECT a.source_name AS sn, COUNT(*) AS c
          FROM event_articles ea JOIN articles a ON a.id = ea.article_id
@@ -251,7 +252,8 @@ router.get("/", (req, res) => {
       SELECT e.*,
         (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)       AS article_count,
         (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
-           JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = e.id)     AS source_count,
+           JOIN articles a ON a.id = ea.article_id
+           WHERE ea.event_id = e.id AND a.source_name IS NOT NULL AND a.source_name <> '') AS source_count,
         (SELECT group_concat(sn, '||') FROM (
            SELECT a.source_name AS sn, COUNT(*) AS c
            FROM event_articles ea JOIN articles a ON a.id = ea.article_id
@@ -473,6 +475,42 @@ router.get("/:slug/articles", (req, res) => {
     res.json({ articles, total, limit, offset });
   } catch (err) {
     logger.error(`GET /api/events/:slug/articles error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/events/:slug/coverage — one row per OUTLET over ALL event articles.
+ *
+ * The dossier COVERAGE section (A2). Unlike /articles (capped at 100), this
+ * groups the full article set server-side, so the outlet count here equals the
+ * header's source_count exactly — both count DISTINCT non-empty source_name over
+ * every event article. Each row carries the outlet's latest headline/url/image
+ * and its article_count for the "+N more" affordance.
+ */
+router.get("/:slug/coverage", (req, res) => {
+  try {
+    const db  = getDb();
+    const ev  = db.prepare("SELECT id FROM events WHERE slug = ?").get(req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+
+    const outlets = db.prepare(`
+      SELECT source_name, url, title, image_url, published_at, article_count
+      FROM (
+        SELECT a.source_name, a.url, a.title, a.image_url, a.published_at,
+               COUNT(*)     OVER (PARTITION BY a.source_name) AS article_count,
+               ROW_NUMBER() OVER (PARTITION BY a.source_name ORDER BY a.published_at DESC, a.id DESC) AS rn
+        FROM event_articles ea
+        JOIN articles a ON a.id = ea.article_id
+        WHERE ea.event_id = ? AND a.source_name IS NOT NULL AND a.source_name <> ''
+      )
+      WHERE rn = 1
+      ORDER BY article_count DESC, published_at DESC
+    `).all(ev.id);
+
+    res.json({ outlets, count: outlets.length });
+  } catch (err) {
+    logger.error(`GET /api/events/:slug/coverage error: ${err.message}`);
     res.status(500).json({ error: "Internal server error" });
   }
 });

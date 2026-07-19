@@ -116,6 +116,20 @@ export function useEventArticles(slug, { limit = 30, offset = 0 } = {}) {
   });
 }
 
+// Coverage grouped BY OUTLET over ALL event articles (A2 dossier). Unlike
+// useEventArticles (capped at 100), the outlet count here matches the header's
+// source_count exactly.
+export function useEventCoverage(slug) {
+  return useQuery({
+    queryKey: ["event-coverage", slug],
+    queryFn: async () => {
+      return unwrapOrThrow(await api.get(`/events/${slug}/coverage`));
+    },
+    enabled: !!slug,
+    staleTime: 3 * 60 * 1000,
+  });
+}
+
 export function useEventPerspectives(slug) {
   return useQuery({
     queryKey: ["event-perspectives", slug],
