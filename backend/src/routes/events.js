@@ -165,8 +165,12 @@ function safeJsonParse(s) {
 // the request path. Returns [] when the event is in no storyline, which is the
 // state on today's graph (STORYLINE_ENABLED default OFF), so ANGLES stays absent
 // until chaining is enabled — matching the design's "empty related[] → no render".
-function getRelatedEvents(db, eventId) {
-  return db.prepare(`
+export function getRelatedEvents(db, eventId) {
+  const self = db.prepare("SELECT slug, title FROM events WHERE id = ?").get(eventId);
+  // Status filter EXCLUDES tombstones (promoter sets merged events to status='merged'),
+  // so a merged sibling never reaches ANGLES. Fetch a little extra (24) so the duplicate
+  // collapse below still has headroom to return a full dozen distinct angles.
+  const rows = db.prepare(`
     SELECT e.id, e.slug, e.title, e.category, e.status, e.severity, e.hero_image_url,
            e.started_at, e.last_activity_at,
       (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
@@ -180,8 +184,32 @@ function getRelatedEvents(db, eventId) {
     WHERE se_self.event_id = ?
       AND e.status IN ('active', 'dormant', 'resolved', 'closed')
     ORDER BY se_sib.position ASC
-    LIMIT 12
-  `).all(eventId).map(r => ({
+    LIMIT 24
+  `).all(eventId);
+
+  // Display guard — ANGLES answers the Google-News comparison, so it must NOT surface the
+  // 2a duplicate residue: the same story minted as a second event with a uniqueSlug "-N"
+  // tail. Collapse near-identical siblings and drop any that duplicate the CURRENT event.
+  // Duplicate key = base slug (slug minus the "-N" tail) OR normalized title. Merged
+  // tombstones are already excluded by the status filter above; this handles the case where
+  // BOTH duplicate episodes are still live (different slug, same story).
+  const baseSlug  = (s) => String(s || "").replace(/-\d+$/, "");
+  const normTitle = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const seenSlug  = new Set([baseSlug(self?.slug)]);
+  const seenTitle = new Set();
+  const selfTitle = normTitle(self?.title);
+  if (selfTitle) seenTitle.add(selfTitle);
+
+  const out = [];
+  for (const r of rows) {
+    const bs = baseSlug(r.slug), nt = normTitle(r.title);
+    if (seenSlug.has(bs) || (nt && seenTitle.has(nt))) continue; // dup of self or a kept sibling
+    seenSlug.add(bs); if (nt) seenTitle.add(nt);
+    out.push(r);
+    if (out.length >= 12) break;
+  }
+
+  return out.map(r => ({
     id:            r.id,
     slug:          r.slug,
     title:         r.title,
