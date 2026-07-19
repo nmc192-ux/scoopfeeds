@@ -117,7 +117,8 @@ function getEventBySlug(db, slug) {
     SELECT e.*,
       (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)     AS article_count,
       (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
-         JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = e.id)  AS source_count,
+         JOIN articles a ON a.id = ea.article_id
+         WHERE ea.event_id = e.id AND a.source_name IS NOT NULL AND a.source_name <> '') AS source_count,
       (SELECT group_concat(sn, '||') FROM (
          SELECT a.source_name AS sn, COUNT(*) AS c
          FROM event_articles ea JOIN articles a ON a.id = ea.article_id
@@ -156,6 +157,43 @@ function getEventBySlug(db, slug) {
 function safeJsonParse(s) {
   if (!s) return null;
   try { return JSON.parse(s); } catch { return null; }
+}
+
+// Related sub-events for the dossier ANGLES section (A2). Sourced from the
+// DURABLE storyline structure (migration 015): sibling events chained into the
+// same storyline as this one. This is a cheap indexed lookup — no clustering in
+// the request path. Returns [] when the event is in no storyline, which is the
+// state on today's graph (STORYLINE_ENABLED default OFF), so ANGLES stays absent
+// until chaining is enabled — matching the design's "empty related[] → no render".
+function getRelatedEvents(db, eventId) {
+  return db.prepare(`
+    SELECT e.id, e.slug, e.title, e.category, e.status, e.severity, e.hero_image_url,
+           e.started_at, e.last_activity_at,
+      (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
+         JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = e.id) AS source_count,
+      (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)     AS article_count
+    FROM storyline_events se_self
+    JOIN storyline_events se_sib
+      ON se_sib.storyline_id = se_self.storyline_id
+     AND se_sib.event_id <> se_self.event_id
+    JOIN events e ON e.id = se_sib.event_id
+    WHERE se_self.event_id = ?
+      AND e.status IN ('active', 'dormant', 'resolved', 'closed')
+    ORDER BY se_sib.position ASC
+    LIMIT 12
+  `).all(eventId).map(r => ({
+    id:            r.id,
+    slug:          r.slug,
+    title:         r.title,
+    category:      r.category,
+    status:        r.status,
+    severity:      r.severity,
+    hero_image_url: r.hero_image_url,
+    source_count:  r.source_count ?? 0,
+    article_count: r.article_count ?? 0,
+    started_at:    r.started_at,
+    last_activity_at: r.last_activity_at,
+  }));
 }
 
 // ─── Routes ────────────────────────────────────────────────────────────────
@@ -214,7 +252,8 @@ router.get("/", (req, res) => {
       SELECT e.*,
         (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)       AS article_count,
         (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
-           JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = e.id)     AS source_count,
+           JOIN articles a ON a.id = ea.article_id
+           WHERE ea.event_id = e.id AND a.source_name IS NOT NULL AND a.source_name <> '') AS source_count,
         (SELECT group_concat(sn, '||') FROM (
            SELECT a.source_name AS sn, COUNT(*) AS c
            FROM event_articles ea JOIN articles a ON a.id = ea.article_id
@@ -316,7 +355,12 @@ router.get("/:slug", (req, res) => {
           .json({ redirect: meta.merged_into_slug, merged_into: meta.merged_into ?? null, status: "merged" });
       }
     }
-    res.json(publicEvent(ev));
+    // ANGLES (A2): durable storyline siblings. Never let a missing/empty
+    // storyline table break the dossier — degrade to no related sub-events.
+    let related = [];
+    try { related = getRelatedEvents(db, ev.id); }
+    catch (e) { logger.warn(`related lookup failed for ${ev.slug}: ${e.message}`); }
+    res.json({ ...publicEvent(ev), related });
   } catch (err) {
     logger.error(`GET /api/events/:slug error: ${err.message}`);
     res.status(500).json({ error: "Internal server error" });
@@ -431,6 +475,42 @@ router.get("/:slug/articles", (req, res) => {
     res.json({ articles, total, limit, offset });
   } catch (err) {
     logger.error(`GET /api/events/:slug/articles error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/events/:slug/coverage — one row per OUTLET over ALL event articles.
+ *
+ * The dossier COVERAGE section (A2). Unlike /articles (capped at 100), this
+ * groups the full article set server-side, so the outlet count here equals the
+ * header's source_count exactly — both count DISTINCT non-empty source_name over
+ * every event article. Each row carries the outlet's latest headline/url/image
+ * and its article_count for the "+N more" affordance.
+ */
+router.get("/:slug/coverage", (req, res) => {
+  try {
+    const db  = getDb();
+    const ev  = db.prepare("SELECT id FROM events WHERE slug = ?").get(req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+
+    const outlets = db.prepare(`
+      SELECT source_name, url, title, image_url, published_at, article_count
+      FROM (
+        SELECT a.source_name, a.url, a.title, a.image_url, a.published_at,
+               COUNT(*)     OVER (PARTITION BY a.source_name) AS article_count,
+               ROW_NUMBER() OVER (PARTITION BY a.source_name ORDER BY a.published_at DESC, a.id DESC) AS rn
+        FROM event_articles ea
+        JOIN articles a ON a.id = ea.article_id
+        WHERE ea.event_id = ? AND a.source_name IS NOT NULL AND a.source_name <> ''
+      )
+      WHERE rn = 1
+      ORDER BY article_count DESC, published_at DESC
+    `).all(ev.id);
+
+    res.json({ outlets, count: outlets.length });
+  } catch (err) {
+    logger.error(`GET /api/events/:slug/coverage error: ${err.message}`);
     res.status(500).json({ error: "Internal server error" });
   }
 });
