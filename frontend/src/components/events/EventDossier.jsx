@@ -7,12 +7,14 @@
  *   2. TIMELINE      latest development first, day-grouped. Mobile: latest-3 + expander.
  *   3. COVERAGE      member articles grouped BY OUTLET, one row per outlet. No cred scores.
  *   4. ANGLES        related[] sub-events as cards. Absent when related[] is empty.
- *   5. ACTORS        event_actors chips, sorted by mentions, cap 8 + "+N".
+ *   5. ACTORS        event_actors chips, wrap freely (any number of rows),
+ *                    sorted by mentions, cap 8 + "+N". (Flag 2: 3-row wrap is
+ *                    accepted as-is — spec is "chips wrap, cap 8 + N", no CSS.)
  *   6. INTELLIGENCE  A3 "earn their render": RI only w/ bound question + trend + source
  *                    count; Sentiment only above a volume floor; Markets only if live.
  *
- * This is the dark-shipped layout (EventPage renders it behind ?a2=1). The legacy
- * layout is untouched. DrJ verifies the A3 earn-render rules + mobile collapse on live.
+ * This is now the DEFAULT layout (EventPage renders it for all events after the
+ * live-device flip). The legacy layout is untouched and remains reachable at ?a2=0.
  */
 
 import { useState } from "react";

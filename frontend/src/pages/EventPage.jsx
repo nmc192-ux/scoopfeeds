@@ -156,13 +156,14 @@ export default function EventPage() {
     );
   }
 
-  // A2 dossier restructure — dark-shipped behind ?a2=1. Default stays legacy
-  // until the flip. The A2 layout owns its own data hooks (EventDossier).
-  if (searchParams.get("a2") === "1") {
-    return <EventDossier event={event} />;
+  // A2 dossier restructure is now the DEFAULT (flipped after live-device
+  // verification). Legacy layout stays reachable at ?a2=0 for fallback.
+  // The A2 layout owns its own data hooks (EventDossier).
+  if (searchParams.get("a2") === "0") {
+    return <LegacyEventBody event={event} slug={slug} />;
   }
 
-  return <LegacyEventBody event={event} slug={slug} />;
+  return <EventDossier event={event} />;
 }
 
 function LegacyEventBody({ event, slug }) {
