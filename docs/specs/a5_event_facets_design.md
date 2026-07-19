@@ -152,3 +152,84 @@ title, never the stored one.
 4. Confirm v1 is read-only cards; interaction + narrow-title treatment deferred to v2.
 
 🛑 **Design gate. No implementation until approved.**
+*(Superseded for Phase 2 by the post-spike revision below; Phase 1 shipped as designed.)*
+
+---
+---
+
+# Phase 2 REVISED design (post-spike, 2026-07-19) — 🛑 at this revision
+
+Phase 1 shipped and is live (EVENT_FACETS_PERSIST=true, 406 rows first sweep). The Phase-2
+GROUND + spike (top-20 events, 07-16 COW; harnesses `_a5_facet_ground.mjs`, `_a5_tau_probe.mjs`,
+`_a5_spike.mjs`) overturned the original render design's data assumption:
+
+**Spike facts (verbatim label sets in the session record):**
+- At the shipped breaker tau 0.78, mega-events collapse to ONE sub-cluster → **1/20 top events
+  would render the shelf**. Iran and World Cup yield ZERO facets — the exact angle-browsing case.
+- Finer tau helps only modestly: at 0.88 Iran fragments into 8 subs but **0 pass the coherence
+  gate** (fine fragments have thin cores); top-20 render rate peaks at **3/20** (0.88/0.90).
+- **Tombstone-derived facets are the richest source for today's mega-events**: each merged
+  tombstone keeps its event_articles (confirmed: Iran survivor has 666 tombstones, 485 with
+  links). After sibling-guard dedup: Iran 22 distinct (2 qualifying), Graham 6 (5 qualifying),
+  Zelensky 5 (2), Kannada 21 (1 — the real S. Janaki story inside the garbage attractor).
+  Top-20 render rate from tombstones alone: **4/20**, with two events at 5–6 facets.
+- **Asymmetry (accepted honestly):** tombstones cover the accreted PAST (rich for current
+  mega-events, built by pre-W1 churn); the Wave-1 no-shells absorb + W2.1 mean future merges
+  mint few tombstones → fine-tau sub-clustering covers the FUTURE. The design needs BOTH.
+- Data-quality traps found: (i) a Graham tombstone titled "Hormuz Route Open…" whose members
+  are all Graham articles (2a-era mis-merge; the TITLE lies about the members) → labels need an
+  entity-sanity check; (ii) Graham's qualifying tombstones include near-duplicate angles with
+  different headlines ("dies suddenly" / "US Senator dies") → title-dedup is insufficient,
+  member-overlap dedup required; (iii) Iran's 67-article "Hormuz" tombstone = 52% of the event's
+  members — not an angle, a pseudo-event → explicit size-share cap required.
+
+## Revised facet sourcing — DUAL SOURCE, unioned
+
+1. **Source A — tombstones (the past):** per survivor, every `status='merged'` event with
+   `meta.merged_into = survivor`, members = tombstone links ∩ survivor's live members.
+   Candidate label = tombstone title.
+2. **Source B — fine-tau sub-clusters (the present/future):** breaker facet pass re-clusters at
+   `EVENT_FACET_TAU` (default **0.88**) — a NEW env, presentation-only; the breaker's split
+   decision stays on DEFAULT_TAU 0.78 and is untouched (guardrail: zero matcher changes).
+   Candidate label = representative member headline.
+
+**Dedup (both sources together):** sibling-guard logic (base-slug strip "-N" / normalized title)
+PLUS **member-overlap collapse**: two facets sharing ≥ 0.5 Jaccard of members merge (keep the
+larger; tombstone label wins on ties — it names the angle at the moment it was a story).
+
+## Revised earn-render gate
+
+A facet renders only if ALL of:
+- `size ≥ FACET_MIN_ARTICLES` (5) — unchanged;
+- coherent hub-filtered core (`isIncoherent` thresholds: ≥2 keys, ≥4 idf mass) — unchanged;
+- **NEW: size ≤ FACET_MAX_SHARE (0.6) × event member count** — a facet that IS most of the
+  event is not an angle (kills the 67a Hormuz pseudo-facet class); the anchor sub is likewise
+  never rendered as a facet (it's the event itself).
+
+Shelf renders only with **≥ 2 qualifying facets** — unchanged. Kannada-class garbage stays out
+(spike-verified: 0 qualifying tau facets on the attractor at every tau; 20/21 junk tombstones
+rejected). **Partial coverage is accepted** (A3 philosophy): a single-thread story rendering no
+shelf is correct, not broken. Expected initial coverage ~4–6/20 mega-events, growing as W3
+cleans the graph and future coverage accrues via Source B.
+
+## Revised labels — mechanical hybrid (NO LLM, hot-path safe)
+
+- **Primary = the candidate headline** (tombstone title or representative member headline),
+  guarded by an **entity-sanity check**: the label's entities must intersect the facet's member
+  core; on mismatch (the "Hormuz on the Graham page" trap) fall back to the entity label.
+- **Secondary eyebrow = entity label**: top-2 DISTINCTIVE core entities (rank facet-unique keys
+  before event-shared ones, by idf), display via `article_entities.label || surface`, with
+  case-insensitive variant dedup ("Graham · Lindsey Graham" → one) and a per-part length cap
+  (~28 chars — kills the Wikidata long-surface blowup observed in the spike).
+
+## Persistence + render deltas
+
+- `event_facets` gains a `source` column ('tau' | 'tombstone'); `EVENT_FACET_TAU` env (0.88).
+- **Recompute:** the 406 rows at 0.78 are truncated + recomputed under the new scheme
+  (additive tables, cheap; flag stays on).
+- Render: "Threads in this story" A2 section, dark behind `?facets=1`, its own ship gate.
+  **Facet cards are NOT links to tombstone events** — a tombstone URL 302s to the survivor
+  (self-loop). v1 cards are display-only (label + N articles · M sources); in-page
+  timeline/coverage filtering is v2.
+
+🛑 **Phase 2 revised design gate — no shelf implementation until DrJ approves this revision.**
