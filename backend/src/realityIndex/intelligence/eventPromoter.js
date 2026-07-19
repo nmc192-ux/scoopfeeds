@@ -418,13 +418,17 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     const survivor = ea.started_at <= eb.started_at ? a : b;
     const absorbed = survivor === a ? b : a;
     parent.set(absorbed, survivor);
-    merges.push({ survivor, absorbed });
+    // Capture DECISION-TIME min-side (pre-union sizes) — logged on the merge line so the
+    // W2.1 floor can be recalibrated on real (ent, min-side) merge distributions, not
+    // post-hoc accreted sizes. The apply loop unions ea.ids into the survivor, so min-side
+    // must be measured here, before that happens.
+    merges.push({ survivor, absorbed, minSide: Math.min(ea.ids.size, eb.ids.size) });
   };
   for (const cl of clusters) {
     const evs = [...new Set([...eventState.values()].filter((ev) => qualifies(cl, ev).ok).map((ev) => find(ev.id)))];
     for (let i = 0; i < evs.length; i++) for (let j = i + 1; j < evs.length; j++) tryMerge(evs[i], evs[j]);
   }
-  for (const { survivor, absorbed: absorbedId } of merges) {
+  for (const { survivor, absorbed: absorbedId, minSide } of merges) {
     const sEv = eventState.get(survivor), aEv = eventState.get(absorbedId);
     if (!sEv || !aEv) continue;
     for (const aid of aEv.ids) { linkArticle.run(survivor, aid, now); sEv.ids.add(aid); }
@@ -433,12 +437,15 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     // The ent reported MUST be the measure the gate used (unified when on) —
     // the R3 validation caught this line reporting legacy core↔core numbers
     // for decisions the unified gate had made on TOPK containment.
+    // W2.1: min-side (decision-time, pre-union) rides this line too → the corpus the
+    // merge floor is recalibrated on once this instrumentation has run ~a week live.
     logger.info(`🧭 promoter-merge ${JSON.stringify({
       survivor: sEv.slug.slice(0, 48), absorbed: aEv.slug.slice(0, 48),
       cos: +cosine(sEv.centroid, aEv.centroid).toFixed(3),
       ent: UNIFIED_AFFINITY
         ? +affinity(affCtx, sEv.entSet, aEv.entSet).ent.toFixed(3)
         : (ENTITY_MIN > 0 ? +rarityOverlap(sEv.core, aEv.core, idfMap, fallbackIdf).toFixed(3) : null),
+      minSide,
     })}`);
     eventState.delete(absorbedId);
   }
@@ -515,6 +522,13 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
             linkMarket.run(target, cm.market_id, cm.weight, cm.rank, now);
           }
           touchActivity.run(now, now, target);
+          // 🧭 absorb log — a QUALIFYING cluster that lost the 1-to-1 race and was
+          // folded into its best event (no shell minted). Closes the last silent
+          // promoter path; the score is the qualify score that justified the absorb.
+          logDecision("promoter-absorb", {
+            cluster: String(c.id).slice(0, 16), title: (c.title || "").slice(0, 44),
+            size: clusterSize, into: tEv.slug.slice(0, 44), score: +bestQual.get(ci).score.toFixed(3),
+          });
           absorbed++;
           return;
         }
@@ -522,11 +536,20 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
       if (eventId) {
         const ev = eventState.get(eventId);
         if (ev && ev.status === "dormant") reactivated++;
-        if (clusterSize >= (ev?.titleClusterSize || 0)) {
+        const prevTitleSize = ev?.titleClusterSize || 0;
+        if (clusterSize >= prevTitleSize) {
           // strong continuation → adopt the new anchor title and record its cluster size
           updateNewTitle.run(c.title, summary, severity, hero, now, now,
             JSON.stringify({ title_cluster_size: clusterSize }), eventId); // preserves id, slug, started_at
           if (ev) ev.titleClusterSize = clusterSize;
+          // 🧭 matched-summary log — the adopt branch is the ONLY path that rewrites an
+          // event's summary (updateKeepTitle protects it). "adopt" = incoming summary
+          // stamped; "keep-null" = incoming was null so COALESCE preserved the prior. Makes
+          // summary provenance greppable — the instrument for the 2e contamination class.
+          logDecision("promoter-match", {
+            event: ev?.slug?.slice(0, 44) ?? String(eventId).slice(0, 8), cluster: String(c.id).slice(0, 16),
+            size: clusterSize, prevTitleSize, summary: summary ? "adopt" : "keep-null",
+          });
         } else {
           // small/diffuse tail → keep the durable title, refresh activity/severity/hero
           // (summary intentionally NOT updated here — Wave 1 summary protection)
