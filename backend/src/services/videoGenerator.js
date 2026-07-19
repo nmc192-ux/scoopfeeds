@@ -31,6 +31,7 @@ import { fileURLToPath } from "url";
 import { createRequire } from "node:module";
 import { logger } from "./logger.js";
 import { generateTts, buildVideoScript } from "./ttsService.js";
+import { writeScript } from "./scriptWriter.js";
 
 // CommonJS bridge — needed to load packages that only export the binary path
 // via require() (e.g. @ffmpeg-installer/ffmpeg).
@@ -747,7 +748,24 @@ export async function generateVideo(article) {
   }
 
   const color   = catColor(article.category);
-  const bullets = extractBullets(article);
+
+  // ── V2: LLM script (spec §4). Returns null on ANY failure — unconfigured,
+  // API down, malformed output, or failed grounding check — and we fall back
+  // to the deterministic path below. The pipeline must never lose the ability
+  // to produce video because a model endpoint is unavailable.
+  let llmScript = null;
+  try {
+    llmScript = await writeScript(article, { format: "short", targetSeconds: 40 });
+  } catch {
+    llmScript = null; // writeScript shouldn't throw, but the render loop is not
+                      // the place to find out otherwise.
+  }
+
+  // Slide text: prefer the LLM's on-screen lines (written to complement the
+  // narration rather than duplicate it), else the existing extractor.
+  const bullets = (llmScript?.slides?.length >= 3)
+    ? llmScript.slides.slice(0, 3).map(s => s.body || s.heading || "")
+    : extractBullets(article);
 
   // 1. Render slides
   const slideFiles = [];
@@ -774,7 +792,7 @@ export async function generateVideo(article) {
   // 2. Generate TTS (optional — null if not configured)
   let audioPath = null;
   try {
-    const script = buildVideoScript(article, bullets);
+    const script = llmScript?.narration || buildVideoScript(article, bullets);
     audioPath = await generateTts(script, id);
     if (audioPath) logger.debug(`videoGenerator: TTS audio at ${audioPath}`);
   } catch (err) {

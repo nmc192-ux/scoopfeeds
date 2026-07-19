@@ -17,6 +17,7 @@ import { runAllPlatformsCycle, listEnabledPlatforms } from "./socialPublisher.js
 import { runXQueueGenerationCycle } from "./xPostGenerator.js";
 import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEventVideo, previewSlide } from "./videoGenerator.js";
 import { runVideoPublishAndApproveCycle } from "./videoPublisher.js";
+import { filterVideoEligible } from "./videoEditorialPolicy.js";
 import { isYouTubeConfigured, getVideoStats } from "./youtubeClient.js";
 import { isInstagramConfigured } from "./instagramClient.js";
 import { isFacebookConfigured } from "./facebookClient.js";
@@ -890,9 +891,13 @@ export async function runVideoGenCycle({ batchSize = 3 } = {}) {
     // Opt-in to the RI-aware ranker via REEL_USE_RI_SELECTOR=1.
     // Falls back to the base credibility selector when off or no RI signals.
     const useRi = String(process.env.REEL_USE_RI_SELECTOR ?? "").toLowerCase() === "1";
-    const toRender = useRi
+    const rawCandidates = useRi
       ? pickTopReelCandidates({ limit: batchSize, minCredibility: 7 })
       : findArticlesForVideoQueue({ minCredibility: 7, limit: batchSize });
+    // Editorial boundary D1 — PK-domestic politics is out of scope for public
+    // video. Applied here (post-selection) rather than in SQL so the rule
+    // lives in one auditable place and both selectors inherit it.
+    const toRender = filterVideoEligible(rawCandidates);
     if (!toRender.length) { logger.info("🎬 No candidates for video gen"); return; }
 
     for (const article of toRender) {
