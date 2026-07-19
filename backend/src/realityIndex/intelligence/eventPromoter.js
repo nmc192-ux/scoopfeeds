@@ -77,6 +77,26 @@ const CORE_FRAC           = Number.parseFloat(process.env.EVENT_ENTITY_CORE_FRAC
 // stories regardless of how rare it is. 999 = no exclusion (default; swept in the harness).
 const MAX_CATSPAN         = parseInt(process.env.EVENT_ENTITY_MAX_CATSPAN || "999", 10);
 
+// ── W2.1 small-side porosity floor (unified-affinity path only) — SHIPS DISABLED ──
+// Would block an AFFINE event↔event merge when affinity is only MODERATE
+// (ent < FLOOR_ENT) AND the smaller side is thin (min-side < FLOOR_MIN_SIDE member
+// articles). Rationale for the code path: the shipped measure is idf-weighted
+// CONTAINMENT (intersection / smaller-side mass), so a small event's few generic keys
+// can sit inside a macro-event's broad set and score mid-band.
+//
+// SHIPPED OFF (FLOOR_MIN_SIDE default 0 → guard below is false → byte-identical to
+// pre-W2.1 merge behavior). Calibration on the 2026-07-16 COW showed labeled SAME pairs
+// span containment 0.248–0.377 — ENTIRELY below FLOOR_ENT 0.50 — so ent<0.50 is
+// always-true and the floor collapses to "block thin-sided merges", catching the R1
+// newborn continuation (0.248 / min-side 5) and re-opening under-merge churn. That was a
+// POST-HOC measurement; a decision-time gate must be calibrated on decision-time data.
+// The 🧭 promoter-merge line now logs (ent, min-side) at decision time — after ~a week
+// live, re-sweep the floor on that corpus and set a threshold from the real SAME/porous
+// distributions (or conclude "no floor — different discriminator"). Env-enableable then
+// with no code change.
+const MERGE_FLOOR_ENT      = Number.parseFloat(process.env.EVENT_MERGE_FLOOR_ENT || "0.50");
+const MERGE_FLOOR_MIN_SIDE = parseInt(process.env.EVENT_MERGE_FLOOR_MIN_SIDE || "0", 10);
+
 // R2a: persist the event's entity signature (top-K keys + idf) while members are ALIVE —
 // articles prune at 7d, so this durable copy is the only identity an event keeps after
 // its members age out. Upserted on every match/create; R2b chains storylines from it.
@@ -412,6 +432,14 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
       const { ent, band } = affinity(affCtx, ea.entSet, eb.entSet);
       if (band !== BANDS.AFFINE) {
         logDecision("merge-hold", { a: ea.slug.slice(0, 44), b: eb.slug.slice(0, 44), band, ent: +ent.toFixed(3) });
+        return;
+      }
+      // W2.1 small-side porosity floor (SHIPS DISABLED: FLOOR_MIN_SIDE default 0).
+      // AFFINE but moderate + thin small side → hold. See the constant block above:
+      // enable only after recalibrating on decision-time (ent, min-side) data.
+      const minSide = Math.min(ea.ids.size, eb.ids.size);
+      if (MERGE_FLOOR_MIN_SIDE > 0 && ent < MERGE_FLOOR_ENT && minSide < MERGE_FLOOR_MIN_SIDE) {
+        logDecision("merge-floor", { a: ea.slug.slice(0, 44), b: eb.slug.slice(0, 44), ent: +ent.toFixed(3), minSide });
         return;
       }
     } else if (ENTITY_MIN > 0 && rarityOverlap(ea.core, eb.core, idfMap, fallbackIdf) < ENTITY_MIN) return; // legacy entity gate — core↔core
