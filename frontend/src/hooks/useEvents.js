@@ -81,6 +81,19 @@ export function useEventTimeline(slug, { kind, limit = 50 } = {}) {
   });
 }
 
+// A6 event-log timeline (occurrence-deduped), dark behind ?tl=1. enabled-gated so the
+// dark path issues no extra fetch; computed read-side, cached like the other reads.
+export function useEventTimelineLog(slug, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: ["event-timeline-log", slug],
+    queryFn: async () => {
+      return unwrapOrThrow(await api.get(`/events/${slug}/timeline-log`));
+    },
+    enabled: !!slug && enabled,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
 export function useEventMarkets(slug) {
   return useQuery({
     queryKey: ["event-markets", slug],

@@ -23,6 +23,7 @@ import { latestRealityIndex, realityIndexHistory } from "../realityIndex/dal/rea
 import { listTrackersByEvent } from "../models/trackers.js";
 import { publicTracker } from "./trackers.js";
 import { groupTopEvents } from "../realityIndex/intelligence/eventGrouping.js";
+import { buildOccurrenceTimeline } from "../realityIndex/intelligence/eventTimelineLog.js";
 
 const router = express.Router();
 
@@ -445,6 +446,26 @@ router.get("/:slug/timeline", (req, res) => {
     res.json({ timeline: rows.map(publicTimelineEntry), limit, offset });
   } catch (err) {
     logger.error(`GET /api/events/:slug/timeline error: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/events/:slug/timeline-log — the A6 EVENT-LOG timeline (dark behind ?tl=1 on
+ * the frontend). Occurrence-deduped: one row per real-world occurrence (near-duplicate
+ * articles within a bounded time window), attributed to the N outlets that covered it,
+ * newest-first, each linking the representative article. Read-layer, computed on the fly
+ * (behind the /api/ri short cache); no writes, no graph changes. See eventTimelineLog.js.
+ */
+router.get("/:slug/timeline-log", (req, res) => {
+  try {
+    const db = getDb();
+    const ev = db.prepare("SELECT id FROM events WHERE slug = ?").get(req.params.slug);
+    if (!ev) return res.status(404).json({ error: "Event not found" });
+    const occurrences = buildOccurrenceTimeline(ev.id, { db });
+    res.json({ occurrences, count: occurrences.length });
+  } catch (err) {
+    logger.error(`GET /api/events/:slug/timeline-log error: ${err.message}`);
     res.status(500).json({ error: "Internal server error" });
   }
 });
