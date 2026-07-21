@@ -43,3 +43,4 @@ backend/_pilot_data/
 
 # Entity-sync DB (3 entity tables only) built off-host to ship to prod
 backend/_entity_sync.db
+.env.bak*
