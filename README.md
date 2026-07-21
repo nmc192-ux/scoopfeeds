@@ -16,7 +16,17 @@ analytical workstation for journalists, researchers, and analysts.
 
 ## Project status
 
-Scoopfeeds is currently in **Phase A (Stabilization and Audit)**. See the [Strategic Plan](docs/strategy/strategic_plan_v6.md) for the full vision and the [Phase A Kickoff Brief](docs/phases/phase_a_kickoff_brief.md) for current execution work.
+The Newsroom is **live at [scoopfeeds.com](https://scoopfeeds.com)**. Phase A
+(Stabilization and Audit) and the Phase B go-live are complete; current work is the
+post-audit remediation programme — event-graph integrity and the reader-facing dossier.
+
+**Start here for current state:**
+- [State of play](docs/STATE_OF_PLAY.md) — what's shipped, what's dark, what's next
+- [Dossier & event graph](docs/architecture/dossier_and_event_graph.md) — how the system actually works today
+- [Environment / feature-flag reference](docs/reference/env_reference.md) — every flag, default, and prod value
+
+For the longer arc, see the [Strategic Plan](docs/strategy/strategic_plan_v6.md) and the
+[Phase B go-live runbook](docs/phases/phase_b_go_live_runbook.md).
 
 **Language support note:** English UI is fully supported. Urdu UI has correct RTL layout but translation quality is currently variable due to translation pipeline limitations being addressed in Phase B/C. Other language UIs (Arabic, Russian, Mandarin) are on the Phase E roadmap.
 
@@ -32,10 +42,16 @@ Key entry points:
 
 ## Tech stack
 
-- **Backend:** Node.js / Express patterns, SQLite (with Postgres path documented for later phases)
-- **Frontend:** Next.js / React
-- **Deployment:** Hostinger (web tier), Mac mini (auxiliary), Docker production stack
-- **AI:** Multi-model routing (DeepSeek for routine, Claude/GPT for complex)
+- **Backend:** Node.js / Express, SQLite via better-sqlite3 (+ `sqlite-vec` for embeddings;
+  Postgres path documented for later phases)
+- **Frontend:** React + Vite
+- **Deployment:** VPS (`/opt/scoopfeeds`), Docker Compose — `web` / `worker` / `scheduler`
+  containers split by `SCOOP_PROCESS_ROLE`
+- **AI:** Google Gemini, pinned via `GEMINI_GENERATION_MODEL`, with deterministic
+  (non-LLM) fallbacks on every path and hard cost rails (`LLM_DAILY_CALL_CAP`,
+  `thinkingBudget: 0`, output caps)
+- **Event graph:** embedding clustering + a single entity-affinity measure shared by the
+  promoter, merge and breaker — see [dossier & event graph](docs/architecture/dossier_and_event_graph.md)
 - **Search backbone (planned):** Brave Search API + Exa.ai
 - **Alerts (planned):** web push, email, Telegram (free tier); WhatsApp + webhooks + Slack/Teams (premium)
 

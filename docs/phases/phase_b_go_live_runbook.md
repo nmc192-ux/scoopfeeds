@@ -259,3 +259,84 @@ The incoherent over-merge blob no longer exists in the durable graph; the homepa
 **Wave 2 — FLIPPED LIVE + FIRST-CYCLE VERIFIED (2026-07-16 18:13Z; treadmill DEAD).** First ~53 min / 2 cycles: 🧭 poison signature GONE (zero `gate-rejected + shared_article + cos~0.98` lines); breaker converging 16→1→0 splits with banded keep decisions; counters (17:53→18:46): iran 346→347 (one transition, not per-cycle minting), fifa 111→114 (live World Cup — plausibly real sub-stories, on watch), **kannada links 1747→1747 FLAT — the garbage-attractor stopped accreting**. Promoter: promoted 4 / matched 113 / absorbed 165 / held 2 / merged 62. Site 200, pipelines.ok true. Multi-day freeze watch running; Wave 3 (husk cleanup + blob dissolution + summary repair) opens when families hold flat.
 
 - **Live finding (DrJ watch): merge-gate small-side porosity — investigated on the COW, within-spec, fix proposed.** A vietnam-speedboat event merged into an Indian-govt survivor at ent 0.482. COW reproduction of the class (`vietnam↔lok-adalat`): containment 0.285 vs Jaccard 0.062 — the driver is the CONTAINMENT denominator (min-side mass), which makes SMALL events (7 hub-filtered keys) cheap to absorb when they share 2-3 span-1/2 regional entities (Q1361 idf 6.09, Q1445 idf 4.66). NOT a cat_span problem — the driving keys are legitimately non-hub; tightening the hub filter wouldn't catch them. Switching MERGE to symmetric Jaccard fails calibration: genuine same-story consolidation merges (iran↔iea 0.173, fifa↔tuchel 0.174) fall below T_MATCH and duplicate families would stop consolidating. **Proposed Wave-2.1 (own micro-gate):** merge-specific evidence floor — min-side entity-set size ≥ 10 AND intersection ≥ 3 keys (env-tunable) — which on current labels blocks vietnam↔lok-adalat (min-side 7) while passing iran/fifa (40/40); calibrate the floor from a day of live 🧭 merge/merge-hold lines before shipping. Bounded meanwhile: the class needs cos ≥ 0.86 + shared regional keys + a small event, and every instance is 🧭-countable.
+
+---
+
+## Post-Wave-2 → 2026-07-20 (commit `6046e11`)
+
+Everything below shipped after the Wave-2 flip. Current-state docs now live outside this
+log: [`docs/architecture/dossier_and_event_graph.md`](../architecture/dossier_and_event_graph.md)
+(how it works), [`docs/reference/env_reference.md`](../reference/env_reference.md) (every
+flag/default/prod value), [`docs/STATE_OF_PLAY.md`](../STATE_OF_PLAY.md) (status + next).
+
+**A2 dossier — FLIPPED to default (`030b39f`, merged `130bb85`).** Legacy at `?a2=0`.
+Section order Header → Timeline → Coverage → Angles → Actors → Intelligence; mechanical
+header (no LLM prose — that was the 2e contamination vector); credibility scores hidden;
+earn-render everywhere (absent ≠ broken). Flag-3 fix: header outlet count == Coverage count
+(both DISTINCT non-empty `source_name` over all articles). Flag-2 adjudicated: chips wrap,
+cap 8 + N, no CSS change.
+
+**W2.1 — instrumentation SHIPPED, merge floor SHIPPED DISABLED (`3f20cb8`, `0c68bf9`).**
+🧭 gained `promoter-absorb`, `promoter-match` (summary adopt/keep-null — the 2e instrument)
+and **decision-time min-side on `promoter-merge`**. The floor (`EVENT_MERGE_FLOOR_MIN_SIDE`)
+ships at **0 = disabled**: COW calibration showed labeled SAME pairs span ent **0.248–0.377,
+entirely below the proposed 0.50 floor**, so the condition is always-true and the floor
+degenerates into blocking every thin-sided merge — including the R1 newborn continuation
+(0.248 / min-side 5), which would re-open under-merge churn through the anti-blob door.
+The original 0.482 observation could not be reproduced on the frozen COW (post-merge sets).
+**Lesson: post-hoc measurement cannot calibrate a decision-time gate** — hence the min-side
+enrichment, so recalibration runs on decision-time data.
+
+**A5 facets — Phase 1 + 2 SHIPPED, shelf DARK behind `?facets=1` (migrations 018 + 019).**
+GROUND overturned the original render design: at the breaker's 0.78 tau the mega-events
+collapse to ONE sub-cluster and the shelf would render on ~1/20 events. Revised to **dual
+source** — merged tombstones (each keeps its `event_articles`, covering the accreted past)
++ fine-tau 0.88 sub-clusters (presentation-only; breaker split tau untouched at 0.78).
+Stable `hash(core-keys)` identity so facets accumulate; gates at write time
+(`FACET_MIN_ARTICLES` 5, `FACET_MAX_SHARE` 0.5, coherent core); dedup on **overlap-over-min
+0.5, chosen empirically over Jaccard** because tombstone duplicates are *nested* accretion
+stages (must-collapse pairs: Jaccard 0.22–0.25 misses, ovmin 0.5–1.0 catches). Labels
+mechanical, no LLM: headline primary with an entity-sanity check (a tombstone titled
+"Hormuz Route Open…" whose members were all Graham articles), ENT eyebrow as fallback.
+Cards display-only — tombstone URLs 302 back to the survivor.
+
+**Storylines — FLIPPED ON.** Pre-flip guard added: ANGLES excludes tombstones (already) and
+now collapses near-identical `-N` duplicates (`2dc5b89`). **Finding worth keeping: ANGLES is
+thin by construction** — Wave 2 consolidates an event's angles *into* the macro-event as
+tombstones, so the 792-event US-Iran chain is 3 active / 789 merged and renders ~1 sibling.
+Correct, not broken — and the reason **facets**, not storylines, are the angle-browsing
+vehicle. Chain quality sound: all four labeled cross-story pairs correctly rejected; the
+2026-07-12 subset-degeneracy failure does not reproduce.
+
+**A6 timeline-as-event-log — SHIPPED, flip prepared (`0bd49c7`, `362a168`).** The dossier
+timeline was one row per ARTICLE (142 articles → ~142 rows), so more sources made it worse.
+Now one row per **occurrence**: near-dup cosine (`EVENT_TL_DEDUP_TAU` 0.88) within a
+**bounded time window** (`EVENT_TL_DEDUP_WINDOW_H` 6h). **The window is load-bearing** —
+plain near-dup clustering chained 78 articles / 100h into one lying row; at 12h two same-day
+strike rounds merged; 6h separates them. Earliest-article timestamp, outlet-count ranking
+with the **3 newest occurrences pinned** (without the pin the reader lost the most recent
+7.7h), top-15 + show-full, rows link the representative article (also closes the queued
+"timeline entries don't link" item). Multi-outlet **beats** render distinctly from
+single-outlet **analysis**. Ceiling accepted: singletons are not a defect — a lone op-ed is a
+distinct item; Phase C's value is relabelling beats, not further collapse.
+
+**Sentiment module — HIDDEN (`VITE_SENTIMENT_ENABLED=false`).** Audit: one machine "media"
+polarity rendered as scaleless "streams" (component supports 6 sources; 42,157 events have
+1), "N mentions" not reconcilable against the article count. **Earn-render must gate on
+COMPREHENSIBILITY, not just data sufficiency.** Consequence handled: the Intelligence
+section now disappears cleanly (no orphan header) when nothing qualifies — which on most
+events is now the case, leaving markets as the only module (currently mis-bound, GROUND queued).
+
+**Timeline writer starvation — DIAGNOSED + FIXED (`be6bc54`).** Live defect: default-path
+timelines empty on new events. The writer never stopped — its **selection** was starved.
+`eventTimelineBuilder` has no cursor; it re-scans the freshest N active events hourly, so
+anything outside the window never gets rows, permanently. The window was a hardcoded
+`LIMIT 500` and **USGS/NOAA machine events held 295 of it (59%)** — they carry no articles
+and yield zero rows, so most of the window produced nothing (affected ranks: 591, 685, 3083).
+Fix: `EXISTS(event_articles)` + `EVENT_TIMELINE_MAX_EVENTS` (2000). COW: 500 slots/322
+wasted → 423 used/0 wasted, where 423 is the whole article-bearing active population.
+Ruled out first, with evidence: migration 017's conflict target (correct), refreshAnalysis
+hash and `LLM_DAILY_CALL_CAP` (builder is an independent hourly cron, not downstream),
+article data (A6 reads the same rows and renders fine), scheduler death (promoter still running).
+**This is the second production failure caused by article-less machine events** — quarantine
+at ingest is now an open item rather than another downstream patch.

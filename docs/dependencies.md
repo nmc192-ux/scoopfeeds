@@ -52,7 +52,19 @@ For each dependency:
 
 ## 2. AI and ML services
 
-> **Note on the AI stack as of May 2026:** the Strategic Plan and README describe a multi-model routing pattern using Anthropic / OpenAI / DeepSeek. The actively wired LLM stack in `backend/src/realityIndex/llmQueue.js` is different: it uses **Cerebras (standard tier) + Groq (premium tier) + Cloudflare Workers AI (embeddings)**, with NVIDIA NIM, Ollama, and Gemini as configurable alternatives. Anthropic, OpenAI, and DeepSeek are not currently paid API integrations. Both states are documented below for accuracy.
+> **Note on the AI stack — updated 2026-07-20.** The Strategic Plan describes a *planned*
+> multi-model routing pattern (DeepSeek routine / Claude-GPT complex) for the Phase-C
+> generative-answers feature; that is still a plan, not the current wiring. **What is
+> actually wired and paid for today is Google Gemini**, pinned via
+> `GEMINI_GENERATION_MODEL` (prod: `gemini-3.1-flash-lite`) with hard cost rails
+> (`thinkingBudget: 0`, output caps, `LLM_DAILY_CALL_CAP`, actor-attempts ledger) added
+> after the gate-(a) cost incident. Cerebras / Groq / Cloudflare Workers AI / NVIDIA NIM /
+> Ollama remain configurable alternatives in `llmQueue.js` but are not the live path.
+> Anthropic, OpenAI and DeepSeek are not paid API integrations. Every LLM path has a
+> deterministic non-LLM fallback. See [`reference/env_reference.md`](reference/env_reference.md).
+>
+> *(This note previously described Cerebras+Groq as the live stack — accurate in May 2026,
+> superseded by the Gemini pin in July.)*
 
 ### Cerebras Cloud
 - **Purpose:** STANDARD-tier LLM (matching, sentiment, reranking, default `LLM_PROVIDER`)
