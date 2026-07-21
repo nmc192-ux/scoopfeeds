@@ -14,6 +14,13 @@ import { logger } from "../../services/logger.js";
 
 const PRICE_MOVE_THRESHOLD = 0.05; // 5% YES-price shift qualifies as a market move
 const ARTICLE_IMPORTANCE_BASE = 0.5;
+// Selection window. The builder has no cursor: it re-scans the freshest N active events
+// each run, so anything outside the window never gets rows — permanently. Prod 2026-07-20:
+// 295 of the live top-500 were machine-generated (NOAA/USGS) events that carry NO articles
+// and therefore yield ZERO timeline rows, so ~59% of the window was spent producing nothing
+// while real stories starved outside it (could-infantino rank 591, soybeans 685,
+// uk-urges-fifa 3083 — all beyond LIMIT 500, all rendering empty timelines).
+const MAX_EVENTS = parseInt(process.env.EVENT_TIMELINE_MAX_EVENTS || "2000", 10);
 
 function articleImportance(article) {
   // Boost for source credibility score, decay older articles slightly.
@@ -117,9 +124,16 @@ function buildMarketMoveEntries(db, event) {
 export async function runEventTimelineBuilder() {
   const db = getDb();
 
+  // EXISTS(event_articles) keeps the window on events that can actually yield rows —
+  // machine-generated events (NOAA/USGS alert feeds) carry no articles and were consuming
+  // most of it. Paired with an env-tunable limit so the window can grow with the graph.
   const events = db.prepare(`
-    SELECT id, title FROM events WHERE status = 'active' ORDER BY last_activity_at DESC LIMIT 500
-  `).all();
+    SELECT e.id, e.title FROM events e
+    WHERE e.status = 'active'
+      AND EXISTS (SELECT 1 FROM event_articles ea WHERE ea.event_id = e.id)
+    ORDER BY e.last_activity_at DESC
+    LIMIT ?
+  `).all(MAX_EVENTS);
 
   let totalArticles = 0;
   let totalMoves = 0;
