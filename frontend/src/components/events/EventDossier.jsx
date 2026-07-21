@@ -266,6 +266,11 @@ function TimelineSection({ slug, entries, isLoading }) {
 // significance (outlet count), "show full timeline" reveals the analysis tail.
 
 const TL_RANK_SHOWN = 15;
+// Recency pin: the N most recent occurrences ALWAYS show, then the rest of the slots
+// fill by outlet count. Without this, pure significance ranking buries "what just
+// happened" behind the expander (live: Iran's shown set ended Jul 20 11:21 PM while a
+// Jul 21 "Houthis Declare a Naval Blockade" beat sat hidden).
+const TL_RECENCY_PIN = 3;
 
 function OccurrenceRow({ o }) {
   const attribution = o.article_count > 1
@@ -303,14 +308,17 @@ function OccurrenceRow({ o }) {
 function OccurrenceTimelineSection({ slug, occurrences = [], isLoading }) {
   const [expanded, setExpanded] = useState(false);
 
-  // Rank by significance (outlet count; article count tiebreak); show the top N,
-  // then display those in the same day-grouped latest-first order as the full log.
-  const shownIds = new Set(
-    [...occurrences]
-      .sort((a, b) => b.significance - a.significance || b.article_count - a.article_count)
-      .slice(0, TL_RANK_SHOWN)
-      .map(o => o.id)
-  );
+  // Shown set = the TL_RECENCY_PIN most recent occurrences (occurrences arrive ts DESC)
+  // + the remaining slots filled by significance (outlet count; article count tiebreak).
+  // Displayed in the same day-grouped latest-first order as the full log.
+  const pinnedIds = occurrences.slice(0, TL_RECENCY_PIN).map(o => o.id);
+  const pinned = new Set(pinnedIds);
+  const bySignificance = occurrences
+    .filter(o => !pinned.has(o.id))
+    .sort((a, b) => b.significance - a.significance || b.article_count - a.article_count)
+    .slice(0, Math.max(0, TL_RANK_SHOWN - pinned.size))
+    .map(o => o.id);
+  const shownIds = new Set([...pinnedIds, ...bySignificance]);
   const visible = expanded ? occurrences : occurrences.filter(o => shownIds.has(o.id));
 
   const groups = [];
@@ -704,9 +712,13 @@ export default function EventDossier({ event }) {
   // mean each dark path costs nothing: no extra fetch unless its param is present.
   const [searchParams] = useSearchParams();
   const facetsOn = searchParams.get("facets") === "1";
-  const tlLogOn  = searchParams.get("tl") === "1";     // A6 event-log timeline
+  // A6 event-log timeline is the DEFAULT; the stored-row legacy timeline stays
+  // reachable at ?tl=0. The occurrence log is computed read-time from articles, so it
+  // is also immune to the event_timeline WRITER outage (empty legacy timelines on
+  // newly-created events) — the flip is the user-facing fix for that defect.
+  const tlLogOn  = searchParams.get("tl") !== "0";
 
-  const { data: tlData,   isLoading: loadingTimeline }  = useEventTimeline(slug, { limit: 60 });
+  const { data: tlData,   isLoading: loadingTimeline }  = useEventTimeline(slug, { limit: 60, enabled: !tlLogOn });
   const { data: covData,  isLoading: loadingCoverage }  = useEventCoverage(slug);
   const { data: actData,  isLoading: loadingActors }    = useEventActors(slug);
   const { data: mkData }                                = useEventMarkets(slug);

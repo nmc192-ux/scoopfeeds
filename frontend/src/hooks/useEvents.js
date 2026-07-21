@@ -68,7 +68,9 @@ export function useEvent(slug) {
   });
 }
 
-export function useEventTimeline(slug, { kind, limit = 50 } = {}) {
+// The stored-row timeline. `enabled` lets the dossier skip this fetch entirely when the
+// A6 occurrence log is in use (default), so only the legacy path (?tl=0) pays for it.
+export function useEventTimeline(slug, { kind, limit = 50, enabled = true } = {}) {
   return useQuery({
     queryKey: ["event-timeline", slug, { kind, limit }],
     queryFn: async () => {
@@ -76,7 +78,7 @@ export function useEventTimeline(slug, { kind, limit = 50 } = {}) {
       if (kind) params.set("kind", kind);
       return unwrapOrThrow(await api.get(`/events/${slug}/timeline?${params}`));
     },
-    enabled: !!slug,
+    enabled: !!slug && enabled,
     staleTime: 2 * 60 * 1000,
   });
 }
