@@ -28,7 +28,7 @@
 import crypto from "crypto";
 import { getDb } from "../../models/database.js";
 import {
-  UNIFIED_AFFINITY, buildAffinityCtx, affinity, isIncoherent, BANDS, logDecision,
+  buildAffinityCtx, affinity, isIncoherent, BANDS, logDecision,
 } from "./storyAffinity.js";
 import { logger } from "../../services/logger.js";
 
@@ -72,10 +72,16 @@ const ENTITY_TOPK         = parseInt(process.env.EVENT_ENTITY_TOPK || "40", 10);
 // weak/empty core (no entity spans enough of its disparate stories) → it can't absorb cross-story
 // clusters. Swept in the harness.
 const CORE_FRAC           = Number.parseFloat(process.env.EVENT_ENTITY_CORE_FRAC || "0.3");
-// 3b-1b: exclude category-PROMISCUOUS hub entities (cat_span > MAX_CATSPAN) from cores + overlap.
-// Document-rarity (IDF) ≠ discriminativeness — a key spanning many categories bridges distinct
-// stories regardless of how rare it is. 999 = no exclusion (default; swept in the harness).
-const MAX_CATSPAN         = parseInt(process.env.EVENT_ENTITY_MAX_CATSPAN || "999", 10);
+// Hub filter for the DURABLE SIGNATURE path (loadEventCore/loadEntityKeys →
+// upsertSignature → chainStoryline). Deliberately its OWN var: the live matcher runs on
+// storyAffinity's hub-filtered vocabulary (EVENT_ENTITY_MAX_CATSPAN, default 3), but the
+// signature is a MONTHS-long cross-episode identity where hubs (Iran, England) may be the
+// legitimate connective tissue. Default 999 (no exclusion) preserves today's behaviour
+// exactly. Whether signatures SHOULD be hub-filtered is a registered open question — see
+// docs/architecture/dossier_and_event_graph.md; do not "unify" it without that GROUND.
+// (Historically this read EVENT_ENTITY_MAX_CATSPAN and diverged from storyAffinity 3 /
+// eventBreaker 5 — one var silently retuning three subsystems. Split 2026-07-20.)
+const MAX_CATSPAN         = parseInt(process.env.EVENT_SIGNATURE_MAX_CATSPAN || "999", 10);
 
 // ── W2.1 small-side porosity floor (unified-affinity path only) — SHIPS DISABLED ──
 // Would block an AFFINE event↔event merge when affinity is only MODERATE
@@ -279,20 +285,15 @@ function loadEventCore(db, ids, idfMap, catSpanMap, minFrac = CORE_FRAC, topK = 
   if (core.length > topK) core = core.sort((a, b) => (idfMap.get(b) ?? 0) - (idfMap.get(a) ?? 0)).slice(0, topK);
   return new Set(core);
 }
-function rarityOverlap(A, B, idfMap, fallbackIdf) {
-  if (!A || !B || !A.size || !B.size) return 0;
-  let inter = 0, uni = 0;
-  for (const k of new Set([...A, ...B])) { const w = idfMap.get(k) ?? fallbackIdf; uni += w; if (A.has(k) && B.has(k)) inter += w; }
-  return uni ? inter / uni : 0;
-}
 
 export async function runEventPromoter({ now = Date.now() } = {}) {
   const db = getDb();
 
-  // Wave 2: the unified affinity context supersedes the local entity plumbing
-  // when EVENT_UNIFIED_AFFINITY is on. One measure, one hub filter, shared
-  // with tryMerge and the breaker (storyAffinity.js).
-  const affCtx = UNIFIED_AFFINITY ? buildAffinityCtx(db) : null;
+  // The unified affinity context: ONE measure, ONE hub filter, shared by qualifies,
+  // tryMerge and the breaker (storyAffinity.js). This is the matcher's vocabulary.
+  // NOTE: the durable SIGNATURE path below deliberately uses a different vocabulary —
+  // see SIGNATURE_MAX_CATSPAN.
+  const affCtx = buildAffinityCtx(db);
 
   // Entity gate (step 3): preload the windowed-IDF map once. Empty table → fallbackIdf = 1 so the
   // overlap degrades to UNWEIGHTED rather than blocking every match. Only when the gate is ON.
@@ -366,8 +367,8 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     const core = ENTITY_MIN > 0 ? loadEventCore(db, aids, idfMap, catSpanMap) : null;
     // Wave 2: symmetric TOPK entity set + explicit coherence contract (R1:
     // newborn events — few members or young — are exempt from incoherence).
-    const entSet = affCtx ? affCtx.entitySet(aids) : null;
-    const incoherent = affCtx ? isIncoherent(affCtx, { memberIds: aids, startedAt: e.started_at, now }) : false;
+    const entSet = affCtx.entitySet(aids);
+    const incoherent = isIncoherent(affCtx, { memberIds: aids, startedAt: e.started_at, now });
     eventState.set(e.id, { id: e.id, slug: e.slug, started_at: e.started_at, status: e.status, ids: new Set(aids), centroid: meanCentroid([...vmap.values()]), core, entSet, incoherent, titleClusterSize });
     // R2a/R2b: refresh the durable signature for every candidate while its members are
     // alive — this also back-fills signatures for events created before the signature
@@ -379,27 +380,17 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
   const clusters = eligible.map((c) => {
     let aids = []; try { aids = JSON.parse(c.article_ids || "[]"); } catch { /* skip */ }
     const vmap = loadArticleVectors(db, aids);
-    return { c, aids, idSet: new Set(aids), centroid: meanCentroid([...vmap.values()]), entKeys: ENTITY_MIN > 0 ? loadEntityKeys(db, aids, idfMap, catSpanMap) : null, entSet: affCtx ? affCtx.entitySet(aids) : null, market_count: c.market_count };
+    return { c, aids, idSet: new Set(aids), centroid: meanCentroid([...vmap.values()]), entKeys: ENTITY_MIN > 0 ? loadEntityKeys(db, aids, idfMap, catSpanMap) : null, entSet: affCtx.entitySet(aids), market_count: c.market_count };
   });
 
   // qualifies — entity gate (step 3): every accept path ALSO requires entity overlap ≥ ENTITY_MIN.
-  // ENTITY_MIN <= 0 → entityOk always true → today's behavior EXACTLY (shared-article force-match;
-  // else cosine ≥ floor). Gating the shared-article path too is the point: a shared article between
-  // title-disjoint distinct stories no longer force-merges when their rare entities don't overlap.
-  const qualifiesLegacy = (cl, ev) => {
-    const entityOk = ENTITY_MIN <= 0 || rarityOverlap(cl.entKeys, ev.core, idfMap, fallbackIdf) >= ENTITY_MIN; // cluster's full entities vs event's CORE
-    const cos = cosine(cl.centroid, ev.centroid);
-    for (const a of cl.idSet) if (ev.ids.has(a)) return entityOk ? { ok: true, score: Math.max(cos, 1.0) } : { ok: false };
-    return (cos >= MATCH_COSINE_FLOOR && entityOk) ? { ok: true, score: cos } : { ok: false };
-  };
-
-  // Wave 2 unified judgment. Structural evidence (shared article / cosine)
+  // Unified judgment. Structural evidence (shared article / cosine)
   // still opens the door, but the BAND from the shared measure decides:
   //   shared-article attach  → band must not be FOREIGN (continuation path —
   //                            carries newborns whose sets are still thin);
   //   cosine-only attach     → band must be fully AFFINE;
   //   incoherent target      → never attracts (anti-blob, by contract).
-  const qualifiesUnified = (cl, ev) => {
+  const qualifies = (cl, ev) => {
     if (ev.incoherent) return { ok: false, band: "INCOHERENT", ent: null };
     const { ent, band } = affinity(affCtx, cl.entSet, ev.entSet);
     const cos = cosine(cl.centroid, ev.centroid);
@@ -409,8 +400,6 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     if (cos >= MATCH_COSINE_FLOOR && band === BANDS.AFFINE) return { ok: true, score: cos, band, ent };
     return { ok: false, band, ent, cos, shared };
   };
-
-  const qualifies = UNIFIED_AFFINITY ? qualifiesUnified : qualifiesLegacy;
 
   // ── 4. MERGE: a cluster qualifying against >=2 events → converge into earliest-started ──
   const parent = new Map();
@@ -425,24 +414,21 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     const ea = eventState.get(a), eb = eventState.get(b);
     if (!ea || !eb) return;
     if (cosine(ea.centroid, eb.centroid) < MERGE_COSINE_FLOOR) return; // distinct stories — do NOT merge
-    if (UNIFIED_AFFINITY) {
-      // Wave 2: merge requires full AFFINE on the SAME measure qualifies and
-      // the breaker use — an AMBIGUOUS pair holds (hysteresis), a FOREIGN
-      // pair can never merge. R2: held pairs are logged.
-      const { ent, band } = affinity(affCtx, ea.entSet, eb.entSet);
-      if (band !== BANDS.AFFINE) {
-        logDecision("merge-hold", { a: ea.slug.slice(0, 44), b: eb.slug.slice(0, 44), band, ent: +ent.toFixed(3) });
-        return;
-      }
-      // W2.1 small-side porosity floor (SHIPS DISABLED: FLOOR_MIN_SIDE default 0).
-      // AFFINE but moderate + thin small side → hold. See the constant block above:
-      // enable only after recalibrating on decision-time (ent, min-side) data.
-      const minSide = Math.min(ea.ids.size, eb.ids.size);
-      if (MERGE_FLOOR_MIN_SIDE > 0 && ent < MERGE_FLOOR_ENT && minSide < MERGE_FLOOR_MIN_SIDE) {
-        logDecision("merge-floor", { a: ea.slug.slice(0, 44), b: eb.slug.slice(0, 44), ent: +ent.toFixed(3), minSide });
-        return;
-      }
-    } else if (ENTITY_MIN > 0 && rarityOverlap(ea.core, eb.core, idfMap, fallbackIdf) < ENTITY_MIN) return; // legacy entity gate — core↔core
+    // Merge requires full AFFINE on the SAME measure qualifies and the breaker use — an
+    // AMBIGUOUS pair holds (hysteresis), a FOREIGN pair can never merge. Held pairs logged.
+    const { ent, band } = affinity(affCtx, ea.entSet, eb.entSet);
+    if (band !== BANDS.AFFINE) {
+      logDecision("merge-hold", { a: ea.slug.slice(0, 44), b: eb.slug.slice(0, 44), band, ent: +ent.toFixed(3) });
+      return;
+    }
+    // W2.1 small-side porosity floor (SHIPS DISABLED: FLOOR_MIN_SIDE default 0).
+    // AFFINE but moderate + thin small side → hold. See the constant block above:
+    // enable only after recalibrating on decision-time (ent, min-side) data.
+    const minSide = Math.min(ea.ids.size, eb.ids.size);
+    if (MERGE_FLOOR_MIN_SIDE > 0 && ent < MERGE_FLOOR_ENT && minSide < MERGE_FLOOR_MIN_SIDE) {
+      logDecision("merge-floor", { a: ea.slug.slice(0, 44), b: eb.slug.slice(0, 44), ent: +ent.toFixed(3), minSide });
+      return;
+    }
     const survivor = ea.started_at <= eb.started_at ? a : b;
     const absorbed = survivor === a ? b : a;
     parent.set(absorbed, survivor);
@@ -470,9 +456,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     logger.info(`🧭 promoter-merge ${JSON.stringify({
       survivor: sEv.slug.slice(0, 48), absorbed: aEv.slug.slice(0, 48),
       cos: +cosine(sEv.centroid, aEv.centroid).toFixed(3),
-      ent: UNIFIED_AFFINITY
-        ? +affinity(affCtx, sEv.entSet, aEv.entSet).ent.toFixed(3)
-        : (ENTITY_MIN > 0 ? +rarityOverlap(sEv.core, aEv.core, idfMap, fallbackIdf).toFixed(3) : null),
+      ent: +affinity(affCtx, sEv.entSet, aEv.entSet).ent.toFixed(3),
       minSide,
     })}`);
     eventState.delete(absorbedId);
@@ -500,7 +484,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
         pairs.push({ ci, eventId: ev.id, score: q.score });
         const b = bestQual.get(ci);
         if (!b || q.score > b.score) bestQual.set(ci, { eventId: ev.id, score: q.score });
-      } else if (UNIFIED_AFFINITY) {
+      } else {
         const cos = q.cos ?? cosine(cl.centroid, ev.centroid);
         const br = bestReject.get(ci);
         if (!br || cos > br.cos) bestReject.set(ci, { slug: ev.slug, cos, ent: q.ent ?? 0, shared: q.shared ?? false, band: q.band });
@@ -508,13 +492,6 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
           const bh = bestHold.get(ci);
           if (!bh || q.ent > bh.ent) bestHold.set(ci, { slug: ev.slug, ent: q.ent, band: q.band });
         }
-      } else {
-        const cos = cosine(cl.centroid, ev.centroid);
-        const ent = ENTITY_MIN > 0 ? rarityOverlap(cl.entKeys, ev.core, idfMap, fallbackIdf) : 1;
-        let shared = false;
-        for (const a of cl.idSet) if (ev.ids.has(a)) { shared = true; break; }
-        const br = bestReject.get(ci);
-        if (!br || cos > br.cos) bestReject.set(ci, { slug: ev.slug, cos, ent, shared });
       }
     }
   });
@@ -599,7 +576,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
         // articles wait a cycle; the story either sharpens into AFFINE or drifts
         // to FOREIGN. "When in doubt, wait" replaces "when in doubt, mint a
         // slug". R2: every hold is logged.
-        if (UNIFIED_AFFINITY && bestHold.has(ci)) {
+        if (bestHold.has(ci)) {
           const bh = bestHold.get(ci);
           logDecision("promoter-hold", { cluster: String(c.id).slice(0, 16), title: (c.title || "").slice(0, 44), size: clusterSize, vs: bh.slug.slice(0, 44), ent: +bh.ent.toFixed(3), band: bh.band });
           held++;

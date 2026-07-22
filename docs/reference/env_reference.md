@@ -13,13 +13,16 @@ not exist before; `backend/.env.example` documented 77 of the ~262 vars the code
   or rebuild. `build` = frontend build-time (requires a rebuild). `migration` = needs one.
 - Booleans are parsed as the literal string `"true"` unless noted; anything else is false.
 
-> ⚠️ **Two live config hazards found during this audit** (not changed — DrJ's call):
-> 1. `STORYLINE_ENABLED` appears **twice** in prod `.env` (lines 53 and 59, both `true`).
->    dotenv takes the last one, so editing the first has no effect. Harmless today, a trap later.
-> 2. `EVENT_ENTITY_MAX_CATSPAN` is read in **two places with different defaults** — `3` in
->    `storyAffinity.js`, `5` in `eventBreaker.js`'s local entity ctx. Setting it in `.env`
->    silently changes both; leaving it unset means the breaker's legacy path hub-filters
->    differently from everything else.
+> ⚠️ **One live config hazard remains** (not changed — DrJ's call):
+> - `STORYLINE_ENABLED` appears **twice** in prod `.env` (lines 53 and 59, both `true`).
+>   dotenv takes the last one, so editing the first has no effect. Harmless today, a trap later.
+>
+> **Resolved 2026-07-20 (commit fixing the cat-span divergence):** `EVENT_ENTITY_MAX_CATSPAN`
+> used to be read in three places with three defaults — `3` (storyAffinity, the live matcher),
+> `5` (eventBreaker's legacy ctx), `999` (eventPromoter's signature path). The breaker's
+> legacy path was deleted (with the retired `EVENT_UNIFIED_AFFINITY` flag), and the signature
+> path now reads its own `EVENT_SIGNATURE_MAX_CATSPAN`. So `EVENT_ENTITY_MAX_CATSPAN` now has a
+> single reader (storyAffinity) and one meaning.
 
 ---
 
@@ -36,7 +39,8 @@ not exist before; `backend/.env.example` documented 77 of the ~262 vars the code
 | `EVENT_ENTITY_MIN` | `0` (off) | **`0.05`** | yes | Legacy rarity-weighted entity gate. `0` disables. Superseded by unified affinity but still gates signature writes. |
 | `EVENT_ENTITY_TOPK` | `40` | default | yes | Top-K rarest entity keys kept per entity set. |
 | `EVENT_ENTITY_CORE_FRAC` | `0.3` | default | yes | Key must appear in ≥ this fraction of members to count as "core". |
-| `EVENT_ENTITY_MAX_CATSPAN` | `3` / `5` ⚠️ | default | yes | Hub filter: drop entities spanning more than N categories. See hazard #2 above. |
+| `EVENT_ENTITY_MAX_CATSPAN` | `3` | default | yes | Hub filter for the live matcher (storyAffinity): drop entities spanning more than N categories. Single reader as of 2026-07-20. |
+| `EVENT_SIGNATURE_MAX_CATSPAN` | `999` (no filter) | default | yes | Hub filter for the DURABLE signature path only (upsertSignature → chainStoryline). Separate from the matcher on purpose — see the open question in the architecture doc. |
 | `EVENT_PROMOTE_MAX_CLUSTER_AGE_MS` | `48h` | default | yes | Only clusters refreshed within this window may spawn NEW events. |
 | `EVENT_CLOSE_ENABLED` | `false` | **`true`** | yes | R2a temporal bounds: dormant events eventually close and can never re-absorb. |
 | `EVENT_CLOSE_AFTER_MS` | `21d` | default | yes | Inactivity before a dormant event closes. |
