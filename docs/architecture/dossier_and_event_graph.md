@@ -184,8 +184,17 @@ most frequent are exactly Q794 (Iran), Q668 (India), Q21 (England).
   signatures are ever migrated, **rebuild the table in full** rather than let `chainStoryline`
   compare newly-filtered signatures against old unfiltered ones (13%/day refresh ⇒ weeks of
   mixed-vintage, which *would* re-introduce an asymmetric-measure comparison).
-- **Related hygiene (Sprint 3):** the source-name string `"day first show news"` appears as an
-  entity key in signatures — publisher strings are leaking into the entity vocabulary.
+- **Related — source-name strings in the entity vocabulary (GROUND'd 2026-07-20, HYGIENE not
+  chain-quality):** 56 publisher-pattern keys leak into the entity vocabulary via NER on
+  article text (`"day first show news"` alone appears 2,035× in signatures; also `"ary news"`,
+  `"al arabiya tv"`, `"bss news agency"`, …). The concern was that two unrelated events sharing
+  a junk key + one real key could clear `chainStoryline`'s ≥2-shared-keys floor with only one
+  genuine signal. **Tested on the COW's would-form chains: 4,533 chains, 501 have a junk key
+  among the shared keys, but 0 DEPEND on one to clear the floor** — in every case there are ≥2
+  *non-junk* shared keys, so removing the junk key never drops a chain below the floor. The
+  reason: chaining's other guards (shared idf mass ≥10, overlap ≥0.25) independently force a
+  real shared signal, so the junk keys ride along without being load-bearing. Fixing the leak
+  is Sprint-3 hygiene (source strings shouldn't be entities), not a chain-quality defect.
 
 ## 3. Things that look like bugs but are correct
 
