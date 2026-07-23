@@ -38,7 +38,7 @@ Key entry points:
 - [Strategic Plan v6](docs/strategy/strategic_plan_v6.md) — what's being built and why
 - [Decisions Log v1](docs/strategy/decisions_log_v1.md) — 31 strategic decisions made
 - [Execution Method v1](docs/execution/execution_method_v1.md) — how work gets done
-- [Phase A Kickoff Brief](docs/phases/phase_a_kickoff_brief.md) — current phase plan
+- [State of play](docs/STATE_OF_PLAY.md) — current status and priorities (start here)
 
 ## Tech stack
 

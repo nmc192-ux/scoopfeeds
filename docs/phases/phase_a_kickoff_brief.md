@@ -9,7 +9,7 @@
 **Predecessor retrospective:** None (first phase)
 **Companion documents:** Strategic Plan v6, Decisions Log v1 (31 decisions), Execution Method v1, Repo Documentation Structure v1
 **Last updated:** May 2026
-**Status:** Active
+**Status:** Closed — Phase A formal close 2026-05-18 (retrospective FINAL v1.0, signed off 2026-05-15 Session 24); see [phase_a_retrospective.md](phase_a_retrospective.md). Exit-criteria path correction: [phase_a_exit_criteria_correction_2026-07.md](phase_a_exit_criteria_correction_2026-07.md).
 
 ---
 

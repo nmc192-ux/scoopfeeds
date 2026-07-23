@@ -7,6 +7,8 @@
 **Draft date:** 2026-05-15 (Session 23)
 **v1.0 sign-off date:** 2026-05-15 (Session 24)
 
+**See also:** [`phase_a_exit_criteria_correction_2026-07.md`](phase_a_exit_criteria_correction_2026-07.md) — July 2026 correction to the §2 source-audit assessment (audit was filed under `docs/audits/`, not the runbooks path checked here). Does not supersede this FINAL v1.0 document or its sign-off.
+
 **Source inputs:**
 - `docs/phases/phase_a_retrospective_inputs.md` (80 findings, 3,803 lines)
 - `docs/phases/phase_a_exit_verification.md` (Sprint 6.1 artifact, 670 lines)

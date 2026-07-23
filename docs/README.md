@@ -12,6 +12,7 @@ methodology, and operational runbooks.
 ## Strategic direction
 - [Strategic Plan v6](strategy/strategic_plan_v6.md) — vision, capabilities, phases, metrics
 - [Decisions Log v1](strategy/decisions_log_v1.md) — 31 strategic decisions made
+- [Decisions Log amendments (Jul 2026)](strategy/decisions_log_amendments_2026-07.md) — decision changes since v1
 - [Strategic Plan archive](strategy/archive/) — historical versions v1 through v5
 
 ## Execution methodology
@@ -19,7 +20,9 @@ methodology, and operational runbooks.
 - [Repo Documentation Structure v1](execution/repo_documentation_structure_v1.md) — how docs live in the repo
 
 ## Phases (historical → current)
-- [Phase A Kickoff Brief](phases/phase_a_kickoff_brief.md) — Stabilize and Audit (complete)
+- [Phase A Kickoff Brief](phases/phase_a_kickoff_brief.md) — Stabilize and Audit (closed 2026-05-18)
+- [Phase A Retrospective](phases/phase_a_retrospective.md) — FINAL v1.0 close-out (signed off 2026-05-15)
+- [Phase A exit-criteria correction (Jul 2026)](phases/phase_a_exit_criteria_correction_2026-07.md) — source-audit path correction; social/search still carried forward
 - [Phase B go-live runbook](phases/phase_b_go_live_runbook.md) — go-live + the post-audit
   remediation programme (Sprints 1–3, Waves 1–3). Current work lives here.
 
