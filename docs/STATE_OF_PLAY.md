@@ -1,8 +1,8 @@
 # State of play — 2026-07-23
 
-Orientation for a fresh context (or future-you). Synced commit: **`38c7b6b`** — run
-`git log --oneline -1` after committing this batch and paste the hash; confirm Mac,
-`origin/main` and the server (`/opt/scoopfeeds`) all match (`git fetch && git status` on both).
+Orientation for a fresh context (or future-you). Last docs sync: **`a42e681`** (2026-07-23).
+This field names the last docs reconciliation, not necessarily current HEAD — to check that all
+three checkouts agree, run `git fetch && git status -sb` on the Mac and on `/opt/scoopfeeds`.
 
 - What the system actually does: [`docs/architecture/dossier_and_event_graph.md`](architecture/dossier_and_event_graph.md)
 - Every flag, default, and prod value: [`docs/reference/env_reference.md`](reference/env_reference.md)
