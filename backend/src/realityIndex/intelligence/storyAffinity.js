@@ -34,8 +34,9 @@
 
 import { logger } from "../../services/logger.js";
 
-// ── Flag + constants (single source; env-overridable) ─────────────────────
-export const UNIFIED_AFFINITY = String(process.env.EVENT_UNIFIED_AFFINITY ?? "false").toLowerCase() === "true";
+// ── Constants (single source; env-overridable) ────────────────────────────
+// (EVENT_UNIFIED_AFFINITY retired 2026-07-20 — this is the only measure now; the promoter
+//  and breaker legacy paths that the flag gated have been deleted.)
 
 // Calibrated on the 2026-07-16 COW labeled-pair table (ship gate, R3).
 export const T_MATCH    = Number.parseFloat(process.env.AFFINITY_T_MATCH    || "0.23");

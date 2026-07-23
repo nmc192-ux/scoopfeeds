@@ -4,9 +4,9 @@
  * For each event with ≥ MIN_ARTICLES members, re-cluster via the UNMODIFIED clusterWindow. clusterWindow
  * splits BOTH genuine multi-story blobs AND a single macro-story's cosine-separable sub-threads, so a raw
  * "≥2 sub-clusters" trigger over-fragments (it shattered the Iran macro-story into ~16 cards). The fix:
- * spin off a sub-cluster ONLY if it is ENTITY-DISJOINT from the largest sub-cluster's core (rarity-weighted
- * shared-entity overlap < DISJOINT) — a genuinely foreign absorbed story. Sub-threads that share the core
- * (the Iran peace-deal/oil/Hormuz/nuclear threads) are KEPT in the event. If nothing is disjoint, the event
+ * spin off a sub-cluster ONLY if storyAffinity calls it FOREIGN relative to the largest sub-cluster's
+ * core (the same banded measure the promoter uses) — a genuinely foreign absorbed story. Sub-threads
+ * that share the core (the Iran peace-deal/oil/Hormuz/nuclear threads) are KEPT. If nothing is foreign, the event
  * is a coherent macro-story → left whole. KEEP-CORE: the kept group retains the event id/slug/URL.
  *
  * Behind EVENT_BREAKER_ENABLED (default OFF → prod-neutral). Mutates events/event_articles.
@@ -16,23 +16,19 @@ import { getDb } from "../../models/database.js";
 import { clusterWindow } from "../clustering/semanticClusterer.js";
 import { logger } from "../../services/logger.js";
 import {
-  UNIFIED_AFFINITY, buildAffinityCtx, affinity, BANDS, logDecision,
+  buildAffinityCtx, affinity, BANDS, logDecision,
   MIN_CORE_KEYS, MIN_CORE_IDF,
 } from "./storyAffinity.js";
 
 const ENABLED      = String(process.env.EVENT_BREAKER_ENABLED ?? "false").toLowerCase() === "true";
 const MIN_ARTICLES = parseInt(process.env.EVENT_BREAKER_MIN_ARTICLES || "6", 10);
-const DISJOINT     = Number.parseFloat(process.env.EVENT_BREAKER_DISJOINT || "0.06"); // core-overlap below this = foreign story → spin off
-const MAX_CATSPAN  = parseInt(process.env.EVENT_ENTITY_MAX_CATSPAN || "5", 10);
-const TOPK         = parseInt(process.env.EVENT_ENTITY_TOPK || "40", 10);
 const DETACH       = String(process.env.EVENT_BREAKER_DETACH ?? "false").toLowerCase() === "true"; // Build B: trim un-clusterable orphan tail from kept events
 const MATCH_TAU    = Number.parseFloat(process.env.EVENT_MATCH_TAU || "0.78"); // matcher cosine floor — detach guard (an orphan must be cosine-far AND entity-disjoint)
 const MAX_PASSES   = parseInt(process.env.EVENT_BREAKER_MAX_PASSES || "6", 10); // sweep convergence bound (Phase 1 converged in 4)
 // A5 facets (Phase 2 revised design — docs/specs/a5_event_facets_design.md): persist
 // RENDER-READY facets behind EVENT_FACETS_PERSIST (default OFF → breaker byte-identical).
-// Requires UNIFIED_AFFINITY (facets use the unified cat_span-3 measure). The pipeline
-// runs ONCE per sweep after convergence (runFacetPass), not per breaker pass — it does a
-// SECOND clustering at EVENT_FACET_TAU plus tombstone queries, so per-pass would be waste.
+// The pipeline runs ONCE per sweep after convergence (runFacetPass), not per breaker pass —
+// it does a SECOND clustering at EVENT_FACET_TAU plus tombstone queries, so per-pass would be waste.
 const FACETS_PERSIST = String(process.env.EVENT_FACETS_PERSIST ?? "false").toLowerCase() === "true";
 // Presentation-only facet clustering tau (spike-picked: mega-events separate into real
 // angles at ~0.88; the breaker's SPLIT decision stays on clusterWindow's DEFAULT_TAU 0.78
@@ -64,22 +60,6 @@ function clusterMembers(db, ids) {
   return clusterWindow({ db, windowStart: span.lo, windowEnd: span.hi + 1, excludeIds: new Set(win.filter(id => !set.has(id))) }).clusters;
 }
 
-// rarity-weighted entity context (idf + cat_span hub exclusion) — shared by the breaker and the detach pass.
-function buildEntityCtx(db) {
-  const idfMap = new Map(), catSpanMap = new Map();
-  for (const r of db.prepare("SELECT key, idf, cat_span FROM entity_idf").all()) { idfMap.set(r.key, r.idf); catSpanMap.set(r.key, r.cat_span); }
-  const nw = db.prepare("SELECT n_window FROM entity_idf LIMIT 1").get()?.n_window;
-  const fallbackIdf = (idfMap.size && nw) ? Math.log(nw) : 1;
-  const entitySet = (ids) => {
-    const keys = new Set();
-    for (let i = 0; i < ids.length; i += 500) { const ch = ids.slice(i, i + 500); if (!ch.length) continue; const ph = ch.map(() => "?").join(","); for (const r of db.prepare(`SELECT DISTINCT COALESCE(qid, surface_norm) k FROM article_entities WHERE article_id IN (${ph})`).all(...ch)) { if ((catSpanMap.get(r.k) ?? 1) > MAX_CATSPAN) continue; keys.add(r.k); } }
-    if (keys.size <= TOPK) return keys;
-    return new Set([...keys].sort((a, b) => (idfMap.get(b) ?? 0) - (idfMap.get(a) ?? 0)).slice(0, TOPK));
-  };
-  const overlap = (A, B) => { if (!A.size || !B.size) return 0; let i = 0, u = 0; for (const k of new Set([...A, ...B])) { const w = idfMap.get(k) ?? fallbackIdf; u += w; if (A.has(k) && B.has(k)) i += w; } return u ? i / u : 0; };
-  return { idfMap, catSpanMap, fallbackIdf, entitySet, overlap };
-}
-
 // embedding helpers — only used by the detach guard (cosine-far test).
 function loadVecs(db, ids) {
   const m = new Map();
@@ -97,11 +77,9 @@ function loadVecs(db, ids) {
 const meanVec = (vs) => { if (!vs.length) return null; const m = new Float64Array(DIMS); for (const v of vs) for (let k = 0; k < DIMS; k++) m[k] += v[k]; let n = 0; for (let k = 0; k < DIMS; k++) n += m[k] * m[k]; n = Math.sqrt(n) || 1; for (let k = 0; k < DIMS; k++) m[k] /= n; return m; };
 const cosVec = (a, b) => { if (!a || !b) return -1; let s = 0; for (let k = 0; k < DIMS; k++) s += a[k] * b[k]; return s; };
 
-export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, disjoint = DISJOINT, force = false } = {}) {
+export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, force = false } = {}) {
   if (!ENABLED && !force) return { enabled: false };
   const db = getDb();
-  // rarity weights + category-span (hub exclusion) from entity_idf
-  const { entitySet, overlap } = buildEntityCtx(db);
 
   const candidates = db.prepare(
     `SELECT ea.event_id id FROM event_articles ea JOIN events e ON e.id = ea.event_id
@@ -109,17 +87,15 @@ export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, 
   ).all(minArticles);
 
   const linkArticle = db.prepare("INSERT OR IGNORE INTO event_articles (event_id, article_id, relevance, added_at) VALUES (?,?,1.0,?)");
-  const delLinks = db.prepare("DELETE FROM event_articles WHERE event_id = ?");
   const touchEv = db.prepare("UPDATE events SET last_activity_at = ?, updated_at = ? WHERE id = ?");
   const insEvent = db.prepare(`INSERT INTO events (id, slug, cluster_id, title, summary, category, status, severity, hero_image_url, started_at, last_activity_at, meta, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
-  // Wave 2: when the unified judgment is on, the spin decision comes from the
-  // SAME banded measure the promoter uses — a sub-cluster spins off only when
-  // FOREIGN (AMBIGUOUS holds; hysteresis is the armistice). The apply is
-  // SURGICAL: only spun members' links are removed — kept links keep their
-  // added_at (the old delete-all-and-relink stamped every link with "now"
-  // each split, destroying the provenance this diagnosis depended on).
-  const affCtx = UNIFIED_AFFINITY ? buildAffinityCtx(db) : null;
+  // The spin decision comes from the SAME banded measure the promoter uses — a
+  // sub-cluster spins off only when FOREIGN (AMBIGUOUS holds; hysteresis is the
+  // armistice). The apply is SURGICAL: only spun members' links are removed — kept
+  // links keep their added_at (the old delete-all-and-relink stamped every link with
+  // "now" each split, destroying the provenance the 2026-07 diagnosis depended on).
+  const affCtx = buildAffinityCtx(db);
   const delLink = db.prepare("DELETE FROM event_articles WHERE event_id = ? AND article_id = ?");
 
   let split = 0, created = 0, foreignSpun = 0; const splitIds = [];
@@ -128,29 +104,19 @@ export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, 
     const subs = clusterMembers(db, members);
     if (subs.length <= 1) continue; // one story
     const anchorIds = subs[0].members.map(m => m.id);
-    const core = UNIFIED_AFFINITY ? affCtx.entitySet(anchorIds) : entitySet(anchorIds);
+    const core = affCtx.entitySet(anchorIds);
     const spin = []; // FOREIGN sub-clusters (genuinely absorbed foreign stories)
     for (let i = 1; i < subs.length; i++) {
       const subIds = subs[i].members.map(m => m.id);
-      if (UNIFIED_AFFINITY) {
-        const { ent, band } = affinity(affCtx, affCtx.entitySet(subIds), core);
-        if (band === BANDS.FOREIGN) { spin.push(subs[i]); }
-        else logDecision("breaker-keep", { event: b.id.slice(0, 8), sub: i, subSize: subIds.length, band, ent: +ent.toFixed(3) });
-      } else {
-        const ov = overlap(entitySet(subIds), core);
-        if (ov < disjoint) spin.push(subs[i]); // legacy: foreign → spin off
-      }
+      const { ent, band } = affinity(affCtx, affCtx.entitySet(subIds), core);
+      if (band === BANDS.FOREIGN) { spin.push(subs[i]); }
+      else logDecision("breaker-keep", { event: b.id.slice(0, 8), sub: i, subSize: subIds.length, band, ent: +ent.toFixed(3) });
     }
     if (!spin.length) continue; // macro-story with sub-threads only → leave whole (the over-fragmentation fix)
     const spinMembers = new Set(spin.flatMap(s => s.members.map(m => m.id)));
     splitIds.push(b.id); split++;
     const apply = db.transaction(() => {
-      if (UNIFIED_AFFINITY) {
-        for (const m of spinMembers) delLink.run(b.id, m); // surgical: kept links untouched
-      } else {
-        delLinks.run(b.id);
-        for (const m of members) if (!spinMembers.has(m)) linkArticle.run(b.id, m, now); // legacy rewrite
-      }
+      for (const m of spinMembers) delLink.run(b.id, m); // surgical: kept links untouched
       touchEv.run(now, now, b.id);
       for (const sub of spin) {
         const id = crypto.randomUUID();
@@ -158,7 +124,7 @@ export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, 
         insEvent.run(id, slug, null, sub.members[0]?.title ?? id.slice(0, 8), null, domCat(sub.members), "active", 0, null, now, now, "{}", now, now);
         for (const m of sub.members) linkArticle.run(id, m.id, now);
         created++; foreignSpun++;
-        if (UNIFIED_AFFINITY) logDecision("breaker-split", { event: b.id.slice(0, 8), spunSlug: slug.slice(0, 44), spunSize: sub.members.length, band: BANDS.FOREIGN });
+        logDecision("breaker-split", { event: b.id.slice(0, 8), spunSlug: slug.slice(0, 44), spunSize: sub.members.length, band: BANDS.FOREIGN });
       }
     });
     apply();
@@ -171,18 +137,17 @@ export function runEventBreaker({ now = Date.now(), minArticles = MIN_ARTICLES, 
 /**
  * Build B — singleton-detach. After spin-off, a kept event can carry a tail of UN-CLUSTERABLE orphans
  * (articles with no cosine peer ≥ tau, so clusterWindow never groups them; they inflate the kept event's
- * category span without belonging to its story). Detach an orphan ONLY if it is BOTH (i) entity-disjoint
- * from the kept core (rarity-weighted overlap < disjoint) AND (ii) cosine-far from the kept centroid
+ * category span without belonging to its story). Detach an orphan ONLY if it is BOTH (i) FOREIGN to
+ * the kept core under storyAffinity AND (ii) cosine-far from the kept centroid
  * (cos < MATCH_TAU). The AND is the safety guard: an entity-sparse but cosine-close article (a real facet
  * with few named entities) STAYS. Detached articles are UN-EVENTED (link removed) — not spun into
  * 1-article events; they remain in articles/feeds and the entity gate keeps them from re-merging.
  *
  * Scoped to the events passed in (the kept events the breaker just curated). Conservative: when in doubt, keep.
  */
-export function detachOrphans({ eventIds = [], now = Date.now(), disjoint = DISJOINT } = {}) {
+export function detachOrphans({ eventIds = [], now = Date.now() } = {}) {
   const db = getDb();
-  const { entitySet, overlap } = buildEntityCtx(db);
-  const affCtx = UNIFIED_AFFINITY ? buildAffinityCtx(db) : null;
+  const affCtx = buildAffinityCtx(db);
   const memIds = (id) => db.prepare("SELECT article_id id FROM event_articles WHERE event_id = ?").all(id).map(r => r.id);
   const delLink = db.prepare("DELETE FROM event_articles WHERE event_id = ? AND article_id = ?");
   const touchEv = db.prepare("UPDATE events SET last_activity_at = ?, updated_at = ? WHERE id = ?");
@@ -192,7 +157,7 @@ export function detachOrphans({ eventIds = [], now = Date.now(), disjoint = DISJ
     const subs = clusterMembers(db, members);
     if (!subs.length) continue;                                   // ghost/empty → nothing to clean
     const coreIds = subs[0].members.map(m => m.id);
-    const core = entitySet(coreIds);
+    const coreSet = affCtx.entitySet(coreIds);                    // hoisted: was recomputed per orphan
     const centroid = meanVec([...loadVecs(db, coreIds).values()]);
     if (!centroid) continue;
     const clustered = new Set(subs.flatMap(s => s.members.map(m => m.id))); // anything in a ≥2 sub-cluster is a real thread → never detach
@@ -201,11 +166,9 @@ export function detachOrphans({ eventIds = [], now = Date.now(), disjoint = DISJ
     const ovec = loadVecs(db, orphans);
     const drop = [];
     for (const a of orphans) {
-      if (UNIFIED_AFFINITY) {
-        // Wave 2: detach only what the unified measure calls FOREIGN.
-        const { band } = affinity(affCtx, affCtx.entitySet([a]), affCtx.entitySet(coreIds));
-        if (band !== BANDS.FOREIGN) continue;                      // (i) not foreign → keep
-      } else if (overlap(entitySet([a]), core) >= disjoint) continue; // (i) legacy entity-close → keep
+      // Detach only what the unified measure calls FOREIGN...
+      const { band } = affinity(affCtx, affCtx.entitySet([a]), coreSet);
+      if (band !== BANDS.FOREIGN) continue;                        // (i) not foreign → keep
       const v = ovec.get(a);
       if (v && cosVec(v, centroid) >= MATCH_TAU) continue;         // (ii) cosine-close → keep
       drop.push(a);
@@ -441,7 +404,7 @@ export function persistFacetRows(db, eventId, rows, now) {
 
 /** One facet pass over all candidate events. Called after sweep convergence. */
 export function runFacetPass({ now = Date.now(), force = false } = {}) {
-  if ((!FACETS_PERSIST || !UNIFIED_AFFINITY) && !force) return { enabled: false };
+  if (!FACETS_PERSIST && !force) return { enabled: false };
   const db = getDb();
   const affCtx = buildAffinityCtx(db);
   const minTotal = Math.ceil(FACET_MIN_ARTICLES / FACET_MAX_SHARE);
@@ -484,7 +447,7 @@ export function runEventBreakerSweep({ now = Date.now(), maxPasses = MAX_PASSES,
   // A5 facets: ONE render-ready facet pass after the graph settles (post-convergence,
   // post-detach). Flag-gated inside; presentation/persistence only.
   let facetStats = null;
-  if (FACETS_PERSIST && UNIFIED_AFFINITY) {
+  if (FACETS_PERSIST) {
     try { facetStats = runFacetPass({ now }); }
     catch (e) { logger.warn(`facet pass failed: ${e.message}`); }
   }

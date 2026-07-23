@@ -155,6 +155,47 @@ deterministically rather than failing silently.
 
 ---
 
+## Open question: should durable signatures be hub-filtered? (DEFERRED)
+
+The live matcher (storyAffinity) runs on a hub-**filtered** entity vocabulary
+(`EVENT_ENTITY_MAX_CATSPAN=3` — Iran, England, India are dropped as category-promiscuous
+hubs). The durable `event_entity_signature` path — which feeds `chainStoryline` — runs on a
+hub-**unfiltered** vocabulary (`EVENT_SIGNATURE_MAX_CATSPAN=999`). On the 2026-07-16 COW,
+**43% of stored signature key-instances are hub keys** a cat-span≤3 filter would drop; the
+most frequent are exactly Q794 (Iran), Q668 (India), Q21 (England).
+
+**Registered as an open question, not scheduled — do not change without a GROUND.**
+
+- **Argument to filter (align to 3):** two subsystems measuring two vocabularies is the shape
+  of the original treadmill bug.
+- **Argument to leave unfiltered (999):** the matcher and the chainer **answer different
+  questions**. The matcher decides "are these two clusters the same event *right now*", where
+  a hub like "Iran" is noise that bridges distinct stories. The chainer decides "is this new
+  event the next episode of a months-long story", where "Iran" may be the legitimate
+  connective tissue. Different question ⇒ a different vocabulary may be *correct*, not a bug.
+- **Empirical: chains are clean today.** The 2026-07-19 chain replay found all labeled
+  cross-story pairs rejected — kannada↔vietnam 0.186, zelensky↔wheat 0.189, and two ov=1.0
+  pairs killed by the ≥2-shared-keys floor. `chainStoryline` has independent rare-evidence
+  guards (≥2 shared keys, idf mass ≥10, symmetric weighted-Jaccard) that partly compensate
+  for the unfiltered vocabulary.
+- **Correction to the framing:** the initial audit called this "the treadmill class." That was
+  too strong. The treadmill was three judges disagreeing about the *same* decision; this is two
+  judges making *different* decisions. Revisit only if chain quality degrades — and if
+  signatures are ever migrated, **rebuild the table in full** rather than let `chainStoryline`
+  compare newly-filtered signatures against old unfiltered ones (13%/day refresh ⇒ weeks of
+  mixed-vintage, which *would* re-introduce an asymmetric-measure comparison).
+- **Related — source-name strings in the entity vocabulary (GROUND'd 2026-07-20, HYGIENE not
+  chain-quality):** 56 publisher-pattern keys leak into the entity vocabulary via NER on
+  article text (`"day first show news"` alone appears 2,035× in signatures; also `"ary news"`,
+  `"al arabiya tv"`, `"bss news agency"`, …). The concern was that two unrelated events sharing
+  a junk key + one real key could clear `chainStoryline`'s ≥2-shared-keys floor with only one
+  genuine signal. **Tested on the COW's would-form chains: 4,533 chains, 501 have a junk key
+  among the shared keys, but 0 DEPEND on one to clear the floor** — in every case there are ≥2
+  *non-junk* shared keys, so removing the junk key never drops a chain below the floor. The
+  reason: chaining's other guards (shared idf mass ≥10, overlap ≥0.25) independently force a
+  real shared signal, so the junk keys ride along without being load-bearing. Fixing the leak
+  is Sprint-3 hygiene (source strings shouldn't be entities), not a chain-quality defect.
+
 ## 3. Things that look like bugs but are correct
 
 | Observation | Why it's correct |
