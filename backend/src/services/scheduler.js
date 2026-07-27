@@ -13,7 +13,7 @@ import { runWelcomeSequenceCycle } from "./welcomeSequence.js";
 import { refreshAllEvents } from "./liveEvents.js";
 import { refreshAnalysis } from "./analysisService.js";
 import { runBreakingNewsPush } from "./breakingNewsPusher.js";
-import { runAllPlatformsCycle, listEnabledPlatforms } from "./socialPublisher.js";
+import { runSocialCycleWithTimeout, listEnabledPlatforms } from "./socialPublisher.js";
 import { runXQueueGenerationCycle } from "./xPostGenerator.js";
 import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEventVideo, previewSlide } from "./videoGenerator.js";
 import { runVideoPublishAndApproveCycle } from "./videoPublisher.js";
@@ -839,10 +839,18 @@ export async function runIngestionCycle() {
     // Tail step: auto-post to social. Each adapter's own minIntervalMs
     // throttles how often it actually fires; if no platform is configured
     // (env vars missing) this is a near-instant no-op.
+    //
+    // Timeout-bounded (SOCIAL_TAIL_TIMEOUT_MS, default 10 min): this tail runs
+    // inside THIS function's isRunning guard, so a social cycle wedged on a
+    // hung HTTP call would otherwise hold isRunning true and block ALL RSS
+    // ingestion indefinitely. Social must never be able to stop ingestion —
+    // on timeout the wrapper logs and returns, the finally below releases
+    // isRunning, and the abandoned cycle is handled by socialPublisher's
+    // in-flight guard + hang detection on later ticks.
     if (String(process.env.ENABLE_AUTO_SOCIAL ?? "true").toLowerCase() !== "false") {
       const enabled = listEnabledPlatforms();
       if (enabled.length) {
-        try { await runAllPlatformsCycle(); }
+        try { await runSocialCycleWithTimeout(); }
         catch (err) { logger.error("❌ Auto-social failed", { error: err.message }); }
       }
     }

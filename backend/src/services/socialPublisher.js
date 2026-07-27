@@ -371,8 +371,27 @@ export async function runPlatformCycle(platform, { dryRun = false, minCredibilit
 //     social_posts via lastPostAt (already persisted; no new state to drift).
 const SOCIAL_CYCLE_HEARTBEAT = "social_cycle";
 const CYCLE_STALE_MS = 90 * 60 * 1000;   // 3 missed */30 runs
-const CYCLE_HANG_MS  = 15 * 60 * 1000;   // a started-but-never-finished cycle is wedged
+// A started-but-never-finished cycle is wedged past this age. Env-tunable
+// (SOCIAL_CYCLE_HANG_MS) so ops can tighten it; read at call time so dotenv
+// load order can't freeze a default in.
+const CYCLE_HANG_MS = () => Number.parseInt(process.env.SOCIAL_CYCLE_HANG_MS || "", 10) || 15 * 60 * 1000;
 const PLATFORM_STALE_MULTIPLIER = 2.5;   // × each platform's minIntervalMs
+
+// ─── Single-flight guard (process-local) ──────────────────────────────────
+// Cross-process overlap is already prevented by the BullMQ singleton job;
+// this covers the in-process entry points the scheduler's isRunning flag does
+// NOT — the /scoop-ops social route calls runAllPlatformsCycle directly, and
+// a manual poke during a wedged cron cycle would otherwise run concurrently
+// AND stamp a fresh phase:"start" over the stale one, refreshing the hang
+// signal forever (the Bluesky rate-limit-loop shape, again).
+//
+// Deliberately NOT a bare skip-if-set flag: that converts one hung cycle into
+// permanent silence — the isRunning wedge reproduced one layer down. Skip
+// only while the in-flight cycle is younger than CYCLE_HANG_MS; past that,
+// log HUNG and let the fresh cycle proceed. The wedged one is unrecoverable
+// anyway (every network call it holds carries its own timeout), and its late
+// completion is defanged by the ownership guard on the heartbeat write below.
+let cycleInFlight = null; // { startedAt } | null
 
 // External dead-man's switch (Healthchecks.io free tier or equivalent). This
 // is the ONLY signal that survives a fully-down process — the in-process
@@ -417,12 +436,13 @@ export function getSocialCycleHealth() {
   // legitimately in-flight cycle also reads as "start", so only a start older
   // than CYCLE_HANG_MS counts — past that the runner is wedged (e.g. a hung
   // HTTP call), which a bare timestamp cannot distinguish from a healthy run.
+  const hangMs      = CYCLE_HANG_MS();
   const phase       = cycleMeta && typeof cycleMeta === "object" ? cycleMeta.phase : null;
   const startedAt   = cycleMeta && typeof cycleMeta === "object" ? cycleMeta.startedAt || null : null;
   const startAgeMs  = startedAt ? now - startedAt : null;
-  const cycleHung   = phase === "start" && startAgeMs != null && startAgeMs > CYCLE_HANG_MS;
+  const cycleHung   = phase === "start" && startAgeMs != null && startAgeMs > hangMs;
   if (cycleHung) {
-    logger.error(`🫀 social cycle HUNG — started ${Math.round(startAgeMs / 60000)}m ago and never completed (threshold ${Math.round(CYCLE_HANG_MS / 60000)}m). The runner is wedged mid-cycle; posts are not going out.`);
+    logger.error(`🫀 social cycle HUNG — started ${Math.round(startAgeMs / 60000)}m ago and never completed (threshold ${Math.round(hangMs / 60000)}m). The runner is wedged mid-cycle; posts are not going out.`);
   }
 
   const platforms = [];
@@ -450,7 +470,7 @@ export function getSocialCycleHealth() {
       startedAt,
       completedAt: cycleMeta && typeof cycleMeta === "object" ? cycleMeta.completedAt || null : null,
       durationMs: cycleMeta && typeof cycleMeta === "object" ? cycleMeta.durationMs ?? null : null,
-      hangThresholdMs: CYCLE_HANG_MS,
+      hangThresholdMs: hangMs,
       hung: cycleHung,
     },
     platforms,
@@ -459,6 +479,20 @@ export function getSocialCycleHealth() {
 
 // Run all configured platforms in series. Used by the scheduler tail step.
 export async function runAllPlatformsCycle(opts = {}) {
+  // Single-flight: a fresh in-flight cycle means this invocation is a genuine
+  // overlap (ops-route poke, cron catch-up) — skip it WITHOUT the /start ping,
+  // because a skip that refreshed the external monitor would reintroduce the
+  // exact false-green the start/success pair exists to prevent. A stale
+  // in-flight cycle (older than CYCLE_HANG_MS) is a wedge: log it and proceed.
+  if (cycleInFlight) {
+    const inFlightAgeMs = Date.now() - cycleInFlight.startedAt;
+    if (inFlightAgeMs <= CYCLE_HANG_MS()) {
+      logger.warn(`⏸️ social cycle already in flight (started ${Math.round(inFlightAgeMs / 1000)}s ago) — skipping this invocation`);
+      return { skipped: "already_in_flight", inFlightForMs: inFlightAgeMs };
+    }
+    logger.error(`🫀 social cycle HUNG in-process — previous invocation started ${Math.round(inFlightAgeMs / 60000)}m ago and never returned (threshold ${Math.round(CYCLE_HANG_MS() / 60000)}m). Proceeding with a fresh cycle over the wedged one.`);
+  }
+
   // Evaluate staleness against the PREVIOUS heartbeat first — so a cycle
   // returning after a gap (or finding a hung predecessor) logs what it
   // recovered from — then stamp THIS execution's start. The heartbeat records
@@ -466,6 +500,7 @@ export async function runAllPlatformsCycle(opts = {}) {
   getSocialCycleHealth();
 
   const startedAt = Date.now();
+  cycleInFlight = { startedAt };
   recordHeartbeat(SOCIAL_CYCLE_HEARTBEAT, { phase: "start", startedAt });
   pingHeartbeatUrl("/start");
 
@@ -478,7 +513,7 @@ export async function runAllPlatformsCycle(opts = {}) {
     // this line, so the monitor sees a start with no success and alerts —
     // instead of staying green while nothing posts.
     const completedAt = Date.now();
-    recordHeartbeat(SOCIAL_CYCLE_HEARTBEAT, {
+    recordCycleCompletionGuarded(startedAt, {
       phase: "complete", startedAt, completedAt, durationMs: completedAt - startedAt,
     });
     pingHeartbeatUrl();
@@ -488,12 +523,69 @@ export async function runAllPlatformsCycle(opts = {}) {
     // a hang, then rethrow — the scheduler's own catch logs it. Deliberately
     // NO success ping: a thrown cycle must not look healthy to the monitor.
     const failedAt = Date.now();
-    recordHeartbeat(SOCIAL_CYCLE_HEARTBEAT, {
+    recordCycleCompletionGuarded(startedAt, {
       phase: "error", startedAt, failedAt, durationMs: failedAt - startedAt,
       error: String(err?.message || err).slice(0, 200),
     });
     throw err;
+  } finally {
+    // Release only if this invocation still owns the flag: a stale-overridden
+    // cycle completing late must not clear the NEWER cycle's in-flight state.
+    if (cycleInFlight && cycleInFlight.startedAt === startedAt) cycleInFlight = null;
   }
+}
+
+// Ownership-guarded heartbeat write for cycle completion/error. An abandoned
+// cycle — timed out at the scheduler, or overridden by the stale check above —
+// that eventually completes will fire its success ping late (accepted), but it
+// must NOT clobber a NEWER cycle's heartbeat meta: recordHeartbeat also bumps
+// last_at, so an unguarded stale write would both overwrite the newer cycle's
+// phase and falsely refresh the staleness clock. Exported for verification.
+export function recordCycleCompletionGuarded(startedAt, meta) {
+  const current = getHeartbeatRow(SOCIAL_CYCLE_HEARTBEAT);
+  const ownerStartedAt = current.meta && typeof current.meta === "object" ? current.meta.startedAt || null : null;
+  if (ownerStartedAt && ownerStartedAt > startedAt) {
+    logger.warn(`🫀 stale social-cycle ${meta?.phase || "completion"} (started ${new Date(startedAt).toISOString()}) ignored — a newer cycle (started ${new Date(ownerStartedAt).toISOString()}) owns the heartbeat`);
+    return false;
+  }
+  recordHeartbeat(SOCIAL_CYCLE_HEARTBEAT, meta);
+  return true;
+}
+
+// Scheduler-facing wrapper: bounds how long the social tail can hold the
+// ingestion cycle. The tail runs inside runIngestionCycle's isRunning guard,
+// so a wedged social cycle would otherwise block ALL RSS ingestion
+// indefinitely — social must never be able to stop ingestion. On timeout we
+// log and return so the scheduler's finally releases isRunning; the abandoned
+// promise keeps running, which is exactly the case the single-flight stale
+// override and the ownership-guarded completion write handle on later ticks.
+// Never throws (cycle errors are logged and absorbed, matching the previous
+// call-site behaviour). `cycleFn` is injectable for verification only.
+export async function runSocialCycleWithTimeout({ timeoutMs, cycleFn = runAllPlatformsCycle } = {}) {
+  const budgetMs = timeoutMs ?? (Number.parseInt(process.env.SOCIAL_TAIL_TIMEOUT_MS || "", 10) || 10 * 60 * 1000);
+  let timer = null;
+  const timedOut = Symbol("social-tail-timeout");
+  // Catch is attached BEFORE the race so a cycle that rejects after losing the
+  // race can never surface as an unhandled rejection.
+  const guarded = Promise.resolve()
+    .then(() => cycleFn())
+    .catch((err) => {
+      logger.error(`❌ Auto-social failed: ${String(err?.message || err)}`);
+      return { failed: String(err?.message || err).slice(0, 200) };
+    })
+    .finally(() => { if (timer) clearTimeout(timer); });
+  const result = await Promise.race([
+    guarded,
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(timedOut), budgetMs);
+      timer.unref?.(); // never hold the process open for telemetry
+    }),
+  ]);
+  if (result === timedOut) {
+    logger.error(`⏱️ social tail timed out after ${Math.round(budgetMs / 1000)}s — continuing ingestion (isRunning releases); the abandoned cycle may still be running and is covered by the in-flight guard + hang detection`);
+    return { timedOut: true, budgetMs };
+  }
+  return result;
 }
 
 export function listEnabledPlatforms() {
