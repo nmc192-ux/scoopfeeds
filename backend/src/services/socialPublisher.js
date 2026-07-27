@@ -10,10 +10,13 @@
 // Cadence guard: each adapter has a `minIntervalMs`. If the last successful
 // post on that platform was more recent than that, this cycle is a no-op.
 
+import axios from "axios";
 import {
   findFreshUnpostedArticles,
   recordSocialPost,
   lastPostAt,
+  recordHeartbeat,
+  getHeartbeatRow,
 } from "../models/database.js";
 import { composeAllPlatforms } from "./socialComposer.js";
 import { ensureCard } from "./cardRenderer.js";
@@ -355,13 +358,142 @@ export async function runPlatformCycle(platform, { dryRun = false, minCredibilit
   }
 }
 
+// ─── Cycle heartbeat + staleness detection ────────────────────────────────
+//
+// Two DISTINCT signals, tracked separately (this distinction is the whole
+// point — conflating them produces an alert that fires on healthy behaviour
+// and gets ignored):
+//   • cycle EXECUTED  — the runner fired at all. A cycle that runs and
+//     declines to post (throttle not elapsed, no candidate clears the filter)
+//     is HEALTHY. A cycle that never runs is the outage we're catching
+//     (Jul 4-9 2026: ~5 days dark, thousands of candidates, ZERO failed rows).
+//   • post SUCCEEDED  — a post actually went out, per platform. Derived from
+//     social_posts via lastPostAt (already persisted; no new state to drift).
+const SOCIAL_CYCLE_HEARTBEAT = "social_cycle";
+const CYCLE_STALE_MS = 90 * 60 * 1000;   // 3 missed */30 runs
+const CYCLE_HANG_MS  = 15 * 60 * 1000;   // a started-but-never-finished cycle is wedged
+const PLATFORM_STALE_MULTIPLIER = 2.5;   // × each platform's minIntervalMs
+
+// External dead-man's switch (Healthchecks.io free tier or equivalent). This
+// is the ONLY signal that survives a fully-down process — the in-process
+// staleness check below cannot fire when nothing is running, which by
+// definition is the outage. Strictly telemetry: no-op when unset (no error,
+// no log spam), ~3s timeout, every error swallowed. It must never block or
+// break a posting cycle.
+//
+// Fired as a START/SUCCESS PAIR, not once. A single ping at cycle start goes
+// green the moment the runner begins — so a cycle that starts, pings, then
+// wedges on a hung HTTP call keeps the monitor green while nothing posts,
+// which is the exact failure the switch exists to catch. Pinging {url}/start
+// on entry and {url} only on successful completion means a hang shows as a
+// start with no matching success, and the monitor alerts on it.
+function pingHeartbeatUrl(pathSuffix = "") {
+  const base = process.env.SOCIAL_HEARTBEAT_PING_URL;
+  if (!base) return; // unset → complete no-op
+  try {
+    const url = `${String(base).replace(/\/+$/, "")}${pathSuffix}`;
+    // Fire-and-forget: not awaited, rejection swallowed so it can never
+    // surface as an unhandled rejection or delay the cycle.
+    axios.get(url, { timeout: 3000 }).catch(() => {});
+  } catch { /* never let telemetry break posting */ }
+}
+
+// Evaluate both signals, emit a greppable logger.error on staleness, and
+// return the structured health for the metrics-ops route. Called on each
+// cycle (so a run returning after a gap logs the gap it recovered from) and
+// on each /scoop-ops/metrics scrape (so an external monitor triggers it even
+// while the process is otherwise idle).
+export function getSocialCycleHealth() {
+  const now = Date.now();
+
+  const { lastAt: cycleLastAt, meta: cycleMeta } = getHeartbeatRow(SOCIAL_CYCLE_HEARTBEAT);
+  const cycleAgeMs  = cycleLastAt ? now - cycleLastAt : null;
+  const cycleStale  = cycleLastAt ? cycleAgeMs > CYCLE_STALE_MS : false; // never-fired ≠ stale
+  if (cycleStale) {
+    logger.error(`🫀 social cycle STALE — last execution ${Math.round(cycleAgeMs / 60000)}m ago (threshold ${Math.round(CYCLE_STALE_MS / 60000)}m). The posting runner is not firing.`);
+  }
+
+  // Hang detection: a cycle that recorded "start" but never "complete". A
+  // legitimately in-flight cycle also reads as "start", so only a start older
+  // than CYCLE_HANG_MS counts — past that the runner is wedged (e.g. a hung
+  // HTTP call), which a bare timestamp cannot distinguish from a healthy run.
+  const phase       = cycleMeta && typeof cycleMeta === "object" ? cycleMeta.phase : null;
+  const startedAt   = cycleMeta && typeof cycleMeta === "object" ? cycleMeta.startedAt || null : null;
+  const startAgeMs  = startedAt ? now - startedAt : null;
+  const cycleHung   = phase === "start" && startAgeMs != null && startAgeMs > CYCLE_HANG_MS;
+  if (cycleHung) {
+    logger.error(`🫀 social cycle HUNG — started ${Math.round(startAgeMs / 60000)}m ago and never completed (threshold ${Math.round(CYCLE_HANG_MS / 60000)}m). The runner is wedged mid-cycle; posts are not going out.`);
+  }
+
+  const platforms = [];
+  for (const [name, adapter] of Object.entries(ADAPTERS)) {
+    if (!adapter.enabled()) continue; // only judge platforms we're actually running
+    const lastAt      = lastPostAt(name);
+    const thresholdMs = adapter.minIntervalMs * PLATFORM_STALE_MULTIPLIER;
+    const ageMs       = lastAt ? now - lastAt : null;
+    const stale       = lastAt ? ageMs > thresholdMs : false; // never-posted ≠ stale
+    if (stale) {
+      logger.error(`🫀 ${name} posts STALE — last success ${Math.round(ageMs / 60000)}m ago (threshold ${Math.round(thresholdMs / 60000)}m, ${PLATFORM_STALE_MULTIPLIER}× minInterval).`);
+    }
+    platforms.push({ platform: name, lastAt, ageMs, thresholdMs, stale });
+  }
+
+  return {
+    cycle: {
+      lastAt: cycleLastAt,
+      ageMs: cycleAgeMs,
+      thresholdMs: CYCLE_STALE_MS,
+      stale: cycleStale,
+      // Hang signal — distinguishes "ran and finished" from "started and never
+      // came back", which the external monitor sees as a missing success ping.
+      phase: phase || null,
+      startedAt,
+      completedAt: cycleMeta && typeof cycleMeta === "object" ? cycleMeta.completedAt || null : null,
+      durationMs: cycleMeta && typeof cycleMeta === "object" ? cycleMeta.durationMs ?? null : null,
+      hangThresholdMs: CYCLE_HANG_MS,
+      hung: cycleHung,
+    },
+    platforms,
+  };
+}
+
 // Run all configured platforms in series. Used by the scheduler tail step.
 export async function runAllPlatformsCycle(opts = {}) {
-  const out = {};
-  for (const platform of Object.keys(ADAPTERS)) {
-    out[platform] = await runPlatformCycle(platform, opts);
+  // Evaluate staleness against the PREVIOUS heartbeat first — so a cycle
+  // returning after a gap (or finding a hung predecessor) logs what it
+  // recovered from — then stamp THIS execution's start. The heartbeat records
+  // that the cycle RAN, independent of whether any platform posts.
+  getSocialCycleHealth();
+
+  const startedAt = Date.now();
+  recordHeartbeat(SOCIAL_CYCLE_HEARTBEAT, { phase: "start", startedAt });
+  pingHeartbeatUrl("/start");
+
+  try {
+    const out = {};
+    for (const platform of Object.keys(ADAPTERS)) {
+      out[platform] = await runPlatformCycle(platform, opts);
+    }
+    // Success ping fires ONLY here. A cycle that wedges mid-loop never reaches
+    // this line, so the monitor sees a start with no success and alerts —
+    // instead of staying green while nothing posts.
+    const completedAt = Date.now();
+    recordHeartbeat(SOCIAL_CYCLE_HEARTBEAT, {
+      phase: "complete", startedAt, completedAt, durationMs: completedAt - startedAt,
+    });
+    pingHeartbeatUrl();
+    return out;
+  } catch (err) {
+    // Record the failure in meta so an in-process reader can tell a crash from
+    // a hang, then rethrow — the scheduler's own catch logs it. Deliberately
+    // NO success ping: a thrown cycle must not look healthy to the monitor.
+    const failedAt = Date.now();
+    recordHeartbeat(SOCIAL_CYCLE_HEARTBEAT, {
+      phase: "error", startedAt, failedAt, durationMs: failedAt - startedAt,
+      error: String(err?.message || err).slice(0, 200),
+    });
+    throw err;
   }
-  return out;
 }
 
 export function listEnabledPlatforms() {

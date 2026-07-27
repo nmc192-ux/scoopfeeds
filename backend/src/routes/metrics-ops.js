@@ -32,6 +32,7 @@
 import { Router } from "express";
 import { getDb } from "../models/database.js";
 import { getSchedulerStatus } from "../services/scheduler.js";
+import { getSocialCycleHealth } from "../services/socialPublisher.js";
 
 const router = Router();
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -86,6 +87,14 @@ router.get("/", (_req, res) => {
     const latestLastRun = lastRunTimestamps.length > 0 ? Math.max(...lastRunTimestamps) : null;
     const ageSecs = latestLastRun ? Math.floor((now - latestLastRun) / 1000) : null;
 
+    // ── Social cycle health: two separate signals — did the runner EXECUTE
+    // (heartbeat), and are per-platform POSTS succeeding. A healthy cycle can
+    // correctly decline to post, so these must not be conflated. Calling this
+    // also emits a greppable logger.error on staleness (an external scrape of
+    // this endpoint is the in-process backstop for a hard-down process).
+    const socialHealth = getSocialCycleHealth();
+    const ageSecsOf = (ms) => (ms == null ? null : Math.floor(ms / 1000));
+
     // ── Metric #5: distinct (category, region) cells from sources table.
     const diversity = db.prepare(`
       SELECT COUNT(DISTINCT category || '|' || region) AS cells,
@@ -139,6 +148,34 @@ router.get("/", (_req, res) => {
           total_sources: diversity.total_sources,
           distinct_categories: diversity.categories,
           distinct_regions: diversity.regions,
+        },
+        social_cycle_health: {
+          label: "Social posting cycle health (execution heartbeat + per-platform post success)",
+          note: "cycle.stale = the runner stopped firing (the real outage). platform.stale = successes dried up, judged only for enabled platforms at 2.5× minIntervalMs. A healthy cycle may show no recent post without being stale.",
+          cycle: {
+            last_execution_ts: socialHealth.cycle.lastAt || null,
+            age_seconds: ageSecsOf(socialHealth.cycle.ageMs),
+            display: formatAge(ageSecsOf(socialHealth.cycle.ageMs)),
+            stale_threshold_seconds: Math.floor(socialHealth.cycle.thresholdMs / 1000),
+            stale: socialHealth.cycle.stale,
+            // phase distinguishes a cycle that finished from one that started
+            // and never came back (hung) — the case a single start-only ping
+            // would have shown as healthy.
+            phase: socialHealth.cycle.phase,
+            started_at_ts: socialHealth.cycle.startedAt,
+            completed_at_ts: socialHealth.cycle.completedAt,
+            duration_ms: socialHealth.cycle.durationMs,
+            hang_threshold_seconds: Math.floor(socialHealth.cycle.hangThresholdMs / 1000),
+            hung: socialHealth.cycle.hung,
+          },
+          platforms: socialHealth.platforms.map((p) => ({
+            platform: p.platform,
+            last_success_ts: p.lastAt || null,
+            age_seconds: ageSecsOf(p.ageMs),
+            display: formatAge(ageSecsOf(p.ageMs)),
+            stale_threshold_seconds: Math.floor(p.thresholdMs / 1000),
+            stale: p.stale,
+          })),
         },
       },
     });
