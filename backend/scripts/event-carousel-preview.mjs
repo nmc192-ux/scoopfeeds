@@ -85,9 +85,11 @@ console.log("\n=== SLIDE 4 — THE DETAILS ===");
 copy.details.forEach(d => console.log(`  - ${d}   (${d.length} chars)`));
 console.log("\n=== SLIDE 5 — THE NUMBERS ===");
 copy.figures.forEach(f => {
-  console.log(`  ${f.value}  —  ${f.label}`);
+  console.log(`  ${f.value}  —  ${f.label}   [${f.source || "no outlet"}]`);
   console.log(`      grounded in: "${f.source_sentence}"`);
 });
+console.log("  (the [outlet] is rendered under each figure on slide 5 — it restores");
+console.log("   scope a label may have dropped, and is true by construction)");
 console.log("\n=== SLIDE 6 — WHY IT MATTERS ===");
 console.log(`  ${copy.why_it_matters}   (${copy.why_it_matters.length} chars)`);
 console.log("\nEvery figure above was substring-verified against the source text shown at the top.");

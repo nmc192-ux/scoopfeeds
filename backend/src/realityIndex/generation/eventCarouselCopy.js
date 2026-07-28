@@ -98,12 +98,20 @@ function buildContext(db, event) {
     LIMIT ?
   `).all(event.id, MAX_ARTICLES);
 
+  // sources[i] is the outlet snippets[i] came from, or null where there is no
+  // single owning outlet (the event summary is synthesised across the dossier).
+  // This is what lets slide 5 print the source beside each figure: the scope a
+  // label can drop — "peak audience" vs "peak audience / BBC" — then comes from
+  // the data by construction rather than from the model's judgment.
   const snippets = [];
-  if (String(event.summary || "").trim()) snippets.push(event.summary.trim());
-  for (const t of timeline) if (t.headline) snippets.push(t.headline.trim());
+  const sources  = [];
+  const push = (text, source) => { snippets.push(text); sources.push(source || null); };
+
+  if (String(event.summary || "").trim()) push(event.summary.trim(), null);
+  for (const t of timeline) if (t.headline) push(t.headline.trim(), t.source_name || null);
   for (const a of articles) {
-    if (a.title) snippets.push(a.title.trim());
-    if (a.description) snippets.push(String(a.description).slice(0, MAX_DESC_CHARS).trim());
+    if (a.title) push(a.title.trim(), a.source_name);
+    if (a.description) push(String(a.description).slice(0, MAX_DESC_CHARS).trim(), a.source_name);
     // Truncate on a SENTENCE boundary, never mid-sentence: the model is
     // required to quote a whole sentence verbatim as a figure's grounding, and
     // a sentence chopped by the cap could never be matched back against the
@@ -114,14 +122,14 @@ function buildContext(db, event) {
       const lastStop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
       const safe = (c.length <= MAX_CONTENT_CHARS) ? cut
                  : (lastStop > 120 ? cut.slice(0, lastStop + 1) : cut);
-      if (safe) snippets.push(safe.trim());
+      if (safe) push(safe.trim(), a.source_name);
     }
   }
 
   // The corpus is EXACTLY what the model is shown. Grounding is checked
   // against this and nothing else, so the model cannot be blamed for — or get
   // away with — a figure sourced from text it never saw.
-  return { event, snippets, corpus: normText(snippets.join(" \n ")) };
+  return { event, snippets, sources, corpus: normText(snippets.join(" \n ")) };
 }
 
 // Bump whenever the PROMPT RULES or the validator change. content_hash covers
@@ -132,7 +140,11 @@ function buildContext(db, event) {
 //   v1 -> v2: standalone-label rule (a label must be true and complete to a
 //             reader who never sees the source) and the no-strengthening rule
 //             for why_it_matters.
-const COPY_RULES_VER = "v2";
+//   v2 -> v3: figures carry `source`, the outlet their grounding sentence came
+//             from, rendered beside the value on slide 5. Cached v2 rows have
+//             no source field, so they must regenerate rather than render a
+//             blank attribution line.
+const COPY_RULES_VER = "v3";
 
 function contentHashOf(ctx) {
   return crypto.createHash("sha1")
@@ -297,7 +309,17 @@ function validateCopy(parsed, ctx) {
     if (!ctx.corpus.includes(nSent))             return { ok: false, reason: "source_sentence_not_in_corpus" };
     if (!normNum(nSent).includes(normNum(value))) return { ok: false, reason: "value_not_in_source_sentence" };
 
-    clean.push({ value, label, source_sentence: sent });
+    // Attribute the figure to the outlet whose snippet contains the grounding
+    // sentence. This is the mitigation for the under-qualified-label failure
+    // that no validation rule can catch: printing "BBC" beside "peak audience"
+    // restores the scope the label dropped, and it is true BY CONSTRUCTION —
+    // we know which article the sentence came from, so the model is not being
+    // asked to be honest about it. null when the sentence came from the
+    // synthesised event summary, which has no single owning outlet.
+    const ownerIdx = ctx.snippets.findIndex(s => normText(s).includes(nSent));
+    const source = ownerIdx >= 0 ? (ctx.sources?.[ownerIdx] || null) : null;
+
+    clean.push({ value, label, source_sentence: sent, source });
   }
   if (new Set(clean.map(f => normNum(f.value))).size !== 3) return { ok: false, reason: "figure_values_not_distinct" };
 

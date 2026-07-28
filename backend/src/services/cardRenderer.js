@@ -1315,13 +1315,27 @@ const eventPointer = (text) => ({
   ] },
 });
 
-// One big figure + its label. value is rendered in Anton so numbers carry the
-// same weight as the headings; label is Inter caps underneath.
-const eventFigure = (value, label) => ({
+// One big figure: value in Anton (numbers carry the same weight as headings),
+// label in Inter caps under it, and — when known — the outlet the figure came
+// from on a third, smaller line.
+//
+// The source line is the mitigation for under-qualified labels: "15.8 million /
+// peak audience" reads as a global figure, "15.8 million / peak audience / BBC"
+// does not. It is true by construction (we know which article the grounding
+// sentence came from) rather than by the model's judgment.
+//
+// Sizes were cut to pay for the third line. Worst-case vertical budget on this
+// slide is ~570px (heading may occupy its full 420px maxHeight before the body
+// starts); a third line at the old sizes needed ~587px and would have
+// overflowed. At these sizes the stack is ~474px, leaving ~96px clearance:
+//   value 92 x 0.9 = 83, +4, label 27, +2, source 22  => 138 per figure
+//   3 x 138 + 2 x 30 inter-figure gap                 => 474
+const eventFigure = (value, label, source) => ({
   type: "div",
-  props: { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [
-    { type: "div", props: { style: { display: "flex", fontFamily: "Anton", fontWeight: 400, fontSize: 104, lineHeight: 0.9, color: SCOOP.accent }, children: String(value) } },
-    { type: "div", props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 700, fontSize: 29.3, letterSpacing: 1.2, color: SCOOP.dim, textTransform: "uppercase" }, children: String(label) } },
+  props: { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
+    { type: "div", props: { style: { display: "flex", fontFamily: "Anton", fontWeight: 400, fontSize: 92, lineHeight: 0.9, color: SCOOP.accent }, children: String(value) } },
+    { type: "div", props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 700, fontSize: 27, letterSpacing: 1.2, color: SCOOP.text, textTransform: "uppercase" }, children: String(label) } },
+    ...(source ? [{ type: "div", props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 600, fontSize: 22, letterSpacing: 0.8, color: SCOOP.dim, textTransform: "uppercase", marginTop: 2 }, children: String(source) } }] : []),
   ] },
 });
 
@@ -1363,7 +1377,7 @@ function buildEventTree(ctx, slide) {
   if (slide === 5) {
     return eventInterior(5, event.category, {
       type: "div",
-      props: { style: { display: "flex", flexDirection: "column", gap: 40 }, children: copy.figures.map(f => eventFigure(f.value, f.label)) },
+      props: { style: { display: "flex", flexDirection: "column", gap: 30 }, children: copy.figures.map(f => eventFigure(f.value, f.label, f.source)) },
     });
   }
 
