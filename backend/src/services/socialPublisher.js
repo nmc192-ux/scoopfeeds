@@ -159,8 +159,17 @@ const ADAPTERS = {
       const squareUrl = `${SITE}/api/cards/square/${baseId}.png`;
       const singleAlt = String(article.title || "").slice(0, 100);
 
+      // Slide 1 MUST be the carousel1 preset, not square. Under the legacy
+      // style the two are byte-identical (buildTree routes carousel1 →
+      // buildSquareMagazineTree), which is why squareUrl worked here — but
+      // under CARD_STYLE=scoopfeeds they diverge: carousel* gets the 1080x1350
+      // ScoopFeeds cover, while square stays the legacy 1080x1080 magazine
+      // card. Posting squareUrl therefore shipped a legacy 1:1 cover in front
+      // of two 4:5 ScoopFeeds slides — mismatched styling AND mismatched
+      // aspect ratios inside one album, which Meta resolves by cropping every
+      // child to the first child's ratio.
       const imageUrls = [
-        squareUrl,
+        `${SITE}/api/cards/carousel1/${baseId}.png`,
         `${SITE}/api/cards/carousel2/${baseId}.png`,
         `${SITE}/api/cards/carousel3/${baseId}.png`,
       ];
@@ -313,9 +322,12 @@ export async function runPlatformCycle(platform, { dryRun = false, minCredibilit
   if (platform === "instagram") {
     try {
       await Promise.all([
-        ensureCard(article, "square"),
+        ensureCard(article, "carousel1"),
         ensureCard(article, "carousel2"),
         ensureCard(article, "carousel3"),
+        // square is still warmed: IG_POST_STYLE=single posts it directly, and
+        // "auto" falls back to it if the carousel path throws.
+        ensureCard(article, "square"),
       ]);
     } catch (err) {
       logger.warn(`socialPublisher: carousel pre-render failed for ${article.id}: ${err.message}`);
