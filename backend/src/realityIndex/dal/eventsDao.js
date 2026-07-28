@@ -13,11 +13,47 @@
  *
  *   2. QUALIFICATION. Which events can actually fill all seven slides.
  *
- * The bar is source diversity. Measured on prod over 7 days (DrJ, 2026-07-28):
+ * The bar has a VOLUME floor and a COHERENCE gate, and they are separate ideas.
+ *
+ * VOLUME. Measured on prod over 7 days (DrJ, 2026-07-28):
  *   >=3 sources 251   >=5 sources 207   >=8 sources 162   >=12 sources 135
  * >=8 was chosen: ~23/day against a 12/day need is ~2x headroom, which is what
  * makes strict refusal affordable — any validation failure downstream can
  * refuse the post outright instead of padding a slide.
+ *
+ * COHERENCE. Source count ALONE is not just insufficient, it is perverse:
+ * over-merging is precisely what accumulates sources, so ranking or selecting
+ * by sources actively seeks out the worst-merged buckets. Measured on the top
+ * 20 by source count (DrJ, 2026-07-28): 17 had n_keys = 1, one had 0, and only
+ * TWO were real events (24 keys / 142.3 idf and 19 / 133.5). The worst example
+ * was titled "OpenAI's predictable hack and an AI stock sell-off" under the
+ * slug the-case-for-physical-ai-safety-3, spanning the Hugging Face hack, Meta
+ * earnings, MCP, skilled trades, Google search, Moonshot, AI drones and China —
+ * a topic bucket, not an event.
+ *
+ * These survive eventBreaker (confirmed EVENT_BREAKER_ENABLED=true) exactly as
+ * its design implies: it only spins off a sub-cluster storyAffinity calls
+ * FOREIGN relative to the largest sub-cluster's core, and when every thread
+ * shares the same degenerate core, nothing is foreign and the event is left
+ * whole.
+ *
+ * The signal is bimodal — either 1 key at 2.4-4.4 idf, or 19-24 keys at
+ * 133-142 idf, with nothing in between — so the threshold is not a calibration
+ * problem: anything from 5 to 130 separates them. n_keys >= 2 is used because
+ * it is the same test storyAffinity.isIncoherent() applies.
+ * Yield: of 168 qualifying at >=8 sources, 96 pass n_keys >= 2 (~14/day, still
+ * clear of the 12/day target).
+ *
+ * ORDERING. Recency, not sources and not coherence:
+ *   - sources DESC selects for over-merged buckets (above).
+ *   - idf DESC selects for OBSCURE ones. High idf means DISTINCTIVE entities,
+ *     so the top 3 by idf were an analyst note on Citizens Financial Group, a
+ *     "Forget Nvidia, these 5 stocks" listicle, and a TSMC stock piece.
+ * Coherence gates; recency ranks.
+ *
+ * (Titles are not identifying either: "Houthis in Yemen Edge Closer to
+ * Entering U.S." appears eight times across eight slugs. Anything keyed on
+ * title equality would be wrong.)
  *
  * The >=5 articles clause is kept deliberately even though prod shows it is
  * NOT binding (>=3 sources and ">=3 sources AND >=5 articles" both returned
@@ -34,11 +70,31 @@ import { getDb } from "../../models/database.js";
 
 // Env-tunable so the bar can be moved without a deploy, but defaulted to the
 // backtested values rather than to something permissive.
-const MIN_SOURCES  = Number.parseInt(process.env.EVENT_CAROUSEL_MIN_SOURCES  || "8", 10);
-const MIN_ARTICLES = Number.parseInt(process.env.EVENT_CAROUSEL_MIN_ARTICLES || "5", 10);
+const MIN_SOURCES   = Number.parseInt(process.env.EVENT_CAROUSEL_MIN_SOURCES   || "8", 10);
+const MIN_ARTICLES  = Number.parseInt(process.env.EVENT_CAROUSEL_MIN_ARTICLES  || "5", 10);
+// Coherence gate. Mirrors AFFINITY_MIN_CORE_KEYS (also 2) — the same quantity
+// storyAffinity.isIncoherent() tests — but read from event_entity_signature so
+// it costs one JSON count in SQL and does NOT depend on article_entities, which
+// prunes at 7 days.
+const MIN_CORE_KEYS = Number.parseInt(process.env.EVENT_CAROUSEL_MIN_CORE_KEYS || "2", 10);
 
 export function carouselBar() {
-  return { minSources: MIN_SOURCES, minArticles: MIN_ARTICLES };
+  return { minSources: MIN_SOURCES, minArticles: MIN_ARTICLES, minCoreKeys: MIN_CORE_KEYS };
+}
+
+/**
+ * Entity-core coherence for an event, from the durable signature the promoter
+ * upserts on every match/create. nKeys is the gate; idfMass is diagnostic only
+ * (see listQualifyingEvents for why it must NOT rank).
+ */
+export function coherenceForEvent(eventId) {
+  const row = getDb().prepare(`
+    SELECT (SELECT COUNT(*) FROM json_each(COALESCE(s.keys, '[]'))) AS n_keys,
+           (SELECT COALESCE(SUM(json_extract(value, '$.idf')), 0)
+              FROM json_each(COALESCE(s.keys, '[]'))) AS idf_mass
+    FROM event_entity_signature s WHERE s.event_id = ?
+  `).get(eventId);
+  return { nKeys: row?.n_keys || 0, idfMass: row?.idf_mass || 0 };
 }
 
 /**
@@ -83,13 +139,18 @@ export function qualifiesForCarousel(eventId) {
     `SELECT id, slug, title, summary, category, status, last_activity_at FROM events WHERE id = ?`
   ).get(eventId);
 
-  if (!event)                                        return { ok: false, reason: "no_such_event", event: null, coverage: { articles: 0, sources: 0 } };
-  const coverage = coverageForEvent(eventId);
-  if (event.status !== "active")                     return { ok: false, reason: "not_active", event, coverage };
-  if (!String(event.summary || "").trim())           return { ok: false, reason: "no_summary", event, coverage };
-  if (coverage.articles < MIN_ARTICLES)              return { ok: false, reason: "too_few_articles", event, coverage };
-  if (coverage.sources  < MIN_SOURCES)               return { ok: false, reason: "too_few_sources", event, coverage };
-  return { ok: true, reason: null, event, coverage };
+  if (!event)                              return { ok: false, reason: "no_such_event", event: null, coverage: { articles: 0, sources: 0 }, coherence: { nKeys: 0, idfMass: 0 } };
+  const coverage  = coverageForEvent(eventId);
+  const coherence = coherenceForEvent(eventId);
+  if (event.status !== "active")           return { ok: false, reason: "not_active", event, coverage, coherence };
+  if (!String(event.summary || "").trim()) return { ok: false, reason: "no_summary", event, coverage, coherence };
+  if (coverage.articles < MIN_ARTICLES)    return { ok: false, reason: "too_few_articles", event, coverage, coherence };
+  if (coverage.sources  < MIN_SOURCES)     return { ok: false, reason: "too_few_sources", event, coverage, coherence };
+  // Coherence LAST so the reason distinguishes "too small" from "big but
+  // incoherent" — the latter is the over-merged bucket and is the interesting
+  // rejection to see in the logs.
+  if (coherence.nKeys   < MIN_CORE_KEYS)   return { ok: false, reason: "incoherent_core", event, coverage, coherence };
+  return { ok: true, reason: null, event, coverage, coherence };
 }
 
 /**
@@ -107,8 +168,12 @@ export function listQualifyingEvents({ withinMs = 7 * 24 * 60 * 60 * 1000, limit
            (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id) AS articles,
            (SELECT COUNT(DISTINCT a.source_name)
               FROM event_articles ea JOIN articles a ON a.id = ea.article_id
-             WHERE ea.event_id = e.id) AS sources
+             WHERE ea.event_id = e.id) AS sources,
+           (SELECT COUNT(*) FROM json_each(COALESCE(s.keys, '[]'))) AS n_keys,
+           (SELECT COALESCE(SUM(json_extract(value, '$.idf')), 0)
+              FROM json_each(COALESCE(s.keys, '[]'))) AS idf_mass
     FROM events e
+    LEFT JOIN event_entity_signature s ON s.event_id = e.id
     WHERE e.status = 'active'
       AND COALESCE(TRIM(e.summary), '') <> ''
       AND e.last_activity_at >= ?
@@ -116,9 +181,10 @@ export function listQualifyingEvents({ withinMs = 7 * 24 * 60 * 60 * 1000, limit
       AND (SELECT COUNT(DISTINCT a.source_name)
              FROM event_articles ea JOIN articles a ON a.id = ea.article_id
             WHERE ea.event_id = e.id) >= ?
-    ORDER BY sources DESC, e.last_activity_at DESC
+      AND (SELECT COUNT(*) FROM json_each(COALESCE(s.keys, '[]'))) >= ?
+    ORDER BY e.last_activity_at DESC
     LIMIT ?
-  `).all(cutoff, MIN_ARTICLES, MIN_SOURCES, limit);
+  `).all(cutoff, MIN_ARTICLES, MIN_SOURCES, MIN_CORE_KEYS, limit);
 }
 
 /** Per-day qualifying counts — the backtest, callable in-process. */
