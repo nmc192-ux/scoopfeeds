@@ -245,6 +245,10 @@ if (!existsSync(CARDS_DIR)) mkdirSync(CARDS_DIR, { recursive: true });
 const FONT_DIR = path.join(BACKEND_ROOT, "assets", "fonts");
 const FONT_SEMIBOLD = readFontOnce(path.join(FONT_DIR, "Inter-SemiBold.otf"));
 const FONT_BOLD     = readFontOnce(path.join(FONT_DIR, "Inter-Bold.otf"));
+// Heavy condensed grotesk for the ScoopFeeds carousel headlines (SIL OFL,
+// bundled). Only REQUIRED when CARD_STYLE=scoopfeeds is active — see
+// isCardRendererReady — so a missing Anton never disables the legacy cards.
+const FONT_ANTON    = readFontOnce(path.join(FONT_DIR, "Anton-Regular.ttf"));
 
 function readFontOnce(p) {
   try { return readFileSync(p); }
@@ -255,7 +259,12 @@ function readFontOnce(p) {
 }
 
 export function isCardRendererReady() {
-  return Boolean(FONT_SEMIBOLD && FONT_BOLD);
+  if (!(FONT_SEMIBOLD && FONT_BOLD)) return false;
+  // Anton is a hard dependency ONLY under the ScoopFeeds style — flipping
+  // CARD_STYLE=scoopfeeds without the bundled font correctly disables
+  // rendering (routes 503 + log) rather than shipping fontless headlines.
+  if (activeCardStyle() === CARD_STYLE_SCOOP && !FONT_ANTON) return false;
+  return true;
 }
 
 // Preset dimensions chosen to match the platform's native aspect ratios so we
@@ -634,11 +643,16 @@ function buildCarouselTree(article, slide) {
 // changes — or when the card design version bumps (CARD_DESIGN_VER).
 // Bump CARD_DESIGN_VER whenever the visual layout changes so stale cached
 // PNGs are never served alongside the new design.
-const CARD_DESIGN_VER = "v10"; // bumped: photo path now opt-in (CARD_USE_ARTICLE_PHOTO=1) — typographic by default
+const CARD_DESIGN_VER = "v11"; // bumped: ScoopFeeds carousel style (4:5, Anton) added behind CARD_STYLE
 
 function contentHash(article, preset) {
   const h = createHash("sha1");
   h.update(CARD_DESIGN_VER);
+  h.update("|");
+  // Fold the active style into the key so legacy and scoopfeeds renders never
+  // collide on disk — flipping CARD_STYLE re-renders without a second manual
+  // CARD_DESIGN_VER bump.
+  h.update(activeCardStyle());
   h.update("|");
   h.update(String(article.title || ""));
   h.update("|");
@@ -1050,7 +1064,174 @@ function buildSquareMagazineTree(article, bgDataUri) {
 //     "here's what matters" signal — pulls the eye straight to the hero.
 //   - Footer divider hairline + small-caps source attribution + date
 //     reads as press-quality vs the old single-row attribution.
+// ── ScoopFeeds carousel style (dark-shipped behind CARD_STYLE) ─────────────
+//
+// New visual identity for the 3-slide IG carousel: 4:5 canvas, near-black
+// ground, lime accent, heavy condensed grotesk (Anton) headlines. Selected by
+// CARD_STYLE=scoopfeeds; anything else (default) keeps the legacy 1080x1080
+// builders untouched. Article-shaped content and slide count are UNCHANGED —
+// this is styling only.
+const CARD_STYLE_SCOOP = "scoopfeeds";
+function activeCardStyle() {
+  return String(process.env.CARD_STYLE || "").toLowerCase() === CARD_STYLE_SCOOP
+    ? CARD_STYLE_SCOOP
+    : "legacy";
+}
+
+const SCOOP = {
+  bg: "#090706", accent: "#dde706", text: "#ffffff",
+  dim: "rgba(255,255,255,0.55)", margin: 108, W: 1080, H: 1350,
+};
+// Only carousel presets change dimensions under the scoop style (4:5). og /
+// story / square keep their legacy sizes.
+const SCOOP_CAROUSEL_DIMS = {
+  carousel1: { width: 1080, height: 1350 },
+  carousel2: { width: 1080, height: 1350 },
+  carousel3: { width: 1080, height: 1350 },
+};
+
+// Style-aware canvas size. All dims reads route through this so the satori
+// canvas matches whichever builder runs.
+function resolveDims(preset) {
+  if (activeCardStyle() === CARD_STYLE_SCOOP && SCOOP_CAROUSEL_DIMS[preset]) {
+    return SCOOP_CAROUSEL_DIMS[preset];
+  }
+  return PRESETS[preset];
+}
+
+// ── Decorative marks (hand-authored, no external asset licence) ────────────
+// Stroked, not filled, so weight scales cleanly. Static definitions — never
+// regenerated per render. Rendered as inline satori <svg> nodes (NOT <img>
+// data URIs) so they inline into satori's output SVG and resvg rasterises
+// them as vectors, sidestepping the resvg embedded-raster bug entirely.
+const _mstroke = (d, sw) => ({
+  type: "path",
+  props: { d, stroke: SCOOP.accent, strokeWidth: sw, strokeLinecap: "round", strokeLinejoin: "round", fill: "none" },
+});
+const MARK_ASTERISK = (size) => ({
+  type: "svg",
+  props: { width: size, height: size, viewBox: "0 0 100 100", children: [
+    _mstroke("M50 10 L50 90", 14), _mstroke("M15.4 30 L84.6 70", 14), _mstroke("M15.4 70 L84.6 30", 14),
+  ] },
+});
+const MARK_SWOOSH = (w) => ({
+  type: "svg",
+  props: { width: w, height: w * 0.5, viewBox: "0 0 200 100", children: [
+    _mstroke("M8 28 C 34 96, 118 102, 172 26", 12), _mstroke("M150 20 L176 22 L170 48", 12),
+  ] },
+});
+const MARK_ARROW = (w) => ({
+  type: "svg",
+  props: { width: w, height: w * 0.75, viewBox: "0 0 160 120", children: [
+    _mstroke("M8 108 C 40 100, 90 70, 138 18", 12), _mstroke("M110 16 L142 12 L136 44", 12),
+  ] },
+});
+// Placement varies by slide index so consecutive slides don't look identical.
+const _absMark = (node, pos) => ({ type: "div", props: { style: { position: "absolute", display: "flex", ...pos }, children: [node] } });
+function scoopMarksForSlide(slide) {
+  if (slide === 1) return [_absMark(MARK_ASTERISK(150), { top: 6, right: 0 }), _absMark(MARK_SWOOSH(300), { bottom: 250, right: -30 })];
+  if (slide === 2) return [_absMark(MARK_ASTERISK(88), { top: 2, right: 8 }), _absMark(MARK_ARROW(200), { bottom: 170, left: -10 })];
+  return [_absMark(MARK_SWOOSH(320), { top: 40, right: -40 }), _absMark(MARK_ASTERISK(120), { bottom: 300, left: 0 })];
+}
+
+// Greedy word-wrap fit for the condensed headline: shrink from `target` until
+// the text fits `maxWidth` × `maxHeight`. avgRatio is Anton's approximate
+// glyph-advance/size (condensed ≈ 0.42). Prevents long titles overflowing the
+// canvas — the scale-to-fit the tokens call for.
+function fitScoopHeadline(text, { maxWidth, maxHeight, target, min, avgRatio = 0.42 }) {
+  const upper = String(text || "").toUpperCase().trim();
+  const words = upper.split(/\s+/).filter(Boolean);
+  for (let size = target; size > min; size -= 6) {
+    const cpl = Math.max(1, Math.floor(maxWidth / (avgRatio * size)));
+    let lines = 1, cur = 0, fits = true;
+    for (const w of words) {
+      if (w.length > cpl) { fits = false; break; } // single word wider than the box
+      if (cur === 0) cur = w.length;
+      else if (cur + 1 + w.length <= cpl) cur += 1 + w.length;
+      else { lines += 1; cur = w.length; }
+    }
+    if (fits && lines * size * 0.9 <= maxHeight) return { size, text: upper };
+  }
+  return { size: min, text: upper };
+}
+
+const scoopEyebrow = (t) => ({
+  type: "div",
+  props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 700, fontSize: 29.3, letterSpacing: 1.5, color: SCOOP.accent, textTransform: "uppercase" }, children: t },
+});
+const scoopFooter = () => ({
+  type: "div",
+  props: { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", width: "100%" }, children: [
+    { type: "div", props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 700, fontSize: 29.3, letterSpacing: 0.5, textTransform: "uppercase" }, children: [
+      { type: "span", props: { style: { display: "flex", color: SCOOP.text }, children: "scoop" } },
+      { type: "span", props: { style: { display: "flex", color: SCOOP.accent }, children: "feeds" } },
+    ] } },
+    { type: "div", props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 700, fontSize: 29.3, letterSpacing: 0.5, color: SCOOP.dim, textTransform: "uppercase" }, children: "scoopfeeds.com" } },
+  ] },
+});
+const scoopFrame = (slide, children) => ({
+  type: "div",
+  props: { style: {
+    width: SCOOP.W, height: SCOOP.H, display: "flex", flexDirection: "column",
+    justifyContent: "space-between", position: "relative",
+    backgroundColor: SCOOP.bg, padding: SCOOP.margin, fontFamily: "Inter", color: SCOOP.text,
+  }, children: [...scoopMarksForSlide(slide), ...children] },
+});
+
+// Slide 1 — cover: category eyebrow + big auto-fit headline (the article title).
+function buildScoopCover(article) {
+  const fit = fitScoopHeadline(article.title, { maxWidth: SCOOP.W - SCOOP.margin * 2, maxHeight: 860, target: 248, min: 96 });
+  return scoopFrame(1, [
+    { type: "div", props: { style: { display: "flex" }, children: [scoopEyebrow(labelFor(article.category))] } },
+    { type: "div", props: { style: { display: "flex", flexGrow: 1, alignItems: "center" }, children: [
+      { type: "div", props: { style: { display: "flex", fontFamily: "Anton", fontWeight: 400, fontSize: fit.size, lineHeight: 0.9, color: SCOOP.text, textTransform: "uppercase", flexWrap: "wrap" }, children: fit.text } },
+    ] } },
+    scoopFooter(),
+  ]);
+}
+
+// Slides 2 & 3 — interior: category eyebrow + condensed heading + body. Slide 2
+// is KEY POINTS (extractBullets, UNCHANGED); slide 3 is the read-the-story CTA.
+function buildScoopInterior(article, slide) {
+  const heading = slide === 2 ? "KEY POINTS" : "READ THE FULL STORY";
+  const fit = fitScoopHeadline(heading, { maxWidth: SCOOP.W - SCOOP.margin * 2, maxHeight: 420, target: 175, min: 92 });
+
+  let body;
+  if (slide === 2) {
+    const bullets = extractBullets(article);
+    body = { type: "div", props: { style: { display: "flex", flexDirection: "column", gap: 26, marginTop: 40 }, children: bullets.map((b) => ({
+      type: "div", props: { style: { display: "flex", flexDirection: "row", gap: 20, alignItems: "flex-start" }, children: [
+        { type: "div", props: { style: { display: "flex", width: 22, height: 6, backgroundColor: SCOOP.accent, marginTop: 20, flexShrink: 0 } } },
+        { type: "div", props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 600, fontSize: 42.7, lineHeight: 1.2, color: SCOOP.text }, children: b } },
+      ] },
+    })) } };
+  } else {
+    const siteDomain = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    body = { type: "div", props: { style: { display: "flex", flexDirection: "column", gap: 24, marginTop: 40 }, children: [
+      { type: "div", props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 600, fontSize: 42.7, lineHeight: 1.2, color: SCOOP.dim }, children: truncate(article.title, 120) } },
+      { type: "div", props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 700, fontSize: 48, letterSpacing: 0.5, color: SCOOP.accent }, children: `${siteDomain} — link in bio` } },
+    ] } };
+  }
+
+  return scoopFrame(slide, [
+    { type: "div", props: { style: { display: "flex", flexDirection: "column" }, children: [
+      scoopEyebrow(labelFor(article.category)),
+      { type: "div", props: { style: { display: "flex", fontFamily: "Anton", fontWeight: 400, fontSize: fit.size, lineHeight: 0.9, color: SCOOP.text, textTransform: "uppercase", marginTop: 16, flexWrap: "wrap" }, children: fit.text } },
+    ] } },
+    { type: "div", props: { style: { display: "flex", flexGrow: 1, flexDirection: "column", justifyContent: "flex-start" }, children: [body] } },
+    scoopFooter(),
+  ]);
+}
+
 function buildTree(article, preset, opts = {}) {
+  // ScoopFeeds style: carousel presets route to the new 4:5 builders. Legacy
+  // presets (og/story/square) and legacy style are untouched below.
+  if (activeCardStyle() === CARD_STYLE_SCOOP && preset.startsWith("carousel")) {
+    const slide = parseInt(preset.replace("carousel", ""), 10);
+    if (slide === 1) return buildScoopCover(article);
+    if (slide >= 2 && slide <= 3) return buildScoopInterior(article, slide);
+  }
+
   // Carousel slide 1 (cover) shares the magazine photo-background layout
   // with the standalone square card so the cover slide visually matches the
   // single-image post style. Slides 2 and 3 stay typographic for legibility
@@ -1466,16 +1647,21 @@ function buildTree(article, preset, opts = {}) {
 // Returns { buffer, photoEmbedded } so callers can tell whether the photo
 // actually made it into the rendered output (vs. fell back to no-photo).
 async function renderPng(article, preset, opts = {}) {
-  const dims = PRESETS[preset];
+  const dims = resolveDims(preset);
+  const scoop = activeCardStyle() === CARD_STYLE_SCOOP;
   const fonts = [
     { name: "Inter", data: FONT_SEMIBOLD, weight: 600, style: "normal" },
     { name: "Inter", data: FONT_BOLD,     weight: 700, style: "normal" },
+    // Anton is registered whenever available; only the scoop headline nodes
+    // reference it, so its presence is harmless for legacy renders.
+    ...(FONT_ANTON ? [{ name: "Anton", data: FONT_ANTON, weight: 400, style: "normal" }] : []),
   ];
+  const resvgBg = scoop ? SCOOP.bg : "#0B0B0D";
 
   const renderOnce = async (treeOpts) => {
     const tree = buildTree(article, preset, treeOpts);
     const svg = await satori(tree, { width: dims.width, height: dims.height, fonts });
-    return new Resvg(svg, { background: "#0B0B0D", fitTo: { mode: "original" } }).render().asPng();
+    return new Resvg(svg, { background: resvgBg, fitTo: { mode: "original" } }).render().asPng();
   };
 
   try {
