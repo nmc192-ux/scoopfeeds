@@ -1357,18 +1357,22 @@ export function hasArticleBeenPosted(articleId, platform) {
   );
 }
 
-export function recordSocialPost({ articleId, platform, status = "posted", platformPostId = null, url = null, caption = null, error = null }) {
+// eventId is set only when the post was an EVENT carousel; article-only posts
+// leave it NULL. The unique index on (event_id, platform) is PARTIAL
+// (migration 020) precisely so those NULLs do not collide.
+export function recordSocialPost({ articleId, platform, status = "posted", platformPostId = null, url = null, caption = null, error = null, eventId = null }) {
   getDb().prepare(`
-    INSERT INTO social_posts (article_id, platform, status, platform_post_id, url, caption, error, posted_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO social_posts (article_id, platform, status, platform_post_id, url, caption, error, posted_at, event_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(article_id, platform) DO UPDATE SET
       status = excluded.status,
       platform_post_id = excluded.platform_post_id,
       url = excluded.url,
       caption = excluded.caption,
       error = excluded.error,
-      posted_at = excluded.posted_at
-  `).run(articleId, platform, status, platformPostId, url, caption, error, Date.now());
+      posted_at = excluded.posted_at,
+      event_id = excluded.event_id
+  `).run(articleId, platform, status, platformPostId, url, caption, error, Date.now(), eventId);
 }
 
 export function lastPostAt(platform) {

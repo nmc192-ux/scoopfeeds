@@ -19,7 +19,9 @@ import {
   getHeartbeatRow,
 } from "../models/database.js";
 import { composeAllPlatforms } from "./socialComposer.js";
-import { ensureCard } from "./cardRenderer.js";
+import { ensureCard, ensureEventCard } from "./cardRenderer.js";
+import { resolveEventForArticle, qualifiesForCarousel } from "../realityIndex/dal/eventsDao.js";
+import { ensureEventCarouselCopy } from "../realityIndex/generation/eventCarouselCopy.js";
 import { isBlueskyConfigured, postToBluesky } from "./blueskyClient.js";
 import { isThreadsConfigured, postToThreads } from "./threadsClient.js";
 import { isFacebookConfigured, postToFacebook } from "./facebookClient.js";
@@ -72,6 +74,73 @@ const PROGRAMMING_BLOCK_PATTERNS = [
 export function looksLikeProgrammingBlock(title) {
   if (!title || typeof title !== "string") return true; // empty title — always skip
   return PROGRAMMING_BLOCK_PATTERNS.some(re => re.test(title));
+}
+
+// ─── Event carousel (7 slides) ────────────────────────────────────────────
+//
+// Dark-shipped behind IG_CAROUSEL_MODE (default "article" = today's exact
+// behaviour). When "event", the IG adapter tries to upgrade the post from the
+// 3-slide ARTICLE carousel to the 7-slide EVENT dossier.
+//
+// Every step is allowed to say no, and a no is not an error — it falls back to
+// the article carousel, which is the common path by design: most IG-eligible
+// articles have no parent event at all.
+const EVENT_CAROUSEL_SLIDES = 7;
+
+async function tryBuildEventCarousel(article) {
+  if ((process.env.IG_CAROUSEL_MODE || "article").toLowerCase() !== "event") return null;
+
+  // carousel4-7 have no legacy design, so the event deck simply cannot be
+  // rendered under the legacy style. Explicit guard rather than a confusing
+  // render failure seven slides deep.
+  if ((process.env.CARD_STYLE || "").toLowerCase() !== "scoopfeeds") {
+    logger.warn("🎠 IG_CAROUSEL_MODE=event but CARD_STYLE is not scoopfeeds — using the 3-slide article carousel");
+    return null;
+  }
+
+  const event = resolveEventForArticle(article.id);
+  if (!event) return null;                    // common case, not worth a log line
+
+  const q = qualifiesForCarousel(event.id);
+  if (!q.ok) {
+    logger.info(`🎠 event ${event.slug} not carousel-worthy: ${q.reason} (${q.coverage.sources} sources, ${q.coherence.nKeys} core keys)`);
+    return null;
+  }
+
+  // The only paid step. Cached per event, so a re-post attempt or a retry does
+  // not re-call the model.
+  const copy = await ensureEventCarouselCopy(event.id);
+  if (!copy) return null;                     // generator already logged the reason
+
+  const ctx = { event: q.event, coverage: q.coverage, copy };
+
+  // Pre-render all 7 so Meta's fetcher hits warm PNGs. A cold render mid-album
+  // is how carousels fail: Meta gives each child container a short window, and
+  // seven cold satori renders will not finish inside it.
+  try {
+    await Promise.all(
+      Array.from({ length: EVENT_CAROUSEL_SLIDES }, (_, i) => ensureEventCard(ctx, `carousel${i + 1}`))
+    );
+  } catch (err) {
+    logger.warn(`🎠 event card pre-render failed for ${event.slug}: ${err.message} — falling back to article carousel`);
+    return null;
+  }
+
+  const slug = encodeURIComponent(event.slug);
+  return {
+    eventId: event.id,
+    eventSlug: event.slug,
+    imageUrls: Array.from({ length: EVENT_CAROUSEL_SLIDES }, (_, i) => `${SITE}/api/cards/carousel${i + 1}/event/${slug}.png`),
+    altTexts: [
+      String(event.title || "").slice(0, 100),
+      "What happened",
+      `${q.coverage.articles} articles from ${q.coverage.sources} sources`.slice(0, 100),
+      "The details",
+      "The numbers",
+      "Why it matters",
+      "Read the full story at scoopfeeds.com",
+    ],
+  };
 }
 
 // One adapter per platform. `enabled()` returns whether the env is set up;
@@ -158,6 +227,20 @@ const ADAPTERS = {
 
       const squareUrl = `${SITE}/api/cards/square/${baseId}.png`;
       const singleAlt = String(article.title || "").slice(0, 100);
+
+      // Event upgrade: 7-slide dossier when this article has a qualifying
+      // parent event AND its copy generated AND all 7 cards rendered. Any no
+      // falls through to the 3-slide article carousel below.
+      const evt = await tryBuildEventCarousel(article);
+      if (evt) {
+        const out = await postCarouselToInstagram({
+          text: composed.caption, imageUrls: evt.imageUrls, altTexts: evt.altTexts,
+        });
+        logger.info(`🎠 posted 7-slide event carousel for "${evt.eventSlug}"`);
+        // eventId flows back so runPlatformCycle records the post event-keyed;
+        // the partial unique index then enforces once-per-event-per-platform.
+        return { url: out.url, platformPostId: out.id, eventId: evt.eventId };
+      }
 
       // Slide 1 MUST be the carousel1 preset, not square. Under the legacy
       // style the two are byte-identical (buildTree routes carousel1 →
@@ -354,6 +437,8 @@ export async function runPlatformCycle(platform, { dryRun = false, minCredibilit
       platformPostId: result.platformPostId,
       url: result.url,
       caption: composed.caption,
+      // Set only by the IG event carousel; NULL for every article-only post.
+      eventId: result.eventId ?? null,
     });
     logger.info(`📣 ${platform} posted: "${article.title.slice(0, 60)}" → ${result.url || result.platformPostId}`);
     return { platform, posted: true, article: { id: article.id, title: article.title }, ...result };
