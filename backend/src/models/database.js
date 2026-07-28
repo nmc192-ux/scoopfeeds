@@ -1301,13 +1301,19 @@ export function listActivePushSubscriptions({ topic } = {}) {
   });
 }
 
+// Returns the subscription's failure_count AFTER the update. Success resets it
+// to 0, so the returned value is a genuine CONSECUTIVE-failure count — that's
+// what makes it safe for pushService's disable-after-N threshold.
 export function markPushSent(endpoint, success) {
   const now = Date.now();
   if (success) {
     getDb().prepare(`UPDATE push_subscriptions SET last_sent_at = ?, failure_count = 0 WHERE endpoint = ?`).run(now, endpoint);
-  } else {
-    getDb().prepare(`UPDATE push_subscriptions SET failure_count = failure_count + 1 WHERE endpoint = ?`).run(endpoint);
+    return 0;
   }
+  const row = getDb()
+    .prepare(`UPDATE push_subscriptions SET failure_count = failure_count + 1 WHERE endpoint = ? RETURNING failure_count`)
+    .get(endpoint);
+  return row?.failure_count ?? 0;
 }
 
 export function disablePushSubscription(endpoint) {
