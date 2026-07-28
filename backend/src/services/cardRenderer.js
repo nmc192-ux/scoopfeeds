@@ -284,6 +284,16 @@ export const PRESETS = {
   carousel1: { width: 1080, height: 1080, headlineSize: 56, padding: 72 }, // cover
   carousel2: { width: 1080, height: 1080, headlineSize: 36, padding: 72 }, // key points
   carousel3: { width: 1080, height: 1080, headlineSize: 62, padding: 72 }, // CTA
+  // carousel4-7 exist ONLY for the 7-slide event carousel, which is
+  // ScoopFeeds-style by definition (there is no legacy design for these
+  // slots). The legacy dims here are placeholders so PRESETS-based route
+  // validation accepts the preset name; resolveDims returns the real 4:5
+  // canvas whenever the scoop style is active, and ensureEventCard refuses
+  // to render at all when it is not.
+  carousel4: { width: 1080, height: 1350, headlineSize: 36, padding: 72 }, // the details
+  carousel5: { width: 1080, height: 1350, headlineSize: 36, padding: 72 }, // the numbers
+  carousel6: { width: 1080, height: 1350, headlineSize: 36, padding: 72 }, // why it matters
+  carousel7: { width: 1080, height: 1350, headlineSize: 62, padding: 72 }, // CTA
 };
 
 const CATEGORY_COLORS = {
@@ -1088,6 +1098,10 @@ const SCOOP_CAROUSEL_DIMS = {
   carousel1: { width: 1080, height: 1350 },
   carousel2: { width: 1080, height: 1350 },
   carousel3: { width: 1080, height: 1350 },
+  carousel4: { width: 1080, height: 1350 },
+  carousel5: { width: 1080, height: 1350 },
+  carousel6: { width: 1080, height: 1350 },
+  carousel7: { width: 1080, height: 1350 },
 };
 
 // Style-aware canvas size. All dims reads route through this so the satori
@@ -1128,10 +1142,40 @@ const MARK_ARROW = (w) => ({
 });
 // Placement varies by slide index so consecutive slides don't look identical.
 const _absMark = (node, pos) => ({ type: "div", props: { style: { position: "absolute", display: "flex", ...pos }, children: [node] } });
+// 7-entry placement table. The previous if(1)/if(2)/else shape was fine while
+// only three slides existed, but at seven it would give slides 3-7 the SAME
+// pair — five consecutive near-identical slides, exactly what varied placement
+// exists to prevent. Entries 1-3 are byte-for-byte what the else-chain
+// produced, so the shipped 3-slide article carousel is unchanged (verified by
+// sha1 in the commit); 4-7 are new.
+//
+// ⚠️ CACHE TRAP — read before changing anything in this table or in any
+// build*Tree function. The card cache key (contentHash / eventContentHash)
+// covers the SUBJECT and CARD_DESIGN_VER, not the builder code. Editing a
+// builder or a mark placement therefore does NOT invalidate cached PNGs: the
+// next render returns hit=true and silently serves the old image, so a
+// style-only change looks like it did nothing. Purge the cached files (or
+// bump CARD_DESIGN_VER if the change should re-render everything in prod)
+// BEFORE verifying. This bit us on the very first pass of this table.
+//
+// Placement rules, both learned by rendering and looking:
+//   1. NO mark may sit in the TOP-LEFT band. The category eyebrow lives there
+//      on every interior slide, and a mark placed there overprints it — the
+//      first pass put marks top-left on 4/6/7 and the swoosh sliced straight
+//      through "WORLD". Top-edge marks go RIGHT; left-side marks go BOTTOM.
+//   2. No two ADJACENT slides share a mark type in the same corner, so a
+//      reader swiping the deck sees movement rather than a fixed frame.
+const SCOOP_MARKS = {
+  1: () => [_absMark(MARK_ASTERISK(150), { top: 6, right: 0 }),      _absMark(MARK_SWOOSH(300),   { bottom: 250, right: -30 })],
+  2: () => [_absMark(MARK_ASTERISK(88),  { top: 2, right: 8 }),      _absMark(MARK_ARROW(200),    { bottom: 170, left: -10 })],
+  3: () => [_absMark(MARK_SWOOSH(320),   { top: 40, right: -40 }),   _absMark(MARK_ASTERISK(120), { bottom: 300, left: 0 })],
+  4: () => [_absMark(MARK_ASTERISK(96),  { top: 10, right: 12 }),    _absMark(MARK_ARROW(190),    { bottom: 200, left: -20 })],
+  5: () => [_absMark(MARK_ASTERISK(104), { bottom: 250, right: 0 }), _absMark(MARK_SWOOSH(260),   { bottom: 175, left: -40 })],
+  6: () => [_absMark(MARK_SWOOSH(300),   { top: 30, right: -50 }),   _absMark(MARK_ARROW(210),    { bottom: 220, right: -20 })],
+  7: () => [_absMark(MARK_ASTERISK(150), { top: 8, right: 6 }),      _absMark(MARK_SWOOSH(280),   { bottom: 230, right: -30 })],
+};
 function scoopMarksForSlide(slide) {
-  if (slide === 1) return [_absMark(MARK_ASTERISK(150), { top: 6, right: 0 }), _absMark(MARK_SWOOSH(300), { bottom: 250, right: -30 })];
-  if (slide === 2) return [_absMark(MARK_ASTERISK(88), { top: 2, right: 8 }), _absMark(MARK_ARROW(200), { bottom: 170, left: -10 })];
-  return [_absMark(MARK_SWOOSH(320), { top: 40, right: -40 }), _absMark(MARK_ASTERISK(120), { bottom: 300, left: 0 })];
+  return (SCOOP_MARKS[slide] || SCOOP_MARKS[3])();
 }
 
 // Greedy word-wrap fit for the condensed headline: shrink from `target` until
@@ -1221,6 +1265,120 @@ function buildScoopInterior(article, slide) {
     { type: "div", props: { style: { display: "flex", flexGrow: 1, flexDirection: "column", justifyContent: "flex-start" }, children: [body] } },
     scoopFooter(),
   ]);
+}
+
+// ── 7-slide EVENT carousel (ScoopFeeds style only) ────────────────────────
+//
+// Subject is an EVENT dossier, not an article. ctx shape:
+//   { event:    { id, slug, title, summary, category },
+//     coverage: { articles, sources },
+//     copy:     { details: [3], figures: [{value,label} x3], why_it_matters } }
+//
+// copy comes from the event_carousel_copy cache (migration 020) and NOTHING
+// else. This module has no LLM import: rendering a card can never trigger a
+// model call, no matter how many times Meta re-fetches the URL.
+const EVENT_SLIDE_HEADINGS = {
+  2: "WHAT HAPPENED",
+  3: "THE COVERAGE",
+  4: "THE DETAILS",
+  5: "THE NUMBERS",
+  6: "WHY IT MATTERS",
+  7: "READ THE FULL STORY",
+};
+
+// Interior shell: eyebrow + auto-fit Anton heading + body, inside the frame.
+function eventInterior(slide, category, bodyNode) {
+  const fit = fitScoopHeadline(EVENT_SLIDE_HEADINGS[slide], {
+    maxWidth: SCOOP.W - SCOOP.margin * 2, maxHeight: 420, target: 175, min: 84,
+  });
+  return scoopFrame(slide, [
+    { type: "div", props: { style: { display: "flex", flexDirection: "column" }, children: [
+      scoopEyebrow(labelFor(category)),
+      { type: "div", props: { style: { display: "flex", fontFamily: "Anton", fontWeight: 400, fontSize: fit.size, lineHeight: 0.9, color: SCOOP.text, textTransform: "uppercase", marginTop: 16, flexWrap: "wrap" }, children: fit.text } },
+    ] } },
+    { type: "div", props: { style: { display: "flex", flexGrow: 1, flexDirection: "column", justifyContent: "flex-start", paddingTop: 44 }, children: [bodyNode] } },
+    scoopFooter(),
+  ]);
+}
+
+const eventBodyText = (text, { size = 42.7, color = SCOOP.text } = {}) => ({
+  type: "div",
+  props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 600, fontSize: size, lineHeight: 1.2, color }, children: text },
+});
+
+// Accent dash + text, the shared list row for THE DETAILS.
+const eventPointer = (text) => ({
+  type: "div",
+  props: { style: { display: "flex", flexDirection: "row", gap: 20, alignItems: "flex-start" }, children: [
+    { type: "div", props: { style: { display: "flex", width: 22, height: 6, backgroundColor: SCOOP.accent, marginTop: 20, flexShrink: 0 } } },
+    { type: "div", props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 600, fontSize: 42.7, lineHeight: 1.2, color: SCOOP.text }, children: text } },
+  ] },
+});
+
+// One big figure + its label. value is rendered in Anton so numbers carry the
+// same weight as the headings; label is Inter caps underneath.
+const eventFigure = (value, label) => ({
+  type: "div",
+  props: { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [
+    { type: "div", props: { style: { display: "flex", fontFamily: "Anton", fontWeight: 400, fontSize: 104, lineHeight: 0.9, color: SCOOP.accent }, children: String(value) } },
+    { type: "div", props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 700, fontSize: 29.3, letterSpacing: 1.2, color: SCOOP.dim, textTransform: "uppercase" }, children: String(label) } },
+  ] },
+});
+
+function buildEventTree(ctx, slide) {
+  const { event, coverage, copy } = ctx;
+
+  // Slide 1 — HOOK: the event title, full-bleed, nothing else competing.
+  if (slide === 1) {
+    const fit = fitScoopHeadline(event.title, { maxWidth: SCOOP.W - SCOOP.margin * 2, maxHeight: 860, target: 248, min: 96 });
+    return scoopFrame(1, [
+      { type: "div", props: { style: { display: "flex" }, children: [scoopEyebrow(labelFor(event.category))] } },
+      { type: "div", props: { style: { display: "flex", flexGrow: 1, alignItems: "center" }, children: [
+        { type: "div", props: { style: { display: "flex", fontFamily: "Anton", fontWeight: 400, fontSize: fit.size, lineHeight: 0.9, color: SCOOP.text, textTransform: "uppercase", flexWrap: "wrap" }, children: fit.text } },
+      ] } },
+      scoopFooter(),
+    ]);
+  }
+
+  if (slide === 2) return eventInterior(2, event.category, eventBodyText(event.summary));
+
+  // Slide 3 — THE COVERAGE: the two counts, stacked as figures.
+  if (slide === 3) {
+    return eventInterior(3, event.category, {
+      type: "div",
+      props: { style: { display: "flex", flexDirection: "column", gap: 48 }, children: [
+        eventFigure(coverage.articles, coverage.articles === 1 ? "Article" : "Articles"),
+        eventFigure(coverage.sources,  coverage.sources  === 1 ? "Source"  : "Sources"),
+      ] },
+    });
+  }
+
+  if (slide === 4) {
+    return eventInterior(4, event.category, {
+      type: "div",
+      props: { style: { display: "flex", flexDirection: "column", gap: 30 }, children: copy.details.map(eventPointer) },
+    });
+  }
+
+  if (slide === 5) {
+    return eventInterior(5, event.category, {
+      type: "div",
+      props: { style: { display: "flex", flexDirection: "column", gap: 40 }, children: copy.figures.map(f => eventFigure(f.value, f.label)) },
+    });
+  }
+
+  // Slide 6 — WHY IT MATTERS: a single claim, set larger than body copy.
+  if (slide === 6) return eventInterior(6, event.category, eventBodyText(copy.why_it_matters, { size: 48 }));
+
+  // Slide 7 — CTA.
+  const siteDomain = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  return eventInterior(7, event.category, {
+    type: "div",
+    props: { style: { display: "flex", flexDirection: "column", gap: 24 }, children: [
+      eventBodyText(truncate(event.title, 120), { color: SCOOP.dim }),
+      { type: "div", props: { style: { display: "flex", fontFamily: "Inter", fontWeight: 700, fontSize: 48, letterSpacing: 0.5, color: SCOOP.accent }, children: `${siteDomain} — link in bio` } },
+    ] },
+  });
 }
 
 function buildTree(article, preset, opts = {}) {
@@ -1766,6 +1924,87 @@ export async function ensureCard(article, preset = "og", opts = {}) {
     logger.warn(`card renderer: failed to cache to ${finalPath}: ${e.message}`);
   }
   return { path: finalPath, buffer, contentType: "image/png", hit: false, withPhoto: photoEmbedded };
+}
+
+// ── Event carousel render entry point ─────────────────────────────────────
+//
+// Parallel to ensureCard but subject-keyed on an EVENT. Kept as a separate
+// function rather than threading an `event` option through ensureCard/
+// buildTree so the article path — which ships every card in production today
+// — is not touched at all.
+//
+// Refuses rather than degrades in three cases, because there is no sane
+// fallback for any of them:
+//   - CARD_STYLE is not scoopfeeds: carousel4-7 have NO legacy design, so a
+//     legacy-styled event carousel cannot be produced. (This is on in prod;
+//     the guard makes the dependency explicit instead of latent.)
+//   - preset outside carousel1-7.
+//   - copy missing/short for a slide that needs it. Slides 4-6 are LLM-filled;
+//     an absent cache row means "not ready", never "render something".
+export const EVENT_CAROUSEL_SLIDES = 7;
+
+function eventContentHash(ctx, preset) {
+  const h = createHash("sha1");
+  h.update(CARD_DESIGN_VER); h.update("|");
+  h.update(activeCardStyle()); h.update("|");
+  h.update("event"); h.update("|");
+  h.update(String(ctx.event.id || "")); h.update("|");
+  h.update(String(ctx.event.title || "")); h.update("|");
+  h.update(String(ctx.event.summary || "")); h.update("|");
+  h.update(String(ctx.event.category || "")); h.update("|");
+  h.update(`${ctx.coverage?.articles || 0}x${ctx.coverage?.sources || 0}`); h.update("|");
+  // Copy is part of the identity: regenerated copy must invalidate the card.
+  h.update(JSON.stringify(ctx.copy?.details || [])); h.update("|");
+  h.update(JSON.stringify(ctx.copy?.figures || [])); h.update("|");
+  h.update(String(ctx.copy?.why_it_matters || ""));
+  return h.digest("hex").slice(0, 10);
+}
+
+function assertEventCtx(ctx, slide) {
+  if (!ctx?.event?.id || !ctx.event.title) throw new Error("event with id + title required");
+  if (slide === 2 && !String(ctx.event.summary || "").trim()) throw new Error("slide 2 requires event.summary");
+  if (slide === 3 && !(ctx.coverage?.articles > 0 && ctx.coverage?.sources > 0)) throw new Error("slide 3 requires coverage counts");
+  if (slide === 4 && !(Array.isArray(ctx.copy?.details) && ctx.copy.details.length === 3)) throw new Error("slide 4 requires copy.details[3]");
+  if (slide === 5 && !(Array.isArray(ctx.copy?.figures) && ctx.copy.figures.length === 3)) throw new Error("slide 5 requires copy.figures[3]");
+  if (slide === 6 && !String(ctx.copy?.why_it_matters || "").trim()) throw new Error("slide 6 requires copy.why_it_matters");
+}
+
+export async function ensureEventCard(ctx, preset) {
+  if (!isCardRendererReady()) throw new Error("card renderer not ready (missing fonts)");
+  if (activeCardStyle() !== CARD_STYLE_SCOOP) {
+    throw new Error(`event carousel requires CARD_STYLE=${CARD_STYLE_SCOOP} (no legacy design exists for these slides)`);
+  }
+  const slide = parseInt(String(preset).replace("carousel", ""), 10);
+  if (!String(preset).startsWith("carousel") || !(slide >= 1 && slide <= EVENT_CAROUSEL_SLIDES)) {
+    throw new Error(`unknown event preset: ${preset}`);
+  }
+  assertEventCtx(ctx, slide);
+
+  const dims = resolveDims(preset);
+  const hash = eventContentHash(ctx, preset);
+  // "evt-" prefix keeps event cards in their own filename namespace so they
+  // can never collide with an article card that happens to share an id.
+  const path_ = cachePath(`evt-${ctx.event.id}`, preset, `${hash}-p0`);
+  if (existsSync(path_)) {
+    return { path: path_, buffer: readFileSync(path_), contentType: "image/png", hit: true, withPhoto: false };
+  }
+
+  const fonts = [
+    { name: "Inter", data: FONT_SEMIBOLD, weight: 600, style: "normal" },
+    { name: "Inter", data: FONT_BOLD,     weight: 700, style: "normal" },
+    ...(FONT_ANTON ? [{ name: "Anton", data: FONT_ANTON, weight: 400, style: "normal" }] : []),
+  ];
+  const svg = await satori(buildEventTree(ctx, slide), { width: dims.width, height: dims.height, fonts });
+  const buffer = new Resvg(svg, { background: SCOOP.bg, fitTo: { mode: "original" } }).render().asPng();
+  try { writeFileSync(path_, buffer); } catch (e) {
+    logger.warn(`card renderer: failed to cache event card ${path_}: ${e.message}`);
+  }
+  return { path: path_, buffer, contentType: "image/png", hit: false, withPhoto: false };
+}
+
+export function eventCardUrl(slug, preset = "carousel1", siteUrl = "") {
+  const base = String(siteUrl || "").replace(/\/+$/, "");
+  return `${base}/api/cards/${preset}/event/${encodeURIComponent(slug)}.png`;
 }
 
 export function cardUrl(articleId, preset = "og", siteUrl = "") {
