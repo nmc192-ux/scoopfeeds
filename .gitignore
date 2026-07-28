@@ -10,6 +10,13 @@ frontend/dist/
 # persisted social tokens. Everything in backend/data/ is regenerated at
 # runtime and must never be committed (some entries also contain secrets).
 backend/data/
+# Explicit belt-and-braces: pulls of PRODUCTION data (scripts/pull-prod-db.mjs)
+# land here. Already covered by backend/data/ above, but called out separately
+# so the rule survives anyone ever narrowing that line — prod data (real user
+# push subscriptions, article content) must never reach the repo.
+backend/data/prod-live.db
+backend/data/prod-live.db-*
+backend/data/.prod-live.pull.*
 
 # Claude Code internal worktrees
 .claude/worktrees/
