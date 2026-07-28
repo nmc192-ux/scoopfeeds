@@ -12,8 +12,8 @@ import { sendXPostDigest } from "./xPostDigest.js";
 import { runWelcomeSequenceCycle } from "./welcomeSequence.js";
 import { refreshAllEvents } from "./liveEvents.js";
 import { refreshAnalysis } from "./analysisService.js";
-import { runBreakingNewsPush } from "./breakingNewsPusher.js";
-import { runAllPlatformsCycle, listEnabledPlatforms } from "./socialPublisher.js";
+import { startBreakingNewsPushDetached } from "./breakingNewsPusher.js";
+import { runSocialCycleWithTimeout, listEnabledPlatforms } from "./socialPublisher.js";
 import { runXQueueGenerationCycle } from "./xPostGenerator.js";
 import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEventVideo, previewSlide } from "./videoGenerator.js";
 import { runVideoPublishAndApproveCycle } from "./videoPublisher.js";
@@ -832,17 +832,31 @@ export async function runIngestionCycle() {
     // Tail step: if a fresh high-credibility article landed, fan it out as a
     // push. Skipped silently if no candidate, in quiet hours, or push is
     // disabled. Errors here must not break the ingest cycle.
+    //
+    // DETACHED — deliberately NOT awaited. A broadcast to a handful of
+    // subscribers must never be able to stall ingestion: this tail runs inside
+    // THIS function's isRunning guard, and an unbounded webpush call held that
+    // flag true until restart, killing RSS ingestion + social posting silently
+    // for days. The push bounds itself (BREAKING_PUSH_TIMEOUT_MS) and records
+    // its own outcome to the breaking_push heartbeat; nothing here waits on it.
     if (String(process.env.ENABLE_BREAKING_PUSH ?? "true").toLowerCase() !== "false") {
-      try { await runBreakingNewsPush(); }
-      catch (err) { logger.error("❌ Breaking push failed", { error: err.message }); }
+      startBreakingNewsPushDetached();
     }
     // Tail step: auto-post to social. Each adapter's own minIntervalMs
     // throttles how often it actually fires; if no platform is configured
     // (env vars missing) this is a near-instant no-op.
+    //
+    // Timeout-bounded (SOCIAL_TAIL_TIMEOUT_MS, default 10 min): this tail runs
+    // inside THIS function's isRunning guard, so a social cycle wedged on a
+    // hung HTTP call would otherwise hold isRunning true and block ALL RSS
+    // ingestion indefinitely. Social must never be able to stop ingestion —
+    // on timeout the wrapper logs and returns, the finally below releases
+    // isRunning, and the abandoned cycle is handled by socialPublisher's
+    // in-flight guard + hang detection on later ticks.
     if (String(process.env.ENABLE_AUTO_SOCIAL ?? "true").toLowerCase() !== "false") {
       const enabled = listEnabledPlatforms();
       if (enabled.length) {
-        try { await runAllPlatformsCycle(); }
+        try { await runSocialCycleWithTimeout(); }
         catch (err) { logger.error("❌ Auto-social failed", { error: err.message }); }
       }
     }

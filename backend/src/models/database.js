@@ -279,6 +279,20 @@ function initializeSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_social_recency ON social_posts(posted_at);
     CREATE INDEX IF NOT EXISTS idx_social_platform ON social_posts(platform, posted_at);
 
+    -- ─── System heartbeats (in-process cycle liveness) ────────────────
+    -- One row per named signal, upserted when the signal last fired. Used to
+    -- detect a runner that silently stopped (e.g. the social posting cycle
+    -- went dark for ~5 days in Jul 2026 with zero failed rows — nothing
+    -- failed, it just didn't run). Deliberately SEPARATE from
+    -- background_job_runs: that table is BullMQ-shaped and feeds the
+    -- uptime / failure-rate metrics, so mixing lightweight heartbeats in
+    -- would pollute those denominators.
+    CREATE TABLE IF NOT EXISTS system_heartbeats (
+      name    TEXT PRIMARY KEY,
+      last_at INTEGER NOT NULL,
+      meta    TEXT
+    );
+
     -- ─── Tips (Stripe donations) ──────────────────────────────────────
     -- One row per completed Stripe Checkout payment. Populated by the
     -- /api/tips/webhook handler on checkout.session.completed events.
@@ -1287,13 +1301,19 @@ export function listActivePushSubscriptions({ topic } = {}) {
   });
 }
 
+// Returns the subscription's failure_count AFTER the update. Success resets it
+// to 0, so the returned value is a genuine CONSECUTIVE-failure count — that's
+// what makes it safe for pushService's disable-after-N threshold.
 export function markPushSent(endpoint, success) {
   const now = Date.now();
   if (success) {
     getDb().prepare(`UPDATE push_subscriptions SET last_sent_at = ?, failure_count = 0 WHERE endpoint = ?`).run(now, endpoint);
-  } else {
-    getDb().prepare(`UPDATE push_subscriptions SET failure_count = failure_count + 1 WHERE endpoint = ?`).run(endpoint);
+    return 0;
   }
+  const row = getDb()
+    .prepare(`UPDATE push_subscriptions SET failure_count = failure_count + 1 WHERE endpoint = ? RETURNING failure_count`)
+    .get(endpoint);
+  return row?.failure_count ?? 0;
 }
 
 export function disablePushSubscription(endpoint) {
@@ -1354,6 +1374,33 @@ export function recordSocialPost({ articleId, platform, status = "posted", platf
 export function lastPostAt(platform) {
   const row = getDb().prepare(`SELECT MAX(posted_at) AS at FROM social_posts WHERE platform = ? AND status = 'posted'`).get(platform);
   return row?.at || 0;
+}
+
+// Upsert a named liveness heartbeat (see system_heartbeats). `meta` may be a
+// string or any JSON-serialisable value. Returns the timestamp written.
+export function recordHeartbeat(name, meta = null) {
+  const at = Date.now();
+  const metaStr = meta == null ? null : (typeof meta === "string" ? meta : JSON.stringify(meta));
+  getDb().prepare(`
+    INSERT INTO system_heartbeats (name, last_at, meta)
+    VALUES (?, ?, ?)
+    ON CONFLICT(name) DO UPDATE SET last_at = excluded.last_at, meta = excluded.meta
+  `).run(name, at, metaStr);
+  return at;
+}
+
+// Full heartbeat row: { lastAt, meta }. meta is JSON-parsed when it round-trips
+// as JSON, otherwise returned as the raw string (recordHeartbeat accepts both).
+// Callers use meta to distinguish "started" from "completed" — a start with no
+// matching completion is a hang, which a bare timestamp cannot express.
+export function getHeartbeatRow(name) {
+  const row = getDb().prepare(`SELECT last_at, meta FROM system_heartbeats WHERE name = ?`).get(name);
+  if (!row) return { lastAt: 0, meta: null };
+  let meta = row.meta ?? null;
+  if (typeof meta === "string") {
+    try { meta = JSON.parse(meta); } catch { /* keep the raw string */ }
+  }
+  return { lastAt: row.last_at || 0, meta };
 }
 
 export function findFreshUnpostedArticles({ platform, minCredibility = 7, withinMs = 12 * 60 * 60 * 1000, limit = 10 } = {}) {

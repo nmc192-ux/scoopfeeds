@@ -13,7 +13,7 @@
 // The push payload deep-links into /article/{id} so opening the notification
 // lands on the SSR detail page (better than the homepage for attribution).
 
-import { findFreshUnpushedArticles, recordArticlePush } from "../models/database.js";
+import { findFreshUnpushedArticles, recordArticlePush, recordHeartbeat } from "../models/database.js";
 import { broadcastPush } from "./pushService.js";
 import { logger } from "./logger.js";
 
@@ -99,4 +99,79 @@ export async function runBreakingNewsPush({ dryRun = false, minCredibility, with
 
   logger.info(`📣 breaking push: "${article.title.slice(0, 60)}" → ${result.sent}/${result.total} subs`);
   return { pushed: true, article: { id: article.id, title: article.title }, payload, result };
+}
+
+// ─── Detached scheduler entry point ───────────────────────────────────────
+//
+// A broadcast to a handful of subscribers must NEVER be able to stall RSS
+// ingestion, event promotion, and social posting. Previously the ingestion
+// cycle awaited this inside its isRunning guard, so a single hung push
+// request held the flag true until process restart and killed the whole
+// pipeline silently. Detaching removes the blast radius entirely rather than
+// merely bounding it — the cycle no longer waits at all.
+const BREAKING_PUSH_HEARTBEAT = "breaking_push";
+
+// Total wall-clock cap for one detached push run.
+//
+// THIS MUST STAY WELL UNDER THE INGESTION CYCLE INTERVAL (currently */30 min).
+// The old `await` + isRunning guard serialized pushes implicitly: a run had to
+// finish before the next cycle could start one. Detached, NOTHING serializes
+// them — the only thing preventing two runs overlapping is this cap being
+// shorter than the gap between cycles. If it is ever raised past the cycle
+// interval, detached pushes overlap, and two concurrent runs can both select
+// the same article inside the select→broadcast→record window and double-send
+// it (findFreshUnpushedArticles and recordArticlePush are each atomic, but the
+// await between them is not). 5 min against a 30-min cycle is 6x headroom.
+// Raise the cycle interval, or lower this — never the other way around.
+const BREAKING_PUSH_TIMEOUT_MS = 5 * 60 * 1000;
+
+// Fire-and-forget. Returns immediately; the caller MUST NOT await the work.
+// Every path is terminal-caught so a late rejection can never surface as an
+// unhandled rejection and take the process down.
+export function startBreakingNewsPushDetached(opts = {}) {
+  const startedAt = Date.now();
+  try { recordHeartbeat(BREAKING_PUSH_HEARTBEAT, { phase: "start", startedAt }); }
+  catch (e) { logger.warn(`breakingPush: heartbeat write failed: ${e.message}`); }
+
+  let timer = null;
+  const timedOut = Symbol("breaking-push-timeout");
+
+  const guarded = Promise.resolve()
+    .then(() => runBreakingNewsPush(opts))
+    .then((out) => ({ ok: true, out }))
+    .catch((err) => ({ ok: false, err }))
+    .finally(() => { if (timer) clearTimeout(timer); });
+
+  const bounded = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(timedOut), BREAKING_PUSH_TIMEOUT_MS);
+    timer.unref?.(); // never hold the process open for a background push
+  });
+
+  // Not returned to the caller as something to await — resolution only drives
+  // the heartbeat write and logging.
+  Promise.race([guarded, bounded])
+    .then((res) => {
+      const finishedAt = Date.now();
+      const base = { startedAt, finishedAt, durationMs: finishedAt - startedAt };
+      if (res === timedOut) {
+        logger.error(`⏱️ breaking push timed out after ${Math.round(BREAKING_PUSH_TIMEOUT_MS / 1000)}s — abandoned (ingestion was never blocked; it runs detached)`);
+        return recordHeartbeat(BREAKING_PUSH_HEARTBEAT, { ...base, phase: "timeout" });
+      }
+      if (res.ok) {
+        return recordHeartbeat(BREAKING_PUSH_HEARTBEAT, {
+          ...base, phase: "complete",
+          pushed: Boolean(res.out?.pushed),
+          reason: res.out?.reason || null,
+          sent: res.out?.result?.sent ?? null,
+          failed: res.out?.result?.failed ?? null,
+        });
+      }
+      logger.error(`❌ Breaking push failed: ${String(res.err?.message || res.err)}`);
+      return recordHeartbeat(BREAKING_PUSH_HEARTBEAT, {
+        ...base, phase: "error", error: String(res.err?.message || res.err).slice(0, 200),
+      });
+    })
+    .catch((e) => { logger.warn(`breakingPush: completion handler failed: ${e.message}`); });
+
+  return { detached: true, startedAt };
 }

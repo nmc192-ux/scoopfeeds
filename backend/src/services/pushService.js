@@ -75,27 +75,54 @@ export function getPublicKey() {
   return publicKey;
 }
 
+// Per-request timeout for a single push. web-push applies a timeout ONLY when
+// options.timeout is a number — it has NO default (verified in web-push 3.6.7,
+// web-push-lib.js:222). Without this, a gateway that accepts the TCP connection
+// and never responds leaves sendNotification pending FOREVER: the promise never
+// settles, so the try/catch below never fires and every caller upstream hangs
+// with it. That is the mechanism that wedged the ingestion cycle.
+const SEND_TIMEOUT_MS = 10_000;
+
+// After this many CONSECUTIVE failures a subscription is disabled. Previously
+// ONLY 404/410 disabled, so an endpoint failing with any other error was
+// retried on every cycle forever — prod had 3 of 5 subscriptions in that state,
+// two dead since 2026-07-01 with failure_count=15 and still being dialled.
+// markPushSent resets the counter to 0 on success, so this is genuinely
+// consecutive: a subscription that ever works again starts over.
+const MAX_CONSECUTIVE_FAILURES = 10;
+
 // Send a payload to a single subscription. Errors get classified: 404/410
 // means the subscription is permanently dead (browser unsubbed or expired)
-// → drop it. Anything else → bump failure count and retry next cycle.
+// → drop it. Anything else → bump failure count, and drop it once the
+// consecutive-failure threshold is crossed.
 async function sendToOne(sub, payload) {
   ensurePushReady();
   try {
     await webpush.sendNotification(
       { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
       JSON.stringify(payload),
-      { TTL: 60 * 60 * 24 } // 24h: stale breaking news isn't worth waking the device
+      {
+        TTL: 60 * 60 * 24, // 24h: stale breaking news isn't worth waking the device
+        timeout: SEND_TIMEOUT_MS,
+      }
     );
     markPushSent(sub.endpoint, true);
     return { ok: true, endpoint: sub.endpoint };
   } catch (err) {
     const code = err.statusCode || 0;
-    markPushSent(sub.endpoint, false);
+    const failures = markPushSent(sub.endpoint, false);
     if (code === 404 || code === 410) {
       disablePushSubscription(sub.endpoint);
       return { ok: false, endpoint: sub.endpoint, reason: "expired", statusCode: code };
     }
-    return { ok: false, endpoint: sub.endpoint, reason: err.message, statusCode: code };
+    if (failures >= MAX_CONSECUTIVE_FAILURES) {
+      disablePushSubscription(sub.endpoint);
+      // Distinct from the 404/410 drop above so the two are separable in logs:
+      // this one means "never gave us a definitive dead signal, just kept failing".
+      logger.warn(`pushService: disabling ${sub.endpoint.slice(0, 60)}… after ${failures} consecutive failures (last: ${err.message})`);
+      return { ok: false, endpoint: sub.endpoint, reason: "too_many_failures", statusCode: code, failures };
+    }
+    return { ok: false, endpoint: sub.endpoint, reason: err.message, statusCode: code, failures };
   }
 }
 
