@@ -14,8 +14,25 @@
 import axios from "axios";
 import { getDb } from "../models/database.js";
 import { logger } from "./logger.js";
+import {
+  buildGeminiGenerationConfig,
+  isGeminiThinkingRejection,
+  markGeminiThinkingRejected,
+  isGeminiModelGone,
+  markGeminiModelGone,
+} from "../realityIndex/llmQueue.js";
 
-const GEMINI_MODEL    = "gemini-flash-latest";
+// PINNED model, never a "-latest" floating alias. On 2026-07-15 a floating
+// alias elsewhere silently resolved to a THINKING model whose reasoning
+// tokens bill as output — $23.33 of output SKU in a day with zero rows
+// persisted. This service bypasses llmQueue, so it must carry the same two
+// protections itself: an explicit pin + thinkingBudget:0 with graceful
+// degrade (see generateSummary below).
+//
+// Default is gemini-3.1-flash-lite, NOT the siblings' gemini-2.5-flash — the
+// 2026-07-16 pre-test found 2.5-flash returns 404 ("no longer available to
+// new users"). Reads GEMINI_GENERATION_MODEL so prod's pin flows in.
+const GEMINI_MODEL    = process.env.GEMINI_GENERATION_MODEL || "gemini-3.1-flash-lite";
 const GEMINI_ENDPOINT = (key) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
 
@@ -45,25 +62,62 @@ async function generateSummary(article) {
     `No hashtags. No emojis. No phrases like "In a significant development" or "It is worth noting". ` +
     `Just the news, plainly stated.\n\nArticle:\n${rawContext}`;
 
-  try {
-    const { data } = await axios.post(
-      GEMINI_ENDPOINT(key),
-      {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.65, maxOutputTokens: 120 },
-      },
-      { timeout: 18000 }
-    );
+  // Log the resolved model on every call so a silent repoint (via env) or a
+  // dead pin is visible in the logs rather than invisible drift.
+  logger.info(`igSummary: Gemini model=${GEMINI_MODEL} for article ${article.id}`);
 
-    const text = (data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
-    if (text.length >= 30 && text.length <= 350) return text;
-    return null;
-  } catch (err) {
-    const status = err.response?.status;
-    // Log but don't throw — ig_summary is best-effort.
-    logger.warn(`igSummary: Gemini ${status || err.code || err.message} for article ${article.id}`);
-    return null;
+  // Up to 2 attempts. thinkingBudget:0 disables reasoning (this is a short
+  // caption task; thinking tokens bill as output and can eat maxOutputTokens
+  // so the visible text comes back empty). Models with a mandatory minimum
+  // budget reject thinkingBudget:0 with a 400 — we flip the shared llmQueue
+  // degrade flag and retry once WITHOUT thinkingConfig instead of failing.
+  // Mirrors the pattern in llmQueue.js.
+  //
+  // maxOutputTokens is 512, NOT the original 120: a 30-350 char summary needs
+  // ~90 tokens, but the degrade path retries WITHOUT thinkingConfig, so a
+  // thinking-rejection puts us back on a reasoning model — and 120 tokens was
+  // exactly the ceiling reasoning tokens exhausted, returning empty text (the
+  // original 2026-05 silent failure). 512 leaves headroom for that fallback.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { data } = await axios.post(
+        GEMINI_ENDPOINT(key),
+        {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: buildGeminiGenerationConfig({ temperature: 0.65, maxOutputTokens: 512 }),
+        },
+        { timeout: 18000 }
+      );
+
+      const text = (data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+      if (text.length >= 30 && text.length <= 350) return text;
+      // Never return null here silently — this exact gate is why the failure
+      // was invisible from 2026-05 to the Jul snapshot. Record WHY it was
+      // rejected and the actual length, plus the Gemini response shape that
+      // signals a thinking/truncation blowout (empty text + thoughtsTokenCount).
+      const reason = text.length === 0 ? "empty" : text.length < 30 ? "too_short" : "too_long";
+      logger.warn(
+        `igSummary: rejected article ${article.id} — ${reason} (len=${text.length}, ` +
+        `finishReason=${data?.candidates?.[0]?.finishReason ?? "?"}, ` +
+        `thoughtsTokenCount=${data?.usageMetadata?.thoughtsTokenCount ?? "?"})`
+      );
+      return null;
+    } catch (err) {
+      if (isGeminiThinkingRejection(err)) {
+        markGeminiThinkingRejected(logger);
+        continue; // retry once, now without thinkingConfig
+      }
+      if (isGeminiModelGone(err)) {
+        markGeminiModelGone(GEMINI_MODEL, logger);
+        return null; // pin is dead for this key — no retry can help
+      }
+      const status = err.response?.status;
+      // Log but don't throw — ig_summary is best-effort.
+      logger.warn(`igSummary: Gemini ${status || err.code || err.message} for article ${article.id}`);
+      return null;
+    }
   }
+  return null;
 }
 
 // Public. Mutates article.ig_summary in-place, persists to DB, returns the value.
