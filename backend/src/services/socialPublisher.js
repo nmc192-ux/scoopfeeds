@@ -499,10 +499,22 @@ export async function runAllPlatformsCycle(opts = {}) {
   // that the cycle RAN, independent of whether any platform posts.
   getSocialCycleHealth();
 
+  // A dry run is a REHEARSAL, not evidence the pipeline is alive: it selects
+  // and composes but deliberately posts nothing. So it must leave no liveness
+  // trace — no heartbeat write, no /start ping, no success ping. Otherwise an
+  // operator poking dry-run to inspect an outage would refresh the external
+  // dead-man's switch and hold the monitor green while nothing is posting,
+  // which is precisely the false-green the start/success pair exists to
+  // prevent. Staleness is still EVALUATED above (read-only, and its alerts are
+  // useful during exactly that investigation) — only the writes are skipped.
+  const isDryRun = Boolean(opts.dryRun);
+
   const startedAt = Date.now();
   cycleInFlight = { startedAt };
-  recordHeartbeat(SOCIAL_CYCLE_HEARTBEAT, { phase: "start", startedAt });
-  pingHeartbeatUrl("/start");
+  if (!isDryRun) {
+    recordHeartbeat(SOCIAL_CYCLE_HEARTBEAT, { phase: "start", startedAt });
+    pingHeartbeatUrl("/start");
+  }
 
   try {
     const out = {};
@@ -513,20 +525,24 @@ export async function runAllPlatformsCycle(opts = {}) {
     // this line, so the monitor sees a start with no success and alerts —
     // instead of staying green while nothing posts.
     const completedAt = Date.now();
-    recordCycleCompletionGuarded(startedAt, {
-      phase: "complete", startedAt, completedAt, durationMs: completedAt - startedAt,
-    });
-    pingHeartbeatUrl();
+    if (!isDryRun) {
+      recordCycleCompletionGuarded(startedAt, {
+        phase: "complete", startedAt, completedAt, durationMs: completedAt - startedAt,
+      });
+      pingHeartbeatUrl();
+    }
     return out;
   } catch (err) {
     // Record the failure in meta so an in-process reader can tell a crash from
     // a hang, then rethrow — the scheduler's own catch logs it. Deliberately
     // NO success ping: a thrown cycle must not look healthy to the monitor.
     const failedAt = Date.now();
-    recordCycleCompletionGuarded(startedAt, {
-      phase: "error", startedAt, failedAt, durationMs: failedAt - startedAt,
-      error: String(err?.message || err).slice(0, 200),
-    });
+    if (!isDryRun) {
+      recordCycleCompletionGuarded(startedAt, {
+        phase: "error", startedAt, failedAt, durationMs: failedAt - startedAt,
+        error: String(err?.message || err).slice(0, 200),
+      });
+    }
     throw err;
   } finally {
     // Release only if this invocation still owns the flag: a stale-overridden
