@@ -143,6 +143,50 @@ async function tryBuildEventCarousel(article) {
   };
 }
 
+// ─── IG pre-publish self-check ────────────────────────────────────────────
+//
+// Fetch every card URL from the PUBLIC internet before handing it to Meta.
+// Meta's image fetcher reports any non-image response as an opaque
+// "400 Invalid parameter" on the media container, which is undiagnosable from
+// our side — a 404 from an old web build, a 422 "event card not ready", and a
+// render 500 all look identical in Meta's error. Checking ourselves turns
+// each of those into a loud, specific log line BEFORE anything is submitted.
+// Returns [] when all URLs are good, else one {url, status, contentType,
+// bodySnippet} per failure.
+export async function verifyCardUrls(urls) {
+  const failures = [];
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(15000) });
+      const contentType = res.headers.get("content-type") || "";
+      if (!res.ok || !contentType.startsWith("image/png")) {
+        let bodySnippet = "";
+        try { bodySnippet = (await res.text()).slice(0, 120); } catch { /* stream may be gone */ }
+        failures.push({ url, status: res.status, contentType, bodySnippet });
+      } else {
+        // Drain so the socket is released cleanly.
+        await res.arrayBuffer();
+      }
+    } catch (err) {
+      failures.push({ url, status: 0, contentType: "", bodySnippet: String(err?.message || err).slice(0, 120) });
+    }
+  }
+  return failures;
+}
+
+// One log line per IG submission attempt — style, presets, subject id and the
+// EXACT URLs handed to Meta — so a failed cycle is reconstructable from logs
+// alone instead of from guesses about which path ran.
+function logIgAttempt({ style, kind, subjectId, imageUrls }) {
+  logger.info(`📸 IG attempt: style=${style} kind=${kind} subject=${subjectId} urls=${JSON.stringify(imageUrls)}`);
+}
+
+// Meta's useful detail lives in err.body (the Graph API error object), which
+// err.message truncates to "400 Invalid parameter". Always log the whole body.
+function logIgFailure(kind, err) {
+  logger.error(`📸 IG ${kind} FAILED: ${err?.message || err} | meta_error=${JSON.stringify(err?.body ?? null)}`);
+}
+
 // One adapter per platform. `enabled()` returns whether the env is set up;
 // `post()` returns { url, platformPostId } on success or throws.
 const ADAPTERS = {
@@ -206,8 +250,9 @@ const ADAPTERS = {
     // Instagram's algorithm penalises high-frequency feed posting hard. 4h
     // between posts gives us 4-6 posts/day max — well within the safe band
     // for Business accounts (Meta has flagged accounts pushing 8+/day as
-    // spam in past algo updates).
-    minIntervalMs: 4 * 60 * 60 * 1000,
+    // spam in past algo updates). IG_MIN_INTERVAL_MS overrides without a
+    // deploy (e.g. 7200000 for the planned 2h cadence).
+    minIntervalMs: Number.parseInt(process.env.IG_MIN_INTERVAL_MS || "", 10) || 4 * 60 * 60 * 1000,
     composeKey: "instagram_feed",
     enabled: isInstagramConfigured,
     async post(article, composed) {
@@ -229,17 +274,29 @@ const ADAPTERS = {
       const singleAlt = String(article.title || "").slice(0, 100);
 
       // Event upgrade: 7-slide dossier when this article has a qualifying
-      // parent event AND its copy generated AND all 7 cards rendered. Any no
-      // falls through to the 3-slide article carousel below.
+      // parent event AND its copy generated AND all 7 cards rendered AND all
+      // 7 URLs verify publicly. Any no falls through to the 3-slide article
+      // carousel below — loudly, never silently.
       const evt = await tryBuildEventCarousel(article);
       if (evt) {
-        const out = await postCarouselToInstagram({
-          text: composed.caption, imageUrls: evt.imageUrls, altTexts: evt.altTexts,
-        });
-        logger.info(`🎠 posted 7-slide event carousel for "${evt.eventSlug}"`);
-        // eventId flows back so runPlatformCycle records the post event-keyed;
-        // the partial unique index then enforces once-per-event-per-platform.
-        return { url: out.url, platformPostId: out.id, eventId: evt.eventId };
+        const bad = await verifyCardUrls(evt.imageUrls);
+        if (bad.length) {
+          logger.error(`📸 IG event-carousel REFUSED pre-publish: ${bad.length}/7 card URLs failed self-check for "${evt.eventSlug}": ${JSON.stringify(bad)} — falling back to article carousel`);
+        } else {
+          logIgAttempt({ style, kind: "event-carousel(7)", subjectId: `event:${evt.eventId}`, imageUrls: evt.imageUrls });
+          try {
+            const out = await postCarouselToInstagram({
+              text: composed.caption, imageUrls: evt.imageUrls, altTexts: evt.altTexts,
+            });
+            logger.info(`🎠 posted 7-slide event carousel for "${evt.eventSlug}"`);
+            // eventId flows back so runPlatformCycle records the post event-keyed;
+            // the partial unique index then enforces once-per-event-per-platform.
+            return { url: out.url, platformPostId: out.id, eventId: evt.eventId };
+          } catch (err) {
+            logIgFailure(`event-carousel "${evt.eventSlug}"`, err);
+            throw err; // no silent fallback from a SUBMITTED event carousel
+          }
+        }
       }
 
       // Slide 1 MUST be the carousel1 preset, not square. Under the legacy
@@ -263,18 +320,46 @@ const ADAPTERS = {
       ];
 
       const tryCarousel = async () => {
-        const out = await postCarouselToInstagram({ text: composed.caption, imageUrls, altTexts });
-        return { url: out.url, platformPostId: out.id };
+        // Pre-publish self-check: refuse rather than hand Meta a URL that will
+        // come back as an opaque "Invalid parameter".
+        const bad = await verifyCardUrls(imageUrls);
+        if (bad.length) {
+          const err = new Error(`IG article-carousel pre-publish self-check failed: ${JSON.stringify(bad)}`);
+          logger.error(`📸 ${err.message}`);
+          throw err;
+        }
+        logIgAttempt({ style, kind: "article-carousel(3)", subjectId: `article:${article.id}`, imageUrls });
+        try {
+          const out = await postCarouselToInstagram({ text: composed.caption, imageUrls, altTexts });
+          return { url: out.url, platformPostId: out.id };
+        } catch (err) {
+          logIgFailure(`article-carousel ${article.id}`, err);
+          throw err;
+        }
       };
       const trySingle = async () => {
-        const out = await postToInstagram({ text: composed.caption, imageUrl: squareUrl, altText: singleAlt });
-        return { url: out.url, platformPostId: out.id };
+        const bad = await verifyCardUrls([squareUrl]);
+        if (bad.length) {
+          const err = new Error(`IG single-card pre-publish self-check failed: ${JSON.stringify(bad)}`);
+          logger.error(`📸 ${err.message}`);
+          throw err;
+        }
+        logIgAttempt({ style, kind: "single", subjectId: `article:${article.id}`, imageUrls: [squareUrl] });
+        try {
+          const out = await postToInstagram({ text: composed.caption, imageUrl: squareUrl, altText: singleAlt });
+          return { url: out.url, platformPostId: out.id };
+        } catch (err) {
+          logIgFailure(`single ${article.id}`, err);
+          throw err;
+        }
       };
 
       if (style === "single") return trySingle();
       if (style === "carousel") return tryCarousel();
 
-      // "auto" — carousel first, fall back to single on any error.
+      // "auto" — carousel first, fall back to single on any error. The
+      // fallback is NOT silent: tryCarousel has already logged the full Meta
+      // error body (or the self-check detail) before we get here.
       try {
         return await tryCarousel();
       } catch (carouselErr) {

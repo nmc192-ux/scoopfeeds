@@ -11,7 +11,7 @@
 //   - accessJwt expires ~2h, refreshJwt ~90d. Refresh is cheap and
 //     rate-limited far more leniently than createSession.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
@@ -91,10 +91,49 @@ function _persistSession(s) {
   try {
     const dir = path.dirname(SESSION_PATH);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    // Never clobber a NEWER session file with an older in-memory one. Two
+    // processes (web + worker) share this file; if the other process already
+    // recovered and wrote a fresh session, overwriting it with our stale one
+    // would re-break BOTH processes on the next post.
+    try {
+      const existing = JSON.parse(readFileSync(SESSION_PATH, "utf8"));
+      if (existing?.createdAt && s?.createdAt && existing.createdAt > s.createdAt) {
+        logger.warn("blueskyClient: NOT persisting session — file on disk is newer than this one");
+        return;
+      }
+    } catch { /* no readable existing file — write freely */ }
     writeFileSync(SESSION_PATH, JSON.stringify(s, null, 2), { mode: 0o600 });
   } catch (e) {
     logger.warn(`blueskyClient: failed to persist session: ${e.message}`);
   }
+}
+
+// Drop the session EVERYWHERE — memory and disk. Used by expired-token
+// recovery: an ExpiredToken from the PDS means this session chain is dead,
+// and keeping either copy would just replay the failure on the next post
+// (the exact bug: a stale in-memory session held forever, 400 ExpiredToken
+// every cycle after ~2h, permanently, since nothing ever dropped it).
+function _dropSession(reason) {
+  const deadCreatedAt = session?.createdAt ?? Infinity;
+  session = null;
+  try {
+    if (existsSync(SESSION_PATH)) {
+      // Two processes share this file. If it is NEWER than the session that
+      // just failed, the other process has already recovered — deleting its
+      // fresh session would re-break both sides. Keep it; recovery below will
+      // load it instead of spending a createSession.
+      let fileCreatedAt = 0;
+      try { fileCreatedAt = JSON.parse(readFileSync(SESSION_PATH, "utf8"))?.createdAt || 0; } catch { /* unreadable -> droppable */ }
+      if (fileCreatedAt > deadCreatedAt) {
+        logger.warn(`blueskyClient: session dropped from memory (${reason}) — keeping NEWER session file (another process recovered)`);
+        return;
+      }
+      unlinkSync(SESSION_PATH);
+    }
+  } catch (e) {
+    logger.warn(`blueskyClient: failed to delete session file: ${e.message}`);
+  }
+  logger.warn(`blueskyClient: session dropped (${reason}) — next call will createSession fresh`);
 }
 
 async function call(path, { method = "POST", body, headers = {}, blob = null } = {}) {
@@ -141,7 +180,14 @@ async function _refreshSession(prev) {
     return next;
   } catch (err) {
     logger.warn(`blueskyClient: refreshSession failed (${err.message}); will need full login`);
-    return null;
+    // Classify: an ExpiredToken here is the same evidence as on createRecord —
+    // the chain WAS real and has aged out. The follow-up createSession is
+    // legitimate recovery and must not be swallowed by a stale cooldown.
+    // (This is the cold-path twin of the in-memory bug: process restarts with
+    // a dead disk session + an old cooldown file would otherwise stay dark.)
+    return err?.body?.error === "ExpiredToken" || /ExpiredToken/i.test(String(err?.message || ""))
+      ? { expired: true }
+      : null;
   }
 }
 
@@ -166,10 +212,19 @@ function _writeCooldown(untilMs, failCount = 0) {
   }
 }
 
-async function _createSession() {
+async function _createSession({ ignoreCooldown = false } = {}) {
   // Circuit-breaker: skip if we're inside a recent 429 cooldown window.
+  //
+  // ignoreCooldown is used ONLY by expired-token recovery. An ExpiredToken on
+  // createRecord proves credentials and the session flow were WORKING two
+  // hours ago — the cooldown state is stale history, not a live rate-limit,
+  // and letting it swallow the recovery would turn a routine token expiry
+  // into permanent silence (one recovery createSession per ~2h is nowhere
+  // near the 30/5min limit). A 429 on the recovery attempt itself still
+  // writes cooldown state below, so a genuinely rate-limited account is
+  // still protected.
   const { until: cooldownUntil, failCount } = _readCooldown();
-  if (cooldownUntil && Date.now() < cooldownUntil) {
+  if (cooldownUntil && Date.now() < cooldownUntil && !ignoreCooldown) {
     const secs = Math.ceil((cooldownUntil - Date.now()) / 1000);
     const err = new Error(`bluesky createSession on cooldown (${secs}s remaining after recent 429)`);
     err.statusCode = 429;
@@ -217,26 +272,46 @@ async function _createSession() {
 // Do the actual establishment: prefer the cheap refreshSession, fall back to a
 // full createSession only as a last resort. NOT called directly — always via the
 // single-flight ensureSession() below so concurrent callers can't each start one.
-async function _establishSession({ force = false, createIfMissing = true } = {}) {
-  // Disk cache → try the leniently-limited refreshSession first.
+async function _establishSession({ force = false, createIfMissing = true, recovery = false } = {}) {
+  // Expired-token recovery: the caller has already dropped memory+disk state
+  // because the PDS told us the chain is dead. Skip refresh (its tokens came
+  // from the same dead chain) and go straight to a fresh login, past any
+  // stale cooldown.
+  if (recovery) {
+    // A session file that SURVIVED _dropSession is by construction newer than
+    // the dead one — another process already logged in fresh. Use it rather
+    // than spending a second createSession on the same account.
+    const survivor = _loadSessionFromDisk();
+    if (survivor) {
+      logger.info("blueskyClient: recovery adopting fresh session from disk (written by the other process)");
+      return (session = survivor);
+    }
+    return (session = await _createSession({ ignoreCooldown: true }));
+  }
+  // Disk cache → try the leniently-limited refreshSession first. A refresh
+  // that fails with ExpiredToken proves the chain aged out — the follow-up
+  // createSession is recovery, not a cold login, and may pass the cooldown.
+  let refreshExpired = false;
   if (!session) {
     const onDisk = _loadSessionFromDisk();
     if (onDisk) {
       const refreshed = await _refreshSession(onDisk);
-      if (refreshed) return (session = refreshed);
+      if (refreshed?.accessJwt) return (session = refreshed);
+      if (refreshed?.expired) refreshExpired = true;
       // Refresh failed — the on-disk session is dead; fall through to createSession.
     }
   } else if (force) {
     // Forced refresh of an existing in-memory session — refresh first before
     // reaching for createSession (which costs us 1/30 per 5min).
     const refreshed = await _refreshSession(session);
-    if (refreshed) return (session = refreshed);
+    if (refreshed?.accessJwt) return (session = refreshed);
+    if (refreshed?.expired) refreshExpired = true;
   }
   // Search opts out here: it must never initiate the heavily-limited createSession
   // (see ensureSession note). Return null so the frequent caller degrades to [].
   if (!createIfMissing) return null;
   // Last resort: full login (heavily rate-limited — see cooldown breaker).
-  return (session = await _createSession());
+  return (session = await _createSession({ ignoreCooldown: refreshExpired }));
 }
 
 // Single-flight guard. Concurrent callers MUST share one session establishment:
@@ -252,18 +327,31 @@ async function _establishSession({ force = false, createIfMissing = true } = {})
 // re-arming the 6h cooldown; createSession is now reserved for the publisher.
 let inFlight = null;
 
-async function ensureSession({ force = false, createIfMissing = true } = {}) {
-  if (session && !force) return session;           // hot in-memory reuse
+async function ensureSession({ force = false, createIfMissing = true, recovery = false } = {}) {
+  if (session && !force && !recovery) return session;  // hot in-memory reuse
   if (!isBlueskyConfigured()) throw new Error("bluesky not configured");
   // Join any in-flight establishment instead of starting a competing one.
-  if (inFlight) {
+  // (Recovery starts its own: an in-flight non-recovery run may be refreshing
+  // the very chain the PDS just declared dead.)
+  if (inFlight && !recovery) {
     const s = await inFlight.catch(() => null);
     if (s) return s;                               // it produced a session → reuse
     if (!createIfMissing) return null;             // no session, and we won't create one
     // an in-flight no-create run yielded nothing — fall through and start our own.
   }
-  inFlight = _establishSession({ force, createIfMissing }).finally(() => { inFlight = null; });
+  inFlight = _establishSession({ force, createIfMissing, recovery }).finally(() => { inFlight = null; });
   return inFlight;
+}
+
+// Bluesky signals an expired access JWT as HTTP 400 with error "ExpiredToken"
+// — NOT as a 401. The old 401-only check is why expiry was never recovered:
+// access JWTs last ~2h, so a long-lived process got ~3 half-hourly posts and
+// then failed with 400 ExpiredToken every cycle forever, holding the stale
+// session in memory the whole time.
+function _isExpiredToken(err) {
+  if (err?.statusCode === 401) return true;
+  return err?.statusCode === 400 &&
+    (err?.body?.error === "ExpiredToken" || /ExpiredToken/i.test(String(err?.message || "")));
 }
 
 async function authed(path, opts = {}) {
@@ -271,12 +359,15 @@ async function authed(path, opts = {}) {
   try {
     return await call(path, { ...opts, headers: { Authorization: `Bearer ${s.accessJwt}` } });
   } catch (err) {
-    // Only 401 = unambiguously expired/invalid token. 400 covers a wide
-    // range of validation errors (bad payload, etc) and shouldn't trigger
-    // a session refresh — that's how we burned through the 30/5min
-    // createSession budget and started getting RateLimitExceeded.
-    if (err.statusCode === 401) {
-      const fresh = await ensureSession({ force: true });
+    // Expired/invalid token (401, or Bluesky's 400 ExpiredToken): drop the
+    // dead session everywhere, log in fresh, retry ONCE. Bounded — a failure
+    // of the retry propagates; there is no loop. Other 400s (bad payload
+    // etc.) still throw immediately: retrying those is how we once burned
+    // through the 30/5min createSession budget into RateLimitExceeded.
+    if (_isExpiredToken(err)) {
+      logger.warn(`blueskyClient: ${path} rejected with ${err.statusCode} ${err.body?.error || ""} — recovering with a fresh session`);
+      _dropSession(`expired token on ${path}`);
+      const fresh = await ensureSession({ recovery: true });
       return await call(path, { ...opts, headers: { Authorization: `Bearer ${fresh.accessJwt}` } });
     }
     throw err;
