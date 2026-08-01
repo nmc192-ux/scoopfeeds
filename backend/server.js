@@ -49,7 +49,7 @@ import embedRouter       from "./src/routes/embed.js";
 import macroRouter       from "./src/routes/macro.js";
 import syntheticMarketsRouter from "./src/routes/syntheticMarkets.js";
 import v1Router            from "./src/routes/v1.js";
-import { initRealityIndex } from "./src/realityIndex/schema.js";
+import { initRealityIndex, getRealityIndexStatus } from "./src/realityIndex/schema.js";
 import { detectCountry } from "./src/services/geolocation.js";
 import { skimlinksPublisherId, amazonInfoForCountry } from "./src/config/affiliates.js";
 import { isStripeConfigured } from "./src/routes/tips.js";
@@ -318,10 +318,21 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// Liveness probe (docker healthcheck). `ok` stays true when we are merely
+// degraded — that is the point of fail-soft: sqlite-vec is a native extension,
+// and its failure disables embedding search but must not take the live site down
+// or flap the container. Base-schema failures never reach here; those fail hard
+// at boot in bootstrapSchema(). `degraded` is how an operator sees the soft case
+// without reading logs.
 app.get("/api/healthz", (_req, res) => {
+  const ri = getRealityIndexStatus();
+  const degradations = ri.vecAvailable ? [] : ["sqlite-vec"];
+
   res.json({
     ok: true,
     status: "alive",
+    degraded: degradations.length > 0,
+    ...(degradations.length ? { degradations } : {}),
     processRole: PROCESS_ROLE,
     uptime: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
@@ -533,6 +544,10 @@ const server = app.listen(PORT, () => {
 
   // Reality Index Phase 1 — schema + sqlite-vec extension. Idempotent.
   // Safe to call before scheduler starts; only initializes new tables.
+  // Now redundant: getDb() runs this itself via bootstrapSchema() (see
+  // models/database.js), so on the connection getDb() returns this is a no-op.
+  // Kept as a belt-and-braces guard; the WeakSet guard in realityIndex/schema.js
+  // makes it free.
   try { initRealityIndex(getDb()); }
   catch (err) { logger.warn(`Reality Index init failed: ${err.message}`); }
 

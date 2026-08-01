@@ -42,7 +42,37 @@ export function getRegisteredMigrations() {
   return MIGRATIONS.map((migration) => migration.id);
 }
 
+// Tables the migrations operate on but never create. `articles`, `social_posts`
+// come from initializeSchema(); `events`, `event_articles`, `event_timeline` come
+// from initRealityIndex(). Migrations 011/012/017/020 assume all of them exist.
+const REQUIRED_BASE_TABLES = [
+  "articles",
+  "social_posts",
+  "events",
+  "event_articles",
+  "event_timeline",
+];
+
+// Turn the opaque failure into a named one. Without this, running migrations on
+// an unseeded database dies at 011 with a bare `SQLITE_ERROR: no such table:
+// event_articles` — which reads as a broken migration rather than what it is: a
+// missing precondition. One sqlite_master scan per boot.
+function assertBaseSchema(db) {
+  const present = new Set(
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name)
+  );
+  const missing = REQUIRED_BASE_TABLES.filter((table) => !present.has(table));
+  if (missing.length === 0) return;
+
+  throw new Error(
+    `runMigrations: base schema missing (${missing.join(", ")}). ` +
+    `Migrations layer on top of initializeSchema() + initRealityIndex(); they do not create these tables. ` +
+    `Call bootstrapSchema(db) from src/models/database.js instead of runMigrations(db) directly.`
+  );
+}
+
 export function runMigrations(db) {
+  assertBaseSchema(db);
   ensureSchemaMigrationsTable(db);
 
   const appliedIds = new Set(
@@ -86,19 +116,33 @@ function resolveDirectDbPath() {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const Database = (await import("better-sqlite3")).default;
-  const dbPath = resolveDirectDbPath();
-  const db = new Database(dbPath);
+  // Deliberately an async IIFE rather than top-level await.
+  //
+  // models/database.js STATICALLY imports runMigrations from this module. Awaiting
+  // that import at this module's top level is a cycle the ESM loader cannot settle:
+  // database.js waits for migrate.js to finish evaluating, migrate.js waits for
+  // database.js, and node exits with "Detected unsettled top-level await".
+  // Inside an IIFE, this module finishes evaluating first, so by the time the
+  // dynamic import runs there is nothing left to wait for.
+  void (async () => {
+    const Database = (await import("better-sqlite3")).default;
+    const { bootstrapSchema } = await import("../models/database.js");
+    const dbPath = resolveDirectDbPath();
+    const db = new Database(dbPath);
 
-  try {
-    db.pragma("journal_mode = WAL");
-    db.pragma("busy_timeout = 5000");
-    const result = runMigrations(db);
-    logger.info("Database migrations finished", {
-      path: dbPath,
-      ...result,
-    });
-  } finally {
-    db.close();
-  }
+    try {
+      db.pragma("journal_mode = WAL");
+      db.pragma("busy_timeout = 5000");
+      // bootstrapSchema, not runMigrations: this CLI opens its own raw connection and
+      // never goes through getDb(), so against a fresh data directory it used to die
+      // at migration 011 on a table no migration creates.
+      const result = bootstrapSchema(db);
+      logger.info("Database migrations finished", {
+        path: dbPath,
+        ...result,
+      });
+    } finally {
+      db.close();
+    }
+  })();
 }
