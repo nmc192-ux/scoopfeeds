@@ -258,7 +258,7 @@ const ADAPTERS = {
     async post(article, composed) {
       // Post style is controlled by IG_POST_STYLE env var:
       //   "carousel" (default) — 3-slide carousel (cover → key points → CTA).
-      //                          Highest save-rate, but requires the CAROUSEL_ALBUM
+      //                          Highest save-rate, but requires the CAROUSEL
       //                          API path which has stricter rate limits.
       //   "single"             — single branded square card (reliable, was original).
       //   "auto"               — tries carousel, falls back to single if it throws.

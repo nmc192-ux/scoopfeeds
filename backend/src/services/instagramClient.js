@@ -205,7 +205,7 @@ export async function postReelToInstagram({ videoUrl, caption = "" }) {
 //      `media_type=IMAGE`, `image_url=<public-url>`, optional `alt_text=<...>`
 //      → returns child creation_id per call
 //   2. Wait until each child container reports status_code=FINISHED
-//   3. POST /{ig-user-id}/media with `media_type=CAROUSEL_ALBUM`, `caption=<text>`,
+//   3. POST /{ig-user-id}/media with `media_type=CAROUSEL`, `caption=<text>`,
 //      `children=<comma-separated child IDs>` → returns parent creation_id
 //   4. Poll parent until FINISHED, then POST /media_publish { creation_id }
 //
@@ -245,11 +245,17 @@ export async function postCarouselToInstagram({ text, imageUrls, altTexts = [] }
     await _waitForFinished(id);
   }
 
-  // Step 3: create the parent CAROUSEL_ALBUM container with all child IDs.
+  // Step 3: create the parent carousel container with all child IDs.
+  //
+  // media_type MUST be "CAROUSEL" here. "CAROUSEL_ALBUM" is the enum Meta
+  // RETURNS when you READ existing media — sending it to the create endpoint
+  // fails with subcode 2207023 'The media type "CAROUSEL_ALBUM" is unknown.'
+  // That one-word mix-up meant this publisher never successfully posted a
+  // carousel: every historical IG post was a single, via the auto fallback.
   const parent = await _call(`/${t.userId}/media`, {
     method: "POST",
     params: {
-      media_type: "CAROUSEL_ALBUM",
+      media_type: "CAROUSEL",
       caption: text || "",
       children: childIds.join(","),
     },
