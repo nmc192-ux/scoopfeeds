@@ -8,25 +8,18 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-import { runMigrations } from "../../../db/migrate.js";
+import { makeTestDb } from "../../../testing/testDb.js";
 import { fetchArticleBodies } from "./llm/articleBodyPrepass.js";
 
 const NOW = 1_750_000_000_000;
 const DOMAIN = "bodysrc.example";
 
 function makeEnv(route, { nArticles = 6 } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scoring-abp-"));
-  const db = new Database(path.join(dir, "t.db"));
-  runMigrations(db);
-  db.exec(`CREATE TABLE IF NOT EXISTS articles (id TEXT PRIMARY KEY, url TEXT, title TEXT, category TEXT, language TEXT, source_name TEXT NOT NULL, published_at INTEGER NOT NULL, is_duplicate INTEGER DEFAULT 0);`);
+  const { db, cleanup } = makeTestDb({ prefix: "scoring-abp-" });
   const sid = db.prepare(`INSERT INTO sources (name,url,source_type,category,region,created_at,updated_at) VALUES ('BodySrc','https://feeds.bodysrc.example/rss','rss','news','global',?,?)`).run(NOW, NOW).lastInsertRowid;
-  const ins = db.prepare(`INSERT INTO articles (id,url,title,category,language,source_name,published_at,is_duplicate) VALUES (?,?,?,?,?,?,?,0)`);
-  for (let i = 0; i < nArticles; i++) ins.run(`a${i}`, `https://${DOMAIN}/news/${i}`, `Title ${i}`, i % 2 ? "tech" : "politics", i === 0 ? "fr" : "en", "BodySrc", NOW - i * 86400000);
+  const ins = db.prepare(`INSERT INTO articles (id,url,title,category,language,source_name,published_at,fetched_at,is_duplicate) VALUES (?,?,?,?,?,?,?,?,0)`);
+  for (let i = 0; i < nArticles; i++) ins.run(`a${i}`, `https://${DOMAIN}/news/${i}`, `Title ${i}`, i % 2 ? "tech" : "politics", i === 0 ? "fr" : "en", "BodySrc", NOW - i * 86400000, NOW);
   let fetchCount = 0;
   const transport = async (url, opts) => {
     if (!url.endsWith("/robots.txt")) fetchCount++;
@@ -34,7 +27,7 @@ function makeEnv(route, { nArticles = 6 } = {}) {
     if (opts.validateStatus && !opts.validateStatus(r.status)) { const e = new Error(`s${r.status}`); e.response = { status: r.status }; throw e; }
     return { status: r.status, data: r.data ?? "", headers: { "content-type": "text/html" }, finalUrl: url };
   };
-  return { db, sid, transport, cleanup: () => { db.close(); fs.rmSync(dir, { recursive: true, force: true }); }, fetches: () => fetchCount };
+  return { db, sid, transport, cleanup, fetches: () => fetchCount };
 }
 const ok = (body) => ({ status: 200, data: `<html><body><main>${body}</main></body></html>` });
 const ctx = (env) => ({ db: env.db, now: NOW, transport: env.transport });
@@ -118,11 +111,17 @@ test("carried language — articles.language passes through in the data shape", 
   env.cleanup();
 });
 
-// no editorial domain → all-miss (rows exist but unfetchable), never throws
-test("no editorial domain (articles lack resolvable host) → all-miss, no throw", async () => {
+// zero sampleable rows → clean empty (the rows.length === 0 early return), never throws.
+//
+// This used to set `url = NULL`. The real `articles` schema declares url as
+// `TEXT UNIQUE NOT NULL`, so that state is unreachable in production — it was only
+// constructible against the loose stub table this file used to hand-roll. The
+// assertion is unchanged and still pins the same branch; the setup now reaches it
+// the way prod actually does, via rows the sample query excludes as duplicates.
+test("no sampleable articles (all deduped) → clean empty, no throw", async () => {
   const env = makeEnv(() => ok("x"));
-  env.db.exec("UPDATE articles SET url = NULL"); // no URLs → no editorial domain & no sampleable rows
+  env.db.exec("UPDATE articles SET is_duplicate = 1"); // excluded by BODY_SAMPLE_SQL → nothing to sample
   const bodies = await fetchArticleBodies({ id: env.sid, name: "BodySrc" }, ctx(env), { limit: 5 });
-  assert.deepEqual(bodies, [], "no url rows → nothing to sample");
+  assert.deepEqual(bodies, [], "no sampleable rows → nothing to sample");
   env.cleanup();
 });

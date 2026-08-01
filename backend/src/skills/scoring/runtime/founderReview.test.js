@@ -8,23 +8,17 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-import { runMigrations } from "../../../db/migrate.js";
+import { makeTestDb } from "../../../testing/testDb.js";
 import { upsertEvidence, listFlaggedEvidence, listModelNotValidatedEvidence } from "../evidence/evidenceCache.js";
 import { buildFlaggedReport } from "./flaggedReport.js";
 
 const NOW = 1_750_000_000_000;
 
 function env() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scoring-fr-"));
-  const db = new Database(path.join(dir, "t.db"));
-  runMigrations(db);
+  const { db, cleanup } = makeTestDb({ prefix: "scoring-fr-" });
   const sid = db.prepare(`INSERT INTO sources (name,url,source_type,category,region,created_at,updated_at) VALUES ('FlagSrc','https://flag.example/rss','rss','tech','global',?,?)`).run(NOW, NOW).lastInsertRowid;
-  return { db, sid, cleanup: () => { db.close(); fs.rmSync(dir, { recursive: true, force: true }); } };
+  return { db, sid, cleanup };
 }
 const put = (env, sub, ev) => upsertEvidence(env.sid, sub, { evidenceUrl: null, gatheredAt: NOW, ...ev }, "v1.1", env.db);
 

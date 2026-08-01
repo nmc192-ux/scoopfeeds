@@ -8,12 +8,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-import { runMigrations } from "../../../db/migrate.js";
+import { makeTestDb } from "../../../testing/testDb.js";
 import ownership from "./modules/ownership_2_4_a.js";
 
 const NOW = Date.now();
@@ -46,14 +42,11 @@ function makeTransport({ search = [], rows = [], apiStatus = 200 }) {
 }
 
 function makeEnv(wd) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scoring-own-"));
-  const db = new Database(path.join(dir, "t.db"));
-  runMigrations(db);
-  db.exec(`CREATE TABLE IF NOT EXISTS articles (id TEXT PRIMARY KEY, url TEXT, source_name TEXT NOT NULL, published_at INTEGER NOT NULL, is_duplicate INTEGER DEFAULT 0);`);
+  const { db, cleanup } = makeTestDb({ prefix: "scoring-own-" });
   const sid = db.prepare(`INSERT INTO sources (name,url,source_type,category,region,created_at,updated_at) VALUES ('TestOutlet','https://feeds.testoutlet.example/rss','rss','tech','global',?,?)`).run(NOW, NOW).lastInsertRowid;
-  const ins = db.prepare(`INSERT INTO articles (id,url,source_name,published_at,is_duplicate) VALUES (?,?,?,?,0)`);
-  for (let i = 0; i < 5; i++) ins.run(`a${i}`, `https://${DOMAIN}/news/${i}`, "TestOutlet", NOW - i * 86400000);
-  return { db, sid, transport: makeTransport(wd), cleanup: () => { db.close(); fs.rmSync(dir, { recursive: true, force: true }); } };
+  const ins = db.prepare(`INSERT INTO articles (id,url,title,category,source_name,published_at,fetched_at,is_duplicate) VALUES (?,?,?,'tech',?,?,?,0)`);
+  for (let i = 0; i < 5; i++) ins.run(`a${i}`, `https://${DOMAIN}/news/${i}`, `Article ${i}`, "TestOutlet", NOW - i * 86400000, NOW);
+  return { db, sid, transport: makeTransport(wd), cleanup };
 }
 const run = async (env) => ownership.gather({ id: env.sid, name: "TestOutlet" }, { db: env.db, now: NOW, transport: env.transport, methodologyVersion: "v1.1" });
 

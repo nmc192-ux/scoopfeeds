@@ -14,12 +14,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-import { runMigrations } from "../../../db/migrate.js";
+import { makeTestDb } from "../../../testing/testDb.js";
 import bylines from "./modules/bylines_2_1_c.js";
 import sustained from "./modules/sustainedCoverage_2_3_c.js";
 import { getEvidence, upsertEvidence, isStale } from "./evidenceCache.js";
@@ -30,25 +26,10 @@ const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.now();
 
 // ── Temp DB + fixtures ──────────────────────────────────────────────────────
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scoring-ev-"));
-const db = new Database(path.join(dir, "t.db"));
-runMigrations(db); // creates sources (002) + scoring_evidence_cache (007)
-// `articles` is created by the base initializeSchema() (not a migration, and
-// not exported), so the temp DB recreates the column subset the own-DB
-// evidence modules query. Mirrors backend/src/models/database.js.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS articles (
-    id           TEXT PRIMARY KEY,
-    title        TEXT NOT NULL,
-    url          TEXT UNIQUE NOT NULL,
-    source_name  TEXT NOT NULL,
-    category     TEXT NOT NULL,
-    author       TEXT,
-    published_at INTEGER NOT NULL,
-    fetched_at   INTEGER NOT NULL,
-    is_duplicate INTEGER DEFAULT 0
-  );
-`);
+// Seeds the real base schema (articles + the RI tables) and every migration, in
+// the order the app boots them. `articles` used to be hand-mirrored here because
+// initializeSchema() was not exported; it is now, and the helper owns the order.
+const { db, cleanup } = makeTestDb({ prefix: "scoring-ev-" });
 
 function addSource(name) {
   return db.prepare(
@@ -235,6 +216,5 @@ test("EVIDENCE-ONLY invariant — sources.quality_score stays NULL after gatheri
 });
 
 test.after(() => {
-  db.close();
-  fs.rmSync(dir, { recursive: true, force: true });
+  cleanup();
 });
