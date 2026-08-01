@@ -1380,6 +1380,17 @@ export function lastPostAt(platform) {
   return row?.at || 0;
 }
 
+// Event-level dedupe for the event-first carousel selection. Counts any row
+// with this event_id regardless of status: a 'failed' event post still spent
+// the attempt, and retrying the same event every cycle is how failure loops
+// start (see the Bluesky cooldown history).
+export function hasEventBeenPosted(eventId, platform) {
+  if (!eventId) return false;
+  return Boolean(getDb().prepare(
+    `SELECT 1 FROM social_posts WHERE event_id = ? AND platform = ? LIMIT 1`
+  ).get(eventId, platform));
+}
+
 // Upsert a named liveness heartbeat (see system_heartbeats). `meta` may be a
 // string or any JSON-serialisable value. Returns the timestamp written.
 export function recordHeartbeat(name, meta = null) {

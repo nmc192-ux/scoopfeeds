@@ -15,12 +15,13 @@ import {
   findFreshUnpostedArticles,
   recordSocialPost,
   lastPostAt,
+  hasEventBeenPosted,
   recordHeartbeat,
   getHeartbeatRow,
 } from "../models/database.js";
 import { composeAllPlatforms } from "./socialComposer.js";
 import { ensureCard, ensureEventCard } from "./cardRenderer.js";
-import { resolveEventForArticle, qualifiesForCarousel } from "../realityIndex/dal/eventsDao.js";
+import { resolveEventForArticle, qualifiesForCarousel, listQualifyingEvents, leadArticleForEvent } from "../realityIndex/dal/eventsDao.js";
 import { ensureEventCarouselCopy } from "../realityIndex/generation/eventCarouselCopy.js";
 import { isBlueskyConfigured, postToBluesky } from "./blueskyClient.js";
 import { isThreadsConfigured, postToThreads } from "./threadsClient.js";
@@ -87,7 +88,29 @@ export function looksLikeProgrammingBlock(title) {
 // articles have no parent event at all.
 const EVENT_CAROUSEL_SLIDES = 7;
 
-async function tryBuildEventCarousel(article) {
+// Event-FIRST selection. The original flow selected a fresh article and then
+// tried to resolve its parent event — structurally dead on arrival: IG picks
+// FRESH articles (<12h old) while the event bar needs MATURE events (>=8
+// sources, >=5 articles, coherent core). Opposite ends of a story's
+// lifecycle, so the degrade path fired every cycle and article-carousel(3)
+// was the only thing that ever posted. Inverted: pick the most recent
+// QUALIFYING event not yet posted here, then derive its lead article for
+// social_posts.article_id and the caption.
+export function pickEventFirstForInstagram() {
+  const events = listQualifyingEvents({});   // recency-ordered, coherence-gated
+  for (const e of events) {
+    if (hasEventBeenPosted(e.id, "instagram")) continue;
+    const lead = leadArticleForEvent(e.id, { notPostedTo: "instagram" });
+    if (!lead) {
+      logger.info(`🎠 event ${e.slug} skipped: every member article already posted to instagram`);
+      continue;
+    }
+    return { event: e, article: lead };
+  }
+  return null;
+}
+
+async function tryBuildEventCarousel(article, preEvent = null) {
   if ((process.env.IG_CAROUSEL_MODE || "article").toLowerCase() !== "event") return null;
 
   // carousel4-7 have no legacy design, so the event deck simply cannot be
@@ -98,7 +121,10 @@ async function tryBuildEventCarousel(article) {
     return null;
   }
 
-  const event = resolveEventForArticle(article.id);
+  // preEvent comes from event-first selection and is authoritative — the lead
+  // article may belong to several events, and re-resolving could land on a
+  // DIFFERENT parent than the one that was selected and dedupe-checked.
+  const event = preEvent || resolveEventForArticle(article.id);
   if (!event) return null;                    // common case, not worth a log line
 
   const q = qualifiesForCarousel(event.id);
@@ -255,7 +281,7 @@ const ADAPTERS = {
     minIntervalMs: Number.parseInt(process.env.IG_MIN_INTERVAL_MS || "", 10) || 4 * 60 * 60 * 1000,
     composeKey: "instagram_feed",
     enabled: isInstagramConfigured,
-    async post(article, composed) {
+    async post(article, composed, _thumbBuffer, extras = {}) {
       // Post style is controlled by IG_POST_STYLE env var:
       //   "carousel" (default) — 3-slide carousel (cover → key points → CTA).
       //                          Highest save-rate, but requires the CAROUSEL
@@ -277,7 +303,7 @@ const ADAPTERS = {
       // parent event AND its copy generated AND all 7 cards rendered AND all
       // 7 URLs verify publicly. Any no falls through to the 3-slide article
       // carousel below — loudly, never silently.
-      const evt = await tryBuildEventCarousel(article);
+      const evt = await tryBuildEventCarousel(article, extras.event || null);
       if (evt) {
         const bad = await verifyCardUrls(evt.imageUrls);
         if (bad.length) {
@@ -432,36 +458,57 @@ export async function runPlatformCycle(platform, { dryRun = false, minCredibilit
     return { platform, posted: false, reason: "cadence_guard", lastAt: last };
   }
 
-  // Pull a few extra candidates (10 vs 1) so the editorial filter can drop
-  // the "China Show 4/28" / "Bloomberg Daybreak"-style program blocks
-  // without leaving the cycle empty-handed.
-  const candidates = findFreshUnpostedArticles({
-    platform,
-    minCredibility: minCredibility ?? 7,
-    withinMs: withinMs ?? 12 * 60 * 60 * 1000,
-    limit: 10,
-  });
-
-  // Editorial filter: skip recurring programming/show blocks. These come
-  // through ingestion as articles but reading them on social as if they
-  // were news events looks like noise.
+  // EVENT-FIRST (instagram + IG_CAROUSEL_MODE=event): select from qualifying
+  // events, not fresh articles — see pickEventFirstForInstagram for why the
+  // article-first order never produced an event post. Selection is read-only
+  // (no LLM copy is generated here; that happens in the adapter, and only for
+  // the event actually being posted). Falls through to article-first when no
+  // qualifying unposted event exists.
+  let article = null;
+  let preEvent = null;
   let droppedAsBlock = 0;
-  const newsworthy = candidates.filter(c => {
-    if (looksLikeProgrammingBlock(c.title)) {
-      droppedAsBlock += 1;
-      return false;
+  if (platform === "instagram" && (process.env.IG_CAROUSEL_MODE || "article").toLowerCase() === "event") {
+    const pick = pickEventFirstForInstagram();
+    if (pick) {
+      article = pick.article;
+      preEvent = pick.event;
+      logger.info(`📸 IG event-first: selected event "${pick.event.slug}" (${pick.event.sources} sources, ${pick.event.articles} articles) lead article ${article.id}`);
+    } else {
+      logger.info("📸 IG event-first: no qualifying unposted event — falling back to article selection");
     }
-    return true;
-  });
+  }
 
-  const article = newsworthy[0];
   if (!article) {
-    return {
+    // Pull a few extra candidates (10 vs 1) so the editorial filter can drop
+    // the "China Show 4/28" / "Bloomberg Daybreak"-style program blocks
+    // without leaving the cycle empty-handed.
+    const candidates = findFreshUnpostedArticles({
       platform,
-      posted: false,
-      reason: candidates.length ? "all_filtered" : "no_candidate",
-      droppedAsBlock,
-    };
+      minCredibility: minCredibility ?? 7,
+      withinMs: withinMs ?? 12 * 60 * 60 * 1000,
+      limit: 10,
+    });
+
+    // Editorial filter: skip recurring programming/show blocks. These come
+    // through ingestion as articles but reading them on social as if they
+    // were news events looks like noise.
+    const newsworthy = candidates.filter(c => {
+      if (looksLikeProgrammingBlock(c.title)) {
+        droppedAsBlock += 1;
+        return false;
+      }
+      return true;
+    });
+
+    article = newsworthy[0];
+    if (!article) {
+      return {
+        platform,
+        posted: false,
+        reason: candidates.length ? "all_filtered" : "no_candidate",
+        droppedAsBlock,
+      };
+    }
   }
 
   // For Instagram: generate (or retrieve cached) AI summary before composing
@@ -514,7 +561,9 @@ export async function runPlatformCycle(platform, { dryRun = false, minCredibilit
   }
 
   try {
-    const result = await adapter.post(article, composed, thumbBuffer);
+    // extras.event carries the event-first selection to the IG adapter;
+    // other adapters take (article, composed, thumbBuffer) and ignore it.
+    const result = await adapter.post(article, composed, thumbBuffer, { event: preEvent });
     recordSocialPost({
       articleId: article.id,
       platform,

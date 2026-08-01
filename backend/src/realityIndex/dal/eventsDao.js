@@ -187,6 +187,30 @@ export function listQualifyingEvents({ withinMs = 7 * 24 * 60 * 60 * 1000, limit
   `).all(cutoff, MIN_ARTICLES, MIN_SOURCES, MIN_CORE_KEYS, limit);
 }
 
+/**
+ * The lead article for posting an event: highest-credibility member, most
+ * recent on ties. `notPostedTo` excludes members already recorded in
+ * social_posts for that platform — social_posts is UNIQUE(article_id,
+ * platform) with recordSocialPost upserting on conflict, so re-using an
+ * already-posted article_id as the lead would silently OVERWRITE that
+ * article's post history. Returns the full article row (the publisher
+ * composes the caption from it), or null when every member is posted.
+ */
+export function leadArticleForEvent(eventId, { notPostedTo = null } = {}) {
+  if (!eventId) return null;
+  return getDb().prepare(`
+    SELECT a.*
+    FROM event_articles ea
+    JOIN articles a ON a.id = ea.article_id
+    WHERE ea.event_id = ?
+      AND (? IS NULL OR NOT EXISTS (
+        SELECT 1 FROM social_posts s WHERE s.article_id = a.id AND s.platform = ?
+      ))
+    ORDER BY a.credibility DESC, a.published_at DESC
+    LIMIT 1
+  `).get(eventId, notPostedTo, notPostedTo) || null;
+}
+
 /** Per-day qualifying counts — the backtest, callable in-process. */
 export function qualifyingCountsByDay({ withinMs = 7 * 24 * 60 * 60 * 1000 } = {}) {
   const rows = listQualifyingEvents({ withinMs, limit: 100000 });

@@ -370,16 +370,36 @@ function formatShortDate(input) {
 
 // Extract up to `count` sentence-level bullets from the article description.
 // Falls back to title if description is thin. Each bullet is capped at 160 chars.
-function extractBullets(article, count = 3) {
+// NO PADDING — same rule as the event-copy validator. The old version padded
+// short descriptions by repeating the article headline, and that shipped: a
+// live slide 2 went out with bullet 1 = truncated description and bullets 2
+// and 3 = the headline, printed twice. A bullet must never repeat the
+// headline or another bullet; if fewer than `count` real bullets exist,
+// return fewer and let the slide render fewer rows. Sole floor: zero bullets
+// would render an empty KEY POINTS slide, so fall back to ONE line of the
+// raw description (or, with no description at all, ONE instance of the
+// title — once, as the only row, never as filler).
+// Exported for verification.
+export function extractBullets(article, count = 3) {
   const raw = (article.description || article.content || "").replace(/\s+/g, " ").trim();
-  const sentences = raw
-    .split(/\.\s+/)
-    .map(s => s.trim())
-    .filter(s => s.length > 45 && s.length < 300);
-  const picked = sentences.slice(0, count).map(s =>
-    truncate(s.endsWith(".") ? s : s + ".", 160)
-  );
-  while (picked.length < count) picked.push(truncate(article.title, 160));
+  const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const titleNorm = norm(article.title);
+
+  const seen = new Set();
+  const picked = [];
+  for (const s of raw.split(/\.\s+/).map(x => x.trim()).filter(x => x.length > 45 && x.length < 300)) {
+    const bullet = truncate(s.endsWith(".") ? s : s + ".", 160);
+    const key = norm(bullet);
+    if (!key || key === titleNorm || seen.has(key)) continue;
+    seen.add(key);
+    picked.push(bullet);
+    if (picked.length === count) break;
+  }
+
+  if (picked.length === 0) {
+    const fallback = truncate(raw || article.title || "", 160);
+    if (fallback) picked.push(fallback);
+  }
   return picked;
 }
 
@@ -653,7 +673,14 @@ function buildCarouselTree(article, slide) {
 // changes — or when the card design version bumps (CARD_DESIGN_VER).
 // Bump CARD_DESIGN_VER whenever the visual layout changes so stale cached
 // PNGs are never served alongside the new design.
-const CARD_DESIGN_VER = "v11"; // bumped: ScoopFeeds carousel style (4:5, Anton) added behind CARD_STYLE
+// v12: extractBullets no longer pads with the repeated headline. The bullet
+// CONTENT changed for every article whose description yields <3 sentences,
+// and the cache key does not cover builder code (see the cache-trap warning
+// at SCOOP_MARKS) — without this bump, cached carousel2 PNGs would keep
+// serving the headline-twice slide that already shipped to the account.
+// Cost: one cold re-render per cached card. Unavoidable this time; the
+// byte-identity argument that skipped the v11 bump does not apply.
+const CARD_DESIGN_VER = "v12";
 
 function contentHash(article, preset) {
   const h = createHash("sha1");
