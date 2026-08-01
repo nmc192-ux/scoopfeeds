@@ -1380,15 +1380,23 @@ export function lastPostAt(platform) {
   return row?.at || 0;
 }
 
-// Event-level dedupe for the event-first carousel selection. Counts any row
-// with this event_id regardless of status: a 'failed' event post still spent
-// the attempt, and retrying the same event every cycle is how failure loops
-// start (see the Bluesky cooldown history).
-export function hasEventBeenPosted(eventId, platform) {
+// Event-level retire rule for event-first carousel selection: retired on a
+// successful post, or after 2+ FAILED attempts. One failure alone must NOT
+// retire — a 5-day platform outage under an any-row rule would have silently
+// retired ~23 events/day permanently, with no signal. Two failures on two
+// different cycles (each with a different lead article) is evidence the
+// failure is deterministic to the event, not transient to the platform.
+// Requires migration 021 (uniqueness on posted rows only) so the second
+// failed row is insertable at all.
+export function isEventRetiredForPlatform(eventId, platform) {
   if (!eventId) return false;
-  return Boolean(getDb().prepare(
-    `SELECT 1 FROM social_posts WHERE event_id = ? AND platform = ? LIMIT 1`
-  ).get(eventId, platform));
+  const row = getDb().prepare(`
+    SELECT
+      SUM(CASE WHEN status = 'posted' THEN 1 ELSE 0 END) AS posted,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
+    FROM social_posts WHERE event_id = ? AND platform = ?
+  `).get(eventId, platform);
+  return (row?.posted || 0) >= 1 || (row?.failed || 0) >= 2;
 }
 
 // Upsert a named liveness heartbeat (see system_heartbeats). `meta` may be a

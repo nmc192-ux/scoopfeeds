@@ -15,7 +15,7 @@ import {
   findFreshUnpostedArticles,
   recordSocialPost,
   lastPostAt,
-  hasEventBeenPosted,
+  isEventRetiredForPlatform,
   recordHeartbeat,
   getHeartbeatRow,
 } from "../models/database.js";
@@ -99,7 +99,7 @@ const EVENT_CAROUSEL_SLIDES = 7;
 export function pickEventFirstForInstagram() {
   const events = listQualifyingEvents({});   // recency-ordered, coherence-gated
   for (const e of events) {
-    if (hasEventBeenPosted(e.id, "instagram")) continue;
+    if (isEventRetiredForPlatform(e.id, "instagram")) continue;
     const lead = leadArticleForEvent(e.id, { notPostedTo: "instagram" });
     if (!lead) {
       logger.info(`🎠 event ${e.slug} skipped: every member article already posted to instagram`);
