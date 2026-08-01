@@ -30,27 +30,56 @@
  *   GEMINI_API_KEY              — reuses the key analysisService already uses
  *
  * Optional env:
- *   SCRIPT_LLM_MODEL            — model pin (default gemini-2.5-flash)
- *   SCRIPT_LLM_MAX_OUTPUT_TOKENS — output cap (default 1024)
+ *   GEMINI_GENERATION_MODEL     — model pin, shared with the other direct
+ *                                 callers (default gemini-3.1-flash-lite)
+ *   SCRIPT_LLM_MAX_OUTPUT_TOKENS — output cap (default 4096)
  *   SCRIPT_LLM_WPM              — words-per-minute for duration budget (default 150)
  */
 
 import axios from "axios";
 import { logger } from "./logger.js";
+import {
+  buildGeminiGenerationConfig,
+  isGeminiThinkingRejection,
+  markGeminiThinkingRejected,
+  isGeminiModelGone,
+  markGeminiModelGone,
+} from "../realityIndex/llmQueue.js";
 
-// PINNED, following the 2026-07-15 cost incident documented in
-// analysisService.js: an unpinned "-latest" alias silently became a thinking
-// model whose reasoning tokens billed as output. Never use a floating alias
-// here, and never ship without maxOutputTokens.
-const MODEL = process.env.SCRIPT_LLM_MODEL || "gemini-2.5-flash";
+// PINNED model, never a "-latest" floating alias. On 2026-07-15 a floating
+// alias elsewhere silently resolved to a THINKING model whose reasoning
+// tokens bill as output — $23.33 of output SKU in a day with zero rows
+// persisted. This service bypasses llmQueue, so it must carry the same two
+// protections itself: an explicit pin + thinkingBudget:0 with graceful
+// degrade (see callModel below).
+//
+// Default is gemini-3.1-flash-lite, NOT the gemini-2.5-flash this file used
+// to carry — the 2026-07-16 pre-test found 2.5-flash returns 404 ("no longer
+// available to new users"), so the old default 404s on every call. Reads
+// GEMINI_GENERATION_MODEL so prod's pin flows in, same as igSummaryService.
+// The former SCRIPT_LLM_MODEL knob is retired: a second, service-local model
+// var is exactly how a pin drifts out of sync with the rest of the callers.
+const MODEL = process.env.GEMINI_GENERATION_MODEL || "gemini-3.1-flash-lite";
 const ENDPOINT = (key) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
 
-const MAX_OUTPUT_TOKENS = Number.parseInt(process.env.SCRIPT_LLM_MAX_OUTPUT_TOKENS || "1024", 10);
+// 4096, NOT the original 1024. Two reasons, and the second is the load-bearing
+// one. (1) A full script is not a caption: the `dossier` format targets 3-6
+// minutes, ~750 words of narration alone (~1000 tokens) before slides, four
+// titles, description and hashtags — 1024 truncates it outright. (2) The
+// thinking-rejection degrade path retries WITHOUT thinkingConfig, i.e. back on
+// a reasoning model whose thinking tokens share this budget; a tight ceiling is
+// precisely what returned empty text in the 2026-05 igSummary failure. Sizing
+// the cap for the fallback, not the happy path, is the point.
+const MAX_OUTPUT_TOKENS = Number.parseInt(process.env.SCRIPT_LLM_MAX_OUTPUT_TOKENS || "4096", 10);
 const WPM = Number.parseInt(process.env.SCRIPT_LLM_WPM || "150", 10);
 const TIMEOUT_MS = 25000;
 
-// Rough Gemini 2.5 Flash rates, matching the figures pinned in analysisService.
+// Gemini 2.5 Flash rates, matching the figures pinned in analysisService.
+// Left unchanged with the pin move to gemini-3.1-flash-lite deliberately:
+// flash-lite is the cheaper tier, so meta.costUsd is now an UPPER BOUND rather
+// than an exact figure. Guessing at flash-lite's published rates to make the
+// number look precise would be worse than a documented over-estimate.
 const RATE_IN_PER_M = 0.30;
 const RATE_OUT_PER_M = 2.50;
 
@@ -128,10 +157,37 @@ Provide one slide per narration beat (4-5 for short, 6-8 for dossier). Slide tex
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function callModel(prompt) {
+/**
+ * Every rejection path logs the same four fields. A script can be dropped for
+ * five different reasons and, until now, four of them logged something
+ * different (or nothing) — which is how igSummary's length gate hid a ~100%
+ * failure rate from 2026-05 until the Jul snapshot. `finishReason` +
+ * `thoughtsTokenCount` are what distinguish "the model had nothing to say"
+ * from "reasoning tokens ate the output budget", and they are the difference
+ * between a real diagnosis and a shrug.
+ */
+function logRejection(articleId, reason, len, finishReason, usage) {
+  logger.warn(
+    `🎬 scriptWriter: rejected article ${articleId} — ${reason} (len=${len}, ` +
+    `model=${MODEL}, finishReason=${finishReason ?? "?"}, ` +
+    `thoughtsTokenCount=${usage?.thoughtsTokenCount ?? "?"})`
+  );
+}
+
+async function callModel(prompt, articleId) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
 
+  // Log the resolved model on every call so a silent repoint (via env) or a
+  // dead pin is visible in the logs rather than invisible drift.
+  logger.info(`🎬 scriptWriter: Gemini model=${MODEL} for article ${articleId}`);
+
+  // thinkingBudget:0 disables reasoning: this is a structured-JSON writing
+  // task, thinking tokens bill as output and can eat maxOutputTokens so the
+  // visible JSON comes back empty. Models with a mandatory minimum budget
+  // reject thinkingBudget:0 with a 400 — flip the shared llmQueue degrade flag
+  // and retry once WITHOUT thinkingConfig instead of failing. Mirrors
+  // igSummaryService and llmQueue.
   const RETRY_DELAYS_MS = [4000, 9000];
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
@@ -139,30 +195,71 @@ async function callModel(prompt) {
         ENDPOINT(key),
         {
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
+          generationConfig: buildGeminiGenerationConfig({
             // Low but not zero: scripts need some variation in phrasing or
             // every video opens the same way, which reads as automated.
             temperature: 0.4,
             responseMimeType: "application/json",
             maxOutputTokens: MAX_OUTPUT_TOKENS,
-          },
+          }),
         },
         { timeout: TIMEOUT_MS }
       );
 
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const candidate    = data?.candidates?.[0];
+      const finishReason = candidate?.finishReason;
+      const usage        = data?.usageMetadata || {};
+      const text         = candidate?.content?.parts?.[0]?.text;
+
       if (!text) {
-        logger.warn(`🎬 scriptWriter: empty response (finishReason=${data?.candidates?.[0]?.finishReason ?? "?"})`);
+        logRejection(articleId, "empty", 0, finishReason, usage);
         return null;
       }
 
-      const usage = data?.usageMetadata || {};
+      // MAX_TOKENS is a HARD rejection, never a salvage attempt. The 2026-08-02
+      // live verification only exercised format=short (414-445 output tokens);
+      // the production format is 5-8x that, so the 4096 cap is UNTESTED at the
+      // size that matters and truncation is the failure it will produce. A
+      // truncated script that happens to parse is the worst outcome available:
+      // a video narrated to the point the model ran out of budget, mid-arc,
+      // with nothing downstream able to tell it apart from a finished one.
+      if (finishReason === "MAX_TOKENS") {
+        logRejection(articleId, "truncated_max_tokens", text.length, finishReason, usage);
+        return null;
+      }
+
+      // Parse OUTSIDE the generic catch below: a truncated or fenced response
+      // is a content failure with a diagnosable shape, not a transport error,
+      // and swallowing it as "call failed" loses finishReason — the one field
+      // that says whether the budget was the cause.
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        logRejection(articleId, "unparseable_json", text.length, finishReason, usage);
+        return null;
+      }
+
       const cost =
         ((usage.promptTokenCount || 0) / 1e6) * RATE_IN_PER_M +
         ((usage.candidatesTokenCount || 0) / 1e6) * RATE_OUT_PER_M;
 
-      return { parsed: JSON.parse(text), usage, cost };
+      return { parsed, usage, cost, finishReason };
     } catch (err) {
+      // Degrade path 1 — the pin needs a thinking budget. Flip the shared flag
+      // and retry immediately (no backoff: nothing is rate-limiting us, the
+      // request shape was simply wrong).
+      if (isGeminiThinkingRejection(err)) {
+        markGeminiThinkingRejected(logger);
+        continue;
+      }
+      // Degrade path 2 — the pin is dead for this key. STOP. No retry helps,
+      // and silently falling back to another model is the floating-alias bug
+      // wearing a different hat.
+      if (isGeminiModelGone(err)) {
+        markGeminiModelGone(MODEL, logger);
+        return null;
+      }
       const status = err.response?.status;
       const transient = status === 503 || status === 429 ||
                         err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
@@ -171,7 +268,7 @@ async function callModel(prompt) {
         await sleep(RETRY_DELAYS_MS[attempt]);
         continue;
       }
-      logger.warn("🎬 scriptWriter: call failed", { status, error: err.message });
+      logger.warn("🎬 scriptWriter: call failed", { status, model: MODEL, error: err.message });
       return null;
     }
   }
@@ -264,16 +361,23 @@ export async function writeScript(article, { format = "short", targetSeconds = 4
   const wordBudget = Math.round((targetSeconds / 60) * WPM);
 
   try {
-    const result = await callModel(buildPrompt({ article, format, targetSeconds }));
-    if (!result?.parsed?.narration) return null;
+    const result = await callModel(buildPrompt({ article, format, targetSeconds }), article.id);
+    // callModel already logged its own failure paths; this one is its own
+    // reason — a well-formed response that simply has no narration field.
+    if (!result) return null;
+    if (!result?.parsed?.narration) {
+      logRejection(article.id, "no_narration_field", 0, result.finishReason, result.usage);
+      return null;
+    }
 
-    const { parsed, usage, cost } = result;
+    const { parsed, usage, cost, finishReason } = result;
 
     let narration = sanitizeNarration(parsed.narration);
     narration = trimToWordBudget(narration, wordBudget);
 
-    if (narration.split(/\s+/).length < Math.max(20, wordBudget * 0.4)) {
-      logger.warn(`🎬 scriptWriter [${article.id}]: script too short after cleanup — falling back`);
+    const words = narration.split(/\s+/).length;
+    if (words < Math.max(20, wordBudget * 0.4)) {
+      logRejection(article.id, `too_short (${words}w/${wordBudget}w)`, narration.length, finishReason, usage);
       return null;
     }
 
@@ -281,12 +385,12 @@ export async function writeScript(article, { format = "short", targetSeconds = 4
     if (!grounding.ok) {
       // Fail closed. A templated-but-true script beats a fluent-but-invented
       // one every time for a credibility product.
-      logger.warn(`🎬 scriptWriter [${article.id}]: grounding check failed (${grounding.note}) — falling back`);
+      logRejection(article.id, `ungrounded — ${grounding.note}`, narration.length, finishReason, usage);
       return null;
     }
 
     if (parsed.confidence === "low") {
-      logger.warn(`🎬 scriptWriter [${article.id}]: model reported low confidence — falling back`);
+      logRejection(article.id, "low_confidence", narration.length, finishReason, usage);
       return null;
     }
 
@@ -309,6 +413,16 @@ export async function writeScript(article, { format = "short", targetSeconds = 4
         costUsd: Number(cost.toFixed(5)),
         tokensIn: usage.promptTokenCount || 0,
         tokensOut: usage.candidatesTokenCount || 0,
+        // Carried on SUCCESS too, not only on the rejection lines. The
+        // 2026-08-02 verification reconciled cost exactly at $0.30/M in +
+        // $2.50/M out with zero residual — i.e. thoughtsTokenCount was 0 —
+        // and that reconciliation is only repeatable if the number rides
+        // along with the script. A nonzero thoughtsTokenCount on a later run
+        // means thinkingBudget:0 stopped taking effect, which is the 2026-07-15
+        // cost incident starting over; finishReason is how a near-miss on the
+        // token cap becomes visible before it becomes a truncation.
+        finishReason: finishReason ?? null,
+        thoughtsTokenCount: usage.thoughtsTokenCount ?? 0,
         ms: Date.now() - started,
       },
     };
