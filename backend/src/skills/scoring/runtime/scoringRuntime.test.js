@@ -8,12 +8,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import Database from "better-sqlite3";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { runMigrations } from "../../../db/migrate.js";
+import { makeTestDb } from "../../../testing/testDb.js";
 import { getEvidence } from "../evidence/evidenceCache.js";
 import { gatherForSource } from "../evidence/runner.js";
 import { isModelValidated, VALIDATED_CAPABLE_MODELS } from "../evidence/llm/modelGuard.js";
@@ -24,11 +23,7 @@ import { runScoringJob } from "./scoringRun.js";
 const NOW = 1_750_000_000_000;
 
 function tmpDb() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scoring-rt-"));
-  const db = new Database(path.join(dir, "t.db"));
-  runMigrations(db);
-  db.exec(`CREATE TABLE IF NOT EXISTS articles (id TEXT PRIMARY KEY, url TEXT, title TEXT, author TEXT, category TEXT, language TEXT, source_name TEXT NOT NULL, published_at INTEGER NOT NULL, is_duplicate INTEGER DEFAULT 0);`);
-  return { db, cleanup: () => { db.close(); fs.rmSync(dir, { recursive: true, force: true }); } };
+  return makeTestDb({ prefix: "scoring-rt-" });
 }
 
 // ── corpus loader ──────────────────────────────────────────────────────────────
@@ -122,8 +117,8 @@ test("runScoringJob — executes a small slice, summarizes, writes a separate st
   const ins = env.db.prepare(`INSERT INTO sources (name,url,source_type,category,region,created_at,updated_at) VALUES (?,?,'rss',?,?,?,?)`);
   const s1 = ins.run("Src One", "https://one.example/rss", "tech", "global", NOW, NOW).lastInsertRowid;
   const s2 = ins.run("Src Two", "https://two.example/rss", "news", "global", NOW, NOW).lastInsertRowid;
-  const art = env.db.prepare(`INSERT INTO articles (id,url,title,author,category,language,source_name,published_at,is_duplicate) VALUES (?,?,?,?,?,?,?,?,0)`);
-  for (let i = 0; i < 6; i++) { art.run(`a1${i}`, `https://one.example/n/${i}`, "t", "By Reporter", "tech", "en", "Src One", NOW - i * 86400000); art.run(`a2${i}`, `https://two.example/n/${i}`, "t", "By Writer", "news", "en", "Src Two", NOW - i * 86400000); }
+  const art = env.db.prepare(`INSERT INTO articles (id,url,title,author,category,language,source_name,published_at,fetched_at,is_duplicate) VALUES (?,?,?,?,?,?,?,?,?,0)`);
+  for (let i = 0; i < 6; i++) { art.run(`a1${i}`, `https://one.example/n/${i}`, "t", "By Reporter", "tech", "en", "Src One", NOW - i * 86400000, NOW); art.run(`a2${i}`, `https://two.example/n/${i}`, "t", "By Writer", "news", "en", "Src Two", NOW - i * 86400000, NOW); }
 
   // own-DB modules only — no network, no LLM.
   const bylines = (await import("../evidence/modules/bylines_2_1_c.js")).default;

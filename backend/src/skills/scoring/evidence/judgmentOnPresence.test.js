@@ -12,12 +12,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-import { runMigrations } from "../../../db/migrate.js";
+import { makeTestDb } from "../../../testing/testDb.js";
 import { getEvidence, upsertEvidence } from "./evidenceCache.js";
 import { parseHtml } from "./httpFetch.js";
 import { pageText } from "./llm/pageText.js";
@@ -28,19 +24,16 @@ const NOW = 1_750_000_000_000;
 const DOMAIN = "outlet.example";
 
 function makeEnv(route) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scoring-jop-"));
-  const db = new Database(path.join(dir, "t.db"));
-  runMigrations(db);
-  db.exec(`CREATE TABLE IF NOT EXISTS articles (id TEXT PRIMARY KEY, url TEXT, source_name TEXT NOT NULL, published_at INTEGER NOT NULL, is_duplicate INTEGER DEFAULT 0);`);
+  const { db, cleanup } = makeTestDb({ prefix: "scoring-jop-" });
   const sid = db.prepare(`INSERT INTO sources (name,url,source_type,category,region,created_at,updated_at) VALUES ('Outlet','https://feeds.outlet.example/rss','rss','news','global',?,?)`).run(NOW, NOW).lastInsertRowid;
-  const ins = db.prepare(`INSERT INTO articles (id,url,source_name,published_at,is_duplicate) VALUES (?,?,?,?,0)`);
-  for (let i = 0; i < 5; i++) ins.run(`a${i}`, `https://${DOMAIN}/news/${i}`, "Outlet", NOW - i * 86400000);
+  const ins = db.prepare(`INSERT INTO articles (id,url,title,category,source_name,published_at,fetched_at,is_duplicate) VALUES (?,?,?,'news',?,?,?,0)`);
+  for (let i = 0; i < 5; i++) ins.run(`a${i}`, `https://${DOMAIN}/news/${i}`, `Article ${i}`, "Outlet", NOW - i * 86400000, NOW);
   const transport = async (url, opts) => {
     const r = url.endsWith("/robots.txt") ? { status: 404 } : route(url);
     if (opts.validateStatus && !opts.validateStatus(r.status)) { const e = new Error(`s${r.status}`); e.response = { status: r.status }; throw e; }
     return { status: r.status, data: r.data ?? "", headers: { "content-type": "text/html" }, finalUrl: url };
   };
-  return { db, sid, transport, cleanup: () => { db.close(); fs.rmSync(dir, { recursive: true, force: true }); } };
+  return { db, sid, transport, cleanup };
 }
 
 const html = (body) => ({ status: 200, data: `<html><body><main>${body}</main></body></html>` });

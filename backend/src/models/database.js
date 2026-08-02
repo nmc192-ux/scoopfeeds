@@ -6,7 +6,7 @@ import fs from "fs";
 import { runMigrations } from "../db/migrate.js";
 import { timedQuery } from "../db/queryTiming.js";
 import { logger } from "../services/logger.js";
-import { markVecAvailable } from "../realityIndex/schema.js";
+import { markVecAvailable, initRealityIndex } from "../realityIndex/schema.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -53,8 +53,7 @@ export function getDb() {
     } catch (err) {
       logger.warn(`🧮 sqlite-vec NOT loaded — clustering/embedding search disabled: ${err.message}`);
     }
-    initializeSchema(db);
-    runMigrations(db);
+    bootstrapSchema(db);
     logger.info("Database initialized", { path: DB_PATH });
   }
   return db;
@@ -69,7 +68,34 @@ export function getDbStatus() {
   };
 }
 
-function initializeSchema(db) {
+// THE bootstrap order. Defined once, used by getDb(), by the `npm run db:migrate`
+// CLI (db/migrate.js) and by the test helper (src/testing/testDb.js) — three call
+// sites that previously each had their own idea of what "boot the schema" meant.
+//
+// Order is not arbitrary and is not negotiable:
+//
+//   1. initializeSchema   — owns `articles`, `social_posts`, `push_subscriptions`, …
+//   2. initRealityIndex   — owns `events`, `event_articles`, `event_timeline`, …
+//                           and ALTERs push_subscriptions, so it MUST come second
+//                           or that column is silently skipped forever.
+//   3. runMigrations      — 011/012/017/020 operate on tables owned by (1) and (2).
+//                           No migration creates them. This is why a genuinely
+//                           fresh database could not boot at all before this fix:
+//                           011 died on `no such table: event_articles`.
+//
+// Fail-hard vs fail-soft: a base-schema failure here throws and takes the process
+// down — a half-built graph schema is worse than a dead process, and runMigrations
+// would die two statements later anyway. sqlite-vec / vec0 init inside
+// initRealityIndex stays fail-soft on purpose (see realityIndex/schema.js): the
+// site is live, and a native-extension load failure degrades embedding search
+// instead of downing the site. That degradation surfaces at /api/healthz.
+export function bootstrapSchema(db) {
+  initializeSchema(db);
+  initRealityIndex(db);
+  return runMigrations(db);
+}
+
+export function initializeSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS articles (
       id          TEXT PRIMARY KEY,

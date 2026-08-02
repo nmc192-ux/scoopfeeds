@@ -8,16 +8,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import { parseHtml } from "./httpFetch.js";
 import { detectByline } from "./bylineDetect.js";
 import { getEvidence, upsertEvidence } from "./evidenceCache.js";
 import { gatherForSource } from "./runner.js";
-import { runMigrations } from "../../../db/migrate.js";
+import { makeTestDb } from "../../../testing/testDb.js";
 import xcheck from "./modules/bylineCrossCheck_2_1_c.js";
 
 const NOW = Date.now();
@@ -58,21 +54,17 @@ test("detectByline — no markup → not found; priority: meta beats class", () 
 
 // ── cross-check module (temp DB + injected transport) ─────────────────────────
 function makeEnv(articleRoute, counter) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scoring-bx-"));
-  const db = new Database(path.join(dir, "t.db"));
-  runMigrations(db);
-  db.exec(`CREATE TABLE IF NOT EXISTS articles (id TEXT PRIMARY KEY, url TEXT, source_name TEXT NOT NULL, published_at INTEGER NOT NULL, is_duplicate INTEGER DEFAULT 0);`);
+  const { db, cleanup } = makeTestDb({ prefix: "scoring-bx-" });
   const sid = db.prepare(`INSERT INTO sources (name,url,source_type,category,region,created_at,updated_at) VALUES ('PendSrc','https://feeds.pendsrc.example/rss','rss','tech','global',?,?)`).run(NOW, NOW).lastInsertRowid;
-  const ins = db.prepare(`INSERT INTO articles (id,url,source_name,published_at,is_duplicate) VALUES (?,?,?,?,0)`);
-  for (let i = 0; i < 6; i++) ins.run(`p${i}`, `https://pendsrc.example/news/${i}`, "PendSrc", NOW - i * 86400000);
+  const ins = db.prepare(`INSERT INTO articles (id,url,title,category,source_name,published_at,fetched_at,is_duplicate) VALUES (?,?,?,'tech',?,?,?,0)`);
+  for (let i = 0; i < 6; i++) ins.run(`p${i}`, `https://pendsrc.example/news/${i}`, `Article ${i}`, "PendSrc", NOW - i * 86400000, NOW);
   const transport = async (url, opts) => {
     if (!url.endsWith("/robots.txt") && counter) counter.n += 1;
     const r = url.endsWith("/robots.txt") ? { status: 404 } : articleRoute(url);
     if (opts.validateStatus && !opts.validateStatus(r.status)) { const e = new Error(`s${r.status}`); e.response = { status: r.status }; throw e; }
     return { status: r.status, data: r.data ?? "", headers: { "content-type": "text/html" }, finalUrl: url };
   };
-  const cleanup = () => { db.close(); fs.rmSync(dir, { recursive: true, force: true }); };
-  return { db, sid, transport, cleanup, dir };
+  return { db, sid, transport, cleanup };
 }
 const PENDING_211C = { status: "pending", value: { ratio: 0, bylined: 0, sampled: 20, bucket: "inconclusive", signal: "rss-metadata-gap" }, confidence: 0, evidenceUrl: null, gatheredAt: NOW };
 const LD = (name) => ({ status: 200, data: `<html><head><script type="application/ld+json">{"@type":"NewsArticle","author":{"@type":"Person","name":"${name}"}}</script></head><body>story</body></html>` });

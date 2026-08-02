@@ -20,11 +20,31 @@
 import * as sqliteVec from "sqlite-vec";
 import { logger } from "../services/logger.js";
 
-let initialized = false;
+// Per-CONNECTION init guard. This was a module-level boolean, which is the
+// per-process-state bug class documented in CLAUDE.md: "once per process" and
+// "once per connection" are only the same thing while there is exactly one
+// connection. getDb() is a per-process singleton so prod never noticed, but a
+// second connection in the same process (any test building two temp DBs) got a
+// silent no-op and no RI tables at all. Keyed on the db handle, repeat calls on
+// the SAME connection — e.g. server.js's initRealityIndex(getDb()) after getDb()
+// already ran it — stay the free no-op they have always been.
+const initializedDbs = new WeakSet();
 let vecAvailable = false;
+let vecFailureReason = null;
 
 export function isVecAvailable() {
   return vecAvailable;
+}
+
+// Degraded-state readout for /api/healthz. sqlite-vec is a native extension; a
+// load failure disables embedding/clustering but must NOT take the site down
+// (see bootstrapSchema in models/database.js — base-schema failures fail hard,
+// vector init fails soft). Null reason + available:true is the healthy case.
+export function getRealityIndexStatus() {
+  return {
+    vecAvailable,
+    ...(vecFailureReason ? { vecFailureReason } : {}),
+  };
 }
 
 // getDb() loads sqlite-vec on every connection (models/database.js) and calls this so
@@ -39,18 +59,23 @@ export function markVecAvailable() {
 }
 
 export function initRealityIndex(db) {
-  if (initialized) return;
-  initialized = true;
+  if (initializedDbs.has(db)) return;
+  initializedDbs.add(db);
 
   // ── 1. Load sqlite-vec extension. If it fails we still init the rest of
   //      the schema; the matcher will degrade gracefully to keyword match.
+  //      Deliberately fail-SOFT: scoopfeeds is live, and a native-extension
+  //      load failure must not take the site down. The degradation is loud
+  //      (warn here) and observable (/api/healthz `degraded`), never silent.
   try {
     sqliteVec.load(db);
     const row = db.prepare("SELECT vec_version() AS v").get();
     vecAvailable = true;
+    vecFailureReason = null;
     logger.info(`🧮 sqlite-vec loaded (v${row?.v ?? "?"})`);
   } catch (err) {
     vecAvailable = false;
+    vecFailureReason = `sqlite-vec load failed: ${err.message}`;
     logger.warn(`🧮 sqlite-vec NOT loaded — embedding search disabled: ${err.message}`);
   }
 
@@ -160,6 +185,7 @@ export function initRealityIndex(db) {
     } catch (err) {
       logger.warn(`🧮 vec0 table init failed: ${err.message}`);
       vecAvailable = false;
+      vecFailureReason = `vec0 table init failed: ${err.message}`;
     }
   }
 
