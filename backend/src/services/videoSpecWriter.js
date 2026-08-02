@@ -38,7 +38,6 @@
  *   GEMINI_GENERATION_MODEL     — PACKAGING pin (default gemini-3.1-flash-lite)
  *   VIDEO_SPEC_MAX_OUTPUT_TOKENS — output cap (default 8192, see below)
  *   VIDEO_FULLTEXT_MAX_CHARS / VIDEO_FULLTEXT_TIMEOUT_MS — see videoFullText.js
- *   VIDEO_SIBLING_BUNDLE=1      — event-sibling source bundle (default OFF)
  */
 
 import axios from "axios";
@@ -104,11 +103,6 @@ const RATE_OUT_PER_M = 2.50;
 // it never binds first; present so a caller passing text from elsewhere cannot
 // blow the input budget.
 const SPEC_BODY_MAX_CHARS = Number.parseInt(process.env.VIDEO_SPEC_BODY_MAX_CHARS || "28000", 10);
-
-// Event-sibling bundle: DARK by default. Built, tested, and unproven — flip
-// VIDEO_SIBLING_BUNDLE=1 to measure it, and only make it the default once a
-// run shows it adds beats rather than just input.
-const SIBLING_BUNDLE_DEFAULT = process.env.VIDEO_SIBLING_BUNDLE === "1";
 
 const WPM = Number.parseInt(process.env.VIDEO_SPEC_WPM || "150", 10);
 
@@ -465,6 +459,8 @@ HARD RULES — violating any of these makes the output unusable:
 
 3. NUMBERS NEED A REAL SOURCE. Every "stat" and every "bars" card MUST carry a "source" naming one of the outlets listed above, AND the figure itself must appear in the source material. If you cannot attribute a number to one of those outlets, DO NOT EMIT THE CARD. Do not guess an outlet. Do not write "reports" or "analysts" or the story's subject as the source. A dropped card costs nothing; an invented attribution is unrecoverable.
 
+   CREDIT IN THE CAPTION, NOT ONLY IN THE FIELD. The "source" field is metadata; the caption is what is spoken aloud and burned on screen. Any card carrying a figure must NAME THE OUTLET IN ITS CAPTION: "The Guardian reports that seventy percent of faults involve anchors" — never a bare "Seventy percent of faults involve anchors". A figure delivered without the credit presents someone else's reporting as ours. A card whose caption does not name its own source is discarded.
+
    THE SOURCE MATERIAL IS ATTRIBUTED. It is divided into labelled sections — one "PRIMARY SOURCE — <outlet>" block and, when other outlets covered the same story, one or more "ADDITIONAL COVERAGE — <outlet>" blocks. Take a figure from whichever section actually contains it, and name THAT outlet in the "source" field. Do not attribute a figure to the lead publisher because it is listed first. Where two outlets report the same figure, either is correct.
 
    Sections cover ONE story from different newsrooms, so treat them as one body of reporting, not as separate stories: a mechanism explained only in the third section is as usable as one in the first. Where outlets disagree on a number, prefer the one more outlets agree on, and if they cannot be reconciled, drop the card rather than picking a side.
@@ -509,6 +505,8 @@ HARD RULES — violating any of these makes the output unusable:
    - Never place more than two cards of the same type back to back.
    - "turn" should appear once, near the point where the story's obvious reading gives way to its real one.
    Cards that break these limits are discarded from the video, so a monotonous spec loses most of itself. If a beat could be carried by more than one card type, prefer the type you have used least.
+
+   AT LEAST ONE "diagram" OR "turn" IS REQUIRED. These are the cards that add something the source did not already say in that form — a mechanism drawn as a chain, or the point where the obvious reading gives way. A spec of only headline and figures is a restatement of someone else's article with the numbers pulled out; it is rejected outright. This is the part of the video that is ours.
 
 10. TONE. Neutral wire-service register. No editorialising, no outrage, no rhetorical questions, no "you won't believe". Interest comes from a specific fact being genuinely interesting, never from sensational phrasing. Preserve the source's hedging: if it says "reportedly" or "officials say", keep that attribution.
 
@@ -644,12 +642,15 @@ Re-read the CARD GRAMMAR above and match the field shapes exactly. Emit the FULL
  *        stored cap is the measured constraint on beat count, and leaving this
  *        to the caller would mean Section 6 could silently omit it and inherit
  *        the same flat specs.
- * @param {boolean} [opts.includeSiblings] — widen SOURCE MATERIAL with
- *        attributed excerpts from the event's other coverage. DEFAULT OFF,
- *        gated on VIDEO_SIBLING_BUNDLE=1: the bundle is built and tested but
- *        unproven — it has never been shown to add beats, and shipping an
- *        unproven input change ON would silently alter every spec while the
- *        question is still open. Pass explicitly to measure either way.
+ *
+ * ONE STORY PER VIDEO (§3b). Sibling coverage does NOT enter the prompt — not
+ * behind a flag, not by default. The experiment settled it: +13,488 chars from
+ * 8 outlets produced Δ beats 0.00. Breadth was never the constraint, and §3b's
+ * copyright reasoning makes the same point from the other side — source count
+ * is not the variable, how much of ONE publisher's expression you reproduce is.
+ * The Phase-2 use for siblings is VERIFICATION (does the lead figure appear in
+ * a second outlet before publish), which reads them without ever prompting on
+ * them.
  */
 export async function writeVideoSpec(article, {
   allowedSources = [],
@@ -657,7 +658,6 @@ export async function writeVideoSpec(article, {
   slideCeiling = null,
   bodyText = null,
   fetchFullText = true,
-  includeSiblings = SIBLING_BUNDLE_DEFAULT,
 } = {}) {
   if (!isVideoSpecEnabled()) return null;
   if (!article?.title) return null;
@@ -669,14 +669,9 @@ export async function writeVideoSpec(article, {
     // still ships, shorter.
     let resolved = { text: String(bodyText ?? article.content ?? ""), chars: 0, origin: bodyText ? "supplied" : "stored", reason: null };
     resolved.chars = resolved.text.length;
-    let bundleParts = null, siblingCount = 0, bundleEventId = null;
     if (!bodyText && fetchFullText) {
-      const { buildSourceBundle } = await import("./videoSourceBundle.js");
-      const bundle = await buildSourceBundle(article, { includeSiblings });
-      resolved = { text: bundle.text, chars: bundle.totalChars, origin: bundle.primaryOrigin, reason: null };
-      bundleParts = bundle.parts;
-      siblingCount = bundle.siblingCount;
-      bundleEventId = bundle.eventId;
+      const { resolveVideoSourceText } = await import("./videoFullText.js");
+      resolved = await resolveVideoSourceText(article);
     }
 
     // Grounding screens against the SAME text the model was given. Screening
@@ -766,9 +761,6 @@ export async function writeVideoSpec(article, {
         sourceTextChars: resolved.chars,
         sourceTextOrigin: resolved.origin,
         sourceTextReason: resolved.reason,
-        siblingOutlets: siblingCount,
-        sourceParts: bundleParts,
-        bundleEventId,
         targetSeconds,
         slides: v.stats.slides,
         emitted: v.stats.emitted,

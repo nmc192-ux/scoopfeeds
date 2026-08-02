@@ -110,6 +110,15 @@ export const MAX_SOURCING_DROPS = 2;
 // the logs show whether the model found 5 beats or 15.
 export const BEAT_KINDS = Object.freeze(["figure", "mechanism", "turn", "consequence"]);
 
+// §3b/5 — THE PIPELINE'S OWN LAYER. A spec made only of title + stat + kicker
+// is a restatement of someone else's article with numbers pulled out: no
+// analysis added, nothing that is ours. §3b names this as BOTH the
+// transformative element (the copyright argument) and the differentiator (the
+// editorial one), which is why it is a gate rather than a preference. At least
+// one card must be a diagram or a turn — the two types that exist to say
+// something the source did not say in that form.
+export const OWN_LAYER_TYPES = Object.freeze(["diagram", "turn"]);
+
 // Card-type mix. See the mix pass in validateSpec for the derivation.
 export const MAX_TYPE_SHARE = 1 / 3;
 export const MAX_CONSECUTIVE_SAME_TYPE = 2;
@@ -174,6 +183,37 @@ function sourceMatches(claimed, allowed) {
     if (n.length >= 3 && c.includes(n)) return true;
   }
   return false;
+}
+
+// Words that appear in so many mastheads that they identify none of them.
+// Matching on one of these is how "News of the outage spread" would credit
+// "BBC News" — the appearance of attribution with none of the substance.
+const GENERIC_MASTHEAD_WORDS = new Set([
+  "news", "the", "times", "post", "daily", "press", "media", "wire",
+  "journal", "herald", "tribune", "gazette", "review", "report", "reports",
+  "today", "online", "network", "service", "agency", "group", "and",
+]);
+
+/**
+ * Does this caption actually say the outlet's name?
+ *
+ * Mirrors sourceMatches' tolerance in one direction only: "BBC" in the caption
+ * satisfies a source of "BBC News", because that is how a newsreader says it.
+ * The reverse is NOT accepted — a caption saying "News" would otherwise credit
+ * "BBC News", which is no credit at all. Short outlet names (AP, PA) are
+ * matched on a word boundary so they cannot be satisfied by a substring.
+ */
+function captionCreditsSource(caption, source) {
+  const cap = norm(caption);
+  const src = norm(source);
+  if (!cap || !src) return false;
+  if (cap.includes(src)) return true;
+  // A single word only credits the outlet if it IDENTIFIES it. "BBC" credits
+  // "BBC News"; "News" does not, and would otherwise let a caption about
+  // "news of the outage" pass as attribution to any masthead with News in it.
+  return src.split(" ")
+    .filter(w => w.length >= 3 && !GENERIC_MASTHEAD_WORDS.has(w))
+    .some(w => new RegExp(`\\b${w}\\b`).test(cap));
 }
 
 // ─── Per-card validation ────────────────────────────────────────────────────
@@ -407,6 +447,19 @@ export function validateSpec(spec, {
         dropped.push({ index: i, t: card.t, kind: "sourcing", reason: `untraceable source "${card.source}"` });
         continue;
       }
+      // §3b/3 — ATTRIBUTE IN NARRATION, not only on screen. The caption is
+      // what is spoken and burned in, so a figure delivered as a bare "X"
+      // presents someone else's reporting as the channel's own finding. The
+      // credit has to be IN the sentence: "The Guardian reports X", never "X".
+      // Checked against the card's own declared source, so it cannot be
+      // satisfied by naming some other outlet.
+      if (!captionCreditsSource(card.caption, card.source)) {
+        dropped.push({
+          index: i, t: card.t, kind: "sourcing",
+          reason: `caption does not credit "${card.source}" in narration (§3b/3)`,
+        });
+        continue;
+      }
       if (sourceText) {
         const claims = card.t === "stat" ? [card.value] : card.bars.map(b => b[1]);
         const missing = claims
@@ -494,6 +547,14 @@ export function validateSpec(spec, {
     if (kept[0].t !== "title") errors.push(`first surviving card must be "title", got "${kept[0].t}"`);
     const last = kept[kept.length - 1];
     if (last.t !== "kicker")   errors.push(`final surviving card must be "kicker", got "${last.t}"`);
+  }
+
+  // §3b/5 — the pipeline's own layer must exist.
+  if (kept.length > 0 && !kept.some(c => OWN_LAYER_TYPES.includes(c.t))) {
+    errors.push(
+      `no ${OWN_LAYER_TYPES.join(" or ")} card — a spec of only headline and figures restates the source ` +
+      `without adding the pipeline's own layer (§3b/5)`
+    );
   }
 
   // Drop-rate gate — see MAX_DROP_RATIO. Measured against cards the model

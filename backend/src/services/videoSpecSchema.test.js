@@ -25,16 +25,16 @@ const TEXT = "Reuters reported that 70 percent of cable faults involve anchors. 
 
 const titleCard  = () => ({ t: "title",  eyebrow: "SUBSEA", lines: [["THE CABLES", "white"], ["500", "lime"]], sub: "what carries the internet", caption: "Five hundred cables carry almost everything." });
 const kickerCard = () => ({ t: "kicker", top: "NOT SATELLITE", bottom: "CABLE", sub: "the map is the story", caption: "The internet is a map of cables, not satellites." });
-const statCard   = (over = {}) => ({ t: "stat", eyebrow: "FAULTS", value: 70, unit: "%", lines: ["of faults", "involve anchors"], hi: 1, source: "Reuters", caption: "Seventy percent of faults involve anchors.", ...over });
-const barsCard   = (over = {}) => ({ t: "bars", eyebrow: "CAUSE", bars: [["anchors", 70], ["nature", 30]], source: "BBC", caption: "Anchors outweigh natural causes.", ...over });
+const statCard   = (over = {}) => ({ t: "stat", eyebrow: "FAULTS", value: 70, unit: "%", lines: ["of faults", "involve anchors"], hi: 1, source: "Reuters", caption: "Reuters reports that seventy percent of faults involve anchors.", ...over });
+const barsCard   = (over = {}) => ({ t: "bars", eyebrow: "CAUSE", bars: [["anchors", 70], ["nature", 30]], source: "BBC", caption: "The BBC reports anchors outweigh natural causes.", ...over });
 // Filler CYCLES through four card types. A pad of identical cards is not a
 // realistic spec and, since the mix gate landed, is not a valid one either —
 // fixtures have to look like something the model would plausibly emit.
 const FILLER_CYCLE = [
   (n) => ({ t: "diagram", eyebrow: `STEP ${n}`, nodes: [["SHORE", "landing"], ["TRUNK", "deep water"]], caption: `Step ${n} of the route runs from shore to trunk line.` }),
   (n) => ({ t: "turn", eyebrow: `TURN ${n}`, lines: [[`POINT ${n}`, "white"]], caption: `But reading ${n} misses what actually cuts the cable.` }),
-  (n) => ({ t: "stat", eyebrow: `FIGURE ${n}`, value: 70, unit: "%", lines: ["of faults"], hi: 0, source: "Reuters", caption: `Seventy percent again at point ${n}.` }),
-  (n) => ({ t: "bars", eyebrow: `SPLIT ${n}`, bars: [["anchors", 70], ["nature", 30]], source: "BBC", caption: `Anchors outweigh nature at point ${n}.` }),
+  (n) => ({ t: "stat", eyebrow: `FIGURE ${n}`, value: 70, unit: "%", lines: ["of faults"], hi: 0, source: "Reuters", caption: `Reuters reports seventy percent again at point ${n}.` }),
+  (n) => ({ t: "bars", eyebrow: `SPLIT ${n}`, bars: [["anchors", 70], ["nature", 30]], source: "BBC", caption: `The BBC reports anchors outweigh nature at point ${n}.` }),
 ];
 const fillerCard = (n) => FILLER_CYCLE[n % FILLER_CYCLE.length](n);
 
@@ -256,7 +256,7 @@ test("beat stats are reported — count and kind tally", () => {
 test("the Hindu case: 26 slides / 21 stat is dropped down and then rejected", () => {
   // Every card individually valid; the spec is still a spreadsheet read aloud.
   const s = withBeats([titleCard()]);
-  for (let i = 0; i < 21; i++) s.slides.push(statCard({ caption: `Seventy percent, point ${i}.` }));
+  for (let i = 0; i < 21; i++) s.slides.push(statCard({ caption: `Reuters reports seventy percent, point ${i}.` }));
   for (let i = 0; i < 3; i++)  s.slides.push(plainFiller(i));
   s.slides.push(kickerCard());
   s.beats = beatsFor(s.slides);
@@ -273,7 +273,7 @@ test("the Hindu case: 26 slides / 21 stat is dropped down and then rejected", ()
 
 test("no more than 2 of the same type consecutively", () => {
   const s = withBeats([titleCard()]);
-  for (let i = 0; i < 4; i++) s.slides.push(statCard({ caption: `Run card ${i}.` }));
+  for (let i = 0; i < 4; i++) s.slides.push(statCard({ caption: `Reuters reports run card ${i}.` }));
   for (let i = 0; i < 8; i++) s.slides.push(plainFiller(i));
   s.slides.push(kickerCard());
   s.beats = beatsFor(s.slides);
@@ -329,6 +329,108 @@ test("exactly 6 surviving cards is enough", () => {
   const v = validateSpec(s, opts);
   assert.equal(v.ok, true, v.errors.join("; "));
   assert.equal(v.stats.slides, 6);
+});
+
+// ─── §3b/3 — credit in the narration, not only in the field ─────────────────
+
+test("a figure card whose caption does not name its source is DROPPED", () => {
+  // The field says Reuters; the spoken line presents the figure as ours.
+  const v = validateSpec(spec([statCard({ caption: "Seventy percent of faults involve anchors." })]), opts);
+  assert.equal(v.ok, true, v.errors.join("; "));
+  assert.equal(v.dropped.length, 1);
+  assert.equal(v.dropped[0].kind, "sourcing");
+  assert.match(v.dropped[0].reason, /caption does not credit "Reuters" in narration/);
+});
+
+test("crediting a DIFFERENT outlet does not satisfy the rule", () => {
+  const v = validateSpec(spec([statCard({ source: "Reuters", caption: "The BBC reports seventy percent of faults involve anchors." })]), opts);
+  assert.equal(v.dropped.length, 1, "a caption must credit its own card's source");
+  assert.match(v.dropped[0].reason, /does not credit "Reuters"/);
+});
+
+test("newsreader shortening is accepted — 'BBC' credits 'BBC News'", () => {
+  const v = validateSpec(spec([barsCard({ source: "BBC News", caption: "The BBC reports anchors outweigh nature." })]), opts);
+  assert.equal(v.dropped.length, 0, JSON.stringify(v.dropped));
+});
+
+test("a generic word from a multi-word outlet does NOT credit it", () => {
+  // "News" alone would otherwise satisfy "BBC News", which is no credit at all.
+  const v = validateSpec(spec([barsCard({ source: "BBC News", caption: "News of the outage spread quickly." })]), opts);
+  assert.equal(v.dropped.length, 1);
+});
+
+test("cards carrying no figure are exempt — only stat and bars need the credit", () => {
+  const v = validateSpec(spec([{ t: "turn", lines: [["THE REAL CAUSE", "white"]], caption: "But the ordinary explanation is the right one." }]), opts);
+  assert.equal(v.dropped.filter(d => d.kind === "sourcing").length, 0,
+    `a card with no figure must never be dropped for attribution: ${JSON.stringify(v.dropped)}`);
+});
+
+// ─── §3b/5 — the pipeline's own layer ───────────────────────────────────────
+
+test("a spec of only headline and figures is REJECTED — nothing of ours in it", () => {
+  const s = withBeats([
+    titleCard(),
+    statCard(), statCard({ value: 500, caption: "Reuters reports five hundred cables carry the traffic." }),
+    barsCard(), barsCard({ caption: "The BBC reports the same split holds offshore." }),
+    kickerCard(),
+  ]);
+  const v = validateSpec(s, opts);
+  assert.equal(v.ok, false);
+  assert.match(v.errors.join(" "), /no diagram or turn card .* restates the source/);
+});
+
+test("one diagram is enough to satisfy the own-layer gate", () => {
+  const s = withBeats([
+    titleCard(),
+    statCard(),
+    { t: "diagram", nodes: [["SHORE", "landing"], ["TRUNK", "deep water"]], caption: "The route runs from shore to trunk line." },
+    statCard({ value: 500, caption: "Reuters reports five hundred cables carry the traffic." }),
+    barsCard(),
+    kickerCard(),
+  ]);
+  const v = validateSpec(s, opts);
+  assert.equal(v.ok, true, v.errors.join("; "));
+});
+
+test("one turn is equally sufficient", () => {
+  const s = withBeats([
+    titleCard(),
+    statCard(),
+    { t: "turn", lines: [["NOT SABOTAGE", "lime"]], caption: "But the mundane explanation is the correct one." },
+    barsCard(),
+    statCard({ value: 500, caption: "Reuters reports five hundred cables carry the traffic." }),
+    kickerCard(),
+  ]);
+  assert.equal(validateSpec(s, opts).ok, true);
+});
+
+test("the own-layer gate is judged on SURVIVORS, not on what was emitted", () => {
+  // The only diagram is malformed and gets dropped — the spec must then fail
+  // the gate, not pass on the strength of a card that will never render.
+  const s = withBeats([
+    titleCard(),
+    statCard(),
+    { t: "diagram", nodes: [["ONLY", "one"]], caption: "A diagram needs two nodes." },
+    barsCard(),
+    statCard({ value: 500, caption: "Reuters reports five hundred cables carry the traffic." }),
+    kickerCard(),
+  ]);
+  const v = validateSpec(s, opts);
+  assert.equal(v.ok, false);
+  assert.match(v.errors.join(" "), /no diagram or turn card/);
+});
+
+// ─── §3b/2 — publisher images can never reach a renderer ────────────────────
+
+test("a publisher image URL on a card is stripped, not passed through", () => {
+  // §3b/2: stock or generated only. The contract has no image field on any
+  // card type, so an image_url the model invents is discarded by pruning —
+  // the renderer can never receive one.
+  const v = validateSpec(spec([statCard({ image_url: "https://publisher.example/wire-photo.jpg" })]), opts);
+  assert.equal(v.ok, true, v.errors.join("; "));
+  const stat = v.spec.slides.find(c => c.t === "stat");
+  assert.equal(stat.image_url, undefined);
+  assert.ok(!JSON.stringify(v.spec).includes("wire-photo"));
 });
 
 // ─── Brand invariant ────────────────────────────────────────────────────────
