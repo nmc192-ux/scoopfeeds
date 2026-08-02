@@ -20,7 +20,7 @@ const http = axios.create({
 
 // Sources that reliably block scrapers or lock content behind paywalls.
 // Skipping saves bandwidth and avoids rate-limit/403 pollution in logs.
-const BLOCKED_HOSTS = new Set([
+export const BLOCKED_HOSTS = new Set([
   "www.ft.com", "ft.com",
   "www.wsj.com", "wsj.com",
   "www.nytimes.com", "nytimes.com",
@@ -28,7 +28,7 @@ const BLOCKED_HOSTS = new Set([
   "www.economist.com", "economist.com",
 ]);
 
-function hostOf(url) {
+export function hostOf(url) {
   try { return new URL(url).host.toLowerCase(); } catch { return ""; }
 }
 
@@ -45,7 +45,12 @@ function stripHtml(s) {
 
 // Heuristic readability: try <article> / <main> / common class names, then
 // collect <p> text. No deps — good enough for 80%+ of news sites.
-export function extractArticleText(html) {
+//
+// `maxLen` defaults to MAX_CONTENT_LEN so the enrichment path is byte-identical
+// to before. videoFullText.js passes a larger value for the one article about
+// to become a video: that text is used once and discarded, so it never touches
+// the 5,000-char budget that governs what news.db actually stores.
+export function extractArticleText(html, { maxLen = MAX_CONTENT_LEN } = {}) {
   if (!html || html.length < 200) return null;
 
   let cleaned = html
@@ -74,7 +79,7 @@ export function extractArticleText(html) {
   }
 
   if (paragraphs.length < 2) return null;
-  return paragraphs.join("\n\n").slice(0, MAX_CONTENT_LEN);
+  return paragraphs.join("\n\n").slice(0, maxLen);
 }
 
 async function enrichOne(article) {

@@ -34,8 +34,10 @@
  *   GEMINI_API_KEY
  *
  * Optional env:
- *   GEMINI_GENERATION_MODEL     — shared pin (default gemini-3.1-flash-lite)
+ *   VIDEO_SPEC_MODEL            — SPEC call pin (default gemini-3.5-flash)
+ *   GEMINI_GENERATION_MODEL     — PACKAGING pin (default gemini-3.1-flash-lite)
  *   VIDEO_SPEC_MAX_OUTPUT_TOKENS — output cap (default 8192, see below)
+ *   VIDEO_FULLTEXT_MAX_CHARS / VIDEO_FULLTEXT_TIMEOUT_MS — see videoFullText.js
  */
 
 import axios from "axios";
@@ -52,10 +54,34 @@ import {
   validateSpec, validatePackaging,
 } from "./videoSpecSchema.js";
 
-// Same shared pin as scriptWriter and igSummaryService. Never a "-latest" alias.
-const MODEL = process.env.GEMINI_GENERATION_MODEL || "gemini-3.1-flash-lite";
-const ENDPOINT = (key) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
+// TWO PINS, deliberately different tiers for two different jobs.
+//
+// SPEC_MODEL — gemini-3.5-flash, pinned for RELIABILITY, not for beat count.
+// Measured 2026-08-02 on identical articles and an identical prompt:
+//   flash-lite      0/3 successful specs · beats 5.0
+//   3.5-flash       2/3 · beats 5.5 · thoughts 0 · 5-8s
+//   3.1-pro-preview 2/3 · beats 6.5 · thoughts 4-6k billed as output · 38-55s,
+//                   and one article lost outright to truncation
+// Tier is NOT the variable behind flat beat counts — 5 → 5.5 → 6.5 across three
+// tiers is noise next to the 12-20 the rubric asks for. What 3.5-flash buys is
+// a spec that comes back at all, with no thinking tokens and inside a sane
+// latency budget. Pro is rejected on cost and latency, not on quality.
+//
+// This is a SERVICE-LOCAL var, unlike the SCRIPT_LLM_MODEL knob retired from
+// scriptWriter — and for the opposite reason. That one was a second name for
+// the same intent, which is how pins drift apart. This one encodes a measured
+// divergence: the spec call genuinely needs a different tier from every other
+// Gemini caller, and folding it into GEMINI_GENERATION_MODEL would drag the
+// whole codebase onto 3.5-flash as a side effect.
+const SPEC_MODEL = process.env.VIDEO_SPEC_MODEL || "gemini-3.5-flash";
+
+// PACKAGING_MODEL stays on the shared pin. Packaging is a few hundred tokens of
+// hook-writing against a finished script — the cheap tier does it well, and the
+// comparison gave no reason to move it.
+const PACKAGING_MODEL = process.env.GEMINI_GENERATION_MODEL || "gemini-3.1-flash-lite";
+
+const ENDPOINT = (model, key) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
 
 // 8192, not scriptWriter's 4096. A 25-slide spec is a structurally larger
 // artifact than a narration blob: every slide carries a type, an eyebrow, its
@@ -73,6 +99,11 @@ const TIMEOUT_MS = 60000;   // a 25-slide spec is a longer generation than a cap
 const RATE_IN_PER_M  = 0.30;
 const RATE_OUT_PER_M = 2.50;
 
+// Prompt-side ceiling on body text. Above videoFullText's 24,000-char cap so
+// it never binds first; present so a caller passing text from elsewhere cannot
+// blow the input budget.
+const SPEC_BODY_MAX_CHARS = Number.parseInt(process.env.VIDEO_SPEC_BODY_MAX_CHARS || "28000", 10);
+
 const WPM = Number.parseInt(process.env.VIDEO_SPEC_WPM || "150", 10);
 
 export function isVideoSpecEnabled() {
@@ -81,10 +112,10 @@ export function isVideoSpecEnabled() {
 
 // ─── Rejection logging (same four fields as scriptWriter) ───────────────────
 
-function logRejection(tag, articleId, reason, len, finishReason, usage) {
+function logRejection(tag, articleId, reason, len, finishReason, usage, model) {
   logger.warn(
     `🎬 ${tag}: rejected article ${articleId} — ${reason} (len=${len}, ` +
-    `model=${MODEL}, finishReason=${finishReason ?? "?"}, ` +
+    `model=${model}, finishReason=${finishReason ?? "?"}, ` +
     `thoughtsTokenCount=${usage?.thoughtsTokenCount ?? "?"})`
   );
 }
@@ -179,11 +210,11 @@ function extractJsonPayload(text) {
   return null;
 }
 
-async function callModel(prompt, { articleId, tag, maxOutputTokens }) {
+async function callModel(prompt, { articleId, tag, model, maxOutputTokens }) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
 
-  logger.info(`🎬 ${tag}: Gemini model=${MODEL} for article ${articleId} (cap=${maxOutputTokens})`);
+  logger.info(`🎬 ${tag}: Gemini model=${model} for article ${articleId} (cap=${maxOutputTokens})`);
 
   // Each retry class has its own single-use (or bounded) budget so no
   // combination can loop: transient 5xx/429 gets two backoff retries,
@@ -197,7 +228,7 @@ async function callModel(prompt, { articleId, tag, maxOutputTokens }) {
   while (true) {
     try {
       const { data } = await axios.post(
-        ENDPOINT(key),
+        ENDPOINT(model, key),
         {
           contents: [{ role: "user", parts: [{ text: promptText }] }],
           generationConfig: buildGeminiGenerationConfig({
@@ -217,14 +248,14 @@ async function callModel(prompt, { articleId, tag, maxOutputTokens }) {
       const text         = candidate?.content?.parts?.[0]?.text;
 
       if (!text) {
-        logRejection(tag, articleId, "empty", 0, finishReason, usage);
+        logRejection(tag, articleId, "empty", 0, finishReason, usage, model);
         return null;
       }
       // HARD rejection. A truncated 25-slide spec that happens to parse is a
       // video that stops mid-argument with narration that references slides
       // which were never emitted.
       if (finishReason === "MAX_TOKENS") {
-        logRejection(tag, articleId, "truncated_max_tokens", text.length, finishReason, usage);
+        logRejection(tag, articleId, "truncated_max_tokens", text.length, finishReason, usage, model);
         return null;
       }
 
@@ -241,7 +272,7 @@ async function callModel(prompt, { articleId, tag, maxOutputTokens }) {
           continue;
         }
         logger.warn(`🎬 ${tag}: non-JSON payload persisted after reminder retry. head=${head} tail=${tail}`);
-        logRejection(tag, articleId, "unparseable_json", text.length, finishReason, usage);
+        logRejection(tag, articleId, "unparseable_json", text.length, finishReason, usage, model);
         return null;
       }
 
@@ -253,10 +284,10 @@ async function callModel(prompt, { articleId, tag, maxOutputTokens }) {
     } catch (err) {
       if (isGeminiThinkingRejection(err) && !thinkingRetryUsed) {
         thinkingRetryUsed = true;
-        markGeminiThinkingRejected(logger);
+        markGeminiThinkingRejected(logger, model);
         continue;
       }
-      if (isGeminiModelGone(err)) { markGeminiModelGone(MODEL, logger); return null; }
+      if (isGeminiModelGone(err)) { markGeminiModelGone(model, logger); return null; }
       const status = err.response?.status;
       const transient = status === 503 || status === 429 ||
                         err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
@@ -266,7 +297,19 @@ async function callModel(prompt, { articleId, tag, maxOutputTokens }) {
         transientUsed++;
         continue;
       }
-      logger.warn(`🎬 ${tag}: call failed`, { status, model: MODEL, error: err.message });
+      // FULL response body, not just err.message. A 400 from Gemini carries
+      // its reason only in the body — err.message is the useless "Request
+      // failed with status code 400". Measured 2026-08-02: gemini-3.5-flash-lite
+      // failed on TRANSPORT, not on output, so the cheap-generation-bump
+      // question stays open and the body is the only thing that can settle it.
+      const body = (() => {
+        try { return JSON.stringify(err.response?.data ?? null); }
+        catch { return String(err.response?.data); }
+      })();
+      logger.warn(
+        `🎬 ${tag}: call failed — model=${model} status=${status ?? err.code ?? "?"} ` +
+        `error=${err.message} body=${String(body).slice(0, 3000)}`
+      );
       return null;
     }
   }
@@ -316,11 +359,15 @@ const CARD_GRAMMAR = `
  * Do not reintroduce a count here — not "aim for", not "roughly", not a
  * duration the model can divide into slides. That is the whole finding.
  */
-export function buildSpecPrompt({ article, allowedSources = [] }) {
+export function buildSpecPrompt({ article, allowedSources = [], bodyText = null }) {
+  // bodyText is the resolved source text (full-text fetch when available,
+  // stored content otherwise). The slice is a safety ceiling, not the
+  // constraint — videoFullText already caps at MAX_FULLTEXT_LEN.
+  const body = String(bodyText ?? article.content ?? "");
   const sourceText = [
     `HEADLINE: ${article.title || ""}`,
     article.description ? `SUMMARY: ${article.description}` : "",
-    article.content ? `BODY: ${String(article.content).slice(0, 12000)}` : "",
+    body ? `BODY: ${body.slice(0, SPEC_BODY_MAX_CHARS)}` : "",
     `PUBLISHER: ${article.source_name || "unknown"}`,
     article.category ? `CATEGORY: ${article.category}` : "",
   ].filter(Boolean).join("\n");
@@ -515,19 +562,41 @@ Re-read the CARD GRAMMAR above and match the field shapes exactly. Emit the FULL
  *        never sees it, because a duration is a slide count once divided.
  * @param {number}  [opts.slideCeiling] — VALIDATION ceiling, never shown to the
  *        model. Overrides MAX_SLIDES for the runaway check.
+ * @param {string}  [opts.bodyText] — pre-resolved source text. Supply it to skip
+ *        the fetch (tests always do, so no test touches the network).
+ * @param {boolean} [opts.fetchFullText=true] — fetch the article URL once at
+ *        generation time for uncapped text. ON by default: the 5,000-char
+ *        stored cap is the measured constraint on beat count, and leaving this
+ *        to the caller would mean Section 6 could silently omit it and inherit
+ *        the same flat specs.
  */
 export async function writeVideoSpec(article, {
   allowedSources = [],
   targetSeconds = 180,
   slideCeiling = null,
+  bodyText = null,
+  fetchFullText = true,
 } = {}) {
   if (!isVideoSpecEnabled()) return null;
   if (!article?.title) return null;
 
   const started = Date.now();
   try {
-    const sourceText = `${article.title || ""} ${article.description || ""} ${article.content || ""}`;
-    const basePrompt = buildSpecPrompt({ article, allowedSources });
+    // ONE request, for the one article already selected, discarded after use.
+    // Never fatal: a failed fetch falls back to stored content and the video
+    // still ships, shorter.
+    let resolved = { text: String(bodyText ?? article.content ?? ""), chars: 0, origin: bodyText ? "supplied" : "stored", reason: null };
+    resolved.chars = resolved.text.length;
+    if (!bodyText && fetchFullText) {
+      const { resolveVideoSourceText } = await import("./videoFullText.js");
+      resolved = await resolveVideoSourceText(article);
+    }
+
+    // Grounding screens against the SAME text the model was given. Screening
+    // against the stored 5,000 chars while prompting with 24,000 would drop
+    // every correctly-sourced figure drawn from the part it could not see.
+    const sourceText = `${article.title || ""} ${article.description || ""} ${resolved.text}`;
+    const basePrompt = buildSpecPrompt({ article, allowedSources, bodyText: resolved.text });
     const validateOpts = {
       allowedSources, sourceText,
       ...(slideCeiling ? { maxSlides: slideCeiling } : {}),
@@ -544,7 +613,7 @@ export async function writeVideoSpec(article, {
 
     for (attempts = 1; attempts <= 2; attempts++) {
       result = await callModel(prompt, {
-        articleId: article.id, tag: "videoSpec", maxOutputTokens: MAX_OUTPUT_TOKENS,
+        articleId: article.id, tag: "videoSpec", model: SPEC_MODEL, maxOutputTokens: MAX_OUTPUT_TOKENS,
       });
       if (!result) return null;            // transport/JSON failure already logged
       spentUsd += result.cost;
@@ -599,7 +668,10 @@ export async function writeVideoSpec(article, {
     const spec = {
       ...v.spec,
       meta: {
-        model: MODEL,
+        model: SPEC_MODEL,
+        sourceTextChars: resolved.chars,
+        sourceTextOrigin: resolved.origin,
+        sourceTextReason: resolved.reason,
         targetSeconds,
         slides: v.stats.slides,
         emitted: v.stats.emitted,
@@ -644,7 +716,7 @@ export async function writePackaging(spec, article) {
   const started = Date.now();
   try {
     const result = await callModel(buildPackagingPrompt({ spec, article }), {
-      articleId: article.id, tag: "videoPackaging", maxOutputTokens: PACKAGING_MAX_OUTPUT_TOKENS,
+      articleId: article.id, tag: "videoPackaging", model: PACKAGING_MODEL, maxOutputTokens: PACKAGING_MAX_OUTPUT_TOKENS,
     });
     if (!result) return null;
 
@@ -653,7 +725,7 @@ export async function writePackaging(spec, article) {
     const v = validatePackaging(parsed, spec);
     if (!v.ok) {
       logRejection("videoPackaging", article.id, `invalid packaging — ${v.errors.slice(0, 3).join(" | ")}`,
-        JSON.stringify(parsed).length, finishReason, usage);
+        JSON.stringify(parsed).length, finishReason, usage, PACKAGING_MODEL);
       return null;
     }
     if (v.dropped?.length) {
@@ -666,7 +738,7 @@ export async function writePackaging(spec, article) {
     const packaging = {
       ...v.packaging,
       meta: {
-        model: MODEL,
+        model: PACKAGING_MODEL,
         droppedVariants: v.dropped || [],
         warnings: v.warnings || [],
         costUsd: Number(cost.toFixed(5)),

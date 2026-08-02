@@ -80,6 +80,27 @@ test("the worked example enumerates 12+ beats and is fenced off from grounding",
   assert.match(p, /never reuse its facts, figures, or wording/);
 });
 
+test("the prompt carries the SUPPLIED body text, not the stored content", () => {
+  // Grounding and generation must see the same bytes: prompting with fetched
+  // full text while screening against stored content would drop every
+  // correctly-sourced figure drawn from the part the validator could not see.
+  const p = buildSpecPrompt({
+    article: { title: "T", description: "D", content: "STORED-ONLY-MARKER", source_name: "Reuters" },
+    allowedSources: ["Reuters"],
+    bodyText: "FETCHED-FULL-TEXT-MARKER with a great deal more detail.",
+  });
+  assert.match(p, /FETCHED-FULL-TEXT-MARKER/);
+  assert.ok(!/STORED-ONLY-MARKER/.test(p), "stored content must not leak in when bodyText is supplied");
+});
+
+test("without bodyText the prompt falls back to stored content", () => {
+  const p = buildSpecPrompt({
+    article: { title: "T", content: "STORED-BODY-MARKER", source_name: "Reuters" },
+    allowedSources: ["Reuters"],
+  });
+  assert.match(p, /STORED-BODY-MARKER/);
+});
+
 test("the retry correction note strips slide counts before the model sees it", () => {
   const { stripCounts } = _internals;
   assert.equal(stripCounts('only 4 slides remain after dropping 3 (< 6) — too thin for a video'), "too thin for a video");

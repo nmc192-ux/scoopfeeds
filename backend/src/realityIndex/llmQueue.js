@@ -203,10 +203,17 @@ export function isGeminiThinkingRejection(err) {
   return status === 400 && /thinking/i.test(msg);
 }
 
-export function markGeminiThinkingRejected(logger_) {
+// `model` names the model that ACTUALLY made the rejected call. Without it the
+// warning printed this module's own GEMINI_GEN_MODEL — which is resolved once
+// at import and is not the caller's pin. Observed 2026-08-02: the line read
+// "gemini-3.1-flash-lite rejected thinkingBudget:0" while gemini-3.1-pro-preview
+// was the caller, i.e. it named an innocent model as the culprit. Callers that
+// carry their own pin (igSummaryService, scriptWriter, videoSpecWriter) should
+// pass it; the default preserves the old behaviour for llmQueue's own calls.
+export function markGeminiThinkingRejected(logger_, model = GEMINI_GEN_MODEL) {
   if (!geminiThinkingRejected) {
     geminiThinkingRejected = true;
-    logger_?.warn?.(`🧠 ${GEMINI_GEN_MODEL} rejected thinkingBudget:0 — continuing WITHOUT thinkingConfig (thinking tokens will bill as output; consider a different pin)`);
+    logger_?.warn?.(`🧠 ${model} rejected thinkingBudget:0 — continuing WITHOUT thinkingConfig for ALL Gemini callers in this process (thinking tokens will bill as output; consider a different pin)`);
   }
 }
 
