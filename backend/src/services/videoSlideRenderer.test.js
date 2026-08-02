@@ -258,3 +258,53 @@ test("concat re-muxes rather than re-encoding", async () => {
   const concat = src.slice(src.indexOf("export async function concatSlides"));
   assert.match(concat, /"-c",\s*"copy"/, "concat must stream-copy");
 });
+
+// ─── Constant-rate drift (ruling 2026-08-02) ────────────────────────────────
+
+const travelOf = (filter) => {
+  const x = filter.match(/crop=\d+:\d+:x='(\d+)\+(\d+)\*/);
+  const y = filter.match(/:y='(\d+)\+(\d+)\*/);
+  return { dx: Number(x[2]), dy: Number(y[2]), padX: Number(x[1]), padY: Number(y[1]) };
+};
+
+test("per-frame displacement is INVARIANT to slide duration", async () => {
+  // Fixed amplitude made this a function of duration — 0.24px/frame at 6.1s
+  // but past 0.5px below ~3.5s. Section 5 derives durations from audio, so
+  // short captions would have pushed the drift back over the criterion that
+  // the supersampling had just brought it under.
+  const { FPS, SUPERSAMPLE } = await import("./videoAssembler.js");
+  // Bounded by the overscan cap, which bites at ~7.3s (6px/s x 7.3s = the
+  // 43.9px diagonal of a 2% overscan). Past that the travel stops growing and
+  // px/frame FALLS — asserted separately, since slower is always acceptable.
+  const perFrame = [];
+  for (const dur of [1.5, 2, 3, 4.95, 6.1, 7.0]) {
+    const { filter, totalDuration } = buildSlideFilter({ stateCount: 3, hold: (dur + 2 * 0.35) / 3 });
+    const { dx, dy } = travelOf(filter);
+    perFrame.push(Math.hypot(dx, dy) / SUPERSAMPLE() / (totalDuration * FPS));
+  }
+  const spread = Math.max(...perFrame) - Math.min(...perFrame);
+  assert.ok(spread < 0.01, `per-frame displacement varies by ${spread.toFixed(4)}px across durations: ${perFrame.map(v => v.toFixed(3))}`);
+  for (const v of perFrame) {
+    assert.ok(v <= 0.5, `${v.toFixed(3)} px/frame exceeds the 0.5px criterion`);
+  }
+});
+
+test("a long slide drifts SLOWER than the rate, never faster", async () => {
+  // Past the overscan cap the travel stops growing, so px/frame can only fall.
+  // The criterion is a ceiling; this must sit under it from both directions.
+  const { FPS, SUPERSAMPLE } = await import("./videoAssembler.js");
+  const { filter, totalDuration } = buildSlideFilter({ stateCount: 3, hold: 8 });
+  const { dx, dy } = travelOf(filter);
+  const perFrame = Math.hypot(dx, dy) / SUPERSAMPLE() / (totalDuration * FPS);
+  assert.ok(perFrame < 0.24, `expected the cap to slow a long slide, got ${perFrame.toFixed(3)} px/frame`);
+});
+
+test("travel never exceeds the overscan, so the crop stays inside the frame", () => {
+  for (const hold of [0.8, 2, 5, 20]) {
+    const { filter } = buildSlideFilter({ stateCount: 3, hold });
+    const { dx, dy, padX, padY } = travelOf(filter);
+    // scale is 1958*SS x 1102*SS, crop 1920*SS x 1080*SS → 38*SS x 22*SS spare
+    assert.ok(dx + padX <= 38 * 4 + 1, `x travel ${dx} + pad ${padX} overruns the overscan`);
+    assert.ok(dy + padY <= 22 * 4 + 1, `y travel ${dy} + pad ${padY} overruns the overscan`);
+  }
+});

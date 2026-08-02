@@ -25,6 +25,7 @@ import { CANVAS } from "./videoSlideRenderer.js";
 export const CROSSFADE_SECS = Number.parseFloat(process.env.VIDEO_CROSSFADE_SECS || "0.35");
 export const FPS = Number.parseInt(process.env.VIDEO_FPS || "25", 10);
 export const SUPERSAMPLE = () => DRIFT_SUPERSAMPLE;
+export const DRIFT_RATE = () => DRIFT_RATE_PX_PER_SEC;
 
 // 2% overscan gives ~38px horizontal and ~22px of travel — below the amplitude
 // where text edges visibly resample, above the point where it reads as static.
@@ -45,6 +46,19 @@ const DRIFT_SCALE = Number.parseFloat(process.env.VIDEO_DRIFT_SCALE || "1.02");
 // output — below the visible-motion threshold and, more importantly, the
 // residual is a smooth ramp rather than a stall-and-snap.
 const DRIFT_SUPERSAMPLE = Number.parseInt(process.env.VIDEO_DRIFT_SUPERSAMPLE || "4", 10);
+
+// CONSTANT RATE, NOT FIXED AMPLITUDE (ruling 2026-08-02). Travelling the full
+// overscan over the slide made per-frame displacement a function of DURATION:
+// 0.24px/frame at 6.1s, but 0.42px at 3.5s and past the 0.5px criterion below
+// that. Section 5 derives durations from audio, so short captions would have
+// silently pushed the drift back over the line the supersampling just fixed.
+//
+// Pinning the RATE makes per-frame displacement invariant to duration:
+// 6px/s at 25fps is 0.24px/frame for every slide, which is the figure that
+// measured clean. Total travel is then rate x duration, capped by the 2%
+// overscan — so a long slide drifts SLOWER than 6px/s once it hits the cap,
+// never faster. The criterion is a ceiling, and this can only sit under it.
+const DRIFT_RATE_PX_PER_SEC = Number.parseFloat(process.env.VIDEO_DRIFT_RATE || "6");
 
 // ENCODE, pinned rather than inherited. The demo came out at 129 kbps, which
 // is fine for static dark frames — but that number is a CONSEQUENCE of this
@@ -112,14 +126,26 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
   const w2 = Math.round(CANVAS.w * DRIFT_SCALE) * SS;
   const h2 = Math.round(CANVAS.h * DRIFT_SCALE) * SS;
   const cw = CANVAS.w * SS, ch = CANVAS.h * SS;
-  const dx = w2 - cw, dy = h2 - ch;
+  const maxX = w2 - cw, maxY = h2 - ch;      // the overscan cap, in SS units
+
+  // Travel at a constant RATE along the overscan's own diagonal, so the
+  // direction is unchanged and only the distance responds to duration.
+  const maxMag = Math.hypot(maxX, maxY);
+  const wantMag = DRIFT_RATE_PX_PER_SEC * SS * total;
+  const mag = Math.min(wantMag, maxMag);
+  const dx = Math.round(maxMag > 0 ? (maxX / maxMag) * mag : 0);
+  const dy = Math.round(maxMag > 0 ? (maxY / maxMag) * mag : 0);
+
   const prog = `(t/${total.toFixed(3)})`;
   // Direction alternates by slide so a long video does not feel mechanical.
   const xExpr = driftDir % 2 === 0 ? `${dx}*${prog}` : `${dx}*(1-${prog})`;
   const yExpr = driftDir % 4 < 2   ? `${dy}*${prog}` : `${dy}*(1-${prog})`;
+  // The crop window has to sit inside the scaled frame at every t, so the
+  // start offset moves with the travel rather than the (larger) overscan.
+  const padX = Math.max(0, maxX - dx), padY = Math.max(0, maxY - dy);
   parts.push(
     `[${last}]scale=${w2}:${h2}:flags=lanczos,` +
-    `crop=${cw}:${ch}:x='${xExpr}':y='${yExpr}',` +
+    `crop=${cw}:${ch}:x='${Math.round(padX / 2)}+${xExpr}':y='${Math.round(padY / 2)}+${yExpr}',` +
     `scale=${CANVAS.w}:${CANVAS.h}:flags=lanczos,setsar=1[out]`
   );
 
