@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import {
   validateSpec,
   validatePackaging,
-  buildSourcesCard,
+  buildAttributionCard,
   CARD_TYPES,
   MODEL_EMITTABLE,
 } from "./videoSpecSchema.js";
@@ -49,7 +49,7 @@ const plainFiller = (n) => FILLER_CYCLE[n % 2](n);
 const BEAT_KIND_CYCLE = ["figure", "mechanism", "turn", "consequence"];
 function beatsFor(slides) {
   return slides
-    .filter(c => c && typeof c === "object" && c.t !== "title" && c.t !== "kicker" && c.t !== "sources")
+    .filter(c => c && typeof c === "object" && c.t !== "title" && c.t !== "kicker" && c.t !== "attribution")
     .map((c, i) => ({
       kind: BEAT_KIND_CYCLE[i % 4],
       beat: `Beat ${i} of the story as the source states it.`,
@@ -96,23 +96,23 @@ test("two malformed bars cards do NOT kill a 22-slide spec — the live 2026-08-
   assert.equal(v.stats.slides, 20); // 22 raw − 2 dropped
 });
 
-test("the closed set excludes `sources` from what the model may emit", () => {
-  assert.ok(CARD_TYPES.includes("sources"));
-  assert.ok(!MODEL_EMITTABLE.includes("sources"));
+test("the closed set excludes `attribution` from what the model may emit", () => {
+  assert.ok(CARD_TYPES.includes("attribution"));
+  assert.ok(!MODEL_EMITTABLE.includes("attribution"));
 });
 
-test("a model-emitted sources card is DROPPED, never rendered", () => {
-  const s = spec([{ t: "sources", eyebrow: "WHO", items: [["BBC", 3], ["Reuters", 2]], caption: "Two outlets covered this." }]);
+test("a model-emitted attribution card is DROPPED — a fabricated byline never renders", () => {
+  const s = spec([{ t: "attribution", eyebrow: "REPORTING BY", outlet: "Reuters", headline: "Invented headline", caption: "Based on Reuters reporting." }]);
   const v = validateSpec(s, opts);
   assert.equal(v.ok, true, v.errors.join("; "));
   assert.equal(v.dropped.length, 1);
-  assert.match(v.dropped[0].reason, /code-injected from event_articles/);
-  assert.ok(!v.spec.slides.some(c => c.t === "sources"));
+  assert.match(v.dropped[0].reason, /code-injected from the article row/);
+  assert.ok(!v.spec.slides.some(c => c.t === "attribution"));
 });
 
-test("the same sources card passes when the code path injects it", () => {
-  const s = spec([{ t: "sources", eyebrow: "WHO", items: [["BBC", 3], ["Reuters", 2]], caption: "Two outlets covered this." }]);
-  const v = validateSpec(s, { ...opts, allowSourcesCard: true });
+test("the same attribution card passes when the code path injects it", () => {
+  const s = spec([{ t: "attribution", eyebrow: "REPORTING BY", outlet: "Reuters", headline: "Cable faults traced to anchors", date: "2026-08-02", caption: "Based on Reuters reporting." }]);
+  const v = validateSpec(s, { ...opts, allowAttributionCard: true });
   assert.equal(v.ok, true, v.errors.join("; "));
 });
 
@@ -235,12 +235,12 @@ test("a beat with an unknown kind, or missing evidence, rejects the spec", () =>
   assert.match(validateSpec(b, opts).errors.join(" "), /"evidence" must quote the source words/);
 });
 
-test("the injected sources card never counts against one-card-per-beat", () => {
-  // Section 6 injects the sources card AFTER generation; revalidation with the
-  // injected card and the model's original beats must still balance.
+test("the injected attribution card never counts against one-card-per-beat", () => {
+  // Section 6 injects it AFTER generation; revalidation with the injected card
+  // and the model's original beats must still balance.
   const s = spec([statCard()]);
-  s.slides.splice(s.slides.length - 1, 0, { t: "sources", items: [["Reuters", 4], ["BBC News", 2]], caption: "Two outlets covered this story." });
-  const v = validateSpec(s, { ...opts, allowSourcesCard: true });
+  s.slides.splice(s.slides.length - 1, 0, { t: "attribution", outlet: "Reuters", headline: "Cable faults traced to anchors", caption: "Based on Reuters reporting." });
+  const v = validateSpec(s, { ...opts, allowAttributionCard: true });
   assert.equal(v.ok, true, v.errors.join("; "));
 });
 
@@ -602,30 +602,37 @@ test("a short-but-valid variant set ships — fewer than 3 is a warning, not a f
 
 // ─── The code-injected sources card ─────────────────────────────────────────
 
-test("buildSourcesCard emits outlet names and counts, and NO score field", () => {
-  const card = buildSourcesCard([
-    { source_name: "Reuters", article_count: 4 },
-    { source_name: "BBC News", article_count: 2 },
-  ]);
-  assert.equal(card.t, "sources");
-  assert.deepEqual(card.items, [["Reuters", 4], ["BBC News", 2]]);
-  // The measured reason: quality_score is 0/154 populated, and credibility is a
-  // 4-value tier that would render as false precision.
+test("buildAttributionCard names the reporting and carries NO score field", () => {
+  const card = buildAttributionCard({
+    source_name: "Reuters",
+    title: "Cable faults traced to dragged anchors",
+    published_at: Date.UTC(2026, 7, 2),
+  });
+  assert.equal(card.t, "attribution");
+  assert.equal(card.outlet, "Reuters");
+  assert.equal(card.headline, "Cable faults traced to dragged anchors");
+  assert.equal(card.date, "2026-08-02");
+  // quality_score is 0/154 populated and credibility is a 4-value tier; a
+  // number here would be false precision on the one card that must be trusted.
   const flat = JSON.stringify(card);
   assert.ok(!/score|credibility/i.test(flat), `no score field may appear: ${flat}`);
 });
 
-test("buildSourcesCard returns null below two outlets — omit, never single-source", () => {
-  assert.equal(buildSourcesCard([{ source_name: "Reuters", article_count: 4 }]), null);
-  assert.equal(buildSourcesCard([]), null);
-  assert.equal(buildSourcesCard(null), null);
+test("ONE outlet is enough — the plural card vanished on single-source scoops", () => {
+  const card = buildAttributionCard({ source_name: "Reuters", title: "A single-source scoop" });
+  assert.ok(card, "a single outlet must still produce an attribution card");
+  assert.equal(card.outlet, "Reuters");
+  assert.equal(card.date, undefined, "no date when the article has none");
 });
 
-test("a card built by buildSourcesCard validates under the injection flag", () => {
-  const card = buildSourcesCard([
-    { source_name: "Reuters", article_count: 4 },
-    { source_name: "BBC News", article_count: 2 },
-  ]);
-  const v = validateSpec(spec([card]), { ...opts, allowSourcesCard: true });
+test("buildAttributionCard returns null only when there is nothing to name", () => {
+  assert.equal(buildAttributionCard({ title: "no outlet" }), null);
+  assert.equal(buildAttributionCard({ source_name: "Reuters" }), null);
+  assert.equal(buildAttributionCard(null), null);
+});
+
+test("a card built by buildAttributionCard validates under the injection flag", () => {
+  const card = buildAttributionCard({ source_name: "Reuters", title: "Cable faults traced to anchors", published_at: Date.UTC(2026, 7, 2) });
+  const v = validateSpec(spec([card]), { ...opts, allowAttributionCard: true });
   assert.equal(v.ok, true, v.errors.join("; "));
 });

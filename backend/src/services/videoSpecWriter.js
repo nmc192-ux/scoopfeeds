@@ -38,6 +38,7 @@
  *   GEMINI_GENERATION_MODEL     — PACKAGING pin (default gemini-3.1-flash-lite)
  *   VIDEO_SPEC_MAX_OUTPUT_TOKENS — output cap (default 8192, see below)
  *   VIDEO_FULLTEXT_MAX_CHARS / VIDEO_FULLTEXT_TIMEOUT_MS — see videoFullText.js
+ *   VIDEO_SIBLING_BUNDLE=1      — event-sibling source bundle (default OFF)
  */
 
 import axios from "axios";
@@ -103,6 +104,11 @@ const RATE_OUT_PER_M = 2.50;
 // it never binds first; present so a caller passing text from elsewhere cannot
 // blow the input budget.
 const SPEC_BODY_MAX_CHARS = Number.parseInt(process.env.VIDEO_SPEC_BODY_MAX_CHARS || "28000", 10);
+
+// Event-sibling bundle: DARK by default. Built, tested, and unproven — flip
+// VIDEO_SIBLING_BUNDLE=1 to measure it, and only make it the default once a
+// run shows it adds beats rather than just input.
+const SIBLING_BUNDLE_DEFAULT = process.env.VIDEO_SIBLING_BUNDLE === "1";
 
 const WPM = Number.parseInt(process.env.VIDEO_SPEC_WPM || "150", 10);
 
@@ -452,21 +458,26 @@ HARD RULES — violating any of these makes the output unusable:
 
 1. GROUNDING. Every claim must appear in the source material above. Do not add context you happen to know. Do not infer causes, motives or consequences. Do not predict outcomes. If the source does not say why something happened, the spec does not say why either.
 
-2. NUMBERS NEED A REAL SOURCE. Every "stat" and every "bars" card MUST carry a "source" naming one of the outlets listed above, AND the figure itself must appear in the source material. If you cannot attribute a number to one of those outlets, DO NOT EMIT THE CARD. Do not guess an outlet. Do not write "reports" or "analysts" or the story's subject as the source. A dropped card costs nothing; an invented attribution is unrecoverable.
+2. RESTATE, NEVER REPRODUCE. Every beat and every caption must be written in your OWN WORDS. Do not copy runs of the article's wording. Do not follow the article's ordering or section structure — decide the order the story is best told in and use that. Two specific limits:
+   - No verbatim run longer than a short fragment, and any fragment you do carry over must be a genuine quotation that belongs to a named speaker or document.
+   - The ONE deliberate exception is the "evidence" field on a beat, which is SUPPOSED to be a short verbatim phrase from the source — that is its job, it is never spoken aloud, and it never appears on screen.
+   Grounding (rule 1) constrains WHAT you may say; this rule constrains HOW you may say it. Being faithful to the facts does not license reproducing the prose.
+
+3. NUMBERS NEED A REAL SOURCE. Every "stat" and every "bars" card MUST carry a "source" naming one of the outlets listed above, AND the figure itself must appear in the source material. If you cannot attribute a number to one of those outlets, DO NOT EMIT THE CARD. Do not guess an outlet. Do not write "reports" or "analysts" or the story's subject as the source. A dropped card costs nothing; an invented attribution is unrecoverable.
 
    THE SOURCE MATERIAL IS ATTRIBUTED. It is divided into labelled sections — one "PRIMARY SOURCE — <outlet>" block and, when other outlets covered the same story, one or more "ADDITIONAL COVERAGE — <outlet>" blocks. Take a figure from whichever section actually contains it, and name THAT outlet in the "source" field. Do not attribute a figure to the lead publisher because it is listed first. Where two outlets report the same figure, either is correct.
 
    Sections cover ONE story from different newsrooms, so treat them as one body of reporting, not as separate stories: a mechanism explained only in the third section is as usable as one in the first. Where outlets disagree on a number, prefer the one more outlets agree on, and if they cannot be reconciled, drop the card rather than picking a side.
 
-3. NO "sources" CARD. You must never emit a card with "t":"sources". That card is built from the database, not written. If you emit one, the spec is rejected.
+4. NO "attribution" CARD. You must never emit a card with "t":"attribution". That card names the outlet, headline and date of the reporting this video is built on, and it is built from the database, not written. A fabricated byline is the worst thing this pipeline could put on screen. If you emit one, the card is discarded.
 
-4. CAPTION IS THE NARRATION. Every card MUST have a "caption": the exact sentence spoken over that slide. It is both the voiceover line and the burned-in subtitle, so they can never drift apart. Write captions as plain spoken prose: no markdown, no brackets, no quotation marks, no emoji, no symbols. Write "percent" not "%", and write numbers the way a newsreader would say them. One or two spoken sentences per caption — say the beat and stop.
+5. CAPTION IS THE NARRATION. Every card MUST have a "caption": the exact sentence spoken over that slide. It is both the voiceover line and the burned-in subtitle, so they can never drift apart. Write captions as plain spoken prose: no markdown, no brackets, no quotation marks, no emoji, no symbols. Write "percent" not "%", and write numbers the way a newsreader would say them. One or two spoken sentences per caption — say the beat and stop.
 
-5. THE SLIDE TEXT IS NOT THE CAPTION. On-screen text is short and declarative — a few words, upper case where the grammar shows upper case. The caption is the sentence that explains it. They reinforce each other; they never repeat each other word for word.
+6. THE SLIDE TEXT IS NOT THE CAPTION. On-screen text is short and declarative — a few words, upper case where the grammar shows upper case. The caption is the sentence that explains it. They reinforce each other; they never repeat each other word for word.
 
-6. ACCENT. Within any single card, AT MOST ONE line may have the colour "lime". Every other line is "white". This is a brand invariant, not a preference.
+7. ACCENT. Within any single card, AT MOST ONE line may have the colour "lime". Every other line is "white". This is a brand invariant, not a preference.
 
-7. ENUMERATE THE BEATS — AS OUTPUT, BEFORE THE SLIDES. Your JSON starts with a "beats" array. A beat is ONE CONCRETE INSTANCE of something the source establishes, never a category:
+8. ENUMERATE THE BEATS — AS OUTPUT, BEFORE THE SLIDES. Your JSON starts with a "beats" array. A beat is ONE CONCRETE INSTANCE of something the source establishes, never a category:
      - "figure"      — one specific number you can attribute to one of the outlets listed above and find in the source material
      - "mechanism"   — one specific explanation of how something works or came about
      - "turn"        — one point where the obvious reading of the story gives way to a truer one
@@ -493,13 +504,13 @@ HARD RULES — violating any of these makes the output unusable:
    ]
    Twelve beats, because that source established twelve distinct things — so that spec carries twelve content cards plus its "title" and "kicker". A thinner source might establish four; then you list four and emit four. The enumeration decides.
 
-8. STRUCTURE AND MIX. The FIRST card must be "title" and the LAST card must be "kicker". In between, VARY THE CARD TYPES:
+9. STRUCTURE AND MIX. The FIRST card must be "title" and the LAST card must be "kicker". In between, VARY THE CARD TYPES:
    - No card type may take more than about a third of the cards. A wall of number cards is a spreadsheet read aloud, not a video.
    - Never place more than two cards of the same type back to back.
    - "turn" should appear once, near the point where the story's obvious reading gives way to its real one.
    Cards that break these limits are discarded from the video, so a monotonous spec loses most of itself. If a beat could be carried by more than one card type, prefer the type you have used least.
 
-9. TONE. Neutral wire-service register. No editorialising, no outrage, no rhetorical questions, no "you won't believe". Interest comes from a specific fact being genuinely interesting, never from sensational phrasing. Preserve the source's hedging: if it says "reportedly" or "officials say", keep that attribution.
+10. TONE. Neutral wire-service register. No editorialising, no outrage, no rhetorical questions, no "you won't believe". Interest comes from a specific fact being genuinely interesting, never from sensational phrasing. Preserve the source's hedging: if it says "reportedly" or "officials say", keep that attribution.
 
 Return ONLY a JSON object, no markdown fence, with exactly this shape — "beats" first, then "slides":
 
@@ -633,10 +644,12 @@ Re-read the CARD GRAMMAR above and match the field shapes exactly. Emit the FULL
  *        stored cap is the measured constraint on beat count, and leaving this
  *        to the caller would mean Section 6 could silently omit it and inherit
  *        the same flat specs.
- * @param {boolean} [opts.includeSiblings=true] — widen SOURCE MATERIAL with
- *        attributed excerpts from the event's other coverage. ON by default for
- *        the same reason as fetchFullText; pass false for a single-article
- *        baseline measurement.
+ * @param {boolean} [opts.includeSiblings] — widen SOURCE MATERIAL with
+ *        attributed excerpts from the event's other coverage. DEFAULT OFF,
+ *        gated on VIDEO_SIBLING_BUNDLE=1: the bundle is built and tested but
+ *        unproven — it has never been shown to add beats, and shipping an
+ *        unproven input change ON would silently alter every spec while the
+ *        question is still open. Pass explicitly to measure either way.
  */
 export async function writeVideoSpec(article, {
   allowedSources = [],
@@ -644,7 +657,7 @@ export async function writeVideoSpec(article, {
   slideCeiling = null,
   bodyText = null,
   fetchFullText = true,
-  includeSiblings = true,
+  includeSiblings = SIBLING_BUNDLE_DEFAULT,
 } = {}) {
   if (!isVideoSpecEnabled()) return null;
   if (!article?.title) return null;

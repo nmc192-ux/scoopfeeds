@@ -156,11 +156,17 @@ test("outlet identifiers in ARTIFACTS are scoped to source-bearing keys", () => 
   assert.ok(v.matches.some(m => m.kind === "outlet" && m.field.includes(".source")));
 });
 
-test("a sources-card items list is treated as source-bearing", () => {
-  const spec = { slides: [{ t: "sources", items: [["Reuters", 4], ["Dawn", 2]], caption: "Two outlets covered this." }] };
+test("an attribution card's outlet is treated as source-bearing", () => {
+  const spec = { slides: [{ t: "attribution", outlet: "Dawn", headline: "A story", caption: "Based on Dawn reporting." }] };
   const v = checkPostGeneration(BENIGN, [spec]);
   assert.equal(v.blocked, true);
   assert.ok(v.matches.some(m => m.kind === "outlet" && m.signal === "dawn"));
+});
+
+test("the legacy plural sources-card shape is still caught", () => {
+  // An artifact produced before the §3b rename must not slip past Rule 0.
+  const spec = { slides: [{ t: "sources", items: [["Reuters", 4], ["Dawn", 2]], caption: "Two outlets covered this." }] };
+  assert.equal(checkPostGeneration(BENIGN, [spec]).blocked, true);
 });
 
 test("the required fixture STILL blocks on all three layers after field-scoping", () => {

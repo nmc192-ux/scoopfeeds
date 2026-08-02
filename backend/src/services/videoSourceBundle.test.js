@@ -3,8 +3,8 @@
  *
  * The bundle exists to add BEATS, not bytes. What must hold: wire copy
  * republished across outlets is deduped rather than counted twice, one outlet
- * cannot eat the budget, every excerpt is attributed (grounding and the sources
- * card both depend on it), and the whole thing degrades to the primary article
+ * cannot eat the budget, every excerpt is attributed (grounding and the
+ * attribution card both depend on it), and the whole thing degrades to the primary article
  * rather than costing a video.
  *
  * DB-backed paths are exercised through makeTestDb per CLAUDE.md — never
@@ -83,7 +83,7 @@ test("sibling reads go through the DAL's event accessor, not ad-hoc event logic"
   assert.match(SRC, /resolveEventForArticle/);
 });
 
-test("every excerpt is attributed — grounding and the sources card depend on it", () => {
+test("every excerpt is attributed — grounding and the attribution card depend on it", () => {
   assert.match(SRC, /PRIMARY SOURCE — \$\{outlet\}/);
   assert.match(SRC, /ADDITIONAL COVERAGE — \$\{outlet\}/);
 });

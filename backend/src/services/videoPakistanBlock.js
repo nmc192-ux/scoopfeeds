@@ -120,9 +120,10 @@ const CATEGORIES = [
 
 const norm = (s) => String(s ?? "");
 
-// Keys whose values are source-bearing, inside generated artifacts. A
-// sources-card `items` array is handled separately (see walkArtifact) because
-// `items` is too generic a key name to treat as source-bearing everywhere.
+// Keys whose values are source-bearing, inside generated artifacts. The
+// attribution card's `outlet` is covered here directly; the legacy plural
+// `sources` card's `items` array is still handled in walkArtifact so an
+// artifact produced before the §3b rename cannot slip past Rule 0.
 const SOURCE_KEY_RE = /^(source|source_name|sources|outlet|outlets|publisher|attribution)$/i;
 
 /**
@@ -197,7 +198,7 @@ function walkArtifact(node, label, path, out) {
   }
   if (typeof node !== "object") return;
 
-  const isSourcesCard = node.t === "sources";
+  const isSourcesCard = node.t === "sources" || node.t === "attribution";
   for (const [k, v] of Object.entries(node)) {
     const p = `${path}.${k}`;
     // `items` is source-bearing only on a sources card, where it is the outlet

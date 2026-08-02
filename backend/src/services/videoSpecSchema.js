@@ -23,23 +23,23 @@
  *      number under a real masthead, which is the single most expensive thing
  *      this pipeline could publish.
  *
- *   3. THE `sources` CARD IS CODE-INJECTED, NEVER MODEL-EMITTED. A
- *      model-written `sources` card is dropped and recorded like any other
- *      per-card violation. The
- *      card's entire job is to say "here is who covered this and how much",
- *      which is a database question; a model asked to answer it will answer it
- *      fluently whether or not it knows. Section 6 injects it from
- *      event_articles. See CREDIBILITY, below, for why it carries no score.
+ *   3. THE `attribution` CARD IS CODE-INJECTED, NEVER MODEL-EMITTED. A
+ *      model-written `attribution` card is dropped and recorded like any other
+ *      per-card violation. The card's entire job is to say WHOSE REPORTING
+ *      THIS IS — outlet, headline, date — which is a database question; a
+ *      model asked to answer it will answer it fluently whether or not it
+ *      knows, and a fabricated byline is the worst thing this pipeline could
+ *      put on screen. Section 6 injects it from the article row.
  *
- * CREDIBILITY — measured on prod 2026-08-02, and the reason there is no score
- * field in this schema:
+ * NO SCORE FIELD — measured on prod 2026-08-02, and the reason the attribution
+ * card carries none:
  *   - `sources.quality_score` is populated on 0 of 154 sources. Unusable.
  *   - `articles.credibility` is real but coarse: a 4-value tier
  *     (7→13,116 · 9→11,800 · 8→10,045 · 10→4,517). Not a stuck default, but
  *     rendering a 4-value tier as "9.4" is false precision — inventing
  *     resolution the underlying data does not have, on the one card whose
  *     whole purpose is to be trustworthy.
- * So the `sources` card ships outlet names + article counts and NO score.
+ * So the card names the outlet and its reporting, and carries NO score.
  * Do not add one back without a measurement that justifies it.
  *
  * BRAND INVARIANT, enforced here rather than in the renderer: accent #dde706
@@ -55,7 +55,7 @@ export const CARD_TYPES = Object.freeze([
   "stat",     // one dominant number
   "diagram",  // node chain / flow, optional marker on one node
   "bars",     // small comparison set
-  "sources",  // who covered it (CODE-INJECTED — see rule 3)
+  "attribution", // whose reporting this is (CODE-INJECTED — see rule 3)
   "turn",     // the pivot beat: "but here is what that misses"
   "kicker",   // closer
 ]);
@@ -136,14 +136,14 @@ const CARD_FIELDS = {
   stat:    { required: ["value", "caption", "source"],       optional: ["eyebrow", "unit", "lines", "hi"] },
   diagram: { required: ["nodes", "caption"],                 optional: ["eyebrow", "marker"] },
   bars:    { required: ["bars", "caption", "source"],        optional: ["eyebrow", "source_note"] },
-  sources: { required: ["items", "caption"],                 optional: ["eyebrow", "note"] },
+  attribution: { required: ["outlet", "headline", "caption"], optional: ["eyebrow", "date", "note"] },
   turn:    { required: ["lines", "caption"],                 optional: ["eyebrow", "sub"] },
   kicker:  { required: ["top", "bottom", "caption"],         optional: ["sub"] },
 };
 
-// Card types the MODEL is allowed to emit. `sources` is absent by design.
+// Card types the MODEL is allowed to emit. `attribution` is absent by design.
 export const MODEL_EMITTABLE = Object.freeze(
-  CARD_TYPES.filter(t => t !== "sources")
+  CARD_TYPES.filter(t => t !== "attribution")
 );
 
 // ─── Small helpers ──────────────────────────────────────────────────────────
@@ -276,20 +276,12 @@ function validateCardShape(card, idx) {
       }
       break;
     }
-    case "sources": {
+    case "attribution": {
       // Shape is checked so a CODE-INJECTED card is still validated. A
       // MODEL-emitted one is rejected earlier, in validateSpec.
-      if (card.items !== undefined) {
-        if (!isArr(card.items) || card.items.length === 0) {
-          e.push(`${at} (sources): "items" must be a non-empty array`);
-        } else {
-          card.items.forEach((it, i) => {
-            if (!isArr(it) || it.length !== 2 || !isStr(it[0]) || !Number.isInteger(it[1]) || it[1] < 1) {
-              e.push(`${at} (sources): items[${i}] must be [outlet, articleCount:int>=1]`);
-            }
-          });
-        }
-      }
+      if (card.outlet   !== undefined && !isStr(card.outlet))   e.push(`${at} (attribution): "outlet" must be a non-empty string`);
+      if (card.headline !== undefined && !isStr(card.headline)) e.push(`${at} (attribution): "headline" must be a non-empty string`);
+      if (card.date     !== undefined && !isStr(card.date))     e.push(`${at} (attribution): "date" must be a string when present`);
       break;
     }
     case "kicker": {
@@ -326,13 +318,13 @@ function pruneCard(card) {
  * @param {string} [opts.sourceText]    — article title+description+content. When
  *        supplied, numbers on stat/bars cards are additionally checked to
  *        appear in it. Mirrors scriptWriter.verifyGrounding's normalisation.
- * @param {boolean} [opts.allowSourcesCard=false] — set ONLY by the code path
- *        that injects the DB-built sources card.
+ * @param {boolean} [opts.allowAttributionCard=false] — set ONLY by the code path
+ *        that injects the DB-built attribution card.
  *
  * @returns {{ok, spec, errors, dropped, stats}}
  *   ok=false means SKIP THE ARTICLE. `dropped` lists every refused card, each
  *   tagged kind: "structural" (unknown type, malformed shape, model-emitted
- *   sources), "sourcing" (untraceable outlet, ungrounded figure), or "mix"
+ *   attribution), "sourcing" (untraceable outlet, ungrounded figure), or "mix"
  *   (over-represented or over-repeated card type). A spec
  *   can be ok with drops; Section 6's publish gate reads `dropped` and
  *   decides whether any drop is itself disqualifying — the §3 / §6.2 tension,
@@ -341,7 +333,7 @@ function pruneCard(card) {
 export function validateSpec(spec, {
   allowedSources = [],
   sourceText = "",
-  allowSourcesCard = false,
+  allowAttributionCard = false,
   minSlides = MIN_SLIDES,
   maxSlides = MAX_SLIDES,
   maxDropRatio = MAX_DROP_RATIO,
@@ -367,7 +359,7 @@ export function validateSpec(spec, {
   // whose cards don't correspond to it, wasn't produced by the process the
   // prompt mandates, and no amount of card-level salvage fixes that. The
   // count check runs on EMITTED cards, before drops — drops are this
-  // validator's own doing and must not create a mismatch. `sources` cards are
+  // validator's own doing and must not create a mismatch. `attribution` cards are
   // excluded so the Section 6 code-injected card never breaks the equality.
   const beats = spec.beats;
   if (!isArr(beats) || beats.length === 0) {
@@ -380,7 +372,7 @@ export function validateSpec(spec, {
       if (!isStr(b.evidence))           errors.push(`beats[${i}]: "evidence" must quote the source words that ground it`);
     });
     const contentCards = spec.slides.filter(c =>
-      c && typeof c === "object" && c.t !== "title" && c.t !== "kicker" && c.t !== "sources"
+      c && typeof c === "object" && c.t !== "title" && c.t !== "kicker" && c.t !== "attribution"
     ).length;
     if (contentCards !== beats.length) {
       errors.push(`one card per beat: enumerated ${beats.length} beats but emitted ${contentCards} content cards`);
@@ -388,7 +380,7 @@ export function validateSpec(spec, {
   }
 
   // Per-card pass. A wrong CARD — unknown type, malformed shape, model-emitted
-  // sources, untraceable or ungrounded numbers — is DROPPED and recorded, and
+  // attribution, untraceable or ungrounded numbers — is DROPPED and recorded, and
   // the pass moves on; two bad cards must not kill a 22-slide spec (rule 1).
   // `kind` separates structural from sourcing drops because Section 6's gate
   // may weigh them differently.
@@ -403,9 +395,9 @@ export function validateSpec(spec, {
       continue;
     }
 
-    // Rule 3 — the model may not write the sources card.
-    if (card.t === "sources" && !allowSourcesCard) {
-      dropped.push({ index: i, t: "sources", kind: "structural", reason: `model-emitted "sources" card — code-injected from event_articles only` });
+    // Rule 3 — the model may not write the attribution card.
+    if (card.t === "attribution" && !allowAttributionCard) {
+      dropped.push({ index: i, t: "attribution", kind: "structural", reason: `model-emitted "attribution" card — code-injected from the article row only` });
       continue;
     }
 
@@ -740,24 +732,40 @@ export function validatePackaging(packaging, validatedSpec) {
 }
 
 /**
- * Build the code-injected `sources` card from DB rows. Outlet names + article
- * counts, no score — see CREDIBILITY in the module docs. Returns null when
- * there is no event linkage, and a null card means the card is OMITTED, never
- * a single-source card standing in for a credibility claim (brief §1).
+ * Build the code-injected `attribution` card from the article row.
+ *
+ * SINGULAR by design (§3b). The old `sources` card was a plural roll-up that
+ * needed 2+ outlets and therefore vanished on exactly the stories most in need
+ * of attribution — a single-source scoop. This names the reporting the video is
+ * built on: which outlet, which piece, when.
+ *
+ * Returns null only when there is no outlet to name. There is no minimum
+ * outlet count: one is the normal case, and "whose reporting is this" has an
+ * answer for every article.
  */
-export function buildSourcesCard(outlets, { eyebrow = "WHO REPORTED THIS", note = null } = {}) {
-  if (!isArr(outlets) || outlets.length < 2) return null;
-  const items = outlets
-    .filter(o => isStr(o?.source_name) && Number.isInteger(o?.article_count) && o.article_count >= 1)
-    .map(o => [o.source_name.trim(), o.article_count])
-    .sort((a, b) => b[1] - a[1]);
-  if (items.length < 2) return null;
-  const total = items.reduce((n, [, c]) => n + c, 0);
+export function buildAttributionCard(article, { eyebrow = "REPORTING BY", note = null } = {}) {
+  const outlet = String(article?.source_name || "").trim();
+  if (!outlet) return null;
+
+  const headline = String(article?.headline || article?.title || "").trim();
+  if (!headline) return null;
+
+  // ISO date only — a timestamp on screen reads as machine output, and the
+  // publication DAY is what a viewer needs to judge how current this is.
+  let date = null;
+  const raw = article?.published_at ?? article?.date ?? null;
+  if (raw != null) {
+    const d = new Date(typeof raw === "number" ? raw : String(raw));
+    if (!Number.isNaN(d.getTime())) date = d.toISOString().slice(0, 10);
+  }
+
   return {
-    t: "sources",
+    t: "attribution",
     eyebrow,
-    items,
+    outlet,
+    headline: headline.length > 140 ? headline.slice(0, 137) + "…" : headline,
+    ...(date ? { date } : {}),
     ...(note ? { note } : {}),
-    caption: `${items.length} outlets covered this story across ${total} reports.`,
+    caption: `This report is based on ${outlet}'s reporting${date ? `, published ${date}` : ""}.`,
   };
 }
