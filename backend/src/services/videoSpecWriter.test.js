@@ -11,9 +11,85 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { _internals } from "./videoSpecWriter.js";
+import { _internals, writeVideoSpec } from "./videoSpecWriter.js";
 
 const { extractJsonPayload, buildSpecPrompt } = _internals;
+
+// ─── The return contract: a result object on EVERY path, never null ─────────
+//
+// The prod dry run of 2026-08-03 died here. d7e2c6e changed writeVideoSpec from
+// null-or-spec to `{ ok, spec, costUsd, reason, attempts }` and the caller
+// started reading `r.costUsd` BEFORE `r.ok` — but the too-thin path still
+// returned bare null. The first thin article therefore threw
+// "Cannot read properties of null (reading 'costUsd')" out of the whole cycle,
+// and every later candidate was never attempted. One survivor of an old
+// contract cost the entire run.
+//
+// Both halves are pinned: the shape is asserted, and the source is walked so a
+// future `return null` cannot be reintroduced without failing.
+
+const SPEC_KEYS = ["ok", "spec", "costUsd", "reason", "attempts"];
+
+function assertResultShape(r, label) {
+  assert.notEqual(r, null, `${label}: writeVideoSpec returned null — the contract is a result object`);
+  assert.equal(typeof r, "object", `${label}: expected an object`);
+  for (const k of SPEC_KEYS) {
+    assert.ok(k in r, `${label}: result is missing "${k}" — the caller reads all five`);
+  }
+  assert.equal(typeof r.ok, "boolean", `${label}: ok must be a boolean`);
+  assert.equal(typeof r.costUsd, "number", `${label}: costUsd must be a number, the caller sums it`);
+  assert.ok(Number.isFinite(r.costUsd), `${label}: costUsd must be finite`);
+  if (!r.ok) {
+    assert.equal(r.spec, null, `${label}: a rejection must carry spec:null`);
+    assert.equal(typeof r.reason, "string", `${label}: a rejection must explain itself`);
+    assert.ok(r.reason.length > 0, `${label}: reason must not be empty`);
+  }
+}
+
+test("writeVideoSpec has no `return null` — every exit is a result object", () => {
+  const raw = readFileSync(new URL("./videoSpecWriter.js", import.meta.url), "utf8");
+  const start = raw.indexOf("export async function writeVideoSpec");
+  assert.ok(start !== -1, "writeVideoSpec not found");
+  // Ends at the next top-level export — writePackaging.
+  const end = raw.indexOf("\nexport ", start + 1);
+  assert.ok(end > start, "could not bound writeVideoSpec's body");
+  const body = raw.slice(start, end);
+
+  const returns = [...body.matchAll(/\breturn\b([^\n]*)/g)].map(m => m[1].trim());
+  assert.ok(returns.length >= 6, `expected every exit path present, found ${returns.length}`);
+  for (const r of returns) {
+    assert.ok(
+      r.startsWith("reject(") || r.startsWith("{ ok: true"),
+      `writeVideoSpec exit must be reject(...) or a { ok: true } object, found: return ${r}`
+    );
+  }
+  assert.ok(!/\breturn\s+null\b/.test(body),
+    "writeVideoSpec must never return null — the caller reads .costUsd before .ok");
+});
+
+test("the too-thin path returns a result carrying its spend, not null", () => {
+  // The exact prod sequence, pinned at the source level: the too-thin branch is
+  // the one that regressed, and it must hand back both spentUsd and attempts —
+  // a rejected article still paid for its model call.
+  const raw = readFileSync(new URL("./videoSpecWriter.js", import.meta.url), "utf8");
+  const branch = raw.slice(raw.indexOf("if (v.errors.some(isThinnessError))"));
+  const exit = branch.slice(0, branch.indexOf("if (attempts === 1)"));
+  assert.match(exit, /return reject\(/, "the too-thin branch must return a rejection object");
+  assert.match(exit, /spentUsd/, "the too-thin rejection must carry the spend it already incurred");
+  assert.match(exit, /attempts/, "the too-thin rejection must carry the attempt count");
+});
+
+test("every reachable rejection path has the full result shape", async () => {
+  // No network: both of these exit before any model call.
+  const saved = process.env.VIDEO_SPEC_ENABLED;
+  process.env.VIDEO_SPEC_ENABLED = "";
+  try {
+    assertResultShape(await writeVideoSpec({ id: "a", title: "T" }), "flag unset");
+  } finally {
+    if (saved === undefined) delete process.env.VIDEO_SPEC_ENABLED;
+    else process.env.VIDEO_SPEC_ENABLED = saved;
+  }
+});
 
 // ─── The prompt must contain NO slide count ─────────────────────────────────
 //

@@ -41,7 +41,7 @@ import {
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
 import { selectionGate } from "./videoSelection.js";
 import { buildAttributionCard } from "./videoSpecSchema.js";
-import { writeVideoSpec, writePackaging } from "./videoSpecWriter.js";
+import { writeVideoSpec, writePackaging, isVideoSpecEnabled } from "./videoSpecWriter.js";
 import { statesForCard, renderState, fitStatesToDuration, videoDesignKey } from "./videoSlideRenderer.js";
 import { assembleSlide, concatSlides, holdForAudio } from "./videoAssembler.js";
 import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.js";
@@ -147,7 +147,30 @@ async function produceVideo(article, spec) {
  * One pass: gates → candidates → first article that survives everything gets
  * a video and an upload. Returns a structured result for the job log.
  */
-export async function runVideoRenderCycle({ dryRun = false, now = Date.now() } = {}) {
+/**
+ * @param {object}  [opts]
+ * @param {boolean} [opts.dryRun] — render and stop; never claims, never uploads.
+ * @param {number}  [opts.now]
+ * @param {object}  [opts.deps] — TEST SEAM ONLY. Overrides for the collaborators
+ *        this cycle calls out to. Production passes nothing and gets the real
+ *        imports below. It exists because the failure that took the cycle down
+ *        (a rejected first candidate aborting the run) is only observable by
+ *        driving runVideoRenderCycle itself, and node:test cannot stub ES module
+ *        imports without --experimental-test-module-mocks, which the suite does
+ *        not run with. Everything NOT listed here — the gates, the rate limits,
+ *        the DB — stays real in tests, so this is a seam, not a mock harness.
+ */
+export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), deps = {} } = {}) {
+  const {
+    writeVideoSpec: _writeVideoSpec = writeVideoSpec,
+    writePackaging: _writePackaging = writePackaging,
+    produceVideo: _produceVideo = produceVideo,
+    uploadToYouTube: _uploadToYouTube = uploadToYouTube,
+    isVoiceConfigured: _isVoiceConfigured = isVoiceConfigured,
+    isYouTubeConfigured: _isYouTubeConfigured = isYouTubeConfigured,
+    isVideoSpecEnabled: _isVideoSpecEnabled = isVideoSpecEnabled,
+  } = deps;
+
   if (!autopostEnabled()) {
     logger.info("🎬 video autopost DISABLED (VIDEO_AUTOPOST_ENABLED != 1)");
     return { skipped: "disabled" };
@@ -172,6 +195,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now() } =
 
   const attempts = [];
   let produced = null, spendUsd = 0;
+  let current = null;   // the attempt in flight, so a throw is attributable
 
   try {
     const rate = rateGate({ now });
@@ -179,8 +203,30 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now() } =
       logger.info(`🎬 video cycle: ${rate.gate} — ${rate.reason}`);
       return finish({ skipped: rate.gate, reason: rate.reason });
     }
-    if (!isVoiceConfigured()) return finish({ skipped: "no-voice", reason: "ELEVENLABS_API_KEY unset" });
-    if (!isYouTubeConfigured() && !dryRun) return finish({ skipped: "no-youtube", reason: "YouTube not configured" });
+    // CONFIG IS CHECKED ONCE, HERE, AND ABORTS LOUDLY.
+    //
+    // A missing flag is not an editorial outcome, and treating it as one is how
+    // the first dry run read: VIDEO_SPEC_ENABLED was unset, so writeVideoSpec
+    // rejected every candidate with "VIDEO_SPEC_ENABLED not set", and the cycle
+    // reported eight ordinary-looking spec skips. Eight identical refusals for a
+    // reason no article could ever satisfy is a misconfiguration wearing a
+    // yield report's clothes. One error line, one exit.
+    if (!_isVideoSpecEnabled()) {
+      logger.error(
+        "🚨 video cycle ABORTED — VIDEO_SPEC_ENABLED is not 1, or GEMINI_API_KEY is unset. " +
+        "No candidate can produce a spec in this configuration; skipping every article one at a " +
+        "time would report this as a yield problem instead of a config problem."
+      );
+      return finish({ skipped: "no-spec", reason: "VIDEO_SPEC_ENABLED or GEMINI_API_KEY unset" });
+    }
+    if (!_isVoiceConfigured()) {
+      logger.error("🚨 video cycle ABORTED — ELEVENLABS_API_KEY unset; §5 makes voice a hard requirement.");
+      return finish({ skipped: "no-voice", reason: "ELEVENLABS_API_KEY unset" });
+    }
+    if (!_isYouTubeConfigured() && !dryRun) {
+      logger.error("🚨 video cycle ABORTED — YouTube is not configured and this is not a dry run.");
+      return finish({ skipped: "no-youtube", reason: "YouTube not configured" });
+    }
 
     // Rule 0 FIRST, ahead of every editorial gate. It is absolute and must not
     // be reachable only after something cheaper happened to pass.
@@ -195,49 +241,77 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now() } =
       }
       const n = attempts.length + 1;
 
+      // RECORDED AT ATTEMPT TIME, NOT ON COMPLETION. Every stage below used to
+      // push its own record when it finished, so anything that threw — the null
+      // deref on the spec result being the one that actually happened — left no
+      // trace at all, and the cycle reported "tried 0" having tried one. The
+      // record goes in first and is annotated as the article advances, so a
+      // throw leaves behind the stage it died in. `current` lets the outer catch
+      // attach the error to the right attempt.
+      const rec = { n, id: article.id, stage: "selected", reason: null };
+      attempts.push(rec);
+      current = rec;
+
       const gate = selectionGate(article, { now });
       if (!gate.ok) {
-        attempts.push({ n, id: article.id, stage: gate.gate, reason: gate.reason });
+        rec.stage = gate.gate; rec.reason = gate.reason;
         logger.info(`🎬 ${n} SKIP ${gate.gate}: ${gate.reason} — ${String(article.title).slice(0, 60)}`);
         continue;
       }
 
-      const r = await writeVideoSpec(article, {
+      rec.stage = "spec";
+      const r = await _writeVideoSpec(article, {
         allowedSources: [article.source_name].filter(Boolean),
         preCreditedSources: [article.source_name].filter(Boolean),
       });
+      // ASSERT THE SHAPE, DON'T TRUST IT. writeVideoSpec's contract is
+      // `{ ok, spec, costUsd, reason, attempts }` on every path, but reading
+      // `.costUsd` off a bare null is what took the 2026-08-03 cycle down —
+      // one stale exit in the callee cost every remaining candidate. A broken
+      // contract is now one loud skipped article, not a dead run.
+      if (!r || typeof r !== "object" || typeof r.ok !== "boolean") {
+        rec.reason = `writeVideoSpec broke its contract — returned ${r === null ? "null" : typeof r}`;
+        logger.error(
+          `🚨 ${n} SKIP spec: ${rec.reason}. Expected { ok, spec, costUsd, reason, attempts }. ` +
+          `This is a code defect, not an editorial outcome — the article is skipped, the cycle continues.`
+        );
+        continue;
+      }
       spendUsd += r.costUsd || 0;
+      rec.costUsd = r.costUsd;
       if (!r.ok) {
-        attempts.push({ n, id: article.id, stage: "spec", reason: r.reason, costUsd: r.costUsd });
+        rec.reason = r.reason;
         logger.info(`🎬 ${n} SKIP spec: ${r.reason}`);
         continue;
       }
 
       // §6.2 — a degrade path anywhere in generation disqualifies the article.
       if (r.spec.meta.finishReason && r.spec.meta.finishReason !== "STOP") {
-        attempts.push({ n, id: article.id, stage: "degraded", reason: `finishReason=${r.spec.meta.finishReason}` });
+        rec.stage = "degraded"; rec.reason = `finishReason=${r.spec.meta.finishReason}`;
         continue;
       }
 
       let video;
+      rec.stage = "produce";
       try {
-        video = await produceVideo(article, r.spec);
+        video = await _produceVideo(article, r.spec);
       } catch (err) {
-        attempts.push({ n, id: article.id, stage: "produce", reason: err.message });
+        rec.reason = err.message;
         logger.warn(`🎬 ${n} SKIP produce: ${err.message}`);
         continue;
       }
 
       // Rule 0 LAYER 3 — throws. Re-checked against the article AND everything
       // generated, immediately before upload, assuming layers 1 and 2 did not run.
+      rec.stage = "rule0-publish";
       assertPublishAllowed(article, [r.spec, video.slides]);
 
-      const packaging = await writePackaging(r.spec, article);
+      const packaging = await _writePackaging(r.spec, article);
       const title = packaging?.titles?.[0] || article.title;
 
       if (dryRun) {
         produced = { articleId: article.id, path: video.path, title, dryRun: true };
-        attempts.push({ n, id: article.id, stage: "ok-dry" });
+        rec.stage = "ok-dry";
         break;
       }
 
@@ -247,8 +321,9 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now() } =
         sourceName: article.source_name, title: article.title,
       });
 
+      rec.stage = "upload";
       try {
-        const up = await uploadToYouTube({
+        const up = await _uploadToYouTube({
           filePath: video.path, title,
           description: packaging?.description_hook || "",
           tags: packaging?.tags || [], isShort: false,
@@ -259,7 +334,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now() } =
           titleVariants: packaging?.titles || null,
         });
         produced = { articleId: article.id, youtubeId: up.videoId || up.id, title };
-        attempts.push({ n, id: article.id, stage: "ok" });
+        rec.stage = "ok";
         logger.info(`🎬 PUBLISHED ${produced.youtubeId} — "${title}"`);
         break;
       } catch (err) {
@@ -276,17 +351,24 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now() } =
             `No further uploads will succeed today. Cycle aborted after ${attempts.length} attempt(s). ` +
             `Reduce VIDEO_MAX_PER_DAY, or cut ingestion search volume. Raw: ${err.message}`
           );
-          attempts.push({ n, id: article.id, stage: "quota", reason: err.message });
+          rec.stage = "quota"; rec.reason = err.message;
           return finish({ skipped: "quota-exceeded", reason: err.message });
         }
-        attempts.push({ n, id: article.id, stage: "upload", reason: err.message });
+        rec.reason = err.message;
         logger.warn(`🎬 ${n} SKIP upload: ${err.message}`);
       }
     }
 
     return finish({ produced });
   } catch (err) {
-    logger.error(`❌ video cycle failed: ${err.message}`);
+    // Attribute the throw to the attempt that was in flight. Without this the
+    // cycle log said only "video cycle failed: <message>" with tried 0, and the
+    // article and stage that caused it had to be inferred from the preceding
+    // log lines — which is the wrong time to be inferring anything.
+    if (current) { current.error = err.message; }
+    logger.error(
+      `❌ video cycle failed${current ? ` during attempt ${current.n} (${current.stage}) on ${current.id}` : ""}: ${err.message}`
+    );
     return finish({ error: err.message });
   } finally {
     cycleInFlight = null;
