@@ -1,0 +1,142 @@
+/**
+ * videoAssembler.js — keyframe states → slide segments → one MP4.
+ *
+ * DRIFT IS APPLIED AFTER CROSSFADE ASSEMBLY. This is a correctness
+ * requirement, not a preference. If each state carried its own baked-in drift
+ * offset, the crossfade would dissolve between two DIFFERENTLY-POSITIONED
+ * compositions and every state boundary would visibly jump. So the filter
+ * graph is strictly ordered: scale/pad each state → xfade them into one
+ * continuous stream → and only then pan that stream. The drift is a property
+ * of the assembled slide, which is the only level at which it is continuous.
+ *
+ * Requires ffmpeg >= 4.3 for `xfade`. Verified on the VPS 2026-08-02:
+ * 5.1.9-0+deb12u1 with xfade present, installed via the Dockerfile's apt step.
+ * getFFmpegPath() prefers system ffmpeg over the bundled 4.1 binary, which
+ * lacks xfade and would silently degrade every transition to a hard cut.
+ */
+
+import { spawn } from "child_process";
+import { existsSync, writeFileSync } from "fs";
+import path from "path";
+import { logger } from "./logger.js";
+import { getFFmpegPath } from "./videoGenerator.js";
+import { CANVAS } from "./videoSlideRenderer.js";
+
+export const CROSSFADE_SECS = Number.parseFloat(process.env.VIDEO_CROSSFADE_SECS || "0.35");
+export const FPS = Number.parseInt(process.env.VIDEO_FPS || "25", 10);
+
+// 2% overscan gives ~38px horizontal and ~22px of travel — below the amplitude
+// where text edges visibly resample, above the point where it reads as static.
+const DRIFT_SCALE = Number.parseFloat(process.env.VIDEO_DRIFT_SCALE || "1.02");
+
+function shellQuote(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
+
+function runFFmpeg(args, ffmpegPath) {
+  const cmd = [ffmpegPath, ...args].map(shellQuote).join(" ");
+  return new Promise((resolve, reject) => {
+    const proc = spawn(cmd, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    proc.stderr.on("data", d => { stderr += d.toString(); });
+    proc.on("close", code => code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-800)}`)));
+    proc.on("error", reject);
+  });
+}
+
+/**
+ * The filter graph for ONE slide: N still PNGs → crossfaded → drifted.
+ *
+ * xfade's `offset` is measured from the start of the COMBINED timeline, which
+ * already includes every preceding overlap — not from the start of clip N.
+ * Getting that wrong stacks the transitions on top of each other.
+ */
+export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0 }) {
+  const parts = [];
+  for (let i = 0; i < stateCount; i++) {
+    parts.push(`[${i}:v]scale=${CANVAS.w}:${CANVAS.h},setsar=1,format=yuv420p,fps=${FPS}[s${i}]`);
+  }
+
+  let last = "s0";
+  let total = hold;
+  if (stateCount > 1) {
+    let offset = hold - crossfade;
+    for (let i = 1; i < stateCount; i++) {
+      const out = `xf${i}`;
+      parts.push(`[${last}][s${i}]xfade=transition=fade:duration=${crossfade}:offset=${offset.toFixed(3)}[${out}]`);
+      total += hold - crossfade;
+      offset = total - crossfade;
+      last = out;
+    }
+  }
+
+  // ── Drift, applied to the ASSEMBLED stream ──
+  // Direction alternates by slide so a long video does not feel mechanical.
+  const w2 = Math.round(CANVAS.w * DRIFT_SCALE);
+  const h2 = Math.round(CANVAS.h * DRIFT_SCALE);
+  const dx = w2 - CANVAS.w, dy = h2 - CANVAS.h;
+  const prog = `(t/${total.toFixed(3)})`;
+  const xExpr = driftDir % 2 === 0 ? `${dx}*${prog}` : `${dx}*(1-${prog})`;
+  const yExpr = driftDir % 4 < 2   ? `${dy}*${prog}` : `${dy}*(1-${prog})`;
+  parts.push(`[${last}]scale=${w2}:${h2},crop=${CANVAS.w}:${CANVAS.h}:x='${xExpr}':y='${yExpr}',setsar=1[out]`);
+
+  return { filter: parts.join("; "), totalDuration: total };
+}
+
+/**
+ * Assemble one slide's state PNGs into a silent MP4 segment.
+ * `hold` is per-state; slide duration falls out of it.
+ */
+export async function assembleSlide({ statePaths, hold, outputPath, driftDir = 0, ffmpegPath = null }) {
+  const ff = ffmpegPath || getFFmpegPath();
+  if (!ff) throw new Error("videoAssembler: ffmpeg not available");
+  if (!statePaths.length) throw new Error("videoAssembler: no states to assemble");
+
+  const args = ["-y", "-loglevel", "error"];
+  for (const p of statePaths) args.push("-loop", "1", "-t", String(hold), "-i", p);
+
+  const { filter, totalDuration } = buildSlideFilter({ stateCount: statePaths.length, hold, driftDir });
+  args.push(
+    "-filter_complex", filter, "-map", "[out]",
+    "-t", totalDuration.toFixed(3),
+    "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+    "-pix_fmt", "yuv420p", "-r", String(FPS), "-an",
+    outputPath
+  );
+  await runFFmpeg(args, ff);
+  return { outputPath, duration: totalDuration };
+}
+
+/** Concatenate slide segments into the finished silent MP4. */
+export async function concatSlides({ segmentPaths, outputPath, workDir, ffmpegPath = null }) {
+  const ff = ffmpegPath || getFFmpegPath();
+  if (!ff) throw new Error("videoAssembler: ffmpeg not available");
+  const listPath = path.join(workDir, "concat.txt");
+  // The concat demuxer's own quoting, not JSON's: single quotes, with an
+  // embedded quote escaped as '\''. JSON.stringify emits DOUBLE quotes, which
+  // ffmpeg reads as part of the filename and then resolves relative to the
+  // list file — producing a path with the quotes still in it.
+  const quote = (p) => `'${String(p).replace(/'/g, `'\\''`)}'`;
+  writeFileSync(listPath, segmentPaths.map(p => `file ${quote(p)}`).join("\n") + "\n");
+  await runFFmpeg([
+    "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listPath,
+    "-c", "copy", "-movflags", "+faststart", outputPath,
+  ], ff);
+  if (!existsSync(outputPath)) throw new Error("videoAssembler: concat produced no output");
+  return outputPath;
+}
+
+/** Does this ffmpeg actually have xfade? The keyframe design has no fallback. */
+export async function assertXfadeAvailable(ffmpegPath = null) {
+  const ff = ffmpegPath || getFFmpegPath();
+  if (!ff) throw new Error("videoAssembler: ffmpeg not available");
+  const { execSync } = await import("child_process");
+  const out = execSync(`"${ff}" -hide_banner -filters 2>&1`, { timeout: 8000 }).toString();
+  if (!/\sxfade\s/.test(out)) {
+    throw new Error(
+      "videoAssembler: this ffmpeg has no `xfade` filter. The keyframe renderer has no " +
+      "hard-cut fallback — without crossfade there is no motion, only a slideshow of states. " +
+      "Install system ffmpeg >= 4.3 (the Dockerfile does this)."
+    );
+  }
+  logger.info(`🎬 videoAssembler: xfade available in ${ff}`);
+  return true;
+}
