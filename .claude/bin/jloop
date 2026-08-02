@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -uo pipefail
+MODE="${1:-both}"
+INTERVAL="${JLOOP_INTERVAL:-120}"
+MAX_TURNS="${JLOOP_MAX_TURNS:-200}"
+MODEL_BUILD="${JLOOP_MODEL_BUILD:-sonnet}"
+MODEL_REVIEW="${JLOOP_MODEL_REVIEW:-opus}"
+MAX_FAILS="${JLOOP_MAX_FAILS:-3}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+LOG_DIR="$REPO_ROOT/.j-loop/logs"
+NOTIFY="$REPO_ROOT/.claude/bin/jloop-notify"
+cd "$REPO_ROOT" || exit 1
+mkdir -p "$LOG_DIR"
+case "$MODE" in build|review|both) ;; *) echo "usage: jloop [build|review|both]" >&2; exit 2 ;; esac
+command -v claude >/dev/null 2>&1 || { echo "claude not found" >&2; exit 1; }
+FAILS=0
+model_for() { case "$1" in build) echo "$MODEL_BUILD" ;; review) echo "$MODEL_REVIEW" ;; *) echo sonnet ;; esac; }
+die() {
+  echo "FATAL: $1"
+  "$NOTIFY" failed "J Loop stopped" "$1
+
+The loop halted rather than retrying. Restart with: .claude/bin/jloop $MODE" >/dev/null 2>&1
+  exit 1
+}
+run_cycle() {
+  local skill="$1" model stamp log code
+  model="$(model_for "$skill")"; stamp="$(date '+%Y%m%d-%H%M%S')"; log="$LOG_DIR/${skill}-${stamp}.log"
+  echo "[$(date '+%H:%M:%S')] /$skill on $model …"
+  claude -p "/$skill" --model "$model" --permission-mode acceptEdits --max-turns "$MAX_TURNS" > "$log" 2>&1
+  code=$?
+  # Fatal conditions — never retry these.
+  if grep -qiE "session limit|usage limit|rate limit|quota|credit balance|401|403" "$log"; then
+    die "Hit an account limit or auth error. Log: $log
+$(head -3 "$log")"
+  fi
+  if grep -q "JLOOP_IDLE" "$log"; then echo "  idle"; FAILS=0; return 10; fi
+  if [ $code -ne 0 ]; then
+    FAILS=$((FAILS+1))
+    echo "  exited $code (failure $FAILS/$MAX_FAILS) — $log"
+    [ $FAILS -ge $MAX_FAILS ] && die "$MAX_FAILS consecutive failures. Log: $log
+$(tail -5 "$log")"
+    sleep $((30 * FAILS))
+    return 1
+  fi
+  FAILS=0
+  echo "  finished — $log"
+  return 0
+}
+trap 'echo; echo stopped.; exit 0' INT TERM
+echo "J Loop: mode=$MODE build=$MODEL_BUILD review=$MODEL_REVIEW interval=${INTERVAL}s maxfails=$MAX_FAILS"
+echo "Logs: $LOG_DIR — Ctrl-C to stop."
+while true; do
+  did=0
+  if [ "$MODE" = "build" ] || [ "$MODE" = "both" ]; then run_cycle build; [ $? -ne 10 ] && did=1; fi
+  if [ "$MODE" = "review" ] || [ "$MODE" = "both" ]; then run_cycle review; [ $? -ne 10 ] && did=1; fi
+  [ "${JLOOP_ONCE:-0}" = "1" ] && break
+  if [ $did -eq 0 ]; then sleep "$INTERVAL"; else sleep 15; fi
+done

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -uo pipefail
+KIND="${1:-info}"; TITLE="${2:-J Loop}"; BODY="${3:-}"
+case "$KIND" in
+  gate)    ICON="🟠"; LEAD="Needs your decision" ;;
+  ready)   ICON="🟢"; LEAD="Ready to ship" ;;
+  blocked) ICON="🔴"; LEAD="Blocked" ;;
+  shipped) ICON="🚀"; LEAD="Shipped" ;;
+  failed)  ICON="⚠️";  LEAD="Failed" ;;
+  *)       ICON="ℹ️";  LEAD="Update" ;;
+esac
+TEXT="${ICON} *${LEAD}: ${TITLE}*"
+[ -n "$BODY" ] && TEXT="${TEXT}
+
+${BODY}"
+if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
+  PAYLOAD=$(printf '%s' "$TEXT" | python3 -c 'import json,sys; print(json.dumps({"text": sys.stdin.read()}))')
+  RESP=$(curl -s --max-time 10 -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d "$PAYLOAD" 2>&1)
+  if [ "$RESP" = "ok" ]; then echo "notified: $KIND — $TITLE"; exit 0; fi
+  echo "slack failed ($RESP) — falling back to file" >&2
+fi
+INBOX="${JLOOP_INBOX:-J-LOOP-INBOX.md}"
+{ echo ""; echo "## ${ICON} ${LEAD}: ${TITLE}"; echo "_$(date '+%Y-%m-%d %H:%M')_"; echo ""; echo "$BODY"; } >> "$INBOX"
+echo "wrote to $INBOX"
