@@ -40,14 +40,29 @@ const fillerCard = (n) => FILLER_CYCLE[n % FILLER_CYCLE.length](n);
 
 // Padding for SMALL specs: alternates two card types that carry no numbers and
 // no source, so a test about sourcing or figures measures only the cards it
-// deliberately added. Small specs sit below MIX_MIN_CARDS, so two types is fine.
+// deliberately added.
 const plainFiller = (n) => FILLER_CYCLE[n % 2](n);
 
-/** Minimum viable valid spec: title + fillers + kicker. */
+// One beat per content card, matching what a compliant model would emit. The
+// "one card per beat" equality is part of the contract now, so every fixture
+// has to satisfy it — a fixture without beats is testing the wrong rejection.
+const BEAT_KIND_CYCLE = ["figure", "mechanism", "turn", "consequence"];
+function beatsFor(slides) {
+  return slides
+    .filter(c => c && typeof c === "object" && c.t !== "title" && c.t !== "kicker" && c.t !== "sources")
+    .map((c, i) => ({
+      kind: BEAT_KIND_CYCLE[i % 4],
+      beat: `Beat ${i} of the story as the source states it.`,
+      evidence: "70 percent of cable faults involve anchors",
+    }));
+}
+const withBeats = (slides) => ({ beats: beatsFor(slides), slides });
+
+/** Minimum viable valid spec: title + fillers + kicker, with matching beats. */
 function spec(cards = [], { pad = 4, filler = plainFiller } = {}) {
   const mid = [];
   for (let i = 0; i < pad; i++) mid.push(filler(i));
-  return { slides: [titleCard(), ...cards, ...mid, kickerCard()] };
+  return withBeats([titleCard(), ...cards, ...mid, kickerCard()]);
 }
 
 const opts = { allowedSources: SOURCES, sourceText: TEXT };
@@ -137,7 +152,7 @@ test("with no allowed sources, every numeric card drops", () => {
 });
 
 test("dropping below the slide floor turns a drop into a SKIP", () => {
-  const s = { slides: [titleCard(), statCard({ source: "nobody" }), kickerCard()] };
+  const s = withBeats([titleCard(), statCard({ source: "nobody" }), kickerCard()]);
   const v = validateSpec(s, { ...opts, minSlides: 3 });
   assert.equal(v.ok, false);
   assert.match(v.errors.join(" "), /only 2 slides remain/);
@@ -151,7 +166,7 @@ test("the peptides case: 15 of 26 dropped now FAILS instead of passing as ok", (
   const mid = [];
   for (let i = 0; i < 15; i++) mid.push(malformed());
   for (let i = 0; i < 9; i++)  mid.push(fillerCard(i));
-  const s = { slides: [titleCard(), ...mid, kickerCard()] };
+  const s = withBeats([titleCard(), ...mid, kickerCard()]);
   assert.equal(s.slides.length, 26);
   const v = validateSpec(s, opts);
   assert.equal(v.ok, false);
@@ -164,7 +179,7 @@ test("a drop rate at or under 40% still passes", () => {
   const mid = [];
   for (let i = 0; i < 4; i++)  mid.push(malformed());
   for (let i = 0; i < 14; i++) mid.push(fillerCard(i));
-  const s = { slides: [titleCard(), ...mid, kickerCard()] };  // 4/20 = 20%
+  const s = withBeats([titleCard(), ...mid, kickerCard()]);  // 4/20 = 20%
   const v = validateSpec(s, opts);
   assert.equal(v.ok, true, v.errors.join("; "));
   assert.equal(v.stats.dropRatio, 0.2);
@@ -175,7 +190,7 @@ test("more than 2 SOURCING drops fails even at a low overall drop rate", () => {
   const mid = [];
   for (let i = 0; i < 3; i++) mid.push(statCard({ source: "analysts", value: 70 }));
   for (let i = 0; i < 25; i++) mid.push(fillerCard(i));
-  const s = { slides: [titleCard(), ...mid, kickerCard()] };  // 3/30 = 10%
+  const s = withBeats([titleCard(), ...mid, kickerCard()]);  // 3/30 = 10%
   const v = validateSpec(s, { ...opts, maxSlides: 40 });
   assert.equal(v.ok, false);
   assert.equal(v.dropped.filter(d => d.kind === "sourcing").length, 3);
@@ -187,20 +202,64 @@ test("exactly 2 sourcing drops is allowed", () => {
   const mid = [];
   for (let i = 0; i < 2; i++) mid.push(statCard({ source: "analysts", value: 70 }));
   for (let i = 0; i < 16; i++) mid.push(fillerCard(i));
-  const s = { slides: [titleCard(), ...mid, kickerCard()] };
+  const s = withBeats([titleCard(), ...mid, kickerCard()]);
   const v = validateSpec(s, opts);
   assert.equal(v.ok, true, v.errors.join("; "));
   assert.equal(v.stats.sourcingDrops, 2);
+});
+
+// ─── Beats enumeration — the plan is part of the contract ───────────────────
+
+test("a spec without beats is rejected spec-level — retryable, never a drop", () => {
+  const s = spec([statCard()]);
+  delete s.beats;
+  const v = validateSpec(s, opts);
+  assert.equal(v.ok, false);
+  assert.match(v.errors.join(" "), /missing beats enumeration/);
+});
+
+test("one card per beat: a mismatch is a spec-level error carrying the model's own numbers", () => {
+  const s = spec([statCard()]);
+  s.beats = s.beats.slice(0, s.beats.length - 2); // enumerated fewer than it emitted
+  const v = validateSpec(s, opts);
+  assert.equal(v.ok, false);
+  assert.match(v.errors.join(" "), /enumerated 3 beats but emitted 5 content cards/);
+});
+
+test("a beat with an unknown kind, or missing evidence, rejects the spec", () => {
+  const a = spec([statCard()]);
+  a.beats[0].kind = "revelation";
+  assert.match(validateSpec(a, opts).errors.join(" "), /kind must be one of figure\|mechanism\|turn\|consequence/);
+  const b = spec([statCard()]);
+  delete b.beats[1].evidence;
+  assert.match(validateSpec(b, opts).errors.join(" "), /"evidence" must quote the source words/);
+});
+
+test("the injected sources card never counts against one-card-per-beat", () => {
+  // Section 6 injects the sources card AFTER generation; revalidation with the
+  // injected card and the model's original beats must still balance.
+  const s = spec([statCard()]);
+  s.slides.splice(s.slides.length - 1, 0, { t: "sources", items: [["Reuters", 4], ["BBC News", 2]], caption: "Two outlets covered this story." });
+  const v = validateSpec(s, { ...opts, allowSourcesCard: true });
+  assert.equal(v.ok, true, v.errors.join("; "));
+});
+
+test("beat stats are reported — count and kind tally", () => {
+  const v = validateSpec(spec([statCard()]), opts);
+  assert.equal(v.stats.beats, 5);
+  const total = Object.values(v.stats.beatKinds).reduce((a, b) => a + b, 0);
+  assert.equal(total, 5);
 });
 
 // ─── Card-type mix ──────────────────────────────────────────────────────────
 
 test("the Hindu case: 26 slides / 21 stat is dropped down and then rejected", () => {
   // Every card individually valid; the spec is still a spreadsheet read aloud.
-  const s = { slides: [titleCard()] };
+  const s = withBeats([titleCard()]);
   for (let i = 0; i < 21; i++) s.slides.push(statCard({ caption: `Seventy percent, point ${i}.` }));
   for (let i = 0; i < 3; i++)  s.slides.push(plainFiller(i));
   s.slides.push(kickerCard());
+  s.beats = beatsFor(s.slides);
   assert.equal(s.slides.length, 26);
 
   const v = validateSpec(s, opts);
@@ -213,10 +272,11 @@ test("the Hindu case: 26 slides / 21 stat is dropped down and then rejected", ()
 });
 
 test("no more than 2 of the same type consecutively", () => {
-  const s = { slides: [titleCard()] };
+  const s = withBeats([titleCard()]);
   for (let i = 0; i < 4; i++) s.slides.push(statCard({ caption: `Run card ${i}.` }));
   for (let i = 0; i < 8; i++) s.slides.push(plainFiller(i));
   s.slides.push(kickerCard());
+  s.beats = beatsFor(s.slides);
   const v = validateSpec(s, opts);
   const runDrops = v.dropped.filter(d => /consecutive/.test(d.reason));
   assert.equal(runDrops.length, 2, JSON.stringify(v.dropped));
@@ -225,9 +285,10 @@ test("no more than 2 of the same type consecutively", () => {
 });
 
 test("a well-mixed spec is untouched by the mix gate", () => {
-  const s = { slides: [titleCard()] };
+  const s = withBeats([titleCard()]);
   for (let i = 0; i < 20; i++) s.slides.push(fillerCard(i));
   s.slides.push(kickerCard());
+  s.beats = beatsFor(s.slides);
   const v = validateSpec(s, opts);
   assert.equal(v.ok, true, v.errors.join("; "));
   assert.equal(v.stats.mixDrops, 0, JSON.stringify(v.dropped));
@@ -237,7 +298,7 @@ test("the mix gate runs at EVERY size — no suspension threshold", () => {
   // 8 cards with 3 stat in a row. The old MIX_MIN_CARDS=9 suspension meant the
   // gate never executed on a spec this size — and every live spec on
   // 2026-08-02 came back at 6 cards, so it never executed at all.
-  const s = { slides: [titleCard(), statCard(), statCard(), statCard(), plainFiller(0), plainFiller(1), plainFiller(2), kickerCard()] };
+  const s = withBeats([titleCard(), statCard(), statCard(), statCard(), plainFiller(0), plainFiller(1), plainFiller(2), kickerCard()]);
   const v = validateSpec(s, opts);
   assert.equal(v.stats.mixDrops, 1, JSON.stringify(v.dropped));
   assert.match(v.dropped[0].reason, /consecutive "stat" cards/);
@@ -247,7 +308,7 @@ test("MIN_CARDS_PER_TYPE keeps the share cap safe on small specs", () => {
   // 7 cards, 2 of a type: the exact 1/3 solution would allow only 1 here
   // (floor(5/2) = 2 — but on a 6-card spec it drops to 1). The floor of 2 is
   // what makes the gate safe at every size without a threshold.
-  const s = { slides: [titleCard(), statCard(), statCard(), plainFiller(0), plainFiller(1), kickerCard()] };
+  const s = withBeats([titleCard(), statCard(), statCard(), plainFiller(0), plainFiller(1), kickerCard()]);
   const v = validateSpec(s, opts);
   assert.equal(v.ok, true, v.errors.join("; "));
   assert.equal(v.stats.mixDrops, 0, JSON.stringify(v.dropped));
@@ -257,14 +318,14 @@ test("MIN_CARDS_PER_TYPE keeps the share cap safe on small specs", () => {
 // ─── Length floor (duration is a ceiling, not a target) ─────────────────────
 
 test("a spec below the 6-card floor is skipped as too thin, never padded", () => {
-  const s = { slides: [titleCard(), plainFiller(0), plainFiller(1), kickerCard()] };
+  const s = withBeats([titleCard(), plainFiller(0), plainFiller(1), kickerCard()]);
   const v = validateSpec(s, opts);
   assert.equal(v.ok, false);
   assert.match(v.errors.join(" "), /only 4 slides remain.*< 6.*too thin for a video/);
 });
 
 test("exactly 6 surviving cards is enough", () => {
-  const s = { slides: [titleCard(), plainFiller(0), plainFiller(1), plainFiller(2), plainFiller(3), kickerCard()] };
+  const s = withBeats([titleCard(), plainFiller(0), plainFiller(1), plainFiller(2), plainFiller(3), kickerCard()]);
   const v = validateSpec(s, opts);
   assert.equal(v.ok, true, v.errors.join("; "));
   assert.equal(v.stats.slides, 6);

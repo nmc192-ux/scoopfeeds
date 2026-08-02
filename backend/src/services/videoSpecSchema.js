@@ -100,6 +100,16 @@ export const MAX_SLIDES = 34;
 export const MAX_DROP_RATIO = 0.40;
 export const MAX_SOURCING_DROPS = 2;
 
+// Beat kinds — the enumeration vocabulary of prompt rule 7. The model emits a
+// `beats` array BEFORE `slides`; each beat is one concrete thing the source
+// establishes, grounded by a verbatim phrase. Added 2026-08-02 after the
+// prose version of the rubric produced 5 cards from every article: the model
+// treated four beat KINDS as a four-item checklist — one card per kind — not
+// as categories of instances. Making enumeration an output field forces the
+// instances to exist as data, makes "one card per beat" checkable, and lets
+// the logs show whether the model found 5 beats or 15.
+export const BEAT_KINDS = Object.freeze(["figure", "mechanism", "turn", "consequence"]);
+
 // Card-type mix. See the mix pass in validateSpec for the derivation.
 export const MAX_TYPE_SHARE = 1 / 3;
 export const MAX_CONSECUTIVE_SAME_TYPE = 2;
@@ -307,7 +317,7 @@ function pruneCard(card) {
 /**
  * Validate a model-emitted slide spec.
  *
- * @param {object} spec                 — { slides: [...] }
+ * @param {object} spec                 — { beats: [...], slides: [...] }
  * @param {object} opts
  * @param {string[]} opts.allowedSources — outlet names that actually covered
  *        this story (article.source_name plus siblings via event_articles).
@@ -350,6 +360,31 @@ export function validateSpec(spec, {
   // different video than the model described, silently.
   if (spec.slides.length > maxSlides) {
     return { ok: false, spec: null, errors: [`too many slides: ${spec.slides.length} > ${maxSlides}`], dropped, stats: null };
+  }
+
+  // ── Beats enumeration — the plan is part of the contract ───────────────
+  // Spec-level (retryable), never a drop: a spec without its enumeration, or
+  // whose cards don't correspond to it, wasn't produced by the process the
+  // prompt mandates, and no amount of card-level salvage fixes that. The
+  // count check runs on EMITTED cards, before drops — drops are this
+  // validator's own doing and must not create a mismatch. `sources` cards are
+  // excluded so the Section 6 code-injected card never breaks the equality.
+  const beats = spec.beats;
+  if (!isArr(beats) || beats.length === 0) {
+    errors.push(`missing beats enumeration — emit the "beats" array before "slides", one entry per beat found in the source`);
+  } else {
+    beats.forEach((b, i) => {
+      if (!b || typeof b !== "object") { errors.push(`beats[${i}]: not an object`); return; }
+      if (!BEAT_KINDS.includes(b.kind)) errors.push(`beats[${i}]: kind must be one of ${BEAT_KINDS.join("|")}`);
+      if (!isStr(b.beat))               errors.push(`beats[${i}]: "beat" must be a non-empty sentence`);
+      if (!isStr(b.evidence))           errors.push(`beats[${i}]: "evidence" must quote the source words that ground it`);
+    });
+    const contentCards = spec.slides.filter(c =>
+      c && typeof c === "object" && c.t !== "title" && c.t !== "kicker" && c.t !== "sources"
+    ).length;
+    if (contentCards !== beats.length) {
+      errors.push(`one card per beat: enumerated ${beats.length} beats but emitted ${contentCards} content cards`);
+    }
   }
 
   // Per-card pass. A wrong CARD — unknown type, malformed shape, model-emitted
@@ -502,6 +537,8 @@ export function validateSpec(spec, {
       dropRatio: Number(ratio.toFixed(3)),
       sourcingDrops,
       mixDrops: dropped.filter(d => d.kind === "mix").length,
+      beats: beats.length,
+      beatKinds: beats.reduce((m, b) => { m[b.kind] = (m[b.kind] || 0) + 1; return m; }, {}),
       byType,
       captionWords: kept.reduce((n, c) => n + String(c.caption).trim().split(/\s+/).length, 0),
     },

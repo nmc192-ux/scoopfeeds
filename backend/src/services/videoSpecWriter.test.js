@@ -53,15 +53,31 @@ test("per-card field constraints survive — they are not length instructions", 
   assert.match(p, /AT MOST ONE line may have the colour "lime"/);
 });
 
-test("the prompt teaches the beat rubric instead", () => {
+test("the prompt demands beats AS OUTPUT, before the slides", () => {
   const p = promptFor();
-  assert.match(p, /LENGTH IS DECIDED BY SUBSTANCE/);
-  assert.match(p, /enumerate the story's distinct BEATS/);
-  for (const kind of ["FIGURE", "MECHANISM", "TURN", "CONSEQUENCE"]) {
-    assert.match(p, new RegExp(`\\b${kind}\\b`));
+  assert.match(p, /ENUMERATE THE BEATS — AS OUTPUT, BEFORE THE SLIDES/);
+  for (const kind of ["figure", "mechanism", "turn", "consequence"]) {
+    assert.match(p, new RegExp(`"${kind}"`));
   }
-  assert.match(p, /one card per beat/i);
-  assert.match(p, /never something you decide up front/i);
+  assert.match(p, /KINDS, not a checklist/);
+  assert.match(p, /ONE CARD PER BEAT/i);
+  assert.match(p, /a discovery you make, never a decision/);
+  // The return shape names beats before slides.
+  const shape = p.slice(p.lastIndexOf("Return ONLY a JSON object"));
+  assert.ok(shape.indexOf('"beats"') !== -1 && shape.indexOf('"beats"') < shape.indexOf('"slides"'),
+    "return shape must show beats before slides");
+});
+
+test("the worked example enumerates 12+ beats and is fenced off from grounding", () => {
+  const p = promptFor();
+  const example = p.slice(p.indexOf("WORKED EXAMPLE"));
+  assert.ok(example.length > 100, "worked example must be present");
+  const beatEntries = (example.match(/"kind":\s*"/g) || []).length;
+  assert.ok(beatEntries >= 12, `worked example must show 12+ beats, found ${beatEntries}`);
+  assert.match(example, /Twelve beats, because that source established twelve distinct things/);
+  assert.match(example, /A thinner source might establish four/);
+  assert.match(p, /ILLUSTRATIVE ONLY/);
+  assert.match(p, /never reuse its facts, figures, or wording/);
 });
 
 test("the retry correction note strips slide counts before the model sees it", () => {

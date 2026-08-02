@@ -355,18 +355,32 @@ HARD RULES — violating any of these makes the output unusable:
 
 6. ACCENT. Within any single card, AT MOST ONE line may have the colour "lime". Every other line is "white". This is a brand invariant, not a preference.
 
-7. LENGTH IS DECIDED BY SUBSTANCE. Work the story before you write it.
+7. ENUMERATE THE BEATS — AS OUTPUT, BEFORE THE SLIDES. Your JSON starts with a "beats" array. A beat is ONE CONCRETE INSTANCE of something the source establishes, never a category:
+     - "figure"      — one specific number you can attribute to one of the outlets listed above and find in the source material
+     - "mechanism"   — one specific explanation of how something works or came about
+     - "turn"        — one point where the obvious reading of the story gives way to a truer one
+     - "consequence" — one specific thing that follows, as the source states it
+   Each beat is an object: { "kind": "...", "beat": "one sentence stating it", "evidence": "the short verbatim phrase from the source material that grounds it" }.
+   These are KINDS, not a checklist. A rich story may have six figures and three consequences; list every instance separately. Two sentences restating the same fact are ONE beat. A quote that adds no new fact is not a beat.
 
-   FIRST, enumerate the story's distinct BEATS from the source material. A beat is one thing the source actually establishes:
-     - a FIGURE you can attribute to one of the outlets listed above and also find in the source material
-     - a MECHANISM — how something works, or how it came about
-     - a TURN — a point where the obvious reading of the story gives way to a truer one
-     - a CONSEQUENCE — what follows, as the source states it
-   Two sentences restating the same fact are ONE beat, not two. A quote that adds no new fact is not a beat.
+   THEN emit exactly ONE CARD PER BEAT, choosing the card type that fits, wrapped by the opening "title" card and the closing "kicker" card. No card without a beat; no beat without a card. Do not merge beats to be brief, and do not split or invent beats to be long — how many beats the source holds is a discovery you make, never a decision.
 
-   THEN emit one card per beat, choosing the card type that fits that beat, wrapped by the opening "title" card and the closing "kicker" card.
-
-   Do not merge beats to make the video tighter. Do not restate, split, or invent a beat to make it longer. A story that establishes little yields a short spec, and that is the correct result; a story that establishes a great deal yields a long one. The length of your output is a consequence of how much the source establishes, and it is never something you decide up front.
+   WORKED EXAMPLE of enumeration — a rich single-source story about subsea internet cables. This example is ILLUSTRATIVE ONLY: never reuse its facts, figures, or wording.
+   "beats": [
+     { "kind": "figure",      "beat": "Nearly all intercontinental data travels by subsea cable.",        "evidence": "99 percent of intercontinental traffic" },
+     { "kind": "figure",      "beat": "The whole network is roughly five hundred active cables.",         "evidence": "roughly 500 active cables" },
+     { "kind": "mechanism",   "beat": "Data crosses oceans through fibre bundles laid on the seabed.",    "evidence": "fibre bundles laid directly on the seabed" },
+     { "kind": "figure",      "beat": "Anchors and fishing gear cause most recorded faults.",             "evidence": "70 percent of recorded faults" },
+     { "kind": "mechanism",   "beat": "Dragged anchors sever cables in shallow approaches to shore.",     "evidence": "anchors dragged near landing stations" },
+     { "kind": "figure",      "beat": "The network suffers about two hundred faults a year.",             "evidence": "about 200 faults a year" },
+     { "kind": "consequence", "beat": "Countries served by a single cable can lose connectivity at once.","evidence": "one cable serves the entire country" },
+     { "kind": "turn",        "beat": "The real threat is mundane accidents, not sabotage.",              "evidence": "most damage is accidental" },
+     { "kind": "mechanism",   "beat": "Repairs need specialist ships that grapple the cable up.",         "evidence": "grappled the cable to the surface" },
+     { "kind": "figure",      "beat": "A mid-ocean repair takes about a month.",                          "evidence": "30 days on average" },
+     { "kind": "figure",      "beat": "The global repair fleet is about sixty ships, and it is ageing.",  "evidence": "about 60 cable ships" },
+     { "kind": "consequence", "beat": "Operators are rerouting traffic and burying new cable deeper.",    "evidence": "buried deeper in trenches" }
+   ]
+   Twelve beats, because that source established twelve distinct things — so that spec carries twelve content cards plus its "title" and "kicker". A thinner source might establish four; then you list four and emit four. The enumeration decides.
 
 8. STRUCTURE AND MIX. The FIRST card must be "title" and the LAST card must be "kicker". In between, VARY THE CARD TYPES:
    - No card type may take more than about a third of the cards. A wall of number cards is a spreadsheet read aloud, not a video.
@@ -376,9 +390,12 @@ HARD RULES — violating any of these makes the output unusable:
 
 9. TONE. Neutral wire-service register. No editorialising, no outrage, no rhetorical questions, no "you won't believe". Interest comes from a specific fact being genuinely interesting, never from sensational phrasing. Preserve the source's hedging: if it says "reportedly" or "officials say", keep that attribution.
 
-Return ONLY a JSON object, no markdown fence, with exactly this shape:
+Return ONLY a JSON object, no markdown fence, with exactly this shape — "beats" first, then "slides":
 
-{ "slides": [ ...cards... ] }`;
+{
+  "beats":  [ { "kind": "figure", "beat": "...", "evidence": "..." }, ... ],
+  "slides": [ ...cards... ]
+}`;
 }
 
 // ─── Prompt 2 — packaging ───────────────────────────────────────────────────
@@ -560,6 +577,17 @@ export async function writeVideoSpec(article, {
 
     const { usage, finishReason } = result;
     const cost = spentUsd;
+
+    // The enumeration IS the diagnosis. This line is what distinguishes "the
+    // model found five beats" (an input or rubric problem) from "it found
+    // fifteen and only emitted five cards" (a compliance problem the count
+    // check now rejects) — without it, all we ever see is the slide count.
+    const beats = v.spec.beats || [];
+    logger.info(
+      (`🎬 videoSpec [${article.id}] beats=${beats.length} ${JSON.stringify(v.stats.beatKinds)} — ` +
+       beats.map(b => `${b.kind}: ${String(b.beat).slice(0, 48)}`).join(" | ")).slice(0, 1200)
+    );
+
     if (v.dropped.length) {
       // Not a failure here (§3 drops the card); Section 6's gate reads this.
       logger.warn(
@@ -575,6 +603,8 @@ export async function writeVideoSpec(article, {
         targetSeconds,
         slides: v.stats.slides,
         emitted: v.stats.emitted,
+        beats: v.stats.beats,
+        beatKinds: v.stats.beatKinds,
         dropRatio: v.stats.dropRatio,
         sourcingDrops: v.stats.sourcingDrops,
         mixDrops: v.stats.mixDrops,
