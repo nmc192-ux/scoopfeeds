@@ -635,7 +635,10 @@ Re-read the CARD GRAMMAR above and match the field shapes exactly. Emit the FULL
  * the articles discarded before it. `{ ok, spec, costUsd, reason, attempts }`
  * makes the loop able to say "this video cost $X across 4 attempts".
  *
- * Never throws.
+ * Never throws, and NEVER RETURNS null — every exit is `{ ok, spec, costUsd,
+ * reason, attempts }`. The caller reads `.costUsd` before it reads `.ok`, so a
+ * single null exit is a TypeError that aborts the entire cycle rather than
+ * skipping one article. A source-walking test pins this.
  *
  * @param {object} article
  * @param {object} opts
@@ -726,7 +729,19 @@ export async function writeVideoSpec(article, {
           len: JSON.stringify(result.parsed).length,
           finishReason: result.finishReason, usage: result.usage,
         });
-        return null;
+        // A RESULT OBJECT, never null. This line returned bare null through
+        // d7e2c6e — the one path left on the old contract — and the caller
+        // reads `r.costUsd` unconditionally, so the first thin article threw
+        // TypeError out of the whole cycle instead of being skipped. Every
+        // later candidate was then never attempted.
+        //
+        // It also spent: one model call landed above and `spentUsd` already
+        // carries it. Returning null discarded that, which is the exact thing
+        // the result contract was introduced to stop.
+        return reject(
+          `too thin — ${v.errors.filter(isThinnessError).join(" | ")}`,
+          spentUsd, attempts,
+        );
       }
 
       if (attempts === 1) {

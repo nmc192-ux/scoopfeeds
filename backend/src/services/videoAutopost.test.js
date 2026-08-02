@@ -253,3 +253,129 @@ test("the dedupe survives its article being pruned", () => {
   assert.equal(row.youtube_id, "ytPrune");
   assert.equal(row.title, "Kept headline", "denormalised so the cooldowns still work");
 });
+
+// ─── The cycle, end to end ──────────────────────────────────────────────────
+//
+// THE COVERAGE GAP THAT COST A PROD RUN. Everything above tests the loop's
+// PARTS — gates, cooldowns, the stale-pending rule — and nothing drove
+// runVideoRenderCycle itself. So when writeVideoSpec's too-thin path returned
+// bare null while the caller read `r.costUsd` unconditionally, the first thin
+// article threw out of the whole cycle and the remaining candidates were never
+// attempted. The verification harness had this via --fail-first; the loop did
+// not. These tests are that coverage, moved into the suite where it runs.
+//
+// Only the collaborators are injected (spec, packaging, render, upload, config
+// probes). The gates, the rate limits and the database are REAL — a test that
+// stubbed those would pass while the thing it claims to cover was broken.
+
+const { runVideoRenderCycle } = await import("./videoAutopost.js");
+
+const OK_SPEC = { slides: [{ t: "title" }], meta: { finishReason: "STOP", costUsd: 0.0003 } };
+
+function cycleEnv() {
+  process.env.VIDEO_AUTOPOST_ENABLED = "1";
+  process.env.VIDEO_MAX_PER_DAY = "10";
+  process.env.VIDEO_MIN_INTERVAL_MS = "1";   // not 0 — 0 is falsy and falls back
+  db.exec("DELETE FROM video_posts");
+  db.exec("DELETE FROM articles");
+}
+
+/** Every collaborator stubbed to succeed; individual tests override one. */
+const baseDeps = () => ({
+  isVideoSpecEnabled: () => true,
+  isVoiceConfigured: () => true,
+  isYouTubeConfigured: () => true,
+  writeVideoSpec: async () => ({ ok: true, spec: OK_SPEC, costUsd: 0.0003, reason: null, attempts: 1 }),
+  produceVideo: async () => ({ path: path.join(TMP, "v.mp4"), slides: [] }),
+  writePackaging: async () => ({ titles: ["Packaged title"], description_hook: "", tags: [] }),
+  uploadToYouTube: async () => ({ videoId: "yt-e2e" }),
+});
+
+test("a REJECTED first candidate does not abort the cycle — the second still publishes", async () => {
+  cycleEnv();
+  const thin = seedArticle({ source: "Reuters", cred: 9 });
+  const good = seedArticle({ source: "AP", cred: 8 });   // cred DESC orders selection
+
+  const res = await runVideoRenderCycle({
+    dryRun: true,
+    deps: {
+      ...baseDeps(),
+      writeVideoSpec: async (article) => article.id === thin
+        ? { ok: false, spec: null, costUsd: 0.00012, reason: "too thin — only 4 slides remain (< 6)", attempts: 1 }
+        : { ok: true, spec: OK_SPEC, costUsd: 0.00031, reason: null, attempts: 1 },
+    },
+  });
+
+  assert.equal(res.error, undefined, `cycle threw: ${res.error}`);
+  assert.equal(res.tried, 2, "both candidates must be attempted");
+  assert.equal(res.produced?.articleId, good, "the second candidate must produce the video");
+  assert.equal(res.attempts[0].id, thin);
+  assert.equal(res.attempts[0].stage, "spec");
+  assert.match(res.attempts[0].reason, /too thin/);
+  assert.equal(res.attempts[1].stage, "ok-dry");
+  // The rejected article SPENT. Discarding that spend is what the result
+  // contract was introduced to stop, so the cycle total must include it.
+  assert.ok(Math.abs(res.spendUsd - 0.00043) < 1e-9,
+    `spend must include the rejected attempt, got ${res.spendUsd}`);
+});
+
+test("a collaborator that breaks the contract and returns null skips ONE article, not the run", async () => {
+  // The exact 2026-08-03 prod shape, driven from the caller's side. Even with
+  // the callee fixed, the loop must not be one stale return away from dying.
+  cycleEnv();
+  const bad = seedArticle({ source: "Reuters", cred: 9 });
+  const good = seedArticle({ source: "AP", cred: 8 });
+
+  const res = await runVideoRenderCycle({
+    dryRun: true,
+    deps: {
+      ...baseDeps(),
+      writeVideoSpec: async (article) => article.id === bad ? null : ({ ok: true, spec: OK_SPEC, costUsd: 0.0002, reason: null, attempts: 1 }),
+    },
+  });
+
+  assert.equal(res.error, undefined, `a null return must not abort the cycle (got: ${res.error})`);
+  assert.equal(res.tried, 2);
+  assert.equal(res.produced?.articleId, good);
+  assert.match(res.attempts[0].reason, /broke its contract/);
+});
+
+test("an attempt that THROWS is still counted and names the stage it died in", async () => {
+  // "tried 0" while one article had been attempted is what made the prod log
+  // useless. The record is written at attempt time, so a throw cannot erase it.
+  cycleEnv();
+  const boom = seedArticle({ source: "Reuters", cred: 9 });
+
+  const res = await runVideoRenderCycle({
+    dryRun: true,
+    deps: { ...baseDeps(), writeVideoSpec: async () => { throw new Error("kaboom"); } },
+  });
+
+  assert.equal(res.error, "kaboom");
+  assert.equal(res.tried, 1, "an attempt that threw must still be counted");
+  assert.equal(res.attempts[0].id, boom);
+  assert.equal(res.attempts[0].stage, "spec", "the record must name the stage it died in");
+  assert.equal(res.attempts[0].error, "kaboom");
+});
+
+test("an unset VIDEO_SPEC_ENABLED aborts ONCE — it does not skip eight candidates", async () => {
+  // The earlier dry run reported eight ordinary-looking spec skips for a reason
+  // no article could ever satisfy. A misconfiguration must not read as a yield
+  // problem, and must not cost eight candidates their one shot in the window.
+  cycleEnv();
+  for (let i = 0; i < 8; i++) seedArticle({ source: `Src${i}`, cred: 9 });
+
+  let specCalls = 0;
+  const res = await runVideoRenderCycle({
+    dryRun: true,
+    deps: {
+      ...baseDeps(),
+      isVideoSpecEnabled: () => false,
+      writeVideoSpec: async () => { specCalls++; return { ok: false, spec: null, costUsd: 0, reason: "x", attempts: 0 }; },
+    },
+  });
+
+  assert.equal(res.skipped, "no-spec");
+  assert.equal(res.tried, 0, "no article should be attempted at all");
+  assert.equal(specCalls, 0, "the spec writer must never be called in this configuration");
+});
