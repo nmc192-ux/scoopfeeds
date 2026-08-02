@@ -7,6 +7,7 @@ import { BULLMQ_PREFIX, defaultJobOptions, JOB_IDS, JOB_NAMES, QUEUE_NAMES } fro
 const queueDefinitions = {
   ingestionQueue: QUEUE_NAMES.ingestion,
   videoQueue: QUEUE_NAMES.video,
+  videoRenderQueue: QUEUE_NAMES.videoRender,
   enrichmentQueue: QUEUE_NAMES.enrichment,
   analysisQueue: QUEUE_NAMES.analysis,
   realityIndexQueue: QUEUE_NAMES.realityIndex,

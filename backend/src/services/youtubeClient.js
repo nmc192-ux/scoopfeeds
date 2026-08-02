@@ -234,3 +234,44 @@ export async function getChannelInfo() {
     viewCount:    ch.statistics?.viewCount,
   };
 }
+
+/**
+ * Flip an uploaded video's privacy. Backs §6.3's unlist-recent recovery call.
+ *
+ * videos.update REPLACES the whole `status` part rather than patching it, so
+ * the current status is read first and merged — sending privacyStatus alone
+ * would silently clear madeForKids and the embeddable/licence fields, which
+ * is a worse outcome than the incident being recovered from.
+ *
+ * Costs 50 quota units per call (read 1 + update 50) against the same
+ * 10,000/day budget uploads and ingestion share — unlisting 5 is ~255 units,
+ * which is affordable even late in a quota-exhausted day.
+ */
+export async function setYouTubePrivacy(videoId, privacyStatus = "private") {
+  if (!isYouTubeConfigured()) throw new Error("YouTube not configured");
+  if (!videoId) throw new Error("setYouTubePrivacy: videoId required");
+  if (!["private", "unlisted", "public"].includes(privacyStatus)) {
+    throw new Error(`setYouTubePrivacy: invalid privacyStatus ${privacyStatus}`);
+  }
+  const accessToken = await _getAccessToken();
+
+  const getRes = await fetch(
+    `https://www.googleapis.com/youtube/v3/videos?part=status&id=${encodeURIComponent(videoId)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!getRes.ok) {
+    throw new Error(`YouTube status read ${getRes.status}: ${(await getRes.text().catch(() => "")).slice(0, 300)}`);
+  }
+  const cur = (await getRes.json())?.items?.[0]?.status;
+  if (!cur) throw new Error(`YouTube: no such video ${videoId}`);
+
+  const res = await fetch("https://www.googleapis.com/youtube/v3/videos?part=status", {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ id: videoId, status: { ...cur, privacyStatus } }),
+  });
+  if (!res.ok) {
+    throw new Error(`YouTube privacy update ${res.status}: ${(await res.text().catch(() => "")).slice(0, 300)}`);
+  }
+  return { videoId, privacyStatus };
+}

@@ -30,6 +30,7 @@ import pushRouter        from "./src/routes/push.js";
 import authRouter        from "./src/routes/auth.js";
 import tipsRouter        from "./src/routes/tips.js";
 import videoGenRouter    from "./src/routes/videos-gen.js";
+import videoOpsRouter    from "./src/routes/video-ops.js";
 import newsletterOpsRouter from "./src/routes/newsletter-ops.js";
 import xDigestOpsRouter   from "./src/routes/x-digest-ops.js";
 import queueOpsRouter    from "./src/routes/queue-ops.js";
@@ -288,6 +289,7 @@ app.use("/api/", apiGlobalLimiter);
 app.use("/scoop-ops",      adminRouteLimiter, adminAuth, adminAuditLogger);
 app.use("/scoop-ops",       socialRouter);     // /scoop-ops/social-queue — preview auto-generated social captions (renamed from /admin to bypass host WAF)
 app.use("/scoop-ops/videos-gen", videoGenRouter); // video generation queue: /queue, /run, /approve/:id, /reject/:id
+app.use("/scoop-ops/video", videoOpsRouter);      // autopost recovery (§6.3): /unlist-recent, /status — inherits adminAuth above
 app.use("/scoop-ops/newsletter", newsletterOpsRouter); // newsletter ops: /status, /welcome/run, /welcome/test
 app.use("/scoop-ops/x-digest",   xDigestOpsRouter);    // X-posting queue digest ops (Sprint 2.x.2): /status, /preview, /send-now
 app.use("/scoop-ops/queues", queueOpsRouter); // BullMQ / Redis queue diagnostics
