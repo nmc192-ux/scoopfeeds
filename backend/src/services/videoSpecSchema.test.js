@@ -44,7 +44,7 @@ const fillerCard = (n) => FILLER_CYCLE[n % FILLER_CYCLE.length](n);
 const plainFiller = (n) => FILLER_CYCLE[n % 2](n);
 
 /** Minimum viable valid spec: title + fillers + kicker. */
-function spec(cards = [], { pad = 5, filler = plainFiller } = {}) {
+function spec(cards = [], { pad = 4, filler = plainFiller } = {}) {
   const mid = [];
   for (let i = 0; i < pad; i++) mid.push(filler(i));
   return { slides: [titleCard(), ...cards, ...mid, kickerCard()] };
@@ -58,7 +58,7 @@ test("valid spec passes and reports stats", () => {
   const v = validateSpec(spec([statCard()]), opts);
   assert.equal(v.ok, true, v.errors.join("; "));
   assert.equal(v.dropped.length, 0);
-  assert.equal(v.stats.slides, 8);
+  assert.equal(v.stats.slides, 7);
   assert.equal(v.stats.byType.stat, 1);
 });
 
@@ -233,13 +233,25 @@ test("a well-mixed spec is untouched by the mix gate", () => {
   assert.equal(v.stats.mixDrops, 0, JSON.stringify(v.dropped));
 });
 
-test("the mix gate is suspended below MIX_MIN_CARDS — small specs are not shredded", () => {
-  // 8 cards, 3 stat in a row: under the threshold the run limit does not apply.
+test("the mix gate runs at EVERY size — no suspension threshold", () => {
+  // 8 cards with 3 stat in a row. The old MIX_MIN_CARDS=9 suspension meant the
+  // gate never executed on a spec this size — and every live spec on
+  // 2026-08-02 came back at 6 cards, so it never executed at all.
   const s = { slides: [titleCard(), statCard(), statCard(), statCard(), plainFiller(0), plainFiller(1), plainFiller(2), kickerCard()] };
-  assert.ok(s.slides.length < 9);
+  const v = validateSpec(s, opts);
+  assert.equal(v.stats.mixDrops, 1, JSON.stringify(v.dropped));
+  assert.match(v.dropped[0].reason, /consecutive "stat" cards/);
+});
+
+test("MIN_CARDS_PER_TYPE keeps the share cap safe on small specs", () => {
+  // 7 cards, 2 of a type: the exact 1/3 solution would allow only 1 here
+  // (floor(5/2) = 2 — but on a 6-card spec it drops to 1). The floor of 2 is
+  // what makes the gate safe at every size without a threshold.
+  const s = { slides: [titleCard(), statCard(), statCard(), plainFiller(0), plainFiller(1), kickerCard()] };
   const v = validateSpec(s, opts);
   assert.equal(v.ok, true, v.errors.join("; "));
-  assert.equal(v.stats.mixDrops, 0);
+  assert.equal(v.stats.mixDrops, 0, JSON.stringify(v.dropped));
+  assert.equal(v.stats.byType.stat, 2);
 });
 
 // ─── Length floor (duration is a ceiling, not a target) ─────────────────────

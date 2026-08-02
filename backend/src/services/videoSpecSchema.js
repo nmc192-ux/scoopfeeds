@@ -103,11 +103,16 @@ export const MAX_SOURCING_DROPS = 2;
 // Card-type mix. See the mix pass in validateSpec for the derivation.
 export const MAX_TYPE_SHARE = 1 / 3;
 export const MAX_CONSECUTIVE_SAME_TYPE = 2;
-// Below this many survivors a 1/3 share cap is arithmetic rather than
-// editorial — on an 8-card spec it would cap every type at 2 or 3 and shred
-// legitimate short videos. The run limit is suspended with it, for the same
-// reason: on a tiny spec, three of a kind in a row may be all there is.
-export const MIX_MIN_CARDS = 9;
+// Any type may always keep at least this many cards. This floor is what lets
+// the gate run at EVERY size instead of being suspended below a threshold:
+// the exact 1/3 solution is aggressive at small n (on a 6-card spec it caps a
+// type at 1), and a floor of 2 pairs naturally with the run limit — two of a
+// kind is exactly what MAX_CONSECUTIVE_SAME_TYPE already permits.
+//
+// The previous MIX_MIN_CARDS=9 suspension is REMOVED. Measured 2026-08-02:
+// every live spec came back at 6 cards, so the gate never executed once — a
+// dormant gate is indistinguishable from no gate.
+export const MIN_CARDS_PER_TYPE = 2;
 // Structural singletons, pinned by the first/last rules. Exempt from the
 // share cap only — they are still subject to every per-card rule.
 const SHARE_EXEMPT_TYPES = new Set(["title", "kicker"]);
@@ -404,7 +409,8 @@ export function validateSpec(spec, {
   //                 nOther of every other type satisfies k/(k+nOther) <= 1/3
   //                 precisely when k <= nOther/2, so the cap is self-consistent
   //                 after the drops rather than drifting as the denominator
-  //                 shrinks.
+  //                 shrinks. Floored at MIN_CARDS_PER_TYPE so it is safe on
+  //                 small specs and needs no size threshold.
   //
   // Earliest occurrences are kept: the model front-loads its strongest
   // material, and the alternative — scoring cards for "quality" — is a
@@ -413,14 +419,12 @@ export function validateSpec(spec, {
   // "title" and "kicker" are exempt from the share limit. They are structural
   // singletons pinned by the first/last rules, and capping them on a small
   // spec is arithmetic, not editorial.
-  const mixEligible = survivors.length >= MIX_MIN_CARDS;
-
   const afterRuns = [];
   let runType = null, runLen = 0;
   for (const entry of survivors) {
     const t = entry.card.t;
     if (t === runType) runLen++; else { runType = t; runLen = 1; }
-    if (mixEligible && runLen > MAX_CONSECUTIVE_SAME_TYPE) {
+    if (runLen > MAX_CONSECUTIVE_SAME_TYPE) {
       dropped.push({
         index: entry.index, t, kind: "mix",
         reason: `${runLen} consecutive "${t}" cards (max ${MAX_CONSECUTIVE_SAME_TYPE} in a row)`,
@@ -438,8 +442,8 @@ export function validateSpec(spec, {
   const taken = {};
   for (const e of afterRuns) {
     const t = e.card.t;
-    if (mixEligible && !SHARE_EXEMPT_TYPES.has(t)) {
-      const allowed = Math.floor((afterRuns.length - counts[t]) / 2);
+    if (!SHARE_EXEMPT_TYPES.has(t)) {
+      const allowed = Math.max(MIN_CARDS_PER_TYPE, Math.floor((afterRuns.length - counts[t]) / 2));
       taken[t] = (taken[t] || 0) + 1;
       if (taken[t] > allowed) {
         dropped.push({

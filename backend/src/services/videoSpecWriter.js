@@ -297,13 +297,26 @@ const CARD_GRAMMAR = `
 "kicker"  — the closer. { "t":"kicker", "top":"...", "bottom":"...", "sub":"...", "caption":"..." }
 `.trim();
 
-export function buildSpecPrompt({ article, targetSeconds = 180, slideCeiling, allowedSources = [] }) {
-  const ceiling = slideCeiling || Math.max(MIN_SLIDES + 2, Math.min(MAX_SLIDES, Math.round(targetSeconds / 7)));
-  // Caption budget is expressed per card and independent of the count, because
-  // the count is no longer fixed — deriving words-per-caption from a target
-  // slide number is what turned the ceiling into a quota.
-  const captionWords = Math.max(10, Math.round((targetSeconds / 60) * WPM / ceiling));
-
+/**
+ * THE PROMPT CONTAINS NO SLIDE COUNT. Not a target, not a ceiling, not a floor.
+ *
+ * Measured 2026-08-02, second live run: told to emit "AT LEAST 6 and AT MOST
+ * N", all three articles returned EXACTLY 6 — the floor — with an identical
+ * card mix each time, including a Trump/Iran story carrying 30 allowed
+ * sources. The model does not weigh a stated range; it anchors on whichever
+ * number is nearest and stops there. The first run anchored on the ceiling and
+ * padded to it; the second anchored on the floor and starved to it. Both
+ * failures have one cause — a number in the prompt.
+ *
+ * MIN_SLIDES and MAX_SLIDES survive as VALIDATION GATES ONLY, and the model
+ * never learns they exist: the floor silently discards a spec too thin to
+ * carry a video, the ceiling catches a runaway. Length is an OUTCOME of the
+ * beat rubric in rule 7, never an instruction.
+ *
+ * Do not reintroduce a count here — not "aim for", not "roughly", not a
+ * duration the model can divide into slides. That is the whole finding.
+ */
+export function buildSpecPrompt({ article, allowedSources = [] }) {
   const sourceText = [
     `HEADLINE: ${article.title || ""}`,
     article.description ? `SUMMARY: ${article.description}` : "",
@@ -336,19 +349,30 @@ HARD RULES — violating any of these makes the output unusable:
 
 3. NO "sources" CARD. You must never emit a card with "t":"sources". That card is built from the database, not written. If you emit one, the spec is rejected.
 
-4. CAPTION IS THE NARRATION. Every card MUST have a "caption": the exact sentence spoken over that slide. It is both the voiceover line and the burned-in subtitle, so they can never drift apart. Write captions as plain spoken prose: no markdown, no brackets, no quotation marks, no emoji, no symbols. Write "percent" not "%", and write numbers the way a newsreader would say them. Aim for about ${captionWords} words per caption.
+4. CAPTION IS THE NARRATION. Every card MUST have a "caption": the exact sentence spoken over that slide. It is both the voiceover line and the burned-in subtitle, so they can never drift apart. Write captions as plain spoken prose: no markdown, no brackets, no quotation marks, no emoji, no symbols. Write "percent" not "%", and write numbers the way a newsreader would say them. One or two spoken sentences per caption — say the beat and stop.
 
 5. THE SLIDE TEXT IS NOT THE CAPTION. On-screen text is short and declarative — a few words, upper case where the grammar shows upper case. The caption is the sentence that explains it. They reinforce each other; they never repeat each other word for word.
 
 6. ACCENT. Within any single card, AT MOST ONE line may have the colour "lime". Every other line is "white". This is a brand invariant, not a preference.
 
-7. LENGTH IS A CEILING, NOT A TARGET. Emit AT LEAST ${MIN_SLIDES} cards and AT MOST ${ceiling}. Use the FEWEST cards the story genuinely supports: ${targetSeconds} seconds is the maximum runtime, not a quota to fill. If the source material carries eight real beats, emit eight — a short dense video beats a long one that repeats itself, and padding forces you to manufacture content you cannot source. If the story cannot support ${MIN_SLIDES} substantial cards, emit what it supports and no more; a spec that falls short is correctly discarded.
+7. LENGTH IS DECIDED BY SUBSTANCE. Work the story before you write it.
+
+   FIRST, enumerate the story's distinct BEATS from the source material. A beat is one thing the source actually establishes:
+     - a FIGURE you can attribute to one of the outlets listed above and also find in the source material
+     - a MECHANISM — how something works, or how it came about
+     - a TURN — a point where the obvious reading of the story gives way to a truer one
+     - a CONSEQUENCE — what follows, as the source states it
+   Two sentences restating the same fact are ONE beat, not two. A quote that adds no new fact is not a beat.
+
+   THEN emit one card per beat, choosing the card type that fits that beat, wrapped by the opening "title" card and the closing "kicker" card.
+
+   Do not merge beats to make the video tighter. Do not restate, split, or invent a beat to make it longer. A story that establishes little yields a short spec, and that is the correct result; a story that establishes a great deal yields a long one. The length of your output is a consequence of how much the source establishes, and it is never something you decide up front.
 
 8. STRUCTURE AND MIX. The FIRST card must be "title" and the LAST card must be "kicker". In between, VARY THE CARD TYPES:
-   - No card type may be more than about a THIRD of your cards. Twenty "stat" cards is a spreadsheet read aloud, not a video.
-   - Never place more than TWO cards of the same type back to back.
+   - No card type may take more than about a third of the cards. A wall of number cards is a spreadsheet read aloud, not a video.
+   - Never place more than two cards of the same type back to back.
    - "turn" should appear once, near the point where the story's obvious reading gives way to its real one.
-   Cards that break these limits are discarded from the video, so a monotonous spec loses most of itself.
+   Cards that break these limits are discarded from the video, so a monotonous spec loses most of itself. If a beat could be carried by more than one card type, prefer the type you have used least.
 
 9. TONE. Neutral wire-service register. No editorialising, no outrage, no rhetorical questions, no "you won't believe". Interest comes from a specific fact being genuinely interesting, never from sensational phrasing. Preserve the source's hedging: if it says "reportedly" or "officials say", keep that attribution.
 
@@ -415,13 +439,37 @@ Return ONLY a JSON object, no markdown fence, with exactly this shape:
 }`;
 }
 
+/** A spec-level error meaning "the article was too thin", which is not retried. */
+function isThinnessError(e) {
+  return /too thin for a video/.test(e);
+}
+
+/**
+ * Strip slide counts out of anything the model will read. The retry prompt is
+ * still a prompt: a note saying "only 4 slides remain (< 6)" hands the model
+ * the exact anchor rule 7 exists to withhold, and it would pad to that number
+ * on the second attempt just as it starved to it on the first.
+ *
+ * Card-level reasons ("3 consecutive stat cards") are left intact — those are
+ * adjacency and type facts, not a length instruction.
+ */
+function stripCounts(error) {
+  return String(error)
+    .replace(/only \d+ slides remain[^—]*—?\s*/i, "")
+    .replace(/too many slides: \d+ > \d+/i, "you emitted far more cards than the source establishes — enumerate the beats again and emit one card per beat")
+    .replace(/\((\d+)\/(\d+)\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 /**
  * Corrective note appended to the retry prompt. States what failed in the
  * model's own terms — every spec-level failure is something it can act on
- * (emit the opener, stop inventing attributions, stop malforming cards).
+ * (emit the opener, stop inventing attributions, stop malforming cards) —
+ * with every slide count removed first.
  */
 function buildCorrectionNote(v) {
-  const lines = v.errors.map(e => `  - ${e}`);
+  const lines = v.errors.map(e => stripCounts(e)).filter(Boolean).map(e => `  - ${e}`);
   const byReason = {};
   for (const d of v.dropped) {
     const key = `${d.kind}: ${String(d.reason).split(";")[0]}`;
@@ -434,7 +482,7 @@ YOUR PREVIOUS ATTEMPT WAS REJECTED. Fix these and emit a complete new spec:
 ${lines.join("\n")}
 ${dropLines.length ? `\nCards discarded from that attempt:\n${dropLines.join("\n")}` : ""}
 
-Re-read the CARD GRAMMAR above and match the field shapes exactly. Emit the FULL spec again — do not emit a patch or only the corrected cards.`;
+Re-read the CARD GRAMMAR above and match the field shapes exactly. Emit the FULL spec again — do not emit a patch or only the corrected cards. Re-enumerate the story's beats and emit one card per beat; do not aim for any particular number of cards.`;
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -446,8 +494,10 @@ Re-read the CARD GRAMMAR above and match the field shapes exactly. Emit the FULL
  * @param {object} article
  * @param {object} opts
  * @param {string[]} opts.allowedSources — outlets that covered this story
- * @param {number}  [opts.targetSeconds=180]
- * @param {number}  [opts.slideCeiling] — max cards; the model is asked for fewer
+ * @param {number}  [opts.targetSeconds=180] — recorded in meta only; the model
+ *        never sees it, because a duration is a slide count once divided.
+ * @param {number}  [opts.slideCeiling] — VALIDATION ceiling, never shown to the
+ *        model. Overrides MAX_SLIDES for the runaway check.
  */
 export async function writeVideoSpec(article, {
   allowedSources = [],
@@ -459,8 +509,12 @@ export async function writeVideoSpec(article, {
 
   const started = Date.now();
   try {
-    const basePrompt = buildSpecPrompt({ article, targetSeconds, slideCeiling, allowedSources });
     const sourceText = `${article.title || ""} ${article.description || ""} ${article.content || ""}`;
+    const basePrompt = buildSpecPrompt({ article, allowedSources });
+    const validateOpts = {
+      allowedSources, sourceText,
+      ...(slideCeiling ? { maxSlides: slideCeiling } : {}),
+    };
 
     // ONE regeneration retry on a SPEC-LEVEL rejection. A spec costs well under
     // a cent; discarding an otherwise-good story because the model forgot a
@@ -478,8 +532,18 @@ export async function writeVideoSpec(article, {
       if (!result) return null;            // transport/JSON failure already logged
       spentUsd += result.cost;
 
-      v = validateSpec(result.parsed, { allowedSources, sourceText });
+      v = validateSpec(result.parsed, validateOpts);
       if (v.ok) break;
+
+      // A spec that came back TOO THIN is not retried. The article genuinely
+      // did not carry enough beats, and the only thing a retry could teach the
+      // model is that more cards were wanted — which is the padding instinct
+      // the beat rubric exists to remove. Skip the article silently instead.
+      if (v.errors.some(isThinnessError)) {
+        logRejection("videoSpec", article.id, `too thin — ${v.errors.filter(isThinnessError).join(" | ")}`,
+          JSON.stringify(result.parsed).length, result.finishReason, result.usage);
+        return null;
+      }
 
       if (attempts === 1) {
         logger.warn(
@@ -513,6 +577,7 @@ export async function writeVideoSpec(article, {
         emitted: v.stats.emitted,
         dropRatio: v.stats.dropRatio,
         sourcingDrops: v.stats.sourcingDrops,
+        mixDrops: v.stats.mixDrops,
         byType: v.stats.byType,
         captionWords: v.stats.captionWords,
         droppedCards: v.dropped,
@@ -595,4 +660,7 @@ export async function writePackaging(spec, article) {
   }
 }
 
-export const _internals = { buildSpecPrompt, buildPackagingPrompt, CARD_GRAMMAR, extractJsonPayload };
+export const _internals = {
+  buildSpecPrompt, buildPackagingPrompt, CARD_GRAMMAR,
+  extractJsonPayload, stripCounts, isThinnessError,
+};

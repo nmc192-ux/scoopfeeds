@@ -12,7 +12,66 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { _internals } from "./videoSpecWriter.js";
 
-const { extractJsonPayload } = _internals;
+const { extractJsonPayload, buildSpecPrompt } = _internals;
+
+// ─── The prompt must contain NO slide count ─────────────────────────────────
+//
+// Measured 2026-08-02: given "AT LEAST 6 and AT MOST N", all three articles
+// returned EXACTLY 6 — the floor — with an identical card mix, including a
+// story carrying 30 allowed sources. The run before that anchored on the
+// ceiling and padded to it. The model does not weigh a stated range; it
+// anchors on the nearest number. These tests exist so a well-meaning future
+// edit cannot quietly reintroduce one.
+
+const promptFor = (over = {}) => buildSpecPrompt({
+  article: { title: "T", description: "D", content: "C", source_name: "Reuters", category: "world" },
+  allowedSources: ["Reuters", "BBC News"],
+  ...over,
+});
+
+test("the spec prompt states no slide count, in any form", () => {
+  const p = promptFor();
+  // Scoped to the VIDEO'S LENGTH. Per-card field constraints are a different
+  // thing entirely and must survive — see the bars assertion below.
+  const banned = [
+    /\bAT LEAST \d+ cards?\b/i, /\bAT MOST \d+ cards?\b/i,
+    /\bemit \d+ cards?\b/i, /\bexactly \d+ cards?\b/i,
+    /\b\d+\s*(?:to|-|–)\s*\d+\s*cards?\b/i,
+    /\baim for (?:about |roughly )?\d+\s*(?:cards?|slides?|words?)\b/i,
+    /\b\d+\s*seconds?\b/i, /\b\d+\s*slides?\b/i, /\b\d+\s*minutes?\b/i,
+    /target duration/i, /maximum runtime/i,
+  ];
+  for (const re of banned) {
+    const m = p.match(re);
+    assert.ok(!m, `prompt must not contain a length instruction matching ${re} — found ${JSON.stringify(m?.[0])}`);
+  }
+});
+
+test("per-card field constraints survive — they are not length instructions", () => {
+  const p = promptFor();
+  assert.match(p, /"bars" MUST contain AT LEAST 2 entries/);
+  assert.match(p, /AT MOST ONE line may have the colour "lime"/);
+});
+
+test("the prompt teaches the beat rubric instead", () => {
+  const p = promptFor();
+  assert.match(p, /LENGTH IS DECIDED BY SUBSTANCE/);
+  assert.match(p, /enumerate the story's distinct BEATS/);
+  for (const kind of ["FIGURE", "MECHANISM", "TURN", "CONSEQUENCE"]) {
+    assert.match(p, new RegExp(`\\b${kind}\\b`));
+  }
+  assert.match(p, /one card per beat/i);
+  assert.match(p, /never something you decide up front/i);
+});
+
+test("the retry correction note strips slide counts before the model sees it", () => {
+  const { stripCounts } = _internals;
+  assert.equal(stripCounts('only 4 slides remain after dropping 3 (< 6) — too thin for a video'), "too thin for a video");
+  assert.match(stripCounts("too many slides: 41 > 34"), /enumerate the beats again/);
+  assert.ok(!/\d/.test(stripCounts("too many slides: 41 > 34")));
+  // Card-level adjacency facts are NOT counts of the video's length, and stay.
+  assert.match(stripCounts('3 consecutive "stat" cards (max 2 in a row)'), /consecutive "stat" cards/);
+});
 
 test("exact JSON parses", () => {
   assert.deepEqual(extractJsonPayload('{"slides":[{"t":"title"}]}'), { slides: [{ t: "title" }] });
