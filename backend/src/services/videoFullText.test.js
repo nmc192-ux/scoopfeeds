@@ -13,7 +13,11 @@ import { readFileSync } from "node:fs";
 import { resolveVideoSourceText, _internals } from "./videoFullText.js";
 import { extractArticleText } from "./contentEnricher.js";
 
-const SRC = readFileSync(new URL("./videoFullText.js", import.meta.url), "utf8");
+const RAW = readFileSync(new URL("./videoFullText.js", import.meta.url), "utf8");
+// Scan CODE, not prose — a comment mentioning "update" or "cache" must not fail
+// a module that does neither.
+const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const SRC = stripComments(RAW);
 
 // ─── The no-storage discipline, asserted against the source itself ──────────
 

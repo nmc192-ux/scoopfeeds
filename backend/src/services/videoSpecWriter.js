@@ -112,12 +112,31 @@ export function isVideoSpecEnabled() {
 
 // ─── Rejection logging (same four fields as scriptWriter) ───────────────────
 
-function logRejection(tag, articleId, reason, len, finishReason, usage, model) {
+// NAMED ARGUMENTS, deliberately. This was positional through a63b45d, and the
+// per-call model refactor updated three of the five call sites — the two it
+// missed logged `model=undefined` in production, on the too-thin and
+// exhausted-retries paths. A positional tail argument is exactly the shape that
+// gets silently dropped; a named one shows up as missing at the call site, and
+// videoSpecWriter.test.js asserts no call site omits it.
+function logRejection({ tag, articleId, reason, len, finishReason, usage, model }) {
   logger.warn(
     `🎬 ${tag}: rejected article ${articleId} — ${reason} (len=${len}, ` +
-    `model=${model}, finishReason=${finishReason ?? "?"}, ` +
+    `model=${model ?? "UNKNOWN"}, finishReason=${finishReason ?? "?"}, ` +
     `thoughtsTokenCount=${usage?.thoughtsTokenCount ?? "?"})`
   );
+}
+
+/**
+ * A bare 400 INVALID_ARGUMENT. Deliberately NOT added to llmQueue's shared
+ * isGeminiThinkingRejection: a 400 can mean a dozen things, and treating every
+ * one as a thinking rejection would flip a process-wide flag on evidence that
+ * does not support it. This predicate only opens the probe above; the retry's
+ * outcome is what decides.
+ */
+function isInvalidArgument(err) {
+  if (err?.response?.status !== 400) return false;
+  const body = JSON.stringify(err?.response?.data ?? "");
+  return /INVALID_ARGUMENT|invalid argument/i.test(body);
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -224,23 +243,35 @@ async function callModel(prompt, { articleId, tag, model, maxOutputTokens }) {
   let thinkingRetryUsed = false;
   let jsonRetryUsed = false;
   let promptText = prompt;
+  // Set only by the evidence-gated INVALID_ARGUMENT probe below.
+  let forceNoThinking = false;
+  let thinkingConfirmed = false;
 
   while (true) {
+    const baseConfig = {
+      // Lower than scriptWriter's 0.4: this is a structured artifact with
+      // hard field constraints, not prose that needs phrasing variety.
+      temperature: 0.3,
+      responseMimeType: "application/json",
+      maxOutputTokens,
+    };
+    const generationConfig = forceNoThinking ? baseConfig : buildGeminiGenerationConfig(baseConfig);
+    const sentThinkingConfig = "thinkingConfig" in generationConfig;
+
     try {
       const { data } = await axios.post(
         ENDPOINT(model, key),
-        {
-          contents: [{ role: "user", parts: [{ text: promptText }] }],
-          generationConfig: buildGeminiGenerationConfig({
-            // Lower than scriptWriter's 0.4: this is a structured artifact with
-            // hard field constraints, not prose that needs phrasing variety.
-            temperature: 0.3,
-            responseMimeType: "application/json",
-            maxOutputTokens,
-          }),
-        },
+        { contents: [{ role: "user", parts: [{ text: promptText }] }], generationConfig },
         { timeout: TIMEOUT_MS }
       );
+
+      // The probe succeeded without thinkingConfig — that IS the proof. Flip the
+      // shared flag so every later Gemini call in this process skips it too.
+      if (forceNoThinking && !thinkingConfirmed) {
+        thinkingConfirmed = true;
+        markGeminiThinkingRejected(logger, model);
+        logger.warn(`🧠 ${tag}: confirmed — ${model} rejects thinkingBudget:0; the 400 was thinkingConfig`);
+      }
 
       const candidate    = data?.candidates?.[0];
       const finishReason = candidate?.finishReason;
@@ -248,14 +279,14 @@ async function callModel(prompt, { articleId, tag, model, maxOutputTokens }) {
       const text         = candidate?.content?.parts?.[0]?.text;
 
       if (!text) {
-        logRejection(tag, articleId, "empty", 0, finishReason, usage, model);
+        logRejection({ tag, articleId, reason: "empty", len: 0, finishReason, usage, model });
         return null;
       }
       // HARD rejection. A truncated 25-slide spec that happens to parse is a
       // video that stops mid-argument with narration that references slides
       // which were never emitted.
       if (finishReason === "MAX_TOKENS") {
-        logRejection(tag, articleId, "truncated_max_tokens", text.length, finishReason, usage, model);
+        logRejection({ tag, articleId, reason: "truncated_max_tokens", len: text.length, finishReason, usage, model });
         return null;
       }
 
@@ -272,7 +303,7 @@ async function callModel(prompt, { articleId, tag, model, maxOutputTokens }) {
           continue;
         }
         logger.warn(`🎬 ${tag}: non-JSON payload persisted after reminder retry. head=${head} tail=${tail}`);
-        logRejection(tag, articleId, "unparseable_json", text.length, finishReason, usage, model);
+        logRejection({ tag, articleId, reason: "unparseable_json", len: text.length, finishReason, usage, model });
         return null;
       }
 
@@ -288,6 +319,35 @@ async function callModel(prompt, { articleId, tag, model, maxOutputTokens }) {
         continue;
       }
       if (isGeminiModelGone(err)) { markGeminiModelGone(model, logger); return null; }
+
+      // EVIDENCE-GATED THINKING DEGRADE. Some models reject thinkingBudget:0
+      // with a bare 400 INVALID_ARGUMENT whose body says only "Request contains
+      // an invalid argument" — no mention of thinking, so
+      // isGeminiThinkingRejection cannot match it and the call died as a hard
+      // transport failure. Measured 2026-08-02: gemini-3.5-flash-lite, 0/3.
+      //
+      // Rather than widen the SHARED classifier to "any 400 is a thinking
+      // rejection" — which would let an unrelated malformed request flip the
+      // process-wide flag for igSummary, scriptWriter and llmQueue too — this
+      // binary-searches the request in place: retry ONCE with thinkingConfig
+      // removed and nothing else changed. Success proves thinkingConfig was the
+      // invalid argument, and only THEN is the shared flag flipped. Failure
+      // proves it was not, and the error falls through to be reported honestly.
+      if (isInvalidArgument(err) && sentThinkingConfig && !thinkingRetryUsed) {
+        thinkingRetryUsed = true;
+        forceNoThinking = true;
+        logger.warn(
+          `🧠 ${tag}: ${model} returned 400 INVALID_ARGUMENT with thinkingConfig present — ` +
+          `retrying once WITHOUT it to identify the offending argument`
+        );
+        continue;
+      }
+      // The probe came back and still failed: thinkingConfig was NOT the cause.
+      // Say so explicitly, so the next reader does not re-run the same test.
+      if (isInvalidArgument(err) && forceNoThinking) {
+        logger.warn(`🧠 ${tag}: ${model} still 400s WITHOUT thinkingConfig — thinkingConfig is NOT the invalid argument`);
+      }
+
       const status = err.response?.status;
       const transient = status === 503 || status === 429 ||
                         err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
@@ -367,9 +427,9 @@ export function buildSpecPrompt({ article, allowedSources = [], bodyText = null 
   const sourceText = [
     `HEADLINE: ${article.title || ""}`,
     article.description ? `SUMMARY: ${article.description}` : "",
-    body ? `BODY: ${body.slice(0, SPEC_BODY_MAX_CHARS)}` : "",
-    `PUBLISHER: ${article.source_name || "unknown"}`,
+    `LEAD PUBLISHER: ${article.source_name || "unknown"}`,
     article.category ? `CATEGORY: ${article.category}` : "",
+    body ? `\n${body.slice(0, SPEC_BODY_MAX_CHARS)}` : "",
   ].filter(Boolean).join("\n");
 
   return `You are a video producer for ScoopFeeds, a news-intelligence product. You do not write prose. You emit a SLIDE SPEC as JSON, which a deterministic renderer turns into a video.
@@ -393,6 +453,10 @@ HARD RULES — violating any of these makes the output unusable:
 1. GROUNDING. Every claim must appear in the source material above. Do not add context you happen to know. Do not infer causes, motives or consequences. Do not predict outcomes. If the source does not say why something happened, the spec does not say why either.
 
 2. NUMBERS NEED A REAL SOURCE. Every "stat" and every "bars" card MUST carry a "source" naming one of the outlets listed above, AND the figure itself must appear in the source material. If you cannot attribute a number to one of those outlets, DO NOT EMIT THE CARD. Do not guess an outlet. Do not write "reports" or "analysts" or the story's subject as the source. A dropped card costs nothing; an invented attribution is unrecoverable.
+
+   THE SOURCE MATERIAL IS ATTRIBUTED. It is divided into labelled sections — one "PRIMARY SOURCE — <outlet>" block and, when other outlets covered the same story, one or more "ADDITIONAL COVERAGE — <outlet>" blocks. Take a figure from whichever section actually contains it, and name THAT outlet in the "source" field. Do not attribute a figure to the lead publisher because it is listed first. Where two outlets report the same figure, either is correct.
+
+   Sections cover ONE story from different newsrooms, so treat them as one body of reporting, not as separate stories: a mechanism explained only in the third section is as usable as one in the first. Where outlets disagree on a number, prefer the one more outlets agree on, and if they cannot be reconciled, drop the card rather than picking a side.
 
 3. NO "sources" CARD. You must never emit a card with "t":"sources". That card is built from the database, not written. If you emit one, the spec is rejected.
 
@@ -569,6 +633,10 @@ Re-read the CARD GRAMMAR above and match the field shapes exactly. Emit the FULL
  *        stored cap is the measured constraint on beat count, and leaving this
  *        to the caller would mean Section 6 could silently omit it and inherit
  *        the same flat specs.
+ * @param {boolean} [opts.includeSiblings=true] — widen SOURCE MATERIAL with
+ *        attributed excerpts from the event's other coverage. ON by default for
+ *        the same reason as fetchFullText; pass false for a single-article
+ *        baseline measurement.
  */
 export async function writeVideoSpec(article, {
   allowedSources = [],
@@ -576,6 +644,7 @@ export async function writeVideoSpec(article, {
   slideCeiling = null,
   bodyText = null,
   fetchFullText = true,
+  includeSiblings = true,
 } = {}) {
   if (!isVideoSpecEnabled()) return null;
   if (!article?.title) return null;
@@ -587,9 +656,14 @@ export async function writeVideoSpec(article, {
     // still ships, shorter.
     let resolved = { text: String(bodyText ?? article.content ?? ""), chars: 0, origin: bodyText ? "supplied" : "stored", reason: null };
     resolved.chars = resolved.text.length;
+    let bundleParts = null, siblingCount = 0, bundleEventId = null;
     if (!bodyText && fetchFullText) {
-      const { resolveVideoSourceText } = await import("./videoFullText.js");
-      resolved = await resolveVideoSourceText(article);
+      const { buildSourceBundle } = await import("./videoSourceBundle.js");
+      const bundle = await buildSourceBundle(article, { includeSiblings });
+      resolved = { text: bundle.text, chars: bundle.totalChars, origin: bundle.primaryOrigin, reason: null };
+      bundleParts = bundle.parts;
+      siblingCount = bundle.siblingCount;
+      bundleEventId = bundle.eventId;
     }
 
     // Grounding screens against the SAME text the model was given. Screening
@@ -626,8 +700,12 @@ export async function writeVideoSpec(article, {
       // model is that more cards were wanted — which is the padding instinct
       // the beat rubric exists to remove. Skip the article silently instead.
       if (v.errors.some(isThinnessError)) {
-        logRejection("videoSpec", article.id, `too thin — ${v.errors.filter(isThinnessError).join(" | ")}`,
-          JSON.stringify(result.parsed).length, result.finishReason, result.usage);
+        logRejection({
+          tag: "videoSpec", articleId: article.id, model: SPEC_MODEL,
+          reason: `too thin — ${v.errors.filter(isThinnessError).join(" | ")}`,
+          len: JSON.stringify(result.parsed).length,
+          finishReason: result.finishReason, usage: result.usage,
+        });
         return null;
       }
 
@@ -638,9 +716,12 @@ export async function writeVideoSpec(article, {
         prompt = basePrompt + buildCorrectionNote(v);
         continue;
       }
-      logRejection("videoSpec", article.id,
-        `invalid spec after ${attempts} attempts — ${v.errors.slice(0, 3).join(" | ")}`,
-        JSON.stringify(result.parsed).length, result.finishReason, result.usage);
+      logRejection({
+        tag: "videoSpec", articleId: article.id, model: SPEC_MODEL,
+        reason: `invalid spec after ${attempts} attempts — ${v.errors.slice(0, 3).join(" | ")}`,
+        len: JSON.stringify(result.parsed).length,
+        finishReason: result.finishReason, usage: result.usage,
+      });
       return null;
     }
 
@@ -672,6 +753,9 @@ export async function writeVideoSpec(article, {
         sourceTextChars: resolved.chars,
         sourceTextOrigin: resolved.origin,
         sourceTextReason: resolved.reason,
+        siblingOutlets: siblingCount,
+        sourceParts: bundleParts,
+        bundleEventId,
         targetSeconds,
         slides: v.stats.slides,
         emitted: v.stats.emitted,
@@ -724,8 +808,11 @@ export async function writePackaging(spec, article) {
 
     const v = validatePackaging(parsed, spec);
     if (!v.ok) {
-      logRejection("videoPackaging", article.id, `invalid packaging — ${v.errors.slice(0, 3).join(" | ")}`,
-        JSON.stringify(parsed).length, finishReason, usage, PACKAGING_MODEL);
+      logRejection({
+        tag: "videoPackaging", articleId: article.id, model: PACKAGING_MODEL,
+        reason: `invalid packaging — ${v.errors.slice(0, 3).join(" | ")}`,
+        len: JSON.stringify(parsed).length, finishReason, usage,
+      });
       return null;
     }
     if (v.dropped?.length) {
@@ -764,5 +851,5 @@ export async function writePackaging(spec, article) {
 
 export const _internals = {
   buildSpecPrompt, buildPackagingPrompt, CARD_GRAMMAR,
-  extractJsonPayload, stripCounts, isThinnessError,
+  extractJsonPayload, stripCounts, isThinnessError, isInvalidArgument,
 };

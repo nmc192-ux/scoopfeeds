@@ -10,6 +10,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { _internals } from "./videoSpecWriter.js";
 
 const { extractJsonPayload, buildSpecPrompt } = _internals;
@@ -78,6 +79,53 @@ test("the worked example enumerates 12+ beats and is fenced off from grounding",
   assert.match(example, /A thinner source might establish four/);
   assert.match(p, /ILLUSTRATIVE ONLY/);
   assert.match(p, /never reuse its facts, figures, or wording/);
+});
+
+// ─── Regression guard: every rejection log names its model ──────────────────
+
+test("no logRejection call site omits `model`", () => {
+  // a63b45d made the model per-call and updated three of five sites. The two it
+  // missed logged `model=undefined` in production, on the too-thin and
+  // exhausted-retries paths — invisible until a live run surfaced it.
+  const raw = readFileSync(new URL("./videoSpecWriter.js", import.meta.url), "utf8");
+  const calls = [...raw.matchAll(/logRejection\(\{[\s\S]*?\}\);/g)].map(m => m[0]);
+  assert.ok(calls.length >= 6, `expected every rejection path covered, found ${calls.length}`);
+  for (const c of calls) {
+    assert.match(c, /\bmodel\b\s*[:,}]/, `logRejection call omits model:\n${c}`);
+  }
+});
+
+// ─── INVALID_ARGUMENT classifier (evidence-gated, not a widened match) ──────
+
+test("isInvalidArgument matches a bare 400 with no mention of thinking", () => {
+  const { isInvalidArgument } = _internals;
+  const err = { response: { status: 400, data: { error: { code: 400, message: "Request contains an invalid argument", status: "INVALID_ARGUMENT" } } } };
+  assert.equal(isInvalidArgument(err), true);
+});
+
+test("isInvalidArgument ignores non-400s and unrelated 400s", () => {
+  const { isInvalidArgument } = _internals;
+  assert.equal(isInvalidArgument({ response: { status: 404 } }), false);
+  assert.equal(isInvalidArgument({ response: { status: 429, data: { error: { message: "quota" } } } }), false);
+  assert.equal(isInvalidArgument({ response: { status: 400, data: { error: { message: "API key not valid" } } } }), false);
+});
+
+test("the shared thinking classifier is NOT widened to bare 400s", () => {
+  // Widening llmQueue's predicate would let any malformed request flip the
+  // process-wide flag for igSummary, scriptWriter and llmQueue itself. The
+  // probe lives here, gated on the retry's outcome, precisely to avoid that.
+  const raw = readFileSync(new URL("../realityIndex/llmQueue.js", import.meta.url), "utf8");
+  const fn = raw.slice(raw.indexOf("export function isGeminiThinkingRejection"));
+  assert.match(fn.slice(0, 300), /\/thinking\/i\.test/);
+  assert.ok(!/INVALID_ARGUMENT/.test(fn.slice(0, 300)),
+    "the shared classifier must stay evidence-specific");
+});
+
+test("the probe only fires when thinkingConfig was actually sent", () => {
+  const raw = readFileSync(new URL("./videoSpecWriter.js", import.meta.url), "utf8");
+  assert.match(raw, /isInvalidArgument\(err\) && sentThinkingConfig && !thinkingRetryUsed/);
+  // And the shared flag is flipped only after the retry SUCCEEDS.
+  assert.match(raw, /if \(forceNoThinking && !thinkingConfirmed\)[\s\S]{0,200}markGeminiThinkingRejected/);
 });
 
 test("the prompt carries the SUPPLIED body text, not the stored content", () => {
