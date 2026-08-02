@@ -133,11 +133,19 @@ export function sweepVideos({ retentionMs = MP4_RETENTION_MS, now = Date.now() }
   return { removed, bytes, kept };
 }
 
-/** Both sweeps. Call once at process start, before any render. */
-export function sweepAtStartup() {
+/**
+ * Every sweep. Call once at process start, before any render.
+ *
+ * The TTS cache is swept here too rather than owning its own entry point —
+ * one place to look for "what reclaims disk", so a new artifact class cannot
+ * be added without appearing in this function.
+ */
+export async function sweepAtStartup() {
   const frames = sweepFrames();
   const videos = sweepVideos();
-  return { frames, videos };
+  const { sweepTtsCache } = await import("./videoVoice.js");
+  const tts = sweepTtsCache();
+  return { frames, videos, tts };
 }
 
 export const _internals = { BACKEND_ROOT };

@@ -9,6 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   statesForCard, fitStatesToDuration, videoDesignKey, VIDEO_DESIGN_VER,
   CANVAS, MARGIN_X, RESERVED_BOTTOM_Y, DRIFT_SAFE_X, DRIFT_SAFE_Y, LAYOUT_Y, COLORS,
@@ -146,19 +147,40 @@ test("a long-enough slide keeps every state", () => {
   assert.equal(fitStatesToDuration(states, 30, { cardType: "stat" }).length, states.length);
 });
 
-test("collapsing the credit state is reported, not silent", async () => {
-  // §3b/3's on-screen receipt vanishing from a figure card must be loud —
-  // it looks like a timing tweak and behaves like a compliance regression.
+test("the FINAL state survives a short slide — collapse takes middle states", async () => {
+  // States are cumulative, so the last one is the complete composition. Plain
+  // end-backwards collapse cost the bars card its SOURCE CREDIT and the
+  // diagram card its MARKER on a 7-slide measurement — content, not pacing.
+  const { logger } = await import("./logger.js");
+  const states = statesForCard(CARDS.stat, ctx);
+  const lines = [];
+  const prevInfo = logger.info.bind(logger);
+  const prevWarn = logger.warn.bind(logger);
+  logger.info = (m) => { lines.push(String(m)); };
+  logger.warn = (m) => { lines.push(String(m)); };
+  let kept;
+  try { kept = fitStatesToDuration(states, 2.0, { cardType: "stat", slideIndex: 4 }); }
+  finally { logger.info = prevInfo; logger.warn = prevWarn; }
+
+  assert.ok(kept.length < states.length, "a 2s slide must drop something");
+  assert.equal(kept[kept.length - 1].key, states[states.length - 1].key,
+    "the final state must survive");
+  assert.ok(kept[kept.length - 1].credit, "and it is the one carrying the source credit");
+  assert.ok(lines.some(l => /final state preserved/.test(l)), lines.join(" | "));
+});
+
+test("only a slide too short for TWO states can lose the credit, and it warns", async () => {
   const { logger } = await import("./logger.js");
   const states = statesForCard(CARDS.stat, ctx);
   const lines = [];
   const prevWarn = logger.warn.bind(logger);
+  const prevInfo = logger.info.bind(logger);
   logger.warn = (m) => { lines.push(String(m)); };
-  try {
-    fitStatesToDuration(states, 2.0, { cardType: "stat", slideIndex: 4 });
-  } finally { logger.warn = prevWarn; }
+  logger.info = () => {};
+  try { fitStatesToDuration(states, 0.9, { cardType: "stat", slideIndex: 4 }); }
+  finally { logger.warn = prevWarn; logger.info = prevInfo; }
   assert.ok(lines.some(l => /COLLAPSED THE SOURCE-CREDIT STATE/.test(l)),
-    `expected a loud credit-collapse warning, got: ${lines.join(" | ") || "(nothing logged)"}`);
+    `expected a loud credit-collapse warning, got: ${lines.join(" | ") || "(nothing)"}`);
 });
 
 // ─── Design version ─────────────────────────────────────────────────────────
@@ -306,5 +328,57 @@ test("travel never exceeds the overscan, so the crop stays inside the frame", ()
     // scale is 1958*SS x 1102*SS, crop 1920*SS x 1080*SS → 38*SS x 22*SS spare
     assert.ok(dx + padX <= 38 * 4 + 1, `x travel ${dx} + pad ${padX} overruns the overscan`);
     assert.ok(dy + padY <= 22 * 4 + 1, `y travel ${dy} + pad ${padY} overruns the overscan`);
+  }
+});
+
+// ─── Captions (§5) ──────────────────────────────────────────────────────────
+
+test("captions burn AFTER the drift, so they never move under the eye", async () => {
+  const { buildSlideFilter } = await import("./videoAssembler.js");
+  const { filter } = buildSlideFilter({ stateCount: 3, hold: 1.5, caption: "drawtext=fontfile='/f':textfile='/t'" });
+  const crop = filter.lastIndexOf("crop=");
+  const draw = filter.indexOf("drawtext=");
+  assert.ok(draw > crop, "a caption drawn before the crop would drift with the composition");
+  assert.match(filter, /scale=1920:1080:flags=lanczos,setsar=1,drawtext=/,
+    "and must come after the downscale so it is not resampled");
+});
+
+test("caption wrapping keeps lines inside the measure", async () => {
+  const { wrapCaption, CAPTION } = await import("./videoAssembler.js");
+  const long = "The Guardian reports that seventy percent of recorded subsea cable faults are caused by ships dragging their anchors across shallow coastal approaches.";
+  for (const line of wrapCaption(long)) {
+    assert.ok(line.length <= CAPTION.maxCharsPerLine, `line of ${line.length} chars: "${line}"`);
+  }
+  assert.equal(wrapCaption("").length, 0);
+});
+
+test("the caption band sits inside the drift-safe area", async () => {
+  const { CAPTION } = await import("./videoAssembler.js");
+  assert.ok(CAPTION.bottomY <= CANVAS.h - DRIFT_SAFE_Y,
+    `caption bottom ${CAPTION.bottomY} is inside the ${DRIFT_SAFE_Y}px drift margin`);
+  assert.ok(CAPTION.bottomY - CAPTION.maxLines * CAPTION.lineHeight >= RESERVED_BOTTOM_Y - 60,
+    "the caption block should live in the bottom band, not up in the card content");
+});
+
+test("one drawtext PER LINE — a single multi-line one left-aligns the rest", async () => {
+  const { buildCaptionFilter } = await import("./videoAssembler.js");
+  const { mkdtempSync } = await import("node:fs");
+  const os2 = await import("node:os");
+  const dir = mkdtempSync(path.join(os2.tmpdir(), "capfilter-"));
+  const f = buildCaptionFilter({
+    text: "The Guardian reports that seventy percent of recorded subsea cable faults are caused by ships dragging anchors.",
+    workDir: dir, slideIndex: 0, fontFile: "/tmp/Inter.otf",
+  });
+  assert.ok((f.match(/drawtext=/g) || []).length >= 2, "a two-line caption needs two centred drawtexts");
+  assert.ok(f.includes("x=(w-text_w)/2"), "each line centres on its own width");
+});
+
+test("audio duration drives the hold, exactly", async () => {
+  const { holdForAudio, SLIDE_TAIL_SECS, CROSSFADE_SECS } = await import("./videoAssembler.js");
+  for (const [audio, n] of [[4.2, 5], [2.6, 3], [9.1, 6]]) {
+    const hold = holdForAudio(audio, n);
+    const total = n * hold - (n - 1) * CROSSFADE_SECS;
+    assert.ok(Math.abs(total - (audio + SLIDE_TAIL_SECS)) < 0.001,
+      `${n} states over ${audio}s audio produced a ${total}s slide`);
   }
 });

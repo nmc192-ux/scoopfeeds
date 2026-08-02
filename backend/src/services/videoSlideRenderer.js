@@ -407,26 +407,51 @@ export function statesForCard(card, ctx = {}) {
 /**
  * Drop states when the slide's audio is too short to hold them.
  *
- * Collapses from the END backwards, and LOGS EVERY COLLAPSE — with a distinct
- * warning when the dropped state is the source-credit state on a figure card,
- * because that is §3b/3's on-screen receipt quietly disappearing from exactly
- * the cards that carry numbers. A silent collapse there would look like a
- * timing tweak and behave like a compliance regression.
+ * THE FINAL STATE IS NEVER DROPPED. States are CUMULATIVE — each adds an
+ * element to the one before, so the last state is the complete composition and
+ * every earlier one is a partial reveal of it. Dropping from the very end
+ * therefore removes CONTENT, while dropping a middle state removes only a beat
+ * of pacing.
+ *
+ * That distinction is not theoretical. Measured 2026-08-02 on a 7-slide video
+ * with realistic ~2.6 words/sec caption timings, plain end-backwards collapse
+ * fired on 2 of 7 slides and took with it: the bars card's SOURCE CREDIT
+ * (§3b/3's on-screen receipt, on a card carrying figures) and the diagram's
+ * MARKER (its single lime element and the entire point of the card). Both are
+ * content; neither is pacing.
+ *
+ * So collapse runs from the SECOND-TO-LAST backwards, preserving the opener
+ * and the complete final frame. Every collapse is logged, and the credit case
+ * still logs loudly if it is ever reached — with only two states left there is
+ * nowhere else to take one from, and that is worth seeing.
  */
 export function fitStatesToDuration(states, durationSecs, { minHold = 0.6, crossfade = 0.35, cardType = "?", slideIndex = -1 } = {}) {
-  let kept = [...states];
-  while (kept.length > 1) {
+  const kept = [...states];
+  const fits = () => {
     const usable = durationSecs - crossfade * (kept.length - 1);
-    if (usable / kept.length >= minHold) break;
+    return usable / kept.length >= minHold;
+  };
+  while (kept.length > 2 && !fits()) {
+    const [dropped] = kept.splice(kept.length - 2, 1);   // second-to-last
+    logger.info(
+      `🎬 slide ${slideIndex} (${cardType}): collapsed state "${dropped.key}" — ` +
+      `${durationSecs.toFixed(2)}s too short for ${kept.length + 1} states (final state preserved)`
+    );
+  }
+  // Below two states the only remaining cut IS the final one.
+  if (kept.length === 2 && !fits()) {
     const dropped = kept.pop();
     if (dropped.credit) {
       logger.warn(
         `🎬 slide ${slideIndex} (${cardType}): COLLAPSED THE SOURCE-CREDIT STATE — ` +
-        `${durationSecs.toFixed(2)}s of audio cannot hold ${kept.length + 1} states. ` +
+        `${durationSecs.toFixed(2)}s of audio cannot hold even two states. ` +
         `§3b/3's on-screen credit is NOT rendered on this slide (narration still carries it).`
       );
     } else {
-      logger.info(`🎬 slide ${slideIndex} (${cardType}): collapsed state "${dropped.key}" — ${durationSecs.toFixed(2)}s too short for ${kept.length + 1} states`);
+      logger.warn(
+        `🎬 slide ${slideIndex} (${cardType}): dropped the FINAL state "${dropped.key}" — ` +
+        `${durationSecs.toFixed(2)}s is too short for two states, so this slide loses content, not just pacing.`
+      );
     }
   }
   return kept;

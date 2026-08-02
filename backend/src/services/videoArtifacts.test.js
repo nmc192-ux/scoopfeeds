@@ -134,12 +134,13 @@ test("non-mp4 files in the videos dir are left alone", () => {
   rmSync(other, { force: true });
 });
 
-test("sweepAtStartup runs both and reports both", () => {
+test("sweepAtStartup runs every sweep and reports each", async () => {
   const dir = acquireFrameDir("startup-leak");
   writeFileSync(path.join(dir, "f.png"), "x");
   mp4("stale.mp4", 72 * 3600 * 1000);
-  const r = sweepAtStartup();
+  const r = await sweepAtStartup();
   assert.equal(r.frames.removed, 1);
   assert.equal(r.videos.removed, 1);
+  assert.ok(r.tts, "the TTS cache must be swept here too — one place to look for what reclaims disk");
   assert.equal(readdirSync(FRAMES_ROOT).length, 0);
 });

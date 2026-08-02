@@ -20,7 +20,8 @@ import { existsSync, writeFileSync } from "fs";
 import path from "path";
 import { logger } from "./logger.js";
 import { getFFmpegPath } from "./videoGenerator.js";
-import { CANVAS } from "./videoSlideRenderer.js";
+import { CANVAS, MARGIN_X, DRIFT_SAFE_Y, COLORS } from "./videoSlideRenderer.js";
+import { writeFileSync as writeFileSync_ } from "fs";
 
 export const CROSSFADE_SECS = Number.parseFloat(process.env.VIDEO_CROSSFADE_SECS || "0.35");
 export const FPS = Number.parseInt(process.env.VIDEO_FPS || "25", 10);
@@ -93,7 +94,78 @@ function runFFmpeg(args, ffmpegPath) {
  * already includes every preceding overlap — not from the start of clip N.
  * Getting that wrong stacks the transitions on top of each other.
  */
-export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0 }) {
+// ─── Burned captions ────────────────────────────────────────────────────────
+//
+// The caption is the SAME string that was voiced (brief §3: captions and
+// voiceover come from one string so they cannot drift apart), burned into the
+// slide it narrates.
+//
+// It is drawn AFTER the drift, deliberately. Captions that drift with the
+// composition read as unstable — the eye tracks text, and 6px/s of movement
+// under a line being read is exactly where it becomes noticeable. Burning
+// post-crop also means they are rasterised at final resolution rather than
+// resampled by the downscale.
+export const CAPTION = Object.freeze({
+  fontSize: 34,
+  lineHeight: 44,
+  // Inside the bottom band, above the progress line, and clear of the drift
+  // margin. Nothing a card draws reaches here — the band exists for exactly
+  // this and for YouTube's auto-hiding controls.
+  bottomY: CANVAS.h - DRIFT_SAFE_Y - 18,
+  maxCharsPerLine: 78,
+  maxLines: 2,
+});
+
+/** Greedy wrap. Returns lines; the caller decides what to do about overflow. */
+export function wrapCaption(text, maxChars = CAPTION.maxCharsPerLine) {
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    if (!cur) { cur = w; continue; }
+    if ((cur + " " + w).length <= maxChars) cur += " " + w;
+    else { lines.push(cur); cur = w; }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/**
+ * The drawtext fragment for one caption.
+ *
+ * The text goes in a FILE rather than inline. drawtext treats `:`, `\`, `%`
+ * and `'` as syntax, and a caption is prose written by a model — it will
+ * eventually contain every one of them. `textfile=` sidesteps the whole class.
+ */
+export function buildCaptionFilter({ text, workDir, slideIndex, fontFile }) {
+  const lines = wrapCaption(text);
+  if (lines.length > CAPTION.maxLines) {
+    logger.warn(
+      `🎬 slide ${slideIndex}: caption wraps to ${lines.length} lines (max ${CAPTION.maxLines}) — ` +
+      `it will sit higher than the band intends: "${String(text).slice(0, 60)}"`
+    );
+  }
+  // ONE drawtext PER LINE. A single multi-line drawtext centres the BLOCK and
+  // left-aligns the lines inside it, so a short second line hangs off to the
+  // left of a long first one — visible immediately in the first render.
+  // Per-line filters let each line centre on its own width.
+  const blockH = lines.length * CAPTION.lineHeight;
+  const top = CAPTION.bottomY - blockH;
+  const esc = (v) => String(v).replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
+
+  return lines.map((line, i) => {
+    const file = path.join(workDir, `caption-${String(slideIndex).padStart(2, "0")}-${i}.txt`);
+    writeFileSync_(file, line, "utf8");
+    return (
+      `drawtext=fontfile='${esc(fontFile)}':textfile='${esc(file)}':` +
+      `fontsize=${CAPTION.fontSize}:fontcolor=0xf5f2ea:` +
+      `x=(w-text_w)/2:y=${Math.round(top + i * CAPTION.lineHeight)}:` +
+      `box=1:boxcolor=0x090706@0.72:boxborderw=14`
+    );
+  }).join(",");
+}
+
+export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0, caption = null }) {
   const parts = [];
   for (let i = 0; i < stateCount; i++) {
     parts.push(`[${i}:v]scale=${CANVAS.w}:${CANVAS.h},setsar=1,format=yuv420p,fps=${FPS}[s${i}]`);
@@ -143,36 +215,78 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
   // The crop window has to sit inside the scaled frame at every t, so the
   // start offset moves with the travel rather than the (larger) overscan.
   const padX = Math.max(0, maxX - dx), padY = Math.max(0, maxY - dy);
+  // Captions come LAST in the chain — after the crop and the downscale — so
+  // they neither drift nor get resampled.
+  const captionChain = caption ? `,${caption}` : "";
   parts.push(
     `[${last}]scale=${w2}:${h2}:flags=lanczos,` +
     `crop=${cw}:${ch}:x='${Math.round(padX / 2)}+${xExpr}':y='${Math.round(padY / 2)}+${yExpr}',` +
-    `scale=${CANVAS.w}:${CANVAS.h}:flags=lanczos,setsar=1[out]`
+    `scale=${CANVAS.w}:${CANVAS.h}:flags=lanczos,setsar=1${captionChain}[out]`
   );
 
   return { filter: parts.join("; "), totalDuration: total };
 }
 
 /**
- * Assemble one slide's state PNGs into a silent MP4 segment.
- * `hold` is per-state; slide duration falls out of it.
+ * SLIDE DURATION IS AUDIO DURATION (§5). Given N states and the audio's own
+ * length, this is the per-state hold that makes the video land exactly on it:
+ *
+ *   total = N*hold - (N-1)*crossfade   =>   hold = (total + (N-1)*xf) / N
+ *
+ * A short tail of silence is added so the last word is not clipped by the hard
+ * cut into the next slide.
  */
-export async function assembleSlide({ statePaths, hold, outputPath, driftDir = 0, ffmpegPath = null }) {
+export const SLIDE_TAIL_SECS = Number.parseFloat(process.env.VIDEO_SLIDE_TAIL || "0.3");
+
+export function holdForAudio(audioSecs, stateCount, crossfade = CROSSFADE_SECS) {
+  const total = audioSecs + SLIDE_TAIL_SECS;
+  return (total + (stateCount - 1) * crossfade) / stateCount;
+}
+
+/**
+ * Assemble one slide: state PNGs → crossfade → drift → caption → + its audio.
+ *
+ * Pass `audioPath` and the segment carries that slide's narration, with the
+ * video timed to it. Without it the segment is silent (the motion-review path).
+ */
+export async function assembleSlide({
+  statePaths, hold, outputPath, driftDir = 0, ffmpegPath = null,
+  audioPath = null, captionText = null, workDir = null, fontFile = null,
+}) {
   const ff = ffmpegPath || getFFmpegPath();
   if (!ff) throw new Error("videoAssembler: ffmpeg not available");
   if (!statePaths.length) throw new Error("videoAssembler: no states to assemble");
 
   const args = ["-y", "-loglevel", "error"];
   for (const p of statePaths) args.push("-loop", "1", "-t", String(hold), "-i", p);
+  const audioIdx = statePaths.length;
+  if (audioPath) args.push("-i", audioPath);
 
-  const { filter, totalDuration } = buildSlideFilter({ stateCount: statePaths.length, hold, driftDir });
+  const caption = (captionText && workDir && fontFile)
+    ? buildCaptionFilter({ text: captionText, workDir, slideIndex: driftDir, fontFile })
+    : null;
+
+  const { filter, totalDuration } = buildSlideFilter({
+    stateCount: statePaths.length, hold, driftDir, caption,
+  });
+
+  args.push("-filter_complex", filter, "-map", "[out]");
+  if (audioPath) args.push("-map", `${audioIdx}:a`);
   args.push(
-    "-filter_complex", filter, "-map", "[out]",
     "-t", totalDuration.toFixed(3),
     "-c:v", ENC.codec, "-preset", ENC.preset, "-crf", ENC.crf,
     "-profile:v", ENC.profile, "-level", ENC.level,
-    "-pix_fmt", ENC.pixFmt, "-r", String(FPS), "-g", String(FPS * 2), "-an",
-    outputPath
+    "-pix_fmt", ENC.pixFmt, "-r", String(FPS), "-g", String(FPS * 2),
   );
+  if (audioPath) {
+    // Pad rather than -shortest: the tail of silence is deliberate, and
+    // -shortest would trim the video back to the audio and remove it.
+    args.push("-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
+              "-af", `apad=pad_dur=${SLIDE_TAIL_SECS + 0.5}`);
+  } else {
+    args.push("-an");
+  }
+  args.push(outputPath);
   await runFFmpeg(args, ff);
   return { outputPath, duration: totalDuration };
 }
