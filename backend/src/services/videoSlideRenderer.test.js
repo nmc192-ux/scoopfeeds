@@ -8,6 +8,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   statesForCard, fitStatesToDuration, videoDesignKey, VIDEO_DESIGN_VER,
   CANVAS, MARGIN_X, RESERVED_BOTTOM_Y, DRIFT_SAFE_X, DRIFT_SAFE_Y, LAYOUT_Y, COLORS,
@@ -186,10 +187,38 @@ test("DRIFT IS APPLIED AFTER CROSSFADE, never per state", () => {
     "the crop/drift must come after every xfade — per-state drift makes each boundary jump");
 });
 
+test("the UPSCALE sits between the last xfade and the crop", () => {
+  // Measured 2026-08-02: with the crop at output resolution the drift advanced
+  // in 2px snaps at irregular frames, x and y on different frames. Integer,
+  // chroma-even crop coordinates against ~0.3px/frame of intended motion.
+  // Supersampling is what makes the coordinate grid finer than the motion; if
+  // the upscale ever moves after the crop it buys nothing at all.
+  const { filter } = buildSlideFilter({ stateCount: 4, hold: 1.5 });
+  const tail = filter.slice(filter.lastIndexOf("xfade="));
+  const up   = tail.indexOf("scale=");
+  const crop = tail.indexOf("crop=");
+  const down = tail.indexOf("scale=", crop);
+  assert.ok(up > -1 && crop > up, "the upscale must precede the crop");
+  assert.ok(down > crop, "the downscale back to output must follow the crop");
+  assert.match(tail, /scale=\d+:\d+:flags=lanczos[\s\S]*crop=[\s\S]*scale=1920:1080:flags=lanczos/,
+    "both rescales must be lanczos — bilinear softens Anton at 340px visibly");
+});
+
+test("the supersampled crop domain is an integer multiple of the output", () => {
+  const { filter } = buildSlideFilter({ stateCount: 2, hold: 1.5 });
+  const m = filter.match(/crop=(\d+):(\d+):/);
+  assert.ok(m, "expected a crop in the graph");
+  const [w, h] = [Number(m[1]), Number(m[2])];
+  assert.equal(w % 1920, 0, `crop width ${w} must be a whole multiple of 1920`);
+  assert.equal(h % 1080, 0, `crop height ${h} must be a whole multiple of 1080`);
+  assert.ok(w / 1920 >= 4, "2x was MEASURED insufficient — median returned to 0.000px with snap ratio 3759");
+});
+
 test("a single-state slide still gets drift and a valid graph", () => {
   const { filter, totalDuration } = buildSlideFilter({ stateCount: 1, hold: 2 });
   assert.ok(!filter.includes("xfade="));
-  assert.match(filter, /crop=1920:1080/);
+  assert.match(filter, /crop=\d+:\d+:x=/, "the drift crop must still be present with one state");
+  assert.match(filter, /scale=1920:1080:flags=lanczos,setsar=1\[out\]$/, "and must still land back at output size");
   assert.equal(totalDuration, 2);
 });
 
@@ -208,4 +237,24 @@ test("the output is square-pixel — setsar after the crop", () => {
   const { filter } = buildSlideFilter({ stateCount: 2, hold: 1 });
   assert.match(filter, /crop=[^[]*setsar=1\[out\]/,
     "cropping an overscanned frame perturbs SAR unless it is reset");
+});
+
+test("the encode is pinned, not inherited", async () => {
+  // The demo came out at 129 kbps, which is a CONSEQUENCE of static dark
+  // frames rather than a setting — it would move the moment card content
+  // changes. Pinning makes quality a decision.
+  const src = readFileSync(new URL("./videoAssembler.js", import.meta.url), "utf8");
+  for (const flag of ["-preset", "-crf", "-pix_fmt", "-profile:v", "-level", "-g"]) {
+    assert.ok(src.includes(`"${flag}"`), `encode must pin ${flag} explicitly`);
+  }
+  assert.match(src, /crf:\s*process\.env\.VIDEO_X264_CRF\s*\|\|\s*"18"/);
+  assert.match(src, /pixFmt:\s*"yuv420p"/);
+});
+
+test("concat re-muxes rather than re-encoding", async () => {
+  // A second encode pass would compound quantisation on top of the pinned crf
+  // and quietly undo the pin.
+  const src = readFileSync(new URL("./videoAssembler.js", import.meta.url), "utf8");
+  const concat = src.slice(src.indexOf("export async function concatSlides"));
+  assert.match(concat, /"-c",\s*"copy"/, "concat must stream-copy");
 });

@@ -24,10 +24,40 @@ import { CANVAS } from "./videoSlideRenderer.js";
 
 export const CROSSFADE_SECS = Number.parseFloat(process.env.VIDEO_CROSSFADE_SECS || "0.35");
 export const FPS = Number.parseInt(process.env.VIDEO_FPS || "25", 10);
+export const SUPERSAMPLE = () => DRIFT_SUPERSAMPLE;
 
 // 2% overscan gives ~38px horizontal and ~22px of travel — below the amplitude
 // where text edges visibly resample, above the point where it reads as static.
 const DRIFT_SCALE = Number.parseFloat(process.env.VIDEO_DRIFT_SCALE || "1.02");
+
+// SUPERSAMPLE FACTOR for the drift. Measured 2026-08-02 by phase correlation
+// across 25 consecutive frames: the drift advanced in discrete 2px JUMPS at
+// irregular frames (2, 5, 8, 15, 16, 22), with dx and dy jumping on DIFFERENT
+// frames — two axes twitching independently, which is what read as shake.
+//
+// Cause: the animated crop ran at OUTPUT resolution. The intended motion is
+// ~0.3px/frame, but crop x/y are integers and yuv420p's chroma subsampling
+// forces them even, so nothing moves until the accumulated offset crosses a
+// 2px boundary and then it snaps. Two axes, two independent boundaries, hence
+// the twitch rather than a push.
+//
+// Fix: do the crop in a 4x domain. A 2px quantised step at 4x is 0.5px at
+// output — below the visible-motion threshold and, more importantly, the
+// residual is a smooth ramp rather than a stall-and-snap.
+const DRIFT_SUPERSAMPLE = Number.parseInt(process.env.VIDEO_DRIFT_SUPERSAMPLE || "4", 10);
+
+// ENCODE, pinned rather than inherited. The demo came out at 129 kbps, which
+// is fine for static dark frames — but that number is a CONSEQUENCE of this
+// content, not a setting, and it would drift the moment card content changes.
+// Pinning means quality is a decision instead of an emergent property.
+const ENC = Object.freeze({
+  codec:   process.env.VIDEO_X264_CODEC   || "libx264",
+  preset:  process.env.VIDEO_X264_PRESET  || "medium",
+  crf:     process.env.VIDEO_X264_CRF     || "18",
+  pixFmt:  "yuv420p",       // the chroma format that forced the even-crop snap
+  profile: "high",
+  level:   "4.0",
+});
 
 function shellQuote(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
 
@@ -68,15 +98,30 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
     }
   }
 
-  // ── Drift, applied to the ASSEMBLED stream ──
-  // Direction alternates by slide so a long video does not feel mechanical.
-  const w2 = Math.round(CANVAS.w * DRIFT_SCALE);
-  const h2 = Math.round(CANVAS.h * DRIFT_SCALE);
-  const dx = w2 - CANVAS.w, dy = h2 - CANVAS.h;
+  // ── Drift, applied to the ASSEMBLED stream, in a supersampled domain ──
+  //
+  // Order is load-bearing three times over:
+  //   1. AFTER the last xfade — per-state drift would dissolve between two
+  //      differently-positioned frames and every boundary would jump.
+  //   2. UPSCALE BEFORE THE CROP — this is what buys sub-pixel precision. The
+  //      crop's integer, chroma-even coordinates are 4x finer relative to the
+  //      output, turning a 2px stall-and-snap into a 0.5px ramp.
+  //   3. DOWNSCALE AFTER THE CROP, back to output. lanczos both ways: bilinear
+  //      would soften the display type enough to see at Anton 340.
+  const SS = Math.max(1, DRIFT_SUPERSAMPLE);
+  const w2 = Math.round(CANVAS.w * DRIFT_SCALE) * SS;
+  const h2 = Math.round(CANVAS.h * DRIFT_SCALE) * SS;
+  const cw = CANVAS.w * SS, ch = CANVAS.h * SS;
+  const dx = w2 - cw, dy = h2 - ch;
   const prog = `(t/${total.toFixed(3)})`;
+  // Direction alternates by slide so a long video does not feel mechanical.
   const xExpr = driftDir % 2 === 0 ? `${dx}*${prog}` : `${dx}*(1-${prog})`;
   const yExpr = driftDir % 4 < 2   ? `${dy}*${prog}` : `${dy}*(1-${prog})`;
-  parts.push(`[${last}]scale=${w2}:${h2},crop=${CANVAS.w}:${CANVAS.h}:x='${xExpr}':y='${yExpr}',setsar=1[out]`);
+  parts.push(
+    `[${last}]scale=${w2}:${h2}:flags=lanczos,` +
+    `crop=${cw}:${ch}:x='${xExpr}':y='${yExpr}',` +
+    `scale=${CANVAS.w}:${CANVAS.h}:flags=lanczos,setsar=1[out]`
+  );
 
   return { filter: parts.join("; "), totalDuration: total };
 }
@@ -97,8 +142,9 @@ export async function assembleSlide({ statePaths, hold, outputPath, driftDir = 0
   args.push(
     "-filter_complex", filter, "-map", "[out]",
     "-t", totalDuration.toFixed(3),
-    "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-    "-pix_fmt", "yuv420p", "-r", String(FPS), "-an",
+    "-c:v", ENC.codec, "-preset", ENC.preset, "-crf", ENC.crf,
+    "-profile:v", ENC.profile, "-level", ENC.level,
+    "-pix_fmt", ENC.pixFmt, "-r", String(FPS), "-g", String(FPS * 2), "-an",
     outputPath
   );
   await runFFmpeg(args, ff);
