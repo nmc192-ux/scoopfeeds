@@ -374,24 +374,29 @@ export function validateSpec(spec, {
   allowedSources = [],
   sourceText = "",
   allowAttributionCard = false,
+  // Sources already named ALOUD before the model's cards run — in practice the
+  // primary outlet, credited by the injected attribution card at position 1.
+  preCreditedSources = [],
   minSlides = MIN_SLIDES,
   maxSlides = MAX_SLIDES,
   maxDropRatio = MAX_DROP_RATIO,
   maxSourcingDrops = MAX_SOURCING_DROPS,
 } = {}) {
-  const errors  = [];
-  const dropped = [];
+  const errors   = [];
+  const dropped  = [];
+  const warnings = [];
+  const creditedSources = new Set(preCreditedSources.filter(Boolean).map(String));
 
   if (!spec || typeof spec !== "object") {
-    return { ok: false, spec: null, errors: ["spec is not an object"], dropped, stats: null };
+    return { ok: false, spec: null, errors: ["spec is not an object"], warnings, dropped, stats: null };
   }
   if (!isArr(spec.slides)) {
-    return { ok: false, spec: null, errors: ["spec.slides is not an array"], dropped, stats: null };
+    return { ok: false, spec: null, errors: ["spec.slides is not an array"], warnings, dropped, stats: null };
   }
   // A runaway is spec-level: trimming 60 slides to 34 would render a
   // different video than the model described, silently.
   if (spec.slides.length > maxSlides) {
-    return { ok: false, spec: null, errors: [`too many slides: ${spec.slides.length} > ${maxSlides}`], dropped, stats: null };
+    return { ok: false, spec: null, errors: [`too many slides: ${spec.slides.length} > ${maxSlides}`], warnings, dropped, stats: null };
   }
 
   // ── Beats enumeration — the plan is part of the contract ───────────────
@@ -447,18 +452,39 @@ export function validateSpec(spec, {
         dropped.push({ index: i, t: card.t, kind: "sourcing", reason: `untraceable source "${card.source}"` });
         continue;
       }
-      // §3b/3 — ATTRIBUTE IN NARRATION, not only on screen. The caption is
-      // what is spoken and burned in, so a figure delivered as a bare "X"
-      // presents someone else's reporting as the channel's own finding. The
-      // credit has to be IN the sentence: "The Guardian reports X", never "X".
-      // Checked against the card's own declared source, so it cannot be
-      // satisfied by naming some other outlet.
-      if (!captionCreditsSource(card.caption, card.source)) {
-        dropped.push({
-          index: i, t: card.t, kind: "sourcing",
-          reason: `caption does not credit "${card.source}" in narration (§3b/3)`,
-        });
-        continue;
+      // §3b/3 AS AMENDED (2026-08-02) — ONE verbal source mention per video,
+      // not one per figure card. The on-screen SOURCE: credit stays on every
+      // figure card; only the SPOKEN redundancy is removed. Hearing "Reuters
+      // reports" four times in ninety seconds reads as a disclaimer, not as
+      // attribution.
+      //
+      // SOURCE-KEYED, not count-keyed. The rule is "credit a source the first
+      // time it is used, and again whenever the source CHANGES" — which is
+      // already correct for a future multi-source video, where a second outlet
+      // genuinely needs its own mention. A counter would silently do the wrong
+      // thing there.
+      //
+      // The attribution card is injected before any figure card and carries
+      // the primary outlet's credit, so callers pass that outlet in
+      // `preCreditedSources` and the model's figure captions correctly carry
+      // none.
+      const already = [...creditedSources].some(c => sourceMatches(card.source, [c]));
+      if (!already) {
+        if (!captionCreditsSource(card.caption, card.source)) {
+          dropped.push({
+            index: i, t: card.t, kind: "sourcing",
+            reason: `first use of "${card.source}" carries no verbal credit (§3b/3)`,
+          });
+          continue;
+        }
+        creditedSources.add(String(card.source));
+      } else if (captionCreditsSource(card.caption, card.source)) {
+        // Style, not trust: the figure is correctly sourced on screen and the
+        // outlet was already named aloud. Repeating it is verbose, not wrong.
+        warnings.push(
+          `slides[${i}] (${card.t}): caption re-credits "${card.source}", already named aloud — ` +
+          `one verbal mention per source (§3b/3)`
+        );
       }
       if (sourceText) {
         const claims = card.t === "stat" ? [card.value] : card.bars.map(b => b[1]);
@@ -574,7 +600,7 @@ export function validateSpec(spec, {
     );
   }
 
-  if (errors.length) return { ok: false, spec: null, errors, dropped, stats: null };
+  if (errors.length) return { ok: false, spec: null, errors, warnings, dropped, stats: null };
 
   const byType = {};
   for (const c of kept) byType[c.t] = (byType[c.t] || 0) + 1;
@@ -583,6 +609,7 @@ export function validateSpec(spec, {
     ok: true,
     spec: { ...spec, slides: kept },
     errors: [],
+    warnings,
     dropped,
     stats: {
       slides: kept.length,
@@ -827,6 +854,10 @@ export function buildAttributionCard(article, { eyebrow = "REPORTING BY", note =
     headline: headline.length > 140 ? headline.slice(0, 137) + "…" : headline,
     ...(date ? { date } : {}),
     ...(note ? { note } : {}),
-    caption: `This report is based on ${outlet}'s reporting${date ? `, published ${date}` : ""}.`,
+    // THE video's single verbal source mention (§3b/3 as amended 2026-08-02).
+    // Phrased as a broadcast credit, not as a legal disclosure: "Reported by
+    // Reuters" is what a presenter says; "This report is based on Reuters'
+    // reporting" is what a contract says, and it reads as hedging aloud.
+    caption: `Reported by ${outlet}.`,
   };
 }

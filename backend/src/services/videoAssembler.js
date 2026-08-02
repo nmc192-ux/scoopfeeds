@@ -112,22 +112,25 @@ export const CAPTION = Object.freeze({
   // margin. Nothing a card draws reaches here — the band exists for exactly
   // this and for YouTube's auto-hiding controls.
   bottomY: CANVAS.h - DRIFT_SAFE_Y - 18,
-  maxCharsPerLine: 78,
+  // Measured, not guessed. The box padding is 14px a side, so the text itself
+  // has to fit inside the content measure less that padding.
+  maxWidth: CANVAS.w - 2 * (MARGIN_X + 60),
   maxLines: 2,
 });
 
-/** Greedy wrap. Returns lines; the caller decides what to do about overflow. */
-export function wrapCaption(text, maxChars = CAPTION.maxCharsPerLine) {
-  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
-  const lines = [];
-  let cur = "";
-  for (const w of words) {
-    if (!cur) { cur = w; continue; }
-    if ((cur + " " + w).length <= maxChars) cur += " " + w;
-    else { lines.push(cur); cur = w; }
-  }
-  if (cur) lines.push(cur);
-  return lines;
+/**
+ * Wrap a caption by MEASURED width, not by a character estimate.
+ *
+ * The character predictor was conservative: of four slides it flagged as
+ * three-line, two rendered as two. Tightening captions against a wrong
+ * predictor would have shortened narration for nothing, so the wrap now goes
+ * through the real font at the real size (renderCore.wrapToWidth), with a
+ * calibrated correction for satori-vs-drawtext advance.
+ */
+export async function wrapCaption(text, maxWidth = CAPTION.maxWidth) {
+  const { wrapToWidth } = await import("./renderCore.js");
+  if (!String(text || "").trim()) return [];
+  return wrapToWidth(text, { fontSize: CAPTION.fontSize, maxWidth });
 }
 
 /**
@@ -137,8 +140,8 @@ export function wrapCaption(text, maxChars = CAPTION.maxCharsPerLine) {
  * and `'` as syntax, and a caption is prose written by a model — it will
  * eventually contain every one of them. `textfile=` sidesteps the whole class.
  */
-export function buildCaptionFilter({ text, workDir, slideIndex, fontFile }) {
-  const lines = wrapCaption(text);
+export async function buildCaptionFilter({ text, workDir, slideIndex, fontFile }) {
+  const lines = await wrapCaption(text);
   if (lines.length > CAPTION.maxLines) {
     logger.warn(
       `🎬 slide ${slideIndex}: caption wraps to ${lines.length} lines (max ${CAPTION.maxLines}) — ` +
@@ -263,7 +266,7 @@ export async function assembleSlide({
   if (audioPath) args.push("-i", audioPath);
 
   const caption = (captionText && workDir && fontFile)
-    ? buildCaptionFilter({ text: captionText, workDir, slideIndex: driftDir, fontFile })
+    ? await buildCaptionFilter({ text: captionText, workDir, slideIndex: driftDir, fontFile })
     : null;
 
   const { filter, totalDuration } = buildSlideFilter({

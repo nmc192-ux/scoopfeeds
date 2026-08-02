@@ -459,7 +459,9 @@ HARD RULES — violating any of these makes the output unusable:
 
 3. NUMBERS NEED A REAL SOURCE. Every "stat" and every "bars" card MUST carry a "source" naming one of the outlets listed above, AND the figure itself must appear in the source material. If you cannot attribute a number to one of those outlets, DO NOT EMIT THE CARD. Do not guess an outlet. Do not write "reports" or "analysts" or the story's subject as the source. A dropped card costs nothing; an invented attribution is unrecoverable.
 
-   CREDIT IN THE CAPTION, NOT ONLY IN THE FIELD. The "source" field is metadata; the caption is what is spoken aloud and burned on screen. Any card carrying a figure must NAME THE OUTLET IN ITS CAPTION: "The Guardian reports that seventy percent of faults involve anchors" — never a bare "Seventy percent of faults involve anchors". A figure delivered without the credit presents someone else's reporting as ours. A card whose caption does not name its own source is discarded.
+   THE OUTLET IS CREDITED ALOUD ONCE, AND IT IS ALREADY DONE. A card near the start of the video names the outlet in its narration — you do not write that card, and you must not repeat its credit. So captions on your figure cards carry NO verbal attribution: write "Seventy percent of faults involve anchors", NOT "The Guardian reports that seventy percent of faults involve anchors". The "source" field still names the outlet on every figure card, and that credit is printed on screen; it is the spoken repetition that is unwanted. Hearing the same masthead four times in ninety seconds reads as a disclaimer, not as journalism.
+
+   THE ONE EXCEPTION: if a figure comes from a DIFFERENT outlet than the rest of the video, that caption must name it, because a source the viewer has not heard credited is a source that has not been credited.
 
    THE SOURCE MATERIAL IS ATTRIBUTED. It is divided into labelled sections — one "PRIMARY SOURCE — <outlet>" block and, when other outlets covered the same story, one or more "ADDITIONAL COVERAGE — <outlet>" blocks. Take a figure from whichever section actually contains it, and name THAT outlet in the "source" field. Do not attribute a figure to the lead publisher because it is listed first. Where two outlets report the same figure, either is correct.
 
@@ -625,8 +627,15 @@ Re-read the CARD GRAMMAR above and match the field shapes exactly. Emit the FULL
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
- * Article → validated slide spec. Returns null on ANY failure; the caller
- * skips the article. Never throws.
+ * Article → validated slide spec.
+ *
+ * RETURNS A RESULT OBJECT, NOT null-or-spec. A rejected attempt still SPENT —
+ * one Gemini call, two when the regeneration retry fires — and returning null
+ * threw that number away, so a published video could not be billed including
+ * the articles discarded before it. `{ ok, spec, costUsd, reason, attempts }`
+ * makes the loop able to say "this video cost $X across 4 attempts".
+ *
+ * Never throws.
  *
  * @param {object} article
  * @param {object} opts
@@ -659,8 +668,9 @@ export async function writeVideoSpec(article, {
   bodyText = null,
   fetchFullText = true,
 } = {}) {
-  if (!isVideoSpecEnabled()) return null;
-  if (!article?.title) return null;
+  const reject = (reason, costUsd = 0, attempts = 0) => ({ ok: false, spec: null, costUsd, reason, attempts });
+  if (!isVideoSpecEnabled()) return reject("VIDEO_SPEC_ENABLED not set");
+  if (!article?.title) return reject("article has no title");
 
   const started = Date.now();
   try {
@@ -697,7 +707,9 @@ export async function writeVideoSpec(article, {
       result = await callModel(prompt, {
         articleId: article.id, tag: "videoSpec", model: SPEC_MODEL, maxOutputTokens: MAX_OUTPUT_TOKENS,
       });
-      if (!result) return null;            // transport/JSON failure already logged
+      // A transport/JSON failure is already logged; its spend is unknowable
+      // (the call never returned usage), which is itself worth reporting.
+      if (!result) return reject("model call failed (see the rejection line)", spentUsd, attempts);
       spentUsd += result.cost;
 
       v = validateSpec(result.parsed, validateOpts);
@@ -730,7 +742,7 @@ export async function writeVideoSpec(article, {
         len: JSON.stringify(result.parsed).length,
         finishReason: result.finishReason, usage: result.usage,
       });
-      return null;
+      return reject(v.errors.slice(0, 3).join(" | "), spentUsd, attempts);
     }
 
     const { usage, finishReason } = result;
@@ -787,10 +799,10 @@ export async function writeVideoSpec(article, {
       `🎬 videoSpec [${article.id}] ${spec.meta.slides} slides / ${spec.meta.captionWords}w ` +
       `${spec.meta.tokensOut}tok $${spec.meta.costUsd} ${spec.meta.ms}ms`
     );
-    return spec;
+    return { ok: true, spec, costUsd: spec.meta.costUsd, reason: null, attempts };
   } catch (err) {
     logger.warn(`🎬 videoSpec [${article?.id}]: unexpected error`, { error: err.message });
-    return null;
+    return reject(`unexpected error: ${err.message}`, 0, 0);
   }
 }
 

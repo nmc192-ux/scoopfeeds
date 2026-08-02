@@ -333,19 +333,67 @@ test("exactly 6 surviving cards is enough", () => {
 
 // ─── §3b/3 — credit in the narration, not only in the field ─────────────────
 
-test("a figure card whose caption does not name its source is DROPPED", () => {
+test("the FIRST use of a source must be credited aloud — else DROPPED", () => {
   // The field says Reuters; the spoken line presents the figure as ours.
   const v = validateSpec(spec([statCard({ caption: "Seventy percent of faults involve anchors." })]), opts);
   assert.equal(v.ok, true, v.errors.join("; "));
   assert.equal(v.dropped.length, 1);
   assert.equal(v.dropped[0].kind, "sourcing");
-  assert.match(v.dropped[0].reason, /caption does not credit "Reuters" in narration/);
+  assert.match(v.dropped[0].reason, /first use of "Reuters" carries no verbal credit/);
 });
 
 test("crediting a DIFFERENT outlet does not satisfy the rule", () => {
   const v = validateSpec(spec([statCard({ source: "Reuters", caption: "The BBC reports seventy percent of faults involve anchors." })]), opts);
   assert.equal(v.dropped.length, 1, "a caption must credit its own card's source");
-  assert.match(v.dropped[0].reason, /does not credit "Reuters"/);
+  assert.match(v.dropped[0].reason, /first use of "Reuters" carries no verbal credit/);
+});
+
+test("a PRE-CREDITED source needs no verbal credit — §3b/3 as amended", () => {
+  // The attribution card is injected ahead of the model's cards and names the
+  // outlet aloud once. Figure captions then carry none: hearing the same
+  // masthead four times in ninety seconds reads as a disclaimer.
+  const v = validateSpec(
+    spec([statCard({ caption: "Seventy percent of faults involve anchors." })]),
+    { ...opts, preCreditedSources: ["Reuters"] });
+  assert.equal(v.ok, true, v.errors.join("; "));
+  assert.equal(v.dropped.filter(d => d.kind === "sourcing").length, 0,
+    "a pre-credited source must not require a second spoken mention");
+});
+
+test("re-crediting a pre-credited source is a WARNING, not a drop", () => {
+  const v = validateSpec(
+    spec([statCard({ caption: "Reuters reports that seventy percent of faults involve anchors." })]),
+    { ...opts, preCreditedSources: ["Reuters"] });
+  assert.equal(v.ok, true, v.errors.join("; "));
+  assert.equal(v.dropped.filter(d => d.kind === "sourcing").length, 0, "verbosity is not a trust failure");
+  assert.match(v.warnings.join(" "), /re-credits "Reuters", already named aloud/);
+});
+
+test("the rule is SOURCE-KEYED — a second, different outlet must be credited", () => {
+  // The future multi-source path: a figure from an outlet the viewer has not
+  // heard named is a figure that has not been credited, however many times
+  // some OTHER outlet was mentioned.
+  const v = validateSpec(
+    spec([barsCard({ source: "BBC News", caption: "Anchors outweigh natural causes." })]),
+    { ...opts, preCreditedSources: ["Reuters"] });
+  assert.equal(v.dropped.filter(d => d.kind === "sourcing").length, 1,
+    "a source not yet named aloud still needs its own credit");
+  assert.match(v.dropped[0].reason, /first use of "BBC News" carries no verbal credit/);
+});
+
+test("crediting the second outlet satisfies it, and does not re-arm the first", () => {
+  const v = validateSpec(
+    spec([barsCard({ source: "BBC News", caption: "The BBC reports anchors outweigh natural causes." })]),
+    { ...opts, preCreditedSources: ["Reuters"] });
+  assert.equal(v.ok, true, v.errors.join("; "));
+  assert.equal(v.dropped.filter(d => d.kind === "sourcing").length, 0);
+});
+
+test("the attribution card carries the video's one verbal credit, phrased as broadcast", () => {
+  const card = buildAttributionCard({ source_name: "Yahoo Finance", title: "A headline", published_at: Date.UTC(2026, 7, 2) });
+  assert.equal(card.caption, "Reported by Yahoo Finance.");
+  assert.ok(!/based on|reporting\./.test(card.caption),
+    "a legal-sounding disclosure reads as hedging when spoken aloud");
 });
 
 test("newsreader shortening is accepted — 'BBC' credits 'BBC News'", () => {

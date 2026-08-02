@@ -343,13 +343,25 @@ test("captions burn AFTER the drift, so they never move under the eye", async ()
     "and must come after the downscale so it is not resampled");
 });
 
-test("caption wrapping keeps lines inside the measure", async () => {
+test("caption wrapping is MEASURED, not predicted from character count", async () => {
   const { wrapCaption, CAPTION } = await import("./videoAssembler.js");
+  const { measureTextWidth } = await import("./renderCore.js");
   const long = "The Guardian reports that seventy percent of recorded subsea cable faults are caused by ships dragging their anchors across shallow coastal approaches.";
-  for (const line of wrapCaption(long)) {
-    assert.ok(line.length <= CAPTION.maxCharsPerLine, `line of ${line.length} chars: "${line}"`);
+  const lines = await wrapCaption(long);
+  for (const line of lines) {
+    const w = await measureTextWidth(line, { fontSize: CAPTION.fontSize });
+    assert.ok(w <= CAPTION.maxWidth, `line measures ${w}px, over the ${CAPTION.maxWidth}px measure: "${line}"`);
   }
-  assert.equal(wrapCaption("").length, 0);
+  assert.equal((await wrapCaption("")).length, 0);
+});
+
+test("the measurement is calibrated against drawtext, not assumed equal to it", async () => {
+  const { DRAWTEXT_WIDTH_RATIO } = await import("./renderCore.js");
+  // satori measured 2.0-2.7% NARROWER than drawtext across three real captions.
+  // Under-measuring wraps too late and overflows, so the correction must be
+  // upward and must cover the observed spread.
+  assert.ok(DRAWTEXT_WIDTH_RATIO > 1.027, `${DRAWTEXT_WIDTH_RATIO} does not cover the measured 2.7% bias`);
+  assert.ok(DRAWTEXT_WIDTH_RATIO < 1.15, "an over-correction wastes line width for nothing");
 });
 
 test("the caption band sits inside the drift-safe area", async () => {
@@ -365,7 +377,7 @@ test("one drawtext PER LINE — a single multi-line one left-aligns the rest", a
   const { mkdtempSync } = await import("node:fs");
   const os2 = await import("node:os");
   const dir = mkdtempSync(path.join(os2.tmpdir(), "capfilter-"));
-  const f = buildCaptionFilter({
+  const f = await buildCaptionFilter({
     text: "The Guardian reports that seventy percent of recorded subsea cable faults are caused by ships dragging anchors.",
     workDir: dir, slideIndex: 0, fontFile: "/tmp/Inter.otf",
   });

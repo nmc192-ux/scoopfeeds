@@ -96,4 +96,96 @@ export function sourceFingerprint(fileUrls) {
   return h.digest("hex").slice(0, 12);
 }
 
-export const _internals = { FONT_DIR };
+// ─── Text measurement ───────────────────────────────────────────────────────
+//
+// MEASURED, NOT PREDICTED. Caption wrapping used a characters-per-line
+// estimate, and it was conservative: of four slides it flagged as three-line,
+// two rendered as two. Tightening captions against a wrong predictor would
+// have shortened narration for nothing.
+//
+// The measurement renders the text with the SAME font file at the SAME pixel
+// size the caption is drawn at, then finds the horizontal extent of the ink.
+// Word widths are cached and summed — text advance is additive across a space,
+// and any kerning inside a word is already contained in that word's own
+// measurement — so a caption costs one render per NEW word, not one per
+// prefix, and repeated words across a video are free.
+const _wordWidth = new Map();
+
+// CALIBRATION, measured 2026-08-02. satori and ffmpeg drawtext use the same
+// font file but disagree slightly on advance: across three real captions
+// satori came out 2.0%, 2.5% and 2.7% NARROWER than what drawtext actually
+// rendered. The bias is systematic and in the dangerous direction — an
+// under-measure wraps too late and overflows the line — so measurements are
+// scaled up by a margin that covers the observed spread.
+// Re-derive by rendering a caption both ways and comparing ink extents.
+export const DRAWTEXT_WIDTH_RATIO = 1.04;
+
+async function inkWidth(text, fontSize, fonts) {
+  // Sized for ONE word, not a line: measurement is per-word and summed, so a
+  // 4096-wide canvas was ~20x the pixels needed and dominated the cost.
+  const W = 1024, H = Math.ceil(fontSize * 2.0);
+  const tree = {
+    type: "div",
+    props: {
+      style: { display: "flex", width: W, height: H, background: "#000000", alignItems: "center" },
+      children: [{
+        type: "div",
+        props: {
+          style: { display: "flex", fontFamily: "Inter", fontWeight: 600, fontSize, color: "#ffffff", whiteSpace: "pre" },
+          children: [{ type: "span", props: { children: text } }],
+        },
+      }],
+    },
+  };
+  const svg = await satori(tree, { width: W, height: H, fonts: fonts || satoriFonts() });
+  // .pixels is raw RGBA — no PNG encode/decode round-trip just to find ink.
+  const raw = new Resvg(svg, { background: "#000000", fitTo: { mode: "original" } }).render().pixels;
+  let maxX = -1;
+  for (let y = 0; y < H; y++) {
+    const row = y * W * 4;
+    for (let x = W - 1; x > maxX; x--) {
+      if (raw[row + x * 4] > 24) { if (x > maxX) maxX = x; break; }
+    }
+  }
+  return maxX + 1;
+}
+
+/**
+ * Width of `text` in pixels at `fontSize`, measured through the real font.
+ * Space width is measured once and reused.
+ */
+export async function measureTextWidth(text, { fontSize }) {
+  const words = String(text).trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return 0;
+  const spaceKey = `__space__@${fontSize}`;
+  if (!_wordWidth.has(spaceKey)) {
+    const [a, ab] = [await inkWidth("nn", fontSize), await inkWidth("n n", fontSize)];
+    _wordWidth.set(spaceKey, Math.max(1, ab - a));
+  }
+  const space = _wordWidth.get(spaceKey);
+  let total = 0;
+  for (const w of words) {
+    const k = `${w}@${fontSize}`;
+    if (!_wordWidth.has(k)) _wordWidth.set(k, await inkWidth(w, fontSize));
+    total += _wordWidth.get(k);
+  }
+  return Math.round((total + space * (words.length - 1)) * DRAWTEXT_WIDTH_RATIO);
+}
+
+/** Greedy wrap driven by MEASURED width rather than a character estimate. */
+export async function wrapToWidth(text, { fontSize, maxWidth }) {
+  const words = String(text).trim().split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = [];
+  for (const w of words) {
+    const trial = [...cur, w];
+    if (cur.length && await measureTextWidth(trial.join(" "), { fontSize }) > maxWidth) {
+      lines.push(cur.join(" "));
+      cur = [w];
+    } else cur = trial;
+  }
+  if (cur.length) lines.push(cur.join(" "));
+  return lines;
+}
+
+export const _internals = { FONT_DIR, inkWidth, _wordWidth };
