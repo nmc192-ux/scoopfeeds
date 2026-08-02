@@ -7,7 +7,8 @@ export const BULLMQ_PREFIX = String(process.env.BULLMQ_PREFIX || "scoop").trim()
 
 export const QUEUE_NAMES = {
   ingestion: "ingestion",
-  video: "video",
+  video: "video",              // YouTube INGESTION (fetchAllYouTube) — not rendering
+  videoRender: "video_render", // the autopost loop: spec → render → upload
   enrichment: "enrichment",
   analysis: "analysis",
   realityIndex: "reality-index",
@@ -21,12 +22,14 @@ export const JOB_NAMES = {
   newsIngestAll: "news.ingest.all",
   videosIngestAll: "videos.ingest.all",
   articlesEnrichBatch: "articles.enrich.batch",
+  videoRenderCycle: "video.render.cycle",
 };
 
 export const JOB_IDS = {
   [JOB_NAMES.newsIngestAll]: "news-ingest-all-singleton",
   [JOB_NAMES.videosIngestAll]: "videos-ingest-all-singleton",
   [JOB_NAMES.articlesEnrichBatch]: "articles-enrich-batch-singleton",
+  [JOB_NAMES.videoRenderCycle]: "video-render-cycle-singleton",
 };
 
 export const defaultJobOptions = {
@@ -43,4 +46,7 @@ export const queueConcurrency = {
   ingestion: parseIntEnv("QUEUE_CONCURRENCY_INGESTION", 1),
   video: parseIntEnv("QUEUE_CONCURRENCY_VIDEO", 1),
   enrichment: parseIntEnv("QUEUE_CONCURRENCY_ENRICHMENT", 2),
+  // STRICTLY 1. A render is minutes of ffmpeg and the daily cap is a global
+  // count — two concurrent cycles would both read "under cap" and both publish.
+  videoRender: parseIntEnv("QUEUE_CONCURRENCY_VIDEO_RENDER", 1),
 };

@@ -2248,3 +2248,148 @@ export function rejectStalePending(cutoffMs) {
     WHERE status = 'pending' AND generated_at < ?
   `).run(cutoffMs).changes;
 }
+
+// ─── video_posts (§6.1) ──────────────────────────────────────────────────────
+//
+// One row per article, permanently. See migration 022 for why these are never
+// pruned and carry no FK: the youtube_id is the lasting record that a story
+// was published, and a sweepable dedupe key lets the same story go out twice.
+
+/** A pending row this old with no youtube_id is a dead attempt, not an in-flight one. */
+export const VIDEO_PENDING_HANG_MS =
+  Number.parseInt(process.env.VIDEO_PENDING_HANG_MS || "", 10) || 45 * 60 * 1000;
+
+export function getVideoPost(articleId) {
+  return getDb().prepare("SELECT * FROM video_posts WHERE article_id = ?").get(articleId) || null;
+}
+
+/**
+ * Claim an article for upload BEFORE the upload happens.
+ *
+ * Write-before-upload is deliberate: if the row were only written on success,
+ * a crash between upload and insert would leave a published video with no row
+ * and the next cycle would re-upload the same article — and UNIQUE(article_id)
+ * cannot help with a row that was never written.
+ *
+ * Increments `attempts` so the two-failure retire rule can count without a
+ * second row (UNIQUE(article_id) forbids one).
+ */
+export function claimVideoPost({ articleId, eventId = null, sourceName = null, title = null }) {
+  const now = Date.now();
+  getDb().prepare(`
+    INSERT INTO video_posts (article_id, event_id, source_name, title, status, attempts, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'pending', 1, ?, ?)
+    ON CONFLICT(article_id) DO UPDATE SET
+      status     = 'pending',
+      attempts   = attempts + 1,
+      event_id   = COALESCE(excluded.event_id, video_posts.event_id),
+      error      = NULL,
+      updated_at = excluded.updated_at
+  `).run(articleId, eventId, sourceName, title, now, now);
+  return getVideoPost(articleId);
+}
+
+export function markVideoPublished(articleId, { youtubeId, privacyStatus, titleVariants = null, imageTier = null, imageRef = null }) {
+  getDb().prepare(`
+    UPDATE video_posts SET
+      status = 'published', youtube_id = ?, privacy_status = ?, title_variants = ?,
+      image_tier = ?, image_ref = ?, error = NULL, published_at = ?, updated_at = ?
+    WHERE article_id = ?
+  `).run(youtubeId, privacyStatus, titleVariants ? JSON.stringify(titleVariants) : null,
+         imageTier, imageRef, Date.now(), Date.now(), articleId);
+  return getVideoPost(articleId);
+}
+
+export function markVideoFailed(articleId, error) {
+  getDb().prepare(`
+    UPDATE video_posts SET status = 'failed', error = ?, updated_at = ? WHERE article_id = ?
+  `).run(String(error || "").slice(0, 500), Date.now(), articleId);
+  return getVideoPost(articleId);
+}
+
+/** Published in a ROLLING window — a calendar day resets at midnight and would let a quiet day burst. */
+export function countVideosPublishedSince(sinceMs) {
+  return getDb().prepare(
+    "SELECT COUNT(*) AS n FROM video_posts WHERE status = 'published' AND published_at > ?"
+  ).get(sinceMs)?.n || 0;
+}
+
+export function lastVideoPublishedAt() {
+  return getDb().prepare(
+    "SELECT MAX(published_at) AS at FROM video_posts WHERE status = 'published'"
+  ).get()?.at || 0;
+}
+
+export function publisherPublishedSince(sourceName, sinceMs) {
+  if (!sourceName) return 0;
+  return getDb().prepare(
+    "SELECT COUNT(*) AS n FROM video_posts WHERE status='published' AND source_name = ? AND published_at > ?"
+  ).get(sourceName, sinceMs)?.n || 0;
+}
+
+export function eventPublishedSince(eventId, sinceMs) {
+  if (!eventId) return 0;
+  return getDb().prepare(
+    "SELECT COUNT(*) AS n FROM video_posts WHERE status='published' AND event_id = ? AND published_at > ?"
+  ).get(eventId, sinceMs)?.n || 0;
+}
+
+/** Titles published in the window — the similarity fallback for articles with no event linkage. */
+export function recentPublishedTitles(sinceMs) {
+  return getDb().prepare(
+    "SELECT title FROM video_posts WHERE status='published' AND published_at > ? AND title IS NOT NULL"
+  ).all(sinceMs).map(r => r.title);
+}
+
+/**
+ * Fresh articles with no video yet — a SIBLING of findFreshUnpostedArticles,
+ * never a parameterisation of it. That one joins social_posts on
+ * (article_id, platform) and is live on four platforms; widening it to serve a
+ * second table would put the video loop's bugs inside the social path.
+ *
+ * The retire rule, mirroring 021: an article is out once PUBLISHED, or once it
+ * has FAILED TWICE. A pending row older than the hang threshold counts as a
+ * failed attempt — the process died mid-upload — so a crash never retires an
+ * article permanently on the first try.
+ */
+export function findFreshUnvideoedArticles({
+  minCredibility = 7, withinMs = 12 * 60 * 60 * 1000, limit = 40, now = Date.now(),
+} = {}) {
+  const cutoff = now - withinMs;
+  const staleBefore = now - VIDEO_PENDING_HANG_MS;
+  return getDb().prepare(`
+    SELECT a.id, a.title, a.description, a.content, a.category, a.source_name,
+           a.published_at, a.credibility, a.url, a.tags
+    FROM articles a
+    LEFT JOIN video_posts v ON v.article_id = a.id
+    WHERE a.published_at > ?
+      AND a.credibility >= ?
+      AND a.is_duplicate = 0
+      AND (
+        v.article_id IS NULL
+        OR (
+          v.status <> 'published'
+          -- attempts counts every claim; a pending row still inside the hang
+          -- window is IN FLIGHT and must not be re-selected concurrently.
+          AND v.attempts < 2
+          AND NOT (v.status = 'pending' AND v.updated_at > ?)
+        )
+      )
+    ORDER BY a.credibility DESC, a.published_at DESC
+    LIMIT ?
+  `).all(cutoff, minCredibility, staleBefore, limit);
+}
+
+/** The last N published videos, newest first — backs /scoop-ops/video/unlist-recent. */
+export function recentPublishedVideos(n = 5) {
+  return getDb().prepare(`
+    SELECT * FROM video_posts
+    WHERE status = 'published' AND youtube_id IS NOT NULL
+    ORDER BY published_at DESC LIMIT ?
+  `).all(n);
+}
+
+export function markVideoPrivacy(articleId, privacyStatus) {
+  getDb().prepare("UPDATE video_posts SET privacy_status = ?, updated_at = ? WHERE article_id = ?")
+    .run(privacyStatus, Date.now(), articleId);
+}

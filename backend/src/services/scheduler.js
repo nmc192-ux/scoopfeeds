@@ -162,6 +162,17 @@ export function startScheduler() {
   //
   // Set ENABLE_INPROCESS_VIDEO_CRON=true to re-enable these on a host that
   // allows spawn() (any VPS, Docker, local dev, etc.).
+  // ─── Video autopost (§6.1) — the scheduler ENQUEUES, the worker renders ──
+  // Hourly, not four fixed slots. The two gates inside the cycle (rolling-24h
+  // cap, 4.8h spacing) decide whether this tick actually publishes, so a slot
+  // missed at 14:00 is simply retried at 15:00 rather than lost for the day.
+  // QUEUE_NAMES.videoRender, never QUEUE_NAMES.video — that one is YouTube
+  // ingestion and a job on it would run fetchAllYouTube instead.
+  scheduleCron("7 * * * *", () => runDispatch(
+    () => enqueueSingletonJob(QUEUE_NAMES.videoRender, JOB_NAMES.videoRenderCycle, {}),
+    "video autopost"));
+  logger.info(`🎬 Video autopost cron registered (hourly; gates decide) — enabled=${process.env.VIDEO_AUTOPOST_ENABLED === "1"}`);
+
   const inProcessVideoEnabled = String(process.env.ENABLE_INPROCESS_VIDEO_CRON || "").toLowerCase() === "true";
   if (inProcessVideoEnabled) {
     scheduleCron("0 2 * * *",   () => runVideoGenCycle({ batchSize: 3 }));

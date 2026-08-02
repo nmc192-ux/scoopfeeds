@@ -25,9 +25,10 @@ import * as migration018 from "./migrations/018_event_facets.js";
 import * as migration019 from "./migrations/019_facet_dual_source.js";
 import * as migration020 from "./migrations/020_event_carousel.js";
 import * as migration021 from "./migrations/021_event_post_retries.js";
+import * as migration022 from "./migrations/022_video_posts.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021];
+const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021, migration022];
 
 function ensureSchemaMigrationsTable(db) {
   db.exec(`

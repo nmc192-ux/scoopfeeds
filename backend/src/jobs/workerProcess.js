@@ -9,6 +9,7 @@ import {
 import { getDbStatus } from "../models/database.js";
 import { logger } from "../services/logger.js";
 import { runEnrichCycle, runIngestionCycle, runVideoCycle } from "../services/scheduler.js";
+import { runVideoRenderCycle } from "../services/videoAutopost.js";
 import { withJobRunLogging } from "./jobLogger.js";
 import { queueConcurrency, JOB_NAMES, QUEUE_NAMES, BULLMQ_PREFIX } from "./jobOptions.js";
 import { assertRedisAvailable, assertRedisStartup, closeRedisConnections, createRedisConnection } from "./redis.js";
@@ -78,6 +79,14 @@ try {
       queueConcurrency.video,
       async () => runVideoCycle()
     );
+    // The autopost loop renders HERE, in the worker — ffmpeg and satori both
+    // need a process that can spawn, and the scheduler only enqueues.
+    registerWorker(
+      QUEUE_NAMES.videoRender,
+      JOB_NAMES.videoRenderCycle,
+      queueConcurrency.videoRender,
+      async (job) => runVideoRenderCycle(job.data || {})
+    );
     registerWorker(
       QUEUE_NAMES.enrichment,
       JOB_NAMES.articlesEnrichBatch,
@@ -86,7 +95,7 @@ try {
     );
 
     logger.info(`[${PROCESS_ROLE}] ready`, {
-      queues: [QUEUE_NAMES.ingestion, QUEUE_NAMES.video, QUEUE_NAMES.enrichment],
+      queues: [QUEUE_NAMES.ingestion, QUEUE_NAMES.video, QUEUE_NAMES.videoRender, QUEUE_NAMES.enrichment],
       concurrency: queueConcurrency,
     });
   }

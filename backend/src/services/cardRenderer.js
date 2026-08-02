@@ -7,8 +7,7 @@
 // hazard. Clean headline + category badge + Scoop mark reads well on every
 // platform and sidesteps the licensing problem.
 
-import satori from "satori";
-import { Resvg } from "@resvg/resvg-js";
+import { satoriFonts, fontsReady, renderTreeToPng } from "./renderCore.js";
 import { createHash } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "fs";
 import path from "path";
@@ -242,29 +241,17 @@ const CARDS_DIR = process.env.SCOOP_PERSISTENT_DATA_DIR
   : path.join(BACKEND_ROOT, "data", "cards");
 if (!existsSync(CARDS_DIR)) mkdirSync(CARDS_DIR, { recursive: true });
 
-const FONT_DIR = path.join(BACKEND_ROOT, "assets", "fonts");
-const FONT_SEMIBOLD = readFontOnce(path.join(FONT_DIR, "Inter-SemiBold.otf"));
-const FONT_BOLD     = readFontOnce(path.join(FONT_DIR, "Inter-Bold.otf"));
-// Heavy condensed grotesk for the ScoopFeeds carousel headlines (SIL OFL,
-// bundled). Only REQUIRED when CARD_STYLE=scoopfeeds is active — see
-// isCardRendererReady — so a missing Anton never disables the legacy cards.
-const FONT_ANTON    = readFontOnce(path.join(FONT_DIR, "Anton-Regular.ttf"));
-
-function readFontOnce(p) {
-  try { return readFileSync(p); }
-  catch (e) {
-    logger.warn(`card renderer: font missing at ${p} — card rendering disabled`);
-    return null;
-  }
-}
+// Fonts now come from renderCore, which the landscape video renderer shares —
+// same buffers, loaded once, so the two paths cannot drift onto different
+// faces. Anton is a heavy condensed grotesk for ScoopFeeds headlines (SIL OFL,
+// bundled), REQUIRED only when CARD_STYLE=scoopfeeds is active (see
+// isCardRendererReady), so a missing Anton never disables the legacy cards.
 
 export function isCardRendererReady() {
-  if (!(FONT_SEMIBOLD && FONT_BOLD)) return false;
   // Anton is a hard dependency ONLY under the ScoopFeeds style — flipping
   // CARD_STYLE=scoopfeeds without the bundled font correctly disables
   // rendering (routes 503 + log) rather than shipping fontless headlines.
-  if (activeCardStyle() === CARD_STYLE_SCOOP && !FONT_ANTON) return false;
-  return true;
+  return fontsReady({ requireAnton: activeCardStyle() === CARD_STYLE_SCOOP });
 }
 
 // Preset dimensions chosen to match the platform's native aspect ratios so we
@@ -1848,19 +1835,14 @@ function buildTree(article, preset, opts = {}) {
 async function renderPng(article, preset, opts = {}) {
   const dims = resolveDims(preset);
   const scoop = activeCardStyle() === CARD_STYLE_SCOOP;
-  const fonts = [
-    { name: "Inter", data: FONT_SEMIBOLD, weight: 600, style: "normal" },
-    { name: "Inter", data: FONT_BOLD,     weight: 700, style: "normal" },
-    // Anton is registered whenever available; only the scoop headline nodes
-    // reference it, so its presence is harmless for legacy renders.
-    ...(FONT_ANTON ? [{ name: "Anton", data: FONT_ANTON, weight: 400, style: "normal" }] : []),
-  ];
+  // Anton is registered whenever available; only the scoop headline nodes
+  // reference it, so its presence is harmless for legacy renders.
+  const fonts = satoriFonts();
   const resvgBg = scoop ? SCOOP.bg : "#0B0B0D";
 
   const renderOnce = async (treeOpts) => {
     const tree = buildTree(article, preset, treeOpts);
-    const svg = await satori(tree, { width: dims.width, height: dims.height, fonts });
-    return new Resvg(svg, { background: resvgBg, fitTo: { mode: "original" } }).render().asPng();
+    return renderTreeToPng(tree, { width: dims.width, height: dims.height, background: resvgBg, fonts });
   };
 
   try {
@@ -2030,13 +2012,8 @@ export async function ensureEventCard(ctx, preset) {
     return { path: path_, buffer: readFileSync(path_), contentType: "image/png", hit: true, withPhoto: false };
   }
 
-  const fonts = [
-    { name: "Inter", data: FONT_SEMIBOLD, weight: 600, style: "normal" },
-    { name: "Inter", data: FONT_BOLD,     weight: 700, style: "normal" },
-    ...(FONT_ANTON ? [{ name: "Anton", data: FONT_ANTON, weight: 400, style: "normal" }] : []),
-  ];
-  const svg = await satori(buildEventTree(ctx, slide), { width: dims.width, height: dims.height, fonts });
-  const buffer = new Resvg(svg, { background: SCOOP.bg, fitTo: { mode: "original" } }).render().asPng();
+  const fonts = satoriFonts();
+  const buffer = await renderTreeToPng(buildEventTree(ctx, slide), { width: dims.width, height: dims.height, background: SCOOP.bg, fonts });
   try { writeFileSync(path_, buffer); } catch (e) {
     logger.warn(`card renderer: failed to cache event card ${path_}: ${e.message}`);
   }

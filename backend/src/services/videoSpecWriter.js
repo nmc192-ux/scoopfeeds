@@ -1,0 +1,872 @@
+/**
+ * videoSpecWriter.js — the two generation calls behind the video spec contract.
+ *
+ * Call 1 (writeVideoSpec)  — article  → slide spec   (brief §3)
+ * Call 2 (writePackaging)  — spec     → packaging    (brief §5b)
+ *
+ * Schema, validation and the closed card set live in videoSpecSchema.js. This
+ * module owns the prompts and the model plumbing, nothing else. It does not
+ * render, select, or publish.
+ *
+ * WHY TWO CALLS. Brief §3 shows packaging and slides in ONE JSON object; §5b
+ * then says packaging is a separate call run AFTER the script, because
+ * packaging written in the same breath as the script inherits the script's
+ * register and comes out flat. §5b wins and gives its reason, so the schema
+ * describes one merged artifact while generation is two calls. Call 2 also
+ * gets to validate against a spec that already passed — a title cannot be
+ * checked for "asserts a figure the video never pays off" until the figures
+ * are settled.
+ *
+ * MODEL PLUMBING IS A DELIBERATE COPY, not shared code. llmQueue, igSummary
+ * and scriptWriter each carry their own pin + degrade block; 1ba73f0 chose
+ * per-service duplication explicitly ("no refactor onto llmQueue"). A fourth
+ * copy follows the house pattern rather than introducing a fifth shape. If
+ * that call is ever revisited, all four move together — not this one alone.
+ *
+ * §3 / §6.2 TENSION, resolved and flagged. §3 says an untraceable numeric card
+ * is DROPPED. §6.2 says an article with such a card is SKIPPED. Both are
+ * implemented and kept separate: validateSpec drops and reports `dropped[]`,
+ * and the Section 6 publish gate reads that array to decide. Collapsing them
+ * here would hard-code a publishing policy into a schema module.
+ *
+ * Required env:
+ *   VIDEO_SPEC_ENABLED=1        — master switch (default off, dark-ship posture)
+ *   GEMINI_API_KEY
+ *
+ * Optional env:
+ *   VIDEO_SPEC_MODEL            — SPEC call pin (default gemini-3.5-flash)
+ *   GEMINI_GENERATION_MODEL     — PACKAGING pin (default gemini-3.1-flash-lite)
+ *   VIDEO_SPEC_MAX_OUTPUT_TOKENS — output cap (default 8192, see below)
+ *   VIDEO_FULLTEXT_MAX_CHARS / VIDEO_FULLTEXT_TIMEOUT_MS — see videoFullText.js
+ */
+
+import axios from "axios";
+import { logger } from "./logger.js";
+import {
+  buildGeminiGenerationConfig,
+  isGeminiThinkingRejection,
+  markGeminiThinkingRejected,
+  isGeminiModelGone,
+  markGeminiModelGone,
+} from "../realityIndex/llmQueue.js";
+import {
+  MODEL_EMITTABLE, THUMBNAIL_ANGLES, MIN_SLIDES, MAX_SLIDES,
+  validateSpec, validatePackaging,
+} from "./videoSpecSchema.js";
+
+// TWO PINS, deliberately different tiers for two different jobs.
+//
+// SPEC_MODEL — gemini-3.5-flash, pinned for RELIABILITY, not for beat count.
+// Measured 2026-08-02 on identical articles and an identical prompt:
+//   flash-lite      0/3 successful specs · beats 5.0
+//   3.5-flash       2/3 · beats 5.5 · thoughts 0 · 5-8s
+//   3.1-pro-preview 2/3 · beats 6.5 · thoughts 4-6k billed as output · 38-55s,
+//                   and one article lost outright to truncation
+// Tier is NOT the variable behind flat beat counts — 5 → 5.5 → 6.5 across three
+// tiers is noise next to the 12-20 the rubric asks for. What 3.5-flash buys is
+// a spec that comes back at all, with no thinking tokens and inside a sane
+// latency budget. Pro is rejected on cost and latency, not on quality.
+//
+// This is a SERVICE-LOCAL var, unlike the SCRIPT_LLM_MODEL knob retired from
+// scriptWriter — and for the opposite reason. That one was a second name for
+// the same intent, which is how pins drift apart. This one encodes a measured
+// divergence: the spec call genuinely needs a different tier from every other
+// Gemini caller, and folding it into GEMINI_GENERATION_MODEL would drag the
+// whole codebase onto 3.5-flash as a side effect.
+const SPEC_MODEL = process.env.VIDEO_SPEC_MODEL || "gemini-3.5-flash";
+
+// PACKAGING_MODEL stays on the shared pin. Packaging is a few hundred tokens of
+// hook-writing against a finished script — the cheap tier does it well, and the
+// comparison gave no reason to move it.
+const PACKAGING_MODEL = process.env.GEMINI_GENERATION_MODEL || "gemini-3.1-flash-lite";
+
+const ENDPOINT = (model, key) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+
+// 8192, not scriptWriter's 4096. A 25-slide spec is a structurally larger
+// artifact than a narration blob: every slide carries a type, an eyebrow, its
+// own content fields AND a caption, so the JSON scaffolding is a real fraction
+// of the output rather than a rounding error. The measured figure from the
+// production-length run is recorded in docs; this default is set from that
+// measurement, not from a guess — and MAX_TOKENS remains a hard rejection
+// either way, so an under-set cap fails loudly instead of truncating.
+const MAX_OUTPUT_TOKENS = Number.parseInt(process.env.VIDEO_SPEC_MAX_OUTPUT_TOKENS || "8192", 10);
+const PACKAGING_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.VIDEO_PACKAGING_MAX_OUTPUT_TOKENS || "2048", 10);
+const TIMEOUT_MS = 60000;   // a 25-slide spec is a longer generation than a caption
+
+// Gemini 2.5 Flash rates (analysisService's pinned figures). flash-lite is the
+// cheaper tier, so costUsd is an UPPER BOUND — same note as scriptWriter.
+const RATE_IN_PER_M  = 0.30;
+const RATE_OUT_PER_M = 2.50;
+
+// Prompt-side ceiling on body text. Above videoFullText's 24,000-char cap so
+// it never binds first; present so a caller passing text from elsewhere cannot
+// blow the input budget.
+const SPEC_BODY_MAX_CHARS = Number.parseInt(process.env.VIDEO_SPEC_BODY_MAX_CHARS || "28000", 10);
+
+const WPM = Number.parseInt(process.env.VIDEO_SPEC_WPM || "150", 10);
+
+export function isVideoSpecEnabled() {
+  return process.env.VIDEO_SPEC_ENABLED === "1" && !!process.env.GEMINI_API_KEY;
+}
+
+// ─── Rejection logging (same four fields as scriptWriter) ───────────────────
+
+// NAMED ARGUMENTS, deliberately. This was positional through a63b45d, and the
+// per-call model refactor updated three of the five call sites — the two it
+// missed logged `model=undefined` in production, on the too-thin and
+// exhausted-retries paths. A positional tail argument is exactly the shape that
+// gets silently dropped; a named one shows up as missing at the call site, and
+// videoSpecWriter.test.js asserts no call site omits it.
+function logRejection({ tag, articleId, reason, len, finishReason, usage, model }) {
+  logger.warn(
+    `🎬 ${tag}: rejected article ${articleId} — ${reason} (len=${len}, ` +
+    `model=${model ?? "UNKNOWN"}, finishReason=${finishReason ?? "?"}, ` +
+    `thoughtsTokenCount=${usage?.thoughtsTokenCount ?? "?"})`
+  );
+}
+
+/**
+ * A bare 400 INVALID_ARGUMENT. Deliberately NOT added to llmQueue's shared
+ * isGeminiThinkingRejection: a 400 can mean a dozen things, and treating every
+ * one as a thinking rejection would flip a process-wide flag on evidence that
+ * does not support it. This predicate only opens the probe above; the retry's
+ * outcome is what decides.
+ */
+function isInvalidArgument(err) {
+  if (err?.response?.status !== 400) return false;
+  const body = JSON.stringify(err?.response?.data ?? "");
+  return /INVALID_ARGUMENT|invalid argument/i.test(body);
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// One retry when the payload is not JSON. The API is stateless — the reminder
+// rides on a fresh call of the same prompt, appended so the article context is
+// identical both times.
+const JSON_ONLY_REMINDER = `
+
+STRICT OUTPUT REMINDER: a previous attempt returned something other than a single JSON object. Return ONLY the JSON object — no markdown fence, no commentary, no text of any kind before the opening { or after the closing }.`;
+
+/**
+ * Remove trailing commas before `}` or `]`, string-aware so a comma inside a
+ * caption is untouched. This was the ACTUAL cause of the 2026-08-02 non-JSON
+ * payloads — visible in the head/tail log the previous change added, which is
+ * the whole reason the log was worth adding.
+ *
+ * Repair, not leniency: a trailing comma is a syntax artifact that carries no
+ * content, so removing it cannot change what the model said. Everything the
+ * repair produces still faces the full validator.
+ */
+function repairTrailingCommas(s) {
+  let out = "", inStr = false, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      out += ch;
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; out += ch; continue; }
+    if (ch === ",") {
+      let j = i + 1;
+      while (j < s.length && /\s/.test(s[j])) j++;
+      if (s[j] === "}" || s[j] === "]") continue; // drop it
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/** Parse, then parse-after-repair. Returns the value or undefined on failure. */
+function tryParse(s) {
+  try { return JSON.parse(s); } catch { /* try the repair */ }
+  try { return JSON.parse(repairTrailingCommas(s)); } catch { return undefined; }
+}
+
+/**
+ * Tolerant JSON extraction: exact parse, fence-stripped, trailing-comma
+ * repaired, then the outermost balanced {...} scanned string-aware (braces
+ * inside string values don't count) with the same repair applied.
+ *
+ * Tolerance here is NOT leniency about content — whatever comes out still
+ * faces the full validator. It only stops a cosmetic fence, a trailing
+ * "Hope this helps!", or a stray comma from costing an entire article. A
+ * payload that never balances is genuinely truncated and stays null.
+ */
+function extractJsonPayload(text) {
+  if (typeof text !== "string" || !text.trim()) return null;
+  let t = text.trim();
+  const fenced = t.match(/^```(?:json)?\s*([\s\S]*?)\s*```\s*$/i);
+  if (fenced) t = fenced[1].trim();
+
+  const direct = tryParse(t);
+  if (direct !== undefined) return direct;
+
+  const start = t.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < t.length; i++) {
+    const ch = t[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        const scoped = tryParse(t.slice(start, i + 1));
+        return scoped === undefined ? null : scoped;
+      }
+    }
+  }
+  return null;
+}
+
+async function callModel(prompt, { articleId, tag, model, maxOutputTokens }) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+
+  logger.info(`🎬 ${tag}: Gemini model=${model} for article ${articleId} (cap=${maxOutputTokens})`);
+
+  // Each retry class has its own single-use (or bounded) budget so no
+  // combination can loop: transient 5xx/429 gets two backoff retries,
+  // thinking-rejection and non-JSON get one immediate retry each.
+  const RETRY_DELAYS_MS = [4000, 9000];
+  let transientUsed = 0;
+  let thinkingRetryUsed = false;
+  let jsonRetryUsed = false;
+  let promptText = prompt;
+  // Set only by the evidence-gated INVALID_ARGUMENT probe below.
+  let forceNoThinking = false;
+  let thinkingConfirmed = false;
+
+  while (true) {
+    const baseConfig = {
+      // Lower than scriptWriter's 0.4: this is a structured artifact with
+      // hard field constraints, not prose that needs phrasing variety.
+      temperature: 0.3,
+      responseMimeType: "application/json",
+      maxOutputTokens,
+    };
+    const generationConfig = forceNoThinking ? baseConfig : buildGeminiGenerationConfig(baseConfig);
+    const sentThinkingConfig = "thinkingConfig" in generationConfig;
+
+    try {
+      const { data } = await axios.post(
+        ENDPOINT(model, key),
+        { contents: [{ role: "user", parts: [{ text: promptText }] }], generationConfig },
+        { timeout: TIMEOUT_MS }
+      );
+
+      // The probe succeeded without thinkingConfig — that IS the proof. Flip the
+      // shared flag so every later Gemini call in this process skips it too.
+      if (forceNoThinking && !thinkingConfirmed) {
+        thinkingConfirmed = true;
+        markGeminiThinkingRejected(logger, model);
+        logger.warn(`🧠 ${tag}: confirmed — ${model} rejects thinkingBudget:0; the 400 was thinkingConfig`);
+      }
+
+      const candidate    = data?.candidates?.[0];
+      const finishReason = candidate?.finishReason;
+      const usage        = data?.usageMetadata || {};
+      const text         = candidate?.content?.parts?.[0]?.text;
+
+      if (!text) {
+        logRejection({ tag, articleId, reason: "empty", len: 0, finishReason, usage, model });
+        return null;
+      }
+      // HARD rejection. A truncated 25-slide spec that happens to parse is a
+      // video that stops mid-argument with narration that references slides
+      // which were never emitted.
+      if (finishReason === "MAX_TOKENS") {
+        logRejection({ tag, articleId, reason: "truncated_max_tokens", len: text.length, finishReason, usage, model });
+        return null;
+      }
+
+      const parsed = extractJsonPayload(text);
+      if (parsed === null || typeof parsed !== "object") {
+        // The cause must be legible from the log alone: head and tail of the
+        // raw payload, JSON-escaped so newlines survive the log line.
+        const head = JSON.stringify(text.slice(0, 200));
+        const tail = JSON.stringify(text.slice(-200));
+        if (!jsonRetryUsed) {
+          jsonRetryUsed = true;
+          logger.warn(`🎬 ${tag}: non-JSON payload for article ${articleId} — one retry with JSON-only reminder. head=${head} tail=${tail}`);
+          promptText = prompt + JSON_ONLY_REMINDER;
+          continue;
+        }
+        logger.warn(`🎬 ${tag}: non-JSON payload persisted after reminder retry. head=${head} tail=${tail}`);
+        logRejection({ tag, articleId, reason: "unparseable_json", len: text.length, finishReason, usage, model });
+        return null;
+      }
+
+      const cost =
+        ((usage.promptTokenCount || 0) / 1e6) * RATE_IN_PER_M +
+        ((usage.candidatesTokenCount || 0) / 1e6) * RATE_OUT_PER_M;
+
+      return { parsed, usage, cost, finishReason };
+    } catch (err) {
+      if (isGeminiThinkingRejection(err) && !thinkingRetryUsed) {
+        thinkingRetryUsed = true;
+        markGeminiThinkingRejected(logger, model);
+        continue;
+      }
+      if (isGeminiModelGone(err)) { markGeminiModelGone(model, logger); return null; }
+
+      // EVIDENCE-GATED THINKING DEGRADE. Some models reject thinkingBudget:0
+      // with a bare 400 INVALID_ARGUMENT whose body says only "Request contains
+      // an invalid argument" — no mention of thinking, so
+      // isGeminiThinkingRejection cannot match it and the call died as a hard
+      // transport failure. Measured 2026-08-02: gemini-3.5-flash-lite, 0/3.
+      //
+      // Rather than widen the SHARED classifier to "any 400 is a thinking
+      // rejection" — which would let an unrelated malformed request flip the
+      // process-wide flag for igSummary, scriptWriter and llmQueue too — this
+      // binary-searches the request in place: retry ONCE with thinkingConfig
+      // removed and nothing else changed. Success proves thinkingConfig was the
+      // invalid argument, and only THEN is the shared flag flipped. Failure
+      // proves it was not, and the error falls through to be reported honestly.
+      if (isInvalidArgument(err) && sentThinkingConfig && !thinkingRetryUsed) {
+        thinkingRetryUsed = true;
+        forceNoThinking = true;
+        logger.warn(
+          `🧠 ${tag}: ${model} returned 400 INVALID_ARGUMENT with thinkingConfig present — ` +
+          `retrying once WITHOUT it to identify the offending argument`
+        );
+        continue;
+      }
+      // The probe came back and still failed: thinkingConfig was NOT the cause.
+      // Say so explicitly, so the next reader does not re-run the same test.
+      if (isInvalidArgument(err) && forceNoThinking) {
+        logger.warn(`🧠 ${tag}: ${model} still 400s WITHOUT thinkingConfig — thinkingConfig is NOT the invalid argument`);
+      }
+
+      const status = err.response?.status;
+      const transient = status === 503 || status === 429 ||
+                        err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
+      if (transient && transientUsed < RETRY_DELAYS_MS.length) {
+        logger.warn(`🎬 ${tag}: ${status || err.code} — retry in ${RETRY_DELAYS_MS[transientUsed]}ms`);
+        await sleep(RETRY_DELAYS_MS[transientUsed]);
+        transientUsed++;
+        continue;
+      }
+      // FULL response body, not just err.message. A 400 from Gemini carries
+      // its reason only in the body — err.message is the useless "Request
+      // failed with status code 400". Measured 2026-08-02: gemini-3.5-flash-lite
+      // failed on TRANSPORT, not on output, so the cheap-generation-bump
+      // question stays open and the body is the only thing that can settle it.
+      const body = (() => {
+        try { return JSON.stringify(err.response?.data ?? null); }
+        catch { return String(err.response?.data); }
+      })();
+      logger.warn(
+        `🎬 ${tag}: call failed — model=${model} status=${status ?? err.code ?? "?"} ` +
+        `error=${err.message} body=${String(body).slice(0, 3000)}`
+      );
+      return null;
+    }
+  }
+}
+
+// ─── Prompt 1 — the slide spec ──────────────────────────────────────────────
+
+const CARD_GRAMMAR = `
+"title"   — the opener. { "t":"title", "eyebrow":"SHORT LABEL", "lines":[["TEXT","white"],["TEXT","lime"]], "sub":"one line", "caption":"..." }
+"stat"    — ONE dominant number. { "t":"stat", "eyebrow":"...", "value":70, "unit":"%", "lines":["short line","short line"], "hi":1, "source":"OUTLET NAME", "caption":"..." }
+            "hi" is the index of the line to emphasise. "value" MUST be a number, not a string.
+            !! On a "stat" card, "lines" is an array of PLAIN STRINGS. It is NOT an array of
+               [text, colour] pairs — that form belongs to "title" and "turn" ONLY. Getting this
+               wrong invalidates the card and it is dropped from the video.
+            Worked example, copy this shape exactly:
+              { "t":"stat", "eyebrow":"CABLE FAULTS", "value":70, "unit":"%",
+                "lines":["of all faults", "are caused by anchors"], "hi":1,
+                "source":"Reuters",
+                "caption":"Seventy percent of cable faults are caused by ships dragging anchors." }
+            CORRECT:   "lines":["of all faults", "are caused by anchors"]
+            WRONG:     "lines":[["of all faults","white"], ["are caused by anchors","lime"]]
+"diagram" — a chain or flow of 2-6 nodes. { "t":"diagram", "eyebrow":"...", "nodes":[["LABEL","sub"],["LABEL","sub"]], "marker":{"on":1,"label":"...","sub":"..."}, "caption":"..." }
+            "marker.on" is the index of the node it points at.
+"bars"    — a COMPARISON of 2 to 5 labelled quantities. { "t":"bars", "eyebrow":"...", "bars":[["label",70],["label",30]], "source":"OUTLET NAME", "caption":"..." }
+            "bars" MUST contain AT LEAST 2 entries — a single number is never a "bars" card; use "stat" for a single number.
+"turn"    — the pivot beat, where the obvious reading gives way to the real one.
+            { "t":"turn", "eyebrow":"...", "lines":[["TEXT","white"],["TEXT","lime"]], "sub":"one line", "caption":"..." }
+"kicker"  — the closer. { "t":"kicker", "top":"...", "bottom":"...", "sub":"...", "caption":"..." }
+`.trim();
+
+/**
+ * THE PROMPT CONTAINS NO SLIDE COUNT. Not a target, not a ceiling, not a floor.
+ *
+ * Measured 2026-08-02, second live run: told to emit "AT LEAST 6 and AT MOST
+ * N", all three articles returned EXACTLY 6 — the floor — with an identical
+ * card mix each time, including a Trump/Iran story carrying 30 allowed
+ * sources. The model does not weigh a stated range; it anchors on whichever
+ * number is nearest and stops there. The first run anchored on the ceiling and
+ * padded to it; the second anchored on the floor and starved to it. Both
+ * failures have one cause — a number in the prompt.
+ *
+ * MIN_SLIDES and MAX_SLIDES survive as VALIDATION GATES ONLY, and the model
+ * never learns they exist: the floor silently discards a spec too thin to
+ * carry a video, the ceiling catches a runaway. Length is an OUTCOME of the
+ * beat rubric in rule 7, never an instruction.
+ *
+ * Do not reintroduce a count here — not "aim for", not "roughly", not a
+ * duration the model can divide into slides. That is the whole finding.
+ */
+export function buildSpecPrompt({ article, allowedSources = [], bodyText = null }) {
+  // bodyText is the resolved source text (full-text fetch when available,
+  // stored content otherwise). The slice is a safety ceiling, not the
+  // constraint — videoFullText already caps at MAX_FULLTEXT_LEN.
+  const body = String(bodyText ?? article.content ?? "");
+  const sourceText = [
+    `HEADLINE: ${article.title || ""}`,
+    article.description ? `SUMMARY: ${article.description}` : "",
+    `LEAD PUBLISHER: ${article.source_name || "unknown"}`,
+    article.category ? `CATEGORY: ${article.category}` : "",
+    body ? `\n${body.slice(0, SPEC_BODY_MAX_CHARS)}` : "",
+  ].filter(Boolean).join("\n");
+
+  return `You are a video producer for ScoopFeeds, a news-intelligence product. You do not write prose. You emit a SLIDE SPEC as JSON, which a deterministic renderer turns into a video.
+
+SOURCE MATERIAL — the ONLY information you may use:
+"""
+${sourceText}
+"""
+
+OUTLETS THAT ACTUALLY COVERED THIS STORY — the only names you may ever put in a "source" field:
+${allowedSources.length ? allowedSources.map(s => `  - ${s}`).join("\n") : "  (none — you may therefore emit NO stat and NO bars cards at all)"}
+
+CARD TYPES — a CLOSED SET. Emitting any type not on this list makes the entire spec invalid and the story is dropped:
+${MODEL_EMITTABLE.filter(t => t !== "sources").map(t => `  ${t}`).join("\n")}
+
+CARD GRAMMAR — field names and types are exact:
+${CARD_GRAMMAR}
+
+HARD RULES — violating any of these makes the output unusable:
+
+1. GROUNDING. Every claim must appear in the source material above. Do not add context you happen to know. Do not infer causes, motives or consequences. Do not predict outcomes. If the source does not say why something happened, the spec does not say why either.
+
+2. RESTATE, NEVER REPRODUCE. Every beat and every caption must be written in your OWN WORDS. Do not copy runs of the article's wording. Do not follow the article's ordering or section structure — decide the order the story is best told in and use that. Two specific limits:
+   - No verbatim run longer than a short fragment, and any fragment you do carry over must be a genuine quotation that belongs to a named speaker or document.
+   - The ONE deliberate exception is the "evidence" field on a beat, which is SUPPOSED to be a short verbatim phrase from the source — that is its job, it is never spoken aloud, and it never appears on screen.
+   Grounding (rule 1) constrains WHAT you may say; this rule constrains HOW you may say it. Being faithful to the facts does not license reproducing the prose.
+
+3. NUMBERS NEED A REAL SOURCE. Every "stat" and every "bars" card MUST carry a "source" naming one of the outlets listed above, AND the figure itself must appear in the source material. If you cannot attribute a number to one of those outlets, DO NOT EMIT THE CARD. Do not guess an outlet. Do not write "reports" or "analysts" or the story's subject as the source. A dropped card costs nothing; an invented attribution is unrecoverable.
+
+   THE OUTLET IS CREDITED ALOUD ONCE, AND IT IS ALREADY DONE. A card near the start of the video names the outlet in its narration — you do not write that card, and you must not repeat its credit. So captions on your figure cards carry NO verbal attribution: write "Seventy percent of faults involve anchors", NOT "The Guardian reports that seventy percent of faults involve anchors". The "source" field still names the outlet on every figure card, and that credit is printed on screen; it is the spoken repetition that is unwanted. Hearing the same masthead four times in ninety seconds reads as a disclaimer, not as journalism.
+
+   THE ONE EXCEPTION: if a figure comes from a DIFFERENT outlet than the rest of the video, that caption must name it, because a source the viewer has not heard credited is a source that has not been credited.
+
+   THE SOURCE MATERIAL IS ATTRIBUTED. It is divided into labelled sections — one "PRIMARY SOURCE — <outlet>" block and, when other outlets covered the same story, one or more "ADDITIONAL COVERAGE — <outlet>" blocks. Take a figure from whichever section actually contains it, and name THAT outlet in the "source" field. Do not attribute a figure to the lead publisher because it is listed first. Where two outlets report the same figure, either is correct.
+
+   Sections cover ONE story from different newsrooms, so treat them as one body of reporting, not as separate stories: a mechanism explained only in the third section is as usable as one in the first. Where outlets disagree on a number, prefer the one more outlets agree on, and if they cannot be reconciled, drop the card rather than picking a side.
+
+4. NO "attribution" CARD. You must never emit a card with "t":"attribution". That card names the outlet, headline and date of the reporting this video is built on, and it is built from the database, not written. A fabricated byline is the worst thing this pipeline could put on screen. If you emit one, the card is discarded.
+
+5. CAPTION IS THE NARRATION. Every card MUST have a "caption": the exact sentence spoken over that slide. It is both the voiceover line and the burned-in subtitle, so they can never drift apart. Write captions as plain spoken prose: no markdown, no brackets, no quotation marks, no emoji, no symbols. Write "percent" not "%", and write numbers the way a newsreader would say them. One or two spoken sentences per caption — say the beat and stop.
+
+6. THE SLIDE TEXT IS NOT THE CAPTION. On-screen text is short and declarative — a few words, upper case where the grammar shows upper case. The caption is the sentence that explains it. They reinforce each other; they never repeat each other word for word.
+
+7. ACCENT. Within any single card, AT MOST ONE line may have the colour "lime". Every other line is "white". This is a brand invariant, not a preference.
+
+8. ENUMERATE THE BEATS — AS OUTPUT, BEFORE THE SLIDES. Your JSON starts with a "beats" array. A beat is ONE CONCRETE INSTANCE of something the source establishes, never a category:
+     - "figure"      — one specific number you can attribute to one of the outlets listed above and find in the source material
+     - "mechanism"   — one specific explanation of how something works or came about
+     - "turn"        — one point where the obvious reading of the story gives way to a truer one
+     - "consequence" — one specific thing that follows, as the source states it
+   Each beat is an object: { "kind": "...", "beat": "one sentence stating it", "evidence": "the short verbatim phrase from the source material that grounds it" }.
+   These are KINDS, not a checklist. A rich story may have six figures and three consequences; list every instance separately. Two sentences restating the same fact are ONE beat. A quote that adds no new fact is not a beat.
+
+   THEN emit exactly ONE CARD PER BEAT, choosing the card type that fits, wrapped by the opening "title" card and the closing "kicker" card. No card without a beat; no beat without a card. Do not merge beats to be brief, and do not split or invent beats to be long — how many beats the source holds is a discovery you make, never a decision.
+
+   WORKED EXAMPLE of enumeration — a rich single-source story about subsea internet cables. This example is ILLUSTRATIVE ONLY: never reuse its facts, figures, or wording.
+   "beats": [
+     { "kind": "figure",      "beat": "Nearly all intercontinental data travels by subsea cable.",        "evidence": "99 percent of intercontinental traffic" },
+     { "kind": "figure",      "beat": "The whole network is roughly five hundred active cables.",         "evidence": "roughly 500 active cables" },
+     { "kind": "mechanism",   "beat": "Data crosses oceans through fibre bundles laid on the seabed.",    "evidence": "fibre bundles laid directly on the seabed" },
+     { "kind": "figure",      "beat": "Anchors and fishing gear cause most recorded faults.",             "evidence": "70 percent of recorded faults" },
+     { "kind": "mechanism",   "beat": "Dragged anchors sever cables in shallow approaches to shore.",     "evidence": "anchors dragged near landing stations" },
+     { "kind": "figure",      "beat": "The network suffers about two hundred faults a year.",             "evidence": "about 200 faults a year" },
+     { "kind": "consequence", "beat": "Countries served by a single cable can lose connectivity at once.","evidence": "one cable serves the entire country" },
+     { "kind": "turn",        "beat": "The real threat is mundane accidents, not sabotage.",              "evidence": "most damage is accidental" },
+     { "kind": "mechanism",   "beat": "Repairs need specialist ships that grapple the cable up.",         "evidence": "grappled the cable to the surface" },
+     { "kind": "figure",      "beat": "A mid-ocean repair takes about a month.",                          "evidence": "30 days on average" },
+     { "kind": "figure",      "beat": "The global repair fleet is about sixty ships, and it is ageing.",  "evidence": "about 60 cable ships" },
+     { "kind": "consequence", "beat": "Operators are rerouting traffic and burying new cable deeper.",    "evidence": "buried deeper in trenches" }
+   ]
+   Twelve beats, because that source established twelve distinct things — so that spec carries twelve content cards plus its "title" and "kicker". A thinner source might establish four; then you list four and emit four. The enumeration decides.
+
+9. STRUCTURE AND MIX. The FIRST card must be "title" and the LAST card must be "kicker". In between, VARY THE CARD TYPES:
+   - No card type may take more than about a third of the cards. A wall of number cards is a spreadsheet read aloud, not a video.
+   - Never place more than two cards of the same type back to back.
+   - "turn" should appear once, near the point where the story's obvious reading gives way to its real one.
+   Cards that break these limits are discarded from the video, so a monotonous spec loses most of itself. If a beat could be carried by more than one card type, prefer the type you have used least.
+
+   AT LEAST ONE "diagram" OR "turn" IS REQUIRED. These are the cards that add something the source did not already say in that form — a mechanism drawn as a chain, or the point where the obvious reading gives way. A spec of only headline and figures is a restatement of someone else's article with the numbers pulled out; it is rejected outright. This is the part of the video that is ours.
+
+10. TONE. Neutral wire-service register. No editorialising, no outrage, no rhetorical questions, no "you won't believe". Interest comes from a specific fact being genuinely interesting, never from sensational phrasing. Preserve the source's hedging: if it says "reportedly" or "officials say", keep that attribution.
+
+Return ONLY a JSON object, no markdown fence, with exactly this shape — "beats" first, then "slides":
+
+{
+  "beats":  [ { "kind": "figure", "beat": "...", "evidence": "..." }, ... ],
+  "slides": [ ...cards... ]
+}`;
+}
+
+// ─── Prompt 2 — packaging ───────────────────────────────────────────────────
+
+export function buildPackagingPrompt({ spec, article }) {
+  const script = (spec.slides || [])
+    .map((c, i) => `${i + 1}. [${c.t}] ${c.caption}`)
+    .join("\n");
+
+  const figures = [];
+  for (const c of spec.slides || []) {
+    if (c.t === "stat") figures.push(`${c.value}${c.unit || ""} (${c.source})`);
+    if (c.t === "bars") for (const b of c.bars || []) figures.push(`${b[0]}: ${b[1]} (${c.source})`);
+  }
+
+  return `You are a packaging editor for ScoopFeeds, a news channel on YouTube. The script below is FINISHED and will not change. Your only job is to find the hook that makes someone click it — and that the video then actually delivers.
+
+THE FINISHED SCRIPT, one line per slide:
+"""
+${script}
+"""
+
+FIGURES THE VIDEO ACTUALLY PAYS OFF (the only numbers you may use):
+${figures.length ? figures.map(f => `  - ${f}`).join("\n") : "  (none — use no numbers at all)"}
+
+STORY: ${article.title || ""}${article.category ? ` · ${article.category}` : ""}
+
+TITLES — emit exactly 3, each testing a DIFFERENT angle, not different wording of one angle. Available angles: ${THUMBNAIL_ANGLES.join(", ")}.
+  - Maximum 60 characters. Search and mobile truncate around there, so the hook must survive truncation.
+  - Front-load the concrete noun or the number. Never open with "How", "Why", or the brand name.
+  - THE HARD ONE: the title must be a claim the video actually pays off. Do not use a number that is not in the list above. Do not promise a revelation the script does not deliver. A curiosity gap the script leaves open is a trust cost this channel cannot afford.
+
+THUMBNAILS — emit exactly 3, one per title.
+  - "hook": ONE to THREE words. Never a sentence. It has to stay legible at 168 pixels wide.
+  - "accent": exactly one word taken FROM the hook — the word that gets the accent colour.
+  - "kicker": a short supporting line, up to about five words.
+  - "angle": one of ${THUMBNAIL_ANGLES.join(", ")}.
+  - The thumbnail must NOT restate its title. Title and thumbnail are two halves of one promise, not the same message printed twice.
+
+DESCRIPTION HOOK — one or two sentences. These are the lines that show above the fold and in search, so lead with the hook and the primary keyword. No links, no brand boilerplate; those are appended later.
+
+TAGS — entities and topic terms actually present in the script above. No invented keywords, no generic filler like "news" or "viral". 500 characters total across all tags.
+
+IMAGE QUERY — 2 to 4 CONCRETE NOUNS naming a physical thing that could be photographed, for a stock-photo search. Strip verbs, adjectives and abstractions. If the story has no photographable physical subject, return an empty string.
+
+Return ONLY a JSON object, no markdown fence, with exactly this shape:
+
+{
+  "titles": ["...", "...", "..."],
+  "thumbnails": [
+    { "hook": "...", "kicker": "...", "accent": "...", "angle": "..." },
+    { "hook": "...", "kicker": "...", "accent": "...", "angle": "..." },
+    { "hook": "...", "kicker": "...", "accent": "...", "angle": "..." }
+  ],
+  "description_hook": "...",
+  "tags": ["...", "..."],
+  "image_query": "..."
+}`;
+}
+
+/** A spec-level error meaning "the article was too thin", which is not retried. */
+function isThinnessError(e) {
+  return /too thin for a video/.test(e);
+}
+
+/**
+ * Strip slide counts out of anything the model will read. The retry prompt is
+ * still a prompt: a note saying "only 4 slides remain (< 6)" hands the model
+ * the exact anchor rule 7 exists to withhold, and it would pad to that number
+ * on the second attempt just as it starved to it on the first.
+ *
+ * Card-level reasons ("3 consecutive stat cards") are left intact — those are
+ * adjacency and type facts, not a length instruction.
+ */
+function stripCounts(error) {
+  return String(error)
+    .replace(/only \d+ slides remain[^—]*—?\s*/i, "")
+    .replace(/too many slides: \d+ > \d+/i, "you emitted far more cards than the source establishes — enumerate the beats again and emit one card per beat")
+    .replace(/\((\d+)\/(\d+)\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/**
+ * Corrective note appended to the retry prompt. States what failed in the
+ * model's own terms — every spec-level failure is something it can act on
+ * (emit the opener, stop inventing attributions, stop malforming cards) —
+ * with every slide count removed first.
+ */
+function buildCorrectionNote(v) {
+  const lines = v.errors.map(e => stripCounts(e)).filter(Boolean).map(e => `  - ${e}`);
+  const byReason = {};
+  for (const d of v.dropped) {
+    const key = `${d.kind}: ${String(d.reason).split(";")[0]}`;
+    byReason[key] = (byReason[key] || 0) + 1;
+  }
+  const dropLines = Object.entries(byReason).map(([r, n]) => `  - ${n}x ${r}`);
+  return `
+
+YOUR PREVIOUS ATTEMPT WAS REJECTED. Fix these and emit a complete new spec:
+${lines.join("\n")}
+${dropLines.length ? `\nCards discarded from that attempt:\n${dropLines.join("\n")}` : ""}
+
+Re-read the CARD GRAMMAR above and match the field shapes exactly. Emit the FULL spec again — do not emit a patch or only the corrected cards. Re-enumerate the story's beats and emit one card per beat; do not aim for any particular number of cards.`;
+}
+
+// ─── Public API ─────────────────────────────────────────────────────────────
+
+/**
+ * Article → validated slide spec.
+ *
+ * RETURNS A RESULT OBJECT, NOT null-or-spec. A rejected attempt still SPENT —
+ * one Gemini call, two when the regeneration retry fires — and returning null
+ * threw that number away, so a published video could not be billed including
+ * the articles discarded before it. `{ ok, spec, costUsd, reason, attempts }`
+ * makes the loop able to say "this video cost $X across 4 attempts".
+ *
+ * Never throws.
+ *
+ * @param {object} article
+ * @param {object} opts
+ * @param {string[]} opts.allowedSources — outlets that covered this story
+ * @param {number}  [opts.targetSeconds=180] — recorded in meta only; the model
+ *        never sees it, because a duration is a slide count once divided.
+ * @param {number}  [opts.slideCeiling] — VALIDATION ceiling, never shown to the
+ *        model. Overrides MAX_SLIDES for the runaway check.
+ * @param {string}  [opts.bodyText] — pre-resolved source text. Supply it to skip
+ *        the fetch (tests always do, so no test touches the network).
+ * @param {boolean} [opts.fetchFullText=true] — fetch the article URL once at
+ *        generation time for uncapped text. ON by default: the 5,000-char
+ *        stored cap is the measured constraint on beat count, and leaving this
+ *        to the caller would mean Section 6 could silently omit it and inherit
+ *        the same flat specs.
+ *
+ * ONE STORY PER VIDEO (§3b). Sibling coverage does NOT enter the prompt — not
+ * behind a flag, not by default. The experiment settled it: +13,488 chars from
+ * 8 outlets produced Δ beats 0.00. Breadth was never the constraint, and §3b's
+ * copyright reasoning makes the same point from the other side — source count
+ * is not the variable, how much of ONE publisher's expression you reproduce is.
+ * The Phase-2 use for siblings is VERIFICATION (does the lead figure appear in
+ * a second outlet before publish), which reads them without ever prompting on
+ * them.
+ */
+export async function writeVideoSpec(article, {
+  allowedSources = [],
+  targetSeconds = 180,
+  slideCeiling = null,
+  bodyText = null,
+  fetchFullText = true,
+} = {}) {
+  const reject = (reason, costUsd = 0, attempts = 0) => ({ ok: false, spec: null, costUsd, reason, attempts });
+  if (!isVideoSpecEnabled()) return reject("VIDEO_SPEC_ENABLED not set");
+  if (!article?.title) return reject("article has no title");
+
+  const started = Date.now();
+  try {
+    // ONE request, for the one article already selected, discarded after use.
+    // Never fatal: a failed fetch falls back to stored content and the video
+    // still ships, shorter.
+    let resolved = { text: String(bodyText ?? article.content ?? ""), chars: 0, origin: bodyText ? "supplied" : "stored", reason: null };
+    resolved.chars = resolved.text.length;
+    if (!bodyText && fetchFullText) {
+      const { resolveVideoSourceText } = await import("./videoFullText.js");
+      resolved = await resolveVideoSourceText(article);
+    }
+
+    // Grounding screens against the SAME text the model was given. Screening
+    // against the stored 5,000 chars while prompting with 24,000 would drop
+    // every correctly-sourced figure drawn from the part it could not see.
+    const sourceText = `${article.title || ""} ${article.description || ""} ${resolved.text}`;
+    const basePrompt = buildSpecPrompt({ article, allowedSources, bodyText: resolved.text });
+    const validateOpts = {
+      allowedSources, sourceText,
+      ...(slideCeiling ? { maxSlides: slideCeiling } : {}),
+    };
+
+    // ONE regeneration retry on a SPEC-LEVEL rejection. A spec costs well under
+    // a cent; discarding an otherwise-good story because the model forgot a
+    // kicker card is a worse trade than paying for a second attempt. The retry
+    // is told what failed — a blind retry re-rolls the same dice, and the
+    // failures here (missing opener, drop rate, sourcing overreach) are all
+    // things the model can act on.
+    let result = null, v = null, spentUsd = 0, attempts = 0;
+    let prompt = basePrompt;
+
+    for (attempts = 1; attempts <= 2; attempts++) {
+      result = await callModel(prompt, {
+        articleId: article.id, tag: "videoSpec", model: SPEC_MODEL, maxOutputTokens: MAX_OUTPUT_TOKENS,
+      });
+      // A transport/JSON failure is already logged; its spend is unknowable
+      // (the call never returned usage), which is itself worth reporting.
+      if (!result) return reject("model call failed (see the rejection line)", spentUsd, attempts);
+      spentUsd += result.cost;
+
+      v = validateSpec(result.parsed, validateOpts);
+      if (v.ok) break;
+
+      // A spec that came back TOO THIN is not retried. The article genuinely
+      // did not carry enough beats, and the only thing a retry could teach the
+      // model is that more cards were wanted — which is the padding instinct
+      // the beat rubric exists to remove. Skip the article silently instead.
+      if (v.errors.some(isThinnessError)) {
+        logRejection({
+          tag: "videoSpec", articleId: article.id, model: SPEC_MODEL,
+          reason: `too thin — ${v.errors.filter(isThinnessError).join(" | ")}`,
+          len: JSON.stringify(result.parsed).length,
+          finishReason: result.finishReason, usage: result.usage,
+        });
+        return null;
+      }
+
+      if (attempts === 1) {
+        logger.warn(
+          `🎬 videoSpec [${article.id}]: spec-level rejection on attempt 1, regenerating once — ${v.errors.slice(0, 3).join(" | ")}`
+        );
+        prompt = basePrompt + buildCorrectionNote(v);
+        continue;
+      }
+      logRejection({
+        tag: "videoSpec", articleId: article.id, model: SPEC_MODEL,
+        reason: `invalid spec after ${attempts} attempts — ${v.errors.slice(0, 3).join(" | ")}`,
+        len: JSON.stringify(result.parsed).length,
+        finishReason: result.finishReason, usage: result.usage,
+      });
+      return reject(v.errors.slice(0, 3).join(" | "), spentUsd, attempts);
+    }
+
+    const { usage, finishReason } = result;
+    const cost = spentUsd;
+
+    // The enumeration IS the diagnosis. This line is what distinguishes "the
+    // model found five beats" (an input or rubric problem) from "it found
+    // fifteen and only emitted five cards" (a compliance problem the count
+    // check now rejects) — without it, all we ever see is the slide count.
+    const beats = v.spec.beats || [];
+    logger.info(
+      (`🎬 videoSpec [${article.id}] beats=${beats.length} ${JSON.stringify(v.stats.beatKinds)} — ` +
+       beats.map(b => `${b.kind}: ${String(b.beat).slice(0, 48)}`).join(" | ")).slice(0, 1200)
+    );
+
+    if (v.dropped.length) {
+      // Not a failure here (§3 drops the card); Section 6's gate reads this.
+      logger.warn(
+        `🎬 videoSpec [${article.id}]: dropped ${v.dropped.length} card(s) — ` +
+        v.dropped.map(d => `${d.kind}:${d.t}@${d.index}: ${d.reason}`).join(" | ")
+      );
+    }
+
+    const spec = {
+      ...v.spec,
+      meta: {
+        model: SPEC_MODEL,
+        sourceTextChars: resolved.chars,
+        sourceTextOrigin: resolved.origin,
+        sourceTextReason: resolved.reason,
+        targetSeconds,
+        slides: v.stats.slides,
+        emitted: v.stats.emitted,
+        beats: v.stats.beats,
+        beatKinds: v.stats.beatKinds,
+        dropRatio: v.stats.dropRatio,
+        sourcingDrops: v.stats.sourcingDrops,
+        mixDrops: v.stats.mixDrops,
+        byType: v.stats.byType,
+        captionWords: v.stats.captionWords,
+        droppedCards: v.dropped,
+        attempts,
+        costUsd: Number(cost.toFixed(5)),
+        tokensIn: usage.promptTokenCount || 0,
+        tokensOut: usage.candidatesTokenCount || 0,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        finishReason: finishReason ?? null,
+        thoughtsTokenCount: usage.thoughtsTokenCount ?? 0,
+        ms: Date.now() - started,
+      },
+    };
+
+    logger.info(
+      `🎬 videoSpec [${article.id}] ${spec.meta.slides} slides / ${spec.meta.captionWords}w ` +
+      `${spec.meta.tokensOut}tok $${spec.meta.costUsd} ${spec.meta.ms}ms`
+    );
+    return { ok: true, spec, costUsd: spec.meta.costUsd, reason: null, attempts };
+  } catch (err) {
+    logger.warn(`🎬 videoSpec [${article?.id}]: unexpected error`, { error: err.message });
+    return reject(`unexpected error: ${err.message}`, 0, 0);
+  }
+}
+
+/**
+ * Validated spec → validated packaging. Separate call, run AFTER the spec
+ * exists (§5b). Returns null on any failure; never throws.
+ */
+export async function writePackaging(spec, article) {
+  if (!isVideoSpecEnabled()) return null;
+  if (!spec?.slides?.length) return null;
+
+  const started = Date.now();
+  try {
+    const result = await callModel(buildPackagingPrompt({ spec, article }), {
+      articleId: article.id, tag: "videoPackaging", model: PACKAGING_MODEL, maxOutputTokens: PACKAGING_MAX_OUTPUT_TOKENS,
+    });
+    if (!result) return null;
+
+    const { parsed, usage, cost, finishReason } = result;
+
+    const v = validatePackaging(parsed, spec);
+    if (!v.ok) {
+      logRejection({
+        tag: "videoPackaging", articleId: article.id, model: PACKAGING_MODEL,
+        reason: `invalid packaging — ${v.errors.slice(0, 3).join(" | ")}`,
+        len: JSON.stringify(parsed).length, finishReason, usage,
+      });
+      return null;
+    }
+    if (v.dropped?.length) {
+      logger.warn(
+        `🎬 videoPackaging [${article.id}]: dropped ${v.dropped.length} variant(s) — ` +
+        v.dropped.map(d => `${d.kind}@${d.index}: ${d.reason}`).join(" | ")
+      );
+    }
+
+    const packaging = {
+      ...v.packaging,
+      meta: {
+        model: PACKAGING_MODEL,
+        droppedVariants: v.dropped || [],
+        warnings: v.warnings || [],
+        costUsd: Number(cost.toFixed(5)),
+        tokensIn: usage.promptTokenCount || 0,
+        tokensOut: usage.candidatesTokenCount || 0,
+        maxOutputTokens: PACKAGING_MAX_OUTPUT_TOKENS,
+        finishReason: finishReason ?? null,
+        thoughtsTokenCount: usage.thoughtsTokenCount ?? 0,
+        ms: Date.now() - started,
+      },
+    };
+
+    logger.info(
+      `🎬 videoPackaging [${article.id}] 3 titles / 3 thumbs ` +
+      `${packaging.meta.tokensOut}tok $${packaging.meta.costUsd} ${packaging.meta.ms}ms`
+    );
+    return packaging;
+  } catch (err) {
+    logger.warn(`🎬 videoPackaging [${article?.id}]: unexpected error`, { error: err.message });
+    return null;
+  }
+}
+
+export const _internals = {
+  buildSpecPrompt, buildPackagingPrompt, CARD_GRAMMAR,
+  extractJsonPayload, stripCounts, isThinnessError, isInvalidArgument,
+};
