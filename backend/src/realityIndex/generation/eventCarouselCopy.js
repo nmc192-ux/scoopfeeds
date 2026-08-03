@@ -31,6 +31,7 @@ import crypto from "crypto";
 import { getDb } from "../../models/database.js";
 import { callJson } from "../llmQueue.js";
 import { logger } from "../../services/logger.js";
+import { deterministicSeoLine, SEO_STOPWORDS } from "../../services/socialComposer.js";
 
 // Context caps.
 //
@@ -56,6 +57,50 @@ const DETAIL_MIN = 20,  DETAIL_MAX = 70;
 const VALUE_MAX  = 12,  LABEL_MAX  = 28;
 const WHY_MIN    = 60,  WHY_MAX    = 160;
 
+// seo_line is the ONE SOFT FIELD on this call. Everything else here refuses:
+// a bad figure means "do not post this event". seo_line instead falls back to
+// a deterministic title-derived line, because a keyword line is a discovery
+// optimisation and blocking a whole post over one is the wrong trade.
+//
+// Validation is DELIBERATELY LOOSER than the prompt spec: the prompt asks for
+// 4-8 words, the validator accepts 3-10. A spec tighter than its validator is
+// the right shape — it aims the model at the middle of the range instead of
+// its edge, without rejecting a good line for being one word long.
+const SEO_MIN_WORDS = 3, SEO_MAX_WORDS = 10;
+
+// Hype denylist. Small and EXPLICIT rather than clever: a general "clickbait
+// detector" would reject real headlines, and the failure mode of a missed
+// hype line (a slightly tabloid caption) is far cheaper than the failure mode
+// of a false positive (silently falling back on good copy, forever, for a
+// whole class of stories).
+//
+// `breaking` is anchored to the START of the line only. Mid-line it is usually
+// ordinary English — "breaking point", "record breaking", "breaking ranks" —
+// and rejecting those would be exactly the false positive described above.
+// Each pattern is NAMED. The reason string ends up in a log line that gets
+// grepped and counted — `hype_you_wont_believe` is a tag you can aggregate on,
+// whereas a mangled regex source is noise.
+const SEO_HYPE_PATTERNS = [
+  { name: "breaking_prefix",   re: /^breaking\b/i },
+  { name: "you_wont_believe",  re: /\byou won'?t believe\b/i },
+  { name: "changes_everything", re: /\bthis changes everything\b/i },
+  { name: "what_happened_next", re: /\bwhat happen(?:ed|s) next\b/i },
+  { name: "truth_about",       re: /\bthe truth about\b/i },
+  { name: "nobody_talking",    re: /\b(?:nobody|no one) is talking about\b/i },
+  { name: "need_to_know",      re: /\beverything you need to know\b/i },
+  { name: "heres_why",         re: /\bhere'?s why\b/i },
+  { name: "shocking",          re: /\bshocking\b/i },
+  { name: "jaw_dropping",      re: /\bjaw[- ]dropping\b/i },
+  { name: "unbelievable",      re: /\bunbelievable\b/i },
+  { name: "must_see",          re: /\bmust[- ]see\b/i },
+  { name: "goes_viral",        re: /\bgoes viral\b/i },
+  { name: "blow_your_mind",    re: /\bwill blow your mind\b/i },
+];
+
+const SEO_HASHTAG_RE = /#/;
+const SEO_EMOJI_RE   = /\p{Extended_Pictographic}/u;
+const SEO_URL_RE     = /(https?:\/\/|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|co|gov|edu|news)\b)/i;
+
 // Attempt ledger, mirroring eventActorExtractor: a persistently-failing event
 // must not be re-paid for on every cycle.
 const MAX_ATTEMPTS       = 3;
@@ -80,6 +125,62 @@ function normText(s) {
 function normNum(s) { return normText(s).replace(/\s+/g, ""); }
 
 // ─── Context bundle ───────────────────────────────────────────────────────
+
+// ─── Entity tokens for seo_line grounding ─────────────────────────────────
+//
+// REUSES the event's durable signature — the same event_entity_signature row
+// the carousel selection bar counts keys from — rather than re-deriving
+// entities. But the signature cannot be matched against a caption directly:
+// a key is `COALESCE(qid, surface_norm)` (eventPromoter.loadEntityKeys), so a
+// RESOLVED entity is stored as a Wikidata QID like "Q7747", which will never
+// appear in a sentence a human would type. Matching the raw keys would
+// therefore silently reject every seo_line about a well-known entity — the
+// most important stories — while passing the obscure ones.
+//
+// So QID keys are mapped back to text through surface_qid_cache
+// (surface_norm -> qid, plus a human `label`), and non-QID keys are already
+// surface forms. Both halves are then reduced to word tokens.
+//
+// This is a GROUNDING HEURISTIC, not a proof. A token drawn from "united
+// states" would also match "United Airlines". That is accepted: the cost of a
+// false pass is a slightly-off keyword line, not a false factual claim — very
+// different from the figure grounding above, which is exact by construction.
+function entityTokensFor(db, eventId) {
+  let raw = [];
+  try {
+    const row = db.prepare(`SELECT keys FROM event_entity_signature WHERE event_id = ?`).get(eventId);
+    raw = JSON.parse(row?.keys || "[]");
+  } catch { raw = []; }
+
+  const keys = (Array.isArray(raw) ? raw : []).map(x => String(x?.k ?? "")).filter(Boolean);
+  if (!keys.length) return new Set();
+
+  const surfaces = [];
+  const qids     = [];
+  for (const k of keys) (/^Q\d+$/i.test(k) ? qids : surfaces).push(k);
+
+  if (qids.length) {
+    try {
+      const ph = qids.map(() => "?").join(",");
+      for (const r of db.prepare(
+        `SELECT surface_norm, label FROM surface_qid_cache WHERE qid IN (${ph})`
+      ).all(...qids)) {
+        if (r.surface_norm) surfaces.push(r.surface_norm);
+        if (r.label)        surfaces.push(r.label);
+      }
+    } catch { /* cache table absent or unreadable — surfaces half still works */ }
+  }
+
+  const tokens = new Set();
+  for (const s of surfaces) {
+    for (const t of normText(s).split(/[^a-z0-9]+/)) {
+      // >=3 chars and not a function word, so "the" from "the guardian" cannot
+      // ground a line that has nothing to do with the event.
+      if (t.length >= 3 && !SEO_STOPWORDS.has(t)) tokens.add(t);
+    }
+  }
+  return tokens;
+}
 
 function buildContext(db, event) {
   const timeline = db.prepare(`
@@ -129,7 +230,11 @@ function buildContext(db, event) {
   // The corpus is EXACTLY what the model is shown. Grounding is checked
   // against this and nothing else, so the model cannot be blamed for — or get
   // away with — a figure sourced from text it never saw.
-  return { event, snippets, sources, corpus: normText(snippets.join(" \n ")) };
+  return {
+    event, snippets, sources,
+    corpus: normText(snippets.join(" \n ")),
+    entityTokens: entityTokensFor(db, event.id),
+  };
 }
 
 // Bump whenever the PROMPT RULES or the validator change. content_hash covers
@@ -144,11 +249,22 @@ function buildContext(db, event) {
 //             from, rendered beside the value on slide 5. Cached v2 rows have
 //             no source field, so they must regenerate rather than render a
 //             blank attribution line.
-const COPY_RULES_VER = "v3";
+//   v3 -> v4: seo_line, the keyword-first caption line, added as a fourth
+//             field on this same call. Without this bump every event already
+//             in the cache would keep its v3 row, whose seo_line column is
+//             NULL, and the new field would be invisible in production for
+//             exactly the events most likely to be posted — the ones already
+//             generated. This is the cache trap the paragraph above describes,
+//             hit for the third time on this project.
+const COPY_RULES_VER = "v4";
 
-function contentHashOf(ctx) {
+// `ver` is a parameter rather than a closed-over constant so the version's role
+// in cache identity is directly demonstrable: hashing the same ctx under "v3"
+// and "v4" must produce different digests, which is the whole mechanism that
+// forces regeneration. Production always calls it with the default.
+function contentHashOf(ctx, ver = COPY_RULES_VER) {
   return crypto.createHash("sha1")
-    .update(COPY_RULES_VER)
+    .update(ver)
     .update("|").update(String(ctx.event.id))
     .update("|").update(String(ctx.event.title || ""))
     .update("|").update(String(ctx.event.summary || ""))
@@ -171,7 +287,8 @@ Return JSON with exactly this shape:
     {"value": "...", "label": "...", "source_sentence": "..."},
     {"value": "...", "label": "...", "source_sentence": "..."}
   ],
-  "why_it_matters": "..."
+  "why_it_matters": "...",
+  "seo_line": "..."
 }
 
 RULES
@@ -222,6 +339,21 @@ of this story, grounded in the source material. No questions.
       RIGHT  "For many fans the win confirmed a sense that something promising
               is under way."  (the belief stays a belief)
 
+seo_line — 4-8 words. This is NOT a headline and NOT a hook. It is the phrase a
+person would type into a search box to find this story. Name the actor(s) and
+the topic in plain language. Sentence case. No emoji, no hashtag, no URL, no
+trailing punctuation.
+
+  RIGHT  Iran oil sanctions explained
+  RIGHT  Nvidia earnings and the AI trade
+  WRONG  You won't believe what happened next
+  WRONG  BREAKING
+  WRONG  This changes everything
+
+  At least one word must be a name or term from the source material above —
+  a person, place, organisation or subject. A line of only generic news words
+  is not searchable and will be discarded.
+
 Return only the JSON object.`;
 }
 
@@ -265,8 +397,50 @@ function isBareUnitLabel(label) {
   return tokens.every(t => BARE_UNIT_WORDS.has(t));
 }
 
+// ─── seo_line validation ──────────────────────────────────────────────────
+//
+// Returns { ok:true, value } or { ok:false, reason }. NEVER repairs and NEVER
+// fails the surrounding copy — the caller substitutes a deterministic line.
+// Rejection here is a normal outcome, not an error.
+//
+// Checks are ordered cheapest-and-most-specific first so the logged reason
+// names the actual defect rather than whichever check happened to run.
+function validateSeoLine(raw, ctx) {
+  if (typeof raw !== "string" || !raw.trim()) return { ok: false, reason: "absent" };
+  const line = raw.trim();
+
+  if (SEO_HASHTAG_RE.test(line)) return { ok: false, reason: "has_hashtag" };
+  if (SEO_EMOJI_RE.test(line))   return { ok: false, reason: "has_emoji" };
+  if (SEO_URL_RE.test(line))     return { ok: false, reason: "has_url" };
+
+  const words = line.split(/\s+/).filter(Boolean);
+  if (words.length < SEO_MIN_WORDS || words.length > SEO_MAX_WORDS) {
+    return { ok: false, reason: `words_${words.length}` };
+  }
+
+  for (const p of SEO_HYPE_PATTERNS) {
+    if (p.re.test(line)) return { ok: false, reason: `hype_${p.name}` };
+  }
+
+  // Grounding. An event with no usable signature CANNOT be verified, so it is
+  // rejected rather than waved through: the fallback is deterministic and safe,
+  // and passing an unverifiable line is the failure mode that has no floor.
+  // In practice unreachable for a carousel — qualifiesForCarousel already
+  // requires >= 2 signature keys — which is precisely why failing open here
+  // would create a silent path nobody would ever see exercised.
+  const tokens = ctx.entityTokens;
+  if (!tokens || !tokens.size) return { ok: false, reason: "no_signature" };
+
+  const lineTokens = new Set(normText(line).split(/[^a-z0-9]+/).filter(Boolean));
+  let hit = null;
+  for (const t of lineTokens) if (tokens.has(t)) { hit = t; break; }
+  if (!hit) return { ok: false, reason: "no_entity_token" };
+
+  return { ok: true, value: line };
+}
+
 // ─── Validation ───────────────────────────────────────────────────────────
-// Returns { ok:true, copy } or { ok:false, reason }. Never repairs.
+// Returns { ok:true, copy, seoReason } or { ok:false, reason }. Never repairs.
 
 function validateCopy(parsed, ctx) {
   if (!parsed || typeof parsed !== "object") return { ok: false, reason: "not_an_object" };
@@ -328,7 +502,17 @@ function validateCopy(parsed, ctx) {
   if (why.length < WHY_MIN || why.length > WHY_MAX) return { ok: false, reason: `why_length_${why.length}` };
   if (normText(why) === title) return { ok: false, reason: "why_repeats_title" };
 
-  return { ok: true, copy: { details, figures: clean, why_it_matters: why } };
+  // seo_line LAST, and non-fatally. Every check above can refuse the copy;
+  // this one cannot. A rejected or absent seo_line becomes the deterministic
+  // title-derived line, so no post is ever blocked by it.
+  const seo = validateSeoLine(parsed.seo_line, ctx);
+  const seo_line = seo.ok ? seo.value : deterministicSeoLine(ctx.event.title);
+
+  return {
+    ok: true,
+    copy: { details, figures: clean, why_it_matters: why, seo_line },
+    seoReason: seo.ok ? null : seo.reason,
+  };
 }
 
 // ─── Ledger ───────────────────────────────────────────────────────────────
@@ -350,9 +534,9 @@ function shouldAttempt(db, eventId, hash, now) {
 function recordAttempt(db, eventId, hash, now, { copy = null, model = null } = {}) {
   db.prepare(`
     INSERT INTO event_carousel_copy
-      (event_id, content_hash, details_json, figures_json, why_it_matters, model,
+      (event_id, content_hash, details_json, figures_json, why_it_matters, seo_line, model,
        attempts, last_attempt_at, succeeded_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
     ON CONFLICT(event_id) DO UPDATE SET
       -- a changed hash restarts the attempt count; same hash increments it
       attempts        = CASE WHEN event_carousel_copy.content_hash = excluded.content_hash
@@ -361,6 +545,7 @@ function recordAttempt(db, eventId, hash, now, { copy = null, model = null } = {
       details_json    = excluded.details_json,
       figures_json    = excluded.figures_json,
       why_it_matters  = excluded.why_it_matters,
+      seo_line        = excluded.seo_line,
       model           = excluded.model,
       last_attempt_at = excluded.last_attempt_at,
       succeeded_at    = excluded.succeeded_at,
@@ -370,6 +555,7 @@ function recordAttempt(db, eventId, hash, now, { copy = null, model = null } = {
     copy ? JSON.stringify(copy.details) : null,
     copy ? JSON.stringify(copy.figures) : null,
     copy ? copy.why_it_matters : null,
+    copy ? (copy.seo_line || null) : null,
     model, now, copy ? now : null, now, now
   );
 }
@@ -377,7 +563,7 @@ function recordAttempt(db, eventId, hash, now, { copy = null, model = null } = {
 /** Cached copy for an event, or null. Read-only — never generates. */
 export function readCachedCopy(eventId) {
   const row = getDb().prepare(
-    `SELECT details_json, figures_json, why_it_matters FROM event_carousel_copy
+    `SELECT details_json, figures_json, why_it_matters, seo_line FROM event_carousel_copy
       WHERE event_id = ? AND succeeded_at IS NOT NULL`
   ).get(eventId);
   if (!row) return null;
@@ -386,6 +572,11 @@ export function readCachedCopy(eventId) {
       details: JSON.parse(row.details_json || "[]"),
       figures: JSON.parse(row.figures_json || "[]"),
       why_it_matters: row.why_it_matters || "",
+      // "" rather than null on a pre-v4 row. Those are unreachable in practice
+      // (the version bump regenerates them), but the caption layer treats an
+      // empty seo_line as "derive one from the title" — so an old row degrades
+      // to the deterministic line instead of printing a blank first line.
+      seo_line: row.seo_line || "",
     };
   } catch { return null; }
 }
@@ -447,9 +638,16 @@ export async function ensureEventCarouselCopy(eventId, { callJsonFn = callJson }
   }
 
   recordAttempt(db, eventId, hash, now, { copy: v.copy, model: "gemini" });
-  logger.info(`🎠 carousel copy ready for ${eventId.slice(0, 8)} (${v.copy.figures.length} grounded figures)`);
+  // seo_line provenance is logged, never persisted: a "fallback" that becomes
+  // the norm is a prompt problem, and the only way to see that is a log line
+  // that names the rejection reason each time it happens.
+  const seoNote = v.seoReason ? `seo_line FALLBACK (${v.seoReason})` : "seo_line ok";
+  logger.info(`🎠 carousel copy ready for ${eventId.slice(0, 8)} (${v.copy.figures.length} grounded figures, ${seoNote}): "${v.copy.seo_line}"`);
   return v.copy;
 }
 
 // Exported for tests and for a future ops preview route.
-export const __test__ = { validateCopy, buildContext, buildPrompt, normText, normNum };
+export const __test__ = {
+  validateCopy, buildContext, buildPrompt, normText, normNum,
+  validateSeoLine, entityTokensFor, contentHashOf, COPY_RULES_VER,
+};

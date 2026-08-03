@@ -27,9 +27,10 @@ import * as migration020 from "./migrations/020_event_carousel.js";
 import * as migration021 from "./migrations/021_event_post_retries.js";
 import * as migration022 from "./migrations/022_video_posts.js";
 import * as migration023 from "./migrations/023_video_posts_facebook.js";
+import * as migration024 from "./migrations/024_event_carousel_seo_line.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021, migration022, migration023];
+const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021, migration022, migration023, migration024];
 
 function ensureSchemaMigrationsTable(db) {
   db.exec(`

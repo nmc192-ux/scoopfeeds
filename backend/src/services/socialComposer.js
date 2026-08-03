@@ -79,7 +79,7 @@ function truncate(str, limit) {
 // senten…". Aware of common abbreviations ("Dr.", "U.S.") so we don't cut
 // mid-attribution. Falls back to character truncation if no sentence
 // boundary is available within the budget.
-function truncateBySentence(str, limit) {
+export function truncateBySentence(str, limit) {
   const s = String(str || "").trim();
   if (s.length <= limit) return s;
   const slice = s.slice(0, limit);
@@ -112,7 +112,7 @@ function utmUrl(articleId, network) {
 // "BBC Sport: ...", trailing dashes ("- BBC News"), bracketed annotations
 // ("[VIDEO]", "(Reuters)"), and ALL-CAPS prefixes ("EXCLUSIVE: ...") all
 // either duplicate info we already show or read as templated.
-function cleanHeadline(raw) {
+export function cleanHeadline(raw) {
   let h = String(raw || "").trim();
   if (!h) return "";
   // Trailing " - Source" / " — Source" / " | Source" — but ONLY when the
@@ -133,6 +133,66 @@ function cleanHeadline(raw) {
   // Collapse whitespace
   h = h.replace(/\s+/g, " ").trim();
   return h;
+}
+
+// ── Deterministic SEO line ──────────────────────────────────────────────
+//
+// The keyword-first caption line, derived from a title by rule alone. Two
+// callers, one implementation:
+//   • eventCarouselCopy — the fallback when the model's seo_line is null or
+//     fails validation. A post is NEVER blocked by that failure.
+//   • the article (3-slide) path, which has no event and therefore no model
+//     seo_line at all, so this is its only source.
+//
+// Lives here rather than beside the generator because cleanHeadline() — the
+// publisher-suffix stripper — is already here, and a second suffix stripper is
+// exactly the kind of duplicate the sentence-boundary rule exists to prevent.
+//
+// Function words only. Nothing that carries news meaning is stripped: "says",
+// "after", "over" and "against" all survive, because "Ruling against Meta" and
+// "Ruling for Meta" are different stories.
+export const SEO_STOPWORDS = new Set([
+  "a", "an", "the", "of", "to", "in", "on", "at", "for", "and", "or", "but",
+  "with", "by", "from", "as", "is", "are", "was", "were", "be", "been", "being",
+  "that", "this", "these", "those", "it", "its", "his", "her", "their", "our",
+  "has", "have", "had", "will", "would", "can", "could", "may", "might",
+  "do", "does", "did", "so", "than", "then", "there", "here",
+]);
+
+/**
+ * A keyword-first line derived from a title, by rule.
+ *
+ * Publisher suffix stripped (via cleanHeadline), function words stripped,
+ * truncated to `maxWords`. Never throws; returns "" only when the title is
+ * itself empty.
+ *
+ * Stopword-stripping is ABANDONED when it would leave fewer than 3 words —
+ * "Is it over?" must not collapse to "over". The unstripped cleaned title is
+ * better than a one-word fragment, and short titles are exactly where stopword
+ * removal does the most damage.
+ */
+export function deterministicSeoLine(title, { maxWords = 10 } = {}) {
+  let cleaned = "";
+  try {
+    cleaned = cleanHeadline(title) || String(title ?? "").trim();
+  } catch {
+    cleaned = "";
+  }
+  if (!cleaned) return "";
+
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  const kept = words.filter((w) => {
+    const bare = w.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return bare && !SEO_STOPWORDS.has(bare);
+  });
+
+  const chosen = kept.length >= 3 ? kept : words;
+  return chosen
+    .slice(0, maxWords)
+    .join(" ")
+    // Trailing punctuation only — an interior hyphen or apostrophe is content.
+    .replace(/[\s.,;:!?—–-]+$/, "")
+    .trim();
 }
 
 // Pull a numeric sport score (e.g. "62-24", "2-1") out of a string. Used to
