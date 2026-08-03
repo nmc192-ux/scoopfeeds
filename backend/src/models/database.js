@@ -2401,7 +2401,41 @@ export function findFreshUnvideoedArticles({
           AND NOT (v.status = 'pending' AND v.updated_at > ?)
         )
       )
-    ORDER BY a.credibility DESC, a.published_at DESC
+    -- SUBSTANCE BEFORE RECENCY. This was "credibility DESC, published_at DESC",
+    -- and measured against a prod snapshot it returned the THINNEST articles in
+    -- the pool: top-8 median 111 stored chars against a pool median of 2,219 —
+    -- below the 10th percentile, with 0/8 overlap against a by-length ordering.
+    -- The 2026-08-03 dry run rejected all 8 candidates as "too thin" because of
+    -- it, at 4-5 slides against a 6-slide floor.
+    --
+    -- The mechanism is not recency as such. credibility is a coarse 4-value
+    -- tier, so it buckets and then published_at DESC decides inside the bucket —
+    -- and the freshest rows are the ones ingestion has just written and
+    -- contentEnricher has not filled yet. Ordering by recency was ordering by
+    -- UN-ENRICHED.
+    --
+    -- 1. Stored length is the universal signal; every candidate has one.
+    --    contentEnricher caps it at 5,000, so it saturates for 12-17% of prod
+    --    candidates and stops discriminating exactly at the dense end.
+    -- 2. Event breadth breaks that tie — how many articles the story carries
+    --    across outlets, which is what the verification harness was implicitly
+    --    selecting on. DELIBERATELY SECONDARY: only 8.4% of candidates have
+    --    event linkage at all (measured, 72h prod window), so leading with it
+    --    would rank a thin linked story above a dense unlinked one.
+    -- 3. credibility keeps its editorial preference as a tiebreak. The quality
+    --    FLOOR still lives in the WHERE clause above and is unchanged.
+    --
+    -- Length here is the STORED body, not what the spec sees — videoFullText
+    -- refetches the article at generation time. This orders on the best
+    -- available prior; it does not decide the spec's input.
+    ORDER BY LENGTH(COALESCE(a.content, '')) DESC,
+             (SELECT COUNT(*) FROM event_articles ea2
+                WHERE ea2.event_id = (
+                  SELECT ea1.event_id FROM event_articles ea1
+                   WHERE ea1.article_id = a.id LIMIT 1
+                )) DESC,
+             a.credibility DESC,
+             a.published_at DESC
     LIMIT ?
   `).all(cutoff, minCredibility, staleBefore, limit);
 }

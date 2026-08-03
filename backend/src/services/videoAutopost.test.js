@@ -379,3 +379,92 @@ test("an unset VIDEO_SPEC_ENABLED aborts ONCE — it does not skip eight candida
   assert.equal(res.tried, 0, "no article should be attempted at all");
   assert.equal(specCalls, 0, "the spec writer must never be called in this configuration");
 });
+
+// ─── Candidate ordering: substance before recency ───────────────────────────
+//
+// The 2026-08-03 dry run walked all 8 candidates and rejected every one as
+// "too thin" at 4-5 slides. The pool was not the problem; the ORDER BY was.
+// `credibility DESC, published_at DESC` buckets on a coarse 4-value tier and
+// then takes the FRESHEST rows inside the bucket — which are the ones
+// ingestion has just written and contentEnricher has not filled yet. Measured
+// against a prod snapshot: top-8 median 111 stored chars against a pool median
+// of 2,219, below the 10th percentile, 0/8 overlap with a by-length ordering.
+//
+// These pin the ordering, not the yield. Yield is a live measurement.
+
+function seedSized({ id, chars, source = "Wire", cred = 9, published = Date.now() - HOUR }) {
+  db.prepare(`
+    INSERT INTO articles (id, title, description, content, url, category, source_name,
+                          published_at, fetched_at, credibility, is_duplicate)
+    VALUES (?, ?, '', ?, ?, 'world', ?, ?, ?, ?, 0)
+  `).run(id, `Headline ${id}`, "x".repeat(chars), `https://e.example/${id}`, source, published, Date.now(), cred);
+  return id;
+}
+
+test("a DENSE older article outranks a THIN fresher one", () => {
+  db.exec("DELETE FROM video_posts"); db.exec("DELETE FROM articles");
+  const thinFresh = seedSized({ id: "ord-thin", chars: 120, published: Date.now() - 60_000 });
+  const denseOld = seedSized({ id: "ord-dense", chars: 4800, published: Date.now() - 6 * HOUR });
+
+  const got = ids(findFreshUnvideoedArticles({ limit: 10 }));
+  assert.equal(got[0], denseOld, "substance must outrank recency — this is the whole fix");
+  assert.equal(got[1], thinFresh);
+});
+
+test("credibility no longer dominates — it is a tiebreak, and the FLOOR is unchanged", () => {
+  db.exec("DELETE FROM video_posts"); db.exec("DELETE FROM articles");
+  const denseLowerCred = seedSized({ id: "ord-dense-8", chars: 4800, cred: 8 });
+  const thinTopCred = seedSized({ id: "ord-thin-10", chars: 120, cred: 10 });
+  const belowFloor = seedSized({ id: "ord-below", chars: 5000, cred: 6 });
+
+  const got = ids(findFreshUnvideoedArticles({ limit: 10 }));
+  assert.equal(got[0], denseLowerCred, "a denser cred-8 article must outrank a thin cred-10 one");
+  assert.ok(got.includes(thinTopCred));
+  assert.ok(!got.includes(belowFloor),
+    "the credibility >= 7 FLOOR must still exclude — only the ORDER BY changed");
+});
+
+test("event breadth breaks ties among articles saturated at the 5,000-char cap", () => {
+  // contentEnricher caps content at 5,000, so length stops discriminating
+  // exactly at the dense end — 12-17% of prod candidates sit there. Event
+  // breadth is what separates them.
+  db.exec("DELETE FROM video_posts"); db.exec("DELETE FROM articles");
+  db.exec("DELETE FROM event_articles");
+  const lonely = seedSized({ id: "ord-cap-lonely", chars: 5000, published: Date.now() - 60_000 });
+  const broad = seedSized({ id: "ord-cap-broad", chars: 5000, published: Date.now() - 6 * HOUR });
+
+  const link = db.prepare("INSERT INTO event_articles (event_id, article_id, added_at) VALUES (?, ?, ?)");
+  link.run("evt-broad", broad, Date.now());
+  for (let i = 0; i < 5; i++) {                       // 5 more outlets on the same story
+    const sib = seedSized({ id: `ord-sib-${i}`, chars: 300, source: `Outlet${i}` });
+    link.run("evt-broad", sib, Date.now());
+  }
+  link.run("evt-lonely", lonely, Date.now());
+
+  const got = ids(findFreshUnvideoedArticles({ limit: 10 }));
+  assert.equal(got[0], broad,
+    "at equal length, the story carried by six outlets must outrank the one carried by one");
+  assert.equal(got[1], lonely);
+  db.exec("DELETE FROM event_articles");
+});
+
+test("event breadth is SECONDARY — a thin linked story does not outrank a dense unlinked one", () => {
+  // Only 8.4% of prod candidates have event linkage (measured, 72h window).
+  // Leading with breadth would hand the window to that minority regardless of
+  // whether those stories carry any substance.
+  db.exec("DELETE FROM video_posts"); db.exec("DELETE FROM articles");
+  db.exec("DELETE FROM event_articles");
+  const denseUnlinked = seedSized({ id: "ord-dense-unlinked", chars: 4800 });
+  const thinLinked = seedSized({ id: "ord-thin-linked", chars: 200 });
+
+  const link = db.prepare("INSERT INTO event_articles (event_id, article_id, added_at) VALUES (?, ?, ?)");
+  link.run("evt-big", thinLinked, Date.now());
+  for (let i = 0; i < 9; i++) {
+    link.run("evt-big", seedSized({ id: `ord-big-sib-${i}`, chars: 100, source: `O${i}` }), Date.now());
+  }
+
+  const got = ids(findFreshUnvideoedArticles({ limit: 10 }));
+  assert.equal(got[0], denseUnlinked,
+    "a dense article with no event must still outrank a 200-char one on a 10-outlet event");
+  db.exec("DELETE FROM event_articles");
+});
