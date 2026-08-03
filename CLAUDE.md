@@ -15,6 +15,10 @@ behaviour, not intent, and they are kept current:
 - `docs/architecture/dossier_and_event_graph.md` — how the system actually works
 - `docs/reference/env_reference.md` — every flag, its code default, and its prod value
 - `docs/agentic-workflow.md` — the gates, the honesty rules, who approves what
+- `docs/video-pipeline.md` — the YouTube automation: format, Rule 0, sourcing,
+  selection gates, publishing, and the ops runbook. **Read it before touching
+  anything under `backend/src/services/video*.js`** — most of its rules were
+  earned by a live failure and look arbitrary without that history.
 
 ## Commands
 
