@@ -9,6 +9,7 @@ import {
 import { getDbStatus } from "../models/database.js";
 import { logger } from "../services/logger.js";
 import { runEnrichCycle, runIngestionCycle, runVideoCycle } from "../services/scheduler.js";
+import { sweepAtStartup } from "../services/videoArtifacts.js";
 import { runVideoRenderCycle } from "../services/videoAutopost.js";
 import { withJobRunLogging } from "./jobLogger.js";
 import { queueConcurrency, JOB_NAMES, QUEUE_NAMES, BULLMQ_PREFIX } from "./jobOptions.js";
@@ -63,6 +64,40 @@ try {
     pid: process.pid,
     db,
   });
+
+  // ─── Disk reclamation ─────────────────────────────────────────────────────
+  //
+  // The worker is the ONLY process that creates video artifacts — ffmpeg frame
+  // scratch, MP4s and TTS clips all come out of runVideoRenderCycle, which runs
+  // here and nowhere else. So this is the process that sweeps them. Web and
+  // scheduler would sweep their own empty tmpdir and the same shared volume, to
+  // no additional effect.
+  //
+  // Startup rather than a cron, per videoArtifacts.js's header: a cron that
+  // stops firing is invisible, and a redeploy is exactly when leaked scratch
+  // has accumulated.
+  //
+  // AWAITED BEFORE THE WORKERS REGISTER. sweepFrames() deletes every directory
+  // under FRAMES_ROOT on the assumption that no render is in flight — true only
+  // until this process starts consuming videoRender jobs. Register first and the
+  // sweep can delete the scratch of a job it raced.
+  //
+  // Its failure is logged and swallowed: disk cleanup is maintenance, not a
+  // precondition for consuming jobs, and the outer catch here exits the process.
+  try {
+    const swept = await sweepAtStartup();
+    logger.info(`[${PROCESS_ROLE}] startup sweep`, {
+      frameDirs: swept.frames.removed,
+      mp4s: swept.videos.removed,
+      mp4sKept: swept.videos.kept,
+      ttsClips: swept.tts?.removed ?? 0,
+      mbReclaimed: Number(
+        ((swept.frames.bytes + swept.videos.bytes + (swept.tts?.bytes || 0)) / 1048576).toFixed(1)
+      ),
+    });
+  } catch (error) {
+    logger.error(`[${PROCESS_ROLE}] startup sweep FAILED (continuing): ${error.message}`);
+  }
 
   if (!assertRedisAvailable({ role: PROCESS_ROLE })) {
     logger.warn(`[${PROCESS_ROLE}] Redis not configured; queue workers will not start`);

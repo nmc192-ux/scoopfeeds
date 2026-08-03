@@ -180,6 +180,33 @@ simply have been almost nothing to extract from.
   remaining candidate. Uploads cost 1,600 units of 10,000/day, **shared with
   YouTube ingestion**.
 
+**Facebook cross-post** (`VIDEO_FACEBOOK_ENABLED`, ships dark)
+
+- Every published video is also uploaded **natively** to the page —
+  `POST /{page-id}/videos`, multipart `source`. Not a link share (Facebook
+  demotes YouTube links, which is the whole reason this exists) and not a Reel
+  (`/video_reels` is vertical; these renders are 1920×1080 and a Reel would need
+  a second render path).
+- Runs in the same cycle, immediately after `markVideoPublished`, on the MP4
+  `produceVideo` just returned — so it is always well inside the 48h window.
+- **No fallback.** Every other function in `facebookClient.js` degrades to a
+  link post; this one throws. A degraded link share is the thing being avoided,
+  so "succeeded by posting a link" is worse than failing.
+- **A Facebook failure can never touch the YouTube publish.** It is recorded in
+  `video_posts.facebook_status` (`posted` | `failed` | `skipped`; NULL = never
+  attempted), which is a disjoint column set from `status` — so it cannot flip a
+  published row to `failed`, cannot feed the stale-pending retire rule, and
+  cannot get the same video uploaded to YouTube twice. The `isQuotaExceeded`
+  path is unreachable from it. See the comment at the attach point; the inner
+  try/catch there is load-bearing.
+- Own rolling-24h cap, `VIDEO_FACEBOOK_MAX_PER_DAY`, defaulting to
+  `VIDEO_MAX_PER_DAY` so it tracks unless deliberately throttled. `0` means zero.
+- `X-Business-Use-Case-Usage` is logged on every Graph call. Meta's page limit
+  is 4800 × engaged users per rolling 24h (error 80001) — nowhere near binding
+  at 12/day, so the value of the number is that it is in the logs before the day
+  it matters. Meta documents **no** per-day cap on page video posts; the
+  "25 posts/day" figure that circulates is third-party, unverified.
+
 ---
 
 ## 8. Operations
@@ -190,7 +217,16 @@ simply have been almost nothing to extract from.
 - Config: `backend/.env` — gitignored, single copy, back it up before edits
 - Volume: `/var/lib/docker/volumes/scoopfeeds_scoop_data/_data` (root-owned)
 - MP4s kept 48h, frames in container tmpdir, TTS cache 7 days — all swept at
-  **startup**, not on a cron (a cron that stops firing is invisible)
+  **worker startup** (`workerProcess.js` → `videoArtifacts.sweepAtStartup()`),
+  not on a cron (a cron that stops firing is invisible). The worker is the only
+  process that creates any of the three, and the sweep is awaited before the
+  queue workers register so it cannot race a render's scratch dir.
+- ⚠️ **All three sweeps were dead code until 2026-08-04.** `sweepAtStartup()`
+  had no caller in any process, so nothing reclaimed video disk anywhere —
+  this bullet described intent, not behaviour, for the whole life of the
+  pipeline. A local checkout still held a rendered MP4 fifteen days old.
+  `videoArtifacts.test.js` now asserts the function is reachable from a process
+  entry point and fails if it is ever unwired again.
 
 **Deploy rules learned the hard way**
 
