@@ -39,7 +39,7 @@ import {
   countVideosPublishedSince, lastVideoPublishedAt, recordHeartbeat, getHeartbeatRow,
 } from "../models/database.js";
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
-import { selectionGate } from "./videoSelection.js";
+import { selectionGate, diversifyByPublisher, MAX_PER_PUBLISHER } from "./videoSelection.js";
 import { resolveAttribution, buildDescriptionCredit } from "./videoAttribution.js";
 import { writeVideoSpec, writePackaging, isVideoSpecEnabled } from "./videoSpecWriter.js";
 import { statesForCard, renderState, fitStatesToDuration, videoDesignKey } from "./videoSlideRenderer.js";
@@ -234,8 +234,25 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     // Rule 0 FIRST, ahead of every editorial gate. It is absolute and must not
     // be reachable only after something cheaper happened to pass.
     const raw = findFreshUnvideoedArticles({ limit: MAX_ATTEMPTS * 6, now });
-    const eligible = filterAtSelection(raw);
-    logger.info(`🎬 video cycle: ${raw.length} fresh → ${eligible.length} after Rule 0 · ${rate.published24h}/${rate.max} today`);
+    const afterRule0 = filterAtSelection(raw);
+
+    // PUBLISHER DIVERSITY AT SELECTION. Length-first ordering handed the window
+    // to whoever writes longest — Yahoo Finance took 5 of 7 candidates, then 2
+    // of 2. The publish-time cooldown cannot fix that: it refuses the second
+    // VIDEO, long after the cycle has spent all eight attempts inside one
+    // masthead. Capping the attempt list is the only place this is reachable.
+    const { kept: eligible, dropped: crowded } = diversifyByPublisher(afterRule0);
+    logger.info(
+      `🎬 video cycle: ${raw.length} fresh → ${afterRule0.length} after Rule 0 → ` +
+      `${eligible.length} after publisher diversity (max ${MAX_PER_PUBLISHER}/publisher` +
+      `${crowded.length ? `, dropped ${crowded.length}` : ""}) · ${rate.published24h}/${rate.max} today`
+    );
+    if (crowded.length) {
+      const by = {};
+      for (const a of crowded) by[a.source_name || "(none)"] = (by[a.source_name || "(none)"] || 0) + 1;
+      // NO SILENT CAPS. What was set aside, and whose, is stated.
+      logger.info(`🎬 diversity set aside: ${Object.entries(by).map(([k, n]) => `${k} x${n}`).join(", ")}`);
+    }
 
     for (const article of eligible) {
       if (attempts.length >= MAX_ATTEMPTS) {
