@@ -33,6 +33,7 @@ import {
   getVideoJobsReadyToPublish,
   approveVideoJob,
   markVideoJobPublished,
+  recordSocialPost as recordSocialPostRow,
 } from "../models/database.js";
 import {
   isYouTubeConfigured,
@@ -112,13 +113,25 @@ const AUTO_PUBLISH_SKIP_CATEGORIES = new Set([
   // currently empty; populate if a category turns out to be problematic
 ]);
 
+// Records a successful publish in social_posts.
+//
+// THIS WROTE NOTHING FOR THE LIFE OF THIS FILE. The hand-rolled INSERT it used
+// to contain named a `post_url` column; social_posts has `url`. Every call threw
+// `no such column: post_url` straight into the catch below and became a warn, so
+// the audit log has no row for any video platform — a prod snapshot with four
+// `published` video_jobs had zero social_posts rows for youtube, tiktok,
+// instagram_reels or facebook_reels. It also passed positional arguments to a
+// name that, when it resolved to the exported helper, took a single object.
+//
+// Now delegates to the one real writer in models/database.js. Still swallows:
+// this is called INSIDE each platform's try block, where a throw would be caught
+// by that platform's handler and logged as a publish failure for a post that
+// actually succeeded.
 function recordSocialPost(articleId, platform, postUrl, platformPostId) {
   try {
-    getDb().prepare(`
-      INSERT OR IGNORE INTO social_posts
-        (article_id, platform, status, post_url, platform_post_id, posted_at)
-      VALUES (?, ?, 'posted', ?, ?, ?)
-    `).run(articleId, platform, postUrl, platformPostId, Date.now());
+    recordSocialPostRow({
+      articleId, platform, status: "posted", url: postUrl, platformPostId,
+    });
   } catch (err) {
     logger.warn(`videoPublisher: social_posts insert failed for ${articleId}/${platform}: ${err.message}`);
   }

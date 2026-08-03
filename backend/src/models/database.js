@@ -2333,6 +2333,41 @@ export function markVideoFailed(articleId, error) {
   return getVideoPost(articleId);
 }
 
+/**
+ * Record the Facebook cross-post's outcome on the article's video_posts row.
+ *
+ * DELIBERATELY CANNOT TOUCH `status`. That column is the YouTube publish state
+ * and the input to the stale-pending retire rule; a Facebook failure writing
+ * 'failed' there would re-arm an article whose YouTube video is live and get it
+ * uploaded twice. This function's whole reason to exist separately from
+ * markVideoFailed is that it writes to a disjoint set of columns.
+ *
+ * @param {string} articleId
+ * @param {{ status: 'posted'|'failed'|'skipped', postId?: string|null, error?: string|null }} outcome
+ */
+export function markVideoFacebook(articleId, { status, postId = null, error = null }) {
+  getDb().prepare(`
+    UPDATE video_posts SET
+      facebook_status = ?, facebook_post_id = ?, facebook_error = ?, updated_at = ?
+    WHERE article_id = ?
+  `).run(status, postId, error ? String(error).slice(0, 500) : null, Date.now(), articleId);
+  return getVideoPost(articleId);
+}
+
+/**
+ * Facebook cross-posts in a ROLLING 24h, for VIDEO_FACEBOOK_MAX_PER_DAY.
+ *
+ * Counts `published_at` — the YouTube publish time — rather than a Facebook
+ * timestamp, which is exact only because the cross-post runs in the same cycle
+ * milliseconds later. Migration 023's header owns that reasoning and states
+ * what to add if the cross-post ever moves out of the cycle.
+ */
+export function countFacebookPostsSince(sinceMs) {
+  return getDb().prepare(
+    "SELECT COUNT(*) AS n FROM video_posts WHERE facebook_status = 'posted' AND published_at > ?"
+  ).get(sinceMs)?.n || 0;
+}
+
 /** Published in a ROLLING window — a calendar day resets at midnight and would let a quiet day burst. */
 export function countVideosPublishedSince(sinceMs) {
   return getDb().prepare(

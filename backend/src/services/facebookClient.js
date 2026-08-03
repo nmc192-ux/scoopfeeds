@@ -17,7 +17,10 @@
 //   1. Go to developers.facebook.com → create / select your app
 //   2. Add "Facebook Login" + "Pages API" products
 //   3. Graph API Explorer → select your app → Generate User Token
-//      (permissions needed: pages_manage_posts, pages_read_engagement)
+//      (permissions needed: pages_manage_posts, pages_read_engagement,
+//       pages_show_list — the third is required by POST /{page-id}/videos and
+//       its absence surfaces as an OAuthException at upload time, not at mint
+//       time, so mint with all three even if you only intend to post photos)
 //   4. Exchange for long-lived token:
 //      GET https://graph.facebook.com/oauth/access_token
 //        ?grant_type=fb_exchange_token
@@ -48,7 +51,40 @@ const PERSIST_DIR = process.env.SCOOP_PERSISTENT_DATA_DIR
   : path.join(BACKEND_ROOT, "data");
 const TOKEN_PATH = path.join(PERSIST_DIR, "facebook-token.json");
 
-const API_BASE = "https://graph.facebook.com/v19.0";
+// v19.0 was released 2024-01-23 and EXPIRED 2026-05-21. Meta does not hard-fail
+// an expired version — it silently routes the call to the oldest version still
+// live, so behaviour can change under us with no code change and no error. That
+// is the failure mode this pin exists to prevent, so it has to be maintained:
+// current is v26.0 (2026-07-29), and versions live roughly two years.
+const API_BASE = "https://graph.facebook.com/v26.0";
+
+// Graph enforces Business Use Case limits per Page: 4800 × engaged users per
+// rolling 24h, signalled by error 80001 and, on EVERY response, this header.
+// Logged rather than parsed: at a dozen posts a day the limit is nowhere near
+// binding, so the value of the number is that it is visible in the logs BEFORE
+// the day it matters, not that anything branches on it.
+function _logBucUsage(res, label) {
+  const raw = res.headers?.get?.("x-business-use-case-usage");
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw);
+    for (const entries of Object.values(parsed)) {
+      for (const e of entries || []) {
+        const pct = Math.max(e.call_count || 0, e.total_time || 0, e.total_cputime || 0);
+        const line =
+          `📘 FB usage ${label}: calls ${e.call_count ?? "?"}% time ${e.total_time ?? "?"}% ` +
+          `cpu ${e.total_cputime ?? "?"}%` +
+          (e.estimated_time_to_regain_access ? ` · THROTTLED, ${e.estimated_time_to_regain_access}m to regain` : "");
+        // 75% is the point at which a day's growth would reach the limit; below
+        // that it is background telemetry and does not deserve a warning.
+        if (pct >= 75 || e.estimated_time_to_regain_access) logger.warn(line);
+        else logger.info(line);
+      }
+    }
+  } catch {
+    logger.info(`📘 FB usage ${label}: ${String(raw).slice(0, 200)}`);
+  }
+}
 
 // Read env vars lazily so they work whether loaded by backend/.env (via
 // start.js pre-loader or server.js body) or set at the process level.
@@ -107,6 +143,7 @@ async function _call(pathPart, { method = "GET", params = {}, formData } = {}) {
     init.body = formData;
   }
   const res = await fetch(url, init);
+  _logBucUsage(res, pathPart);
   const text = await res.text();
   let json = {};
   try { json = text ? JSON.parse(text) : {}; } catch {}
@@ -154,6 +191,7 @@ async function _postPhotoBuffer({ buffer, caption, contentType = "image/png" }) 
   fd.append("published", "true");
   fd.append("access_token", t.pageToken);
   const res = await fetch(`${API_BASE}/${t.pageId}/photos`, { method: "POST", body: fd });
+  _logBucUsage(res, "/photos");
   const text = await res.text();
   let json = {};
   try { json = text ? JSON.parse(text) : {}; } catch {}
@@ -181,6 +219,105 @@ async function _postLink({ message, link }) {
   if (!res?.id) throw new Error(`facebook link post returned no id: ${JSON.stringify(res).slice(0, 200)}`);
   const postUrl = `https://www.facebook.com/${res.id.replace("_", "/posts/")}`;
   return { id: res.id, url: postUrl };
+}
+
+// ─── Page-feed video (the autopost cross-post) ────────────────────────────────
+//
+// POST /{page-id}/videos with the MP4 as multipart `source` — a NATIVE video
+// post on the page's feed. Not a link share: Facebook demotes posts whose
+// payload is a YouTube URL, which is the entire reason this exists. Not a Reel
+// either: /video_reels is vertical short-form and these renders are 1920×1080,
+// so posting them there would need a second, vertical render path.
+//
+// Permissions on the page token: pages_manage_posts, pages_read_engagement AND
+// pages_show_list. The third is easy to miss — the setup notes at the top of
+// this file predate it — and its absence shows up as an OAuthException at
+// upload time rather than at token-mint time.
+//
+// NO FALLBACK, DELIBERATELY. Every other function in this file degrades: photo
+// → photo-by-URL → link post. postReelToFacebook does the same, which means a
+// "success" from it may well be the suppressed link share we were avoiding, and
+// is why there is no evidence in social_posts that it ever uploaded a video. A
+// failure here is a failure. The caller records it and moves on; nothing is
+// salvaged into a worse post.
+//
+// Single-request upload, not the Resumable Upload API. Meta's publishing guide
+// leads with resumable (POST /{app-id}/uploads → POST /upload:{session}), which
+// exists for large files; measured renders from this pipeline are ~1.9 MB. The
+// guard below is what makes that assumption fail loudly instead of turning into
+// a mysterious 400 if renders ever grow by two orders of magnitude.
+// parseFloat and an explicit finite/non-negative check, not `parseInt(...) || default`:
+// that idiom silently turns both `0.5` (parses to 0) and a deliberate `0` into
+// the default, so the one setting an operator would reach for to clamp this
+// hard is the one that does nothing.
+const FB_VIDEO_MAX_BYTES = (() => {
+  const raw = process.env.FACEBOOK_VIDEO_MAX_MB;
+  const n = raw === undefined || raw === "" ? NaN : Number.parseFloat(raw);
+  return Math.round((Number.isFinite(n) && n >= 0 ? n : 200) * 1048576);
+})();
+
+const FB_VIDEO_TIMEOUT_MS =
+  Number.parseInt(process.env.FACEBOOK_VIDEO_TIMEOUT_MS || "", 10) || 120_000;
+
+/**
+ * Upload an MP4 as a native page video post. Returns { id, url }.
+ * Throws on anything less than a published video.
+ *
+ * @param {{ filePath: string, title?: string, description?: string }} args
+ */
+export async function postVideoToFacebook({ filePath, title = "", description = "" }) {
+  const t = _loadToken();
+  if (!t) throw new Error("facebook not configured");
+  if (!filePath) throw new Error("postVideoToFacebook: filePath is required");
+  if (!existsSync(filePath)) throw new Error(`postVideoToFacebook: file not found: ${filePath}`);
+
+  const bytes = readFileSync(filePath);
+  if (bytes.length < 10_000) {
+    throw new Error(`postVideoToFacebook: implausibly small MP4 (${bytes.length} bytes): ${filePath}`);
+  }
+  if (bytes.length > FB_VIDEO_MAX_BYTES) {
+    throw new Error(
+      `postVideoToFacebook: ${(bytes.length / 1048576).toFixed(1)} MB exceeds the ` +
+      `${(FB_VIDEO_MAX_BYTES / 1048576).toFixed(0)} MB single-request ceiling. Renders were ~2 MB when ` +
+      `this path was written; at this size it needs Meta's Resumable Upload API ` +
+      `(POST /{app-id}/uploads), not a bigger ceiling.`
+    );
+  }
+
+  const fd = new FormData();
+  fd.append("source", new Blob([bytes], { type: "video/mp4" }), path.basename(filePath));
+  if (title) fd.append("title", title);
+  if (description) fd.append("description", description);
+  fd.append("published", "true");
+  fd.append("access_token", t.pageToken);
+
+  // fetch() has no default timeout. Without this a stalled upload holds the
+  // render cycle open until the 60-minute hang guard notices, and the cycle is
+  // the thing that publishes the NEXT video.
+  const res = await fetch(`${API_BASE}/${t.pageId}/videos`, {
+    method: "POST",
+    body: fd,
+    signal: AbortSignal.timeout(FB_VIDEO_TIMEOUT_MS),
+  });
+  _logBucUsage(res, "/videos");
+
+  const text = await res.text();
+  let json = {};
+  try { json = text ? JSON.parse(text) : {}; } catch {}
+  if (!res.ok) {
+    const msg = json?.error?.message || text || "unknown";
+    const err = new Error(`facebook /videos → ${res.status} ${msg}`);
+    err.statusCode = res.status;
+    err.body = json;
+    throw err;
+  }
+  if (!json?.id) {
+    throw new Error(`facebook /videos returned no id: ${JSON.stringify(json).slice(0, 200)}`);
+  }
+
+  const url = `https://www.facebook.com/${t.pageId}/videos/${json.id}`;
+  logger.info(`📘 Facebook page video published: ${json.id} (${(bytes.length / 1048576).toFixed(1)} MB)`);
+  return { id: json.id, url };
 }
 
 // ─── Facebook Reels ───────────────────────────────────────────────────────────

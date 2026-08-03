@@ -37,6 +37,7 @@ import { logger } from "./logger.js";
 import {
   findFreshUnvideoedArticles, claimVideoPost, markVideoPublished, markVideoFailed,
   countVideosPublishedSince, lastVideoPublishedAt, recordHeartbeat, getHeartbeatRow,
+  markVideoFacebook, countFacebookPostsSince,
 } from "../models/database.js";
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
 import { selectionGate, diversifyByPublisher, MAX_PER_PUBLISHER } from "./videoSelection.js";
@@ -47,6 +48,7 @@ import { assembleSlide, concatSlides, holdForAudio } from "./videoAssembler.js";
 import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.js";
 import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
 import { uploadToYouTube, isYouTubeConfigured } from "./youtubeClient.js";
+import { postVideoToFacebook, isFacebookConfigured } from "./facebookClient.js";
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
 
@@ -59,6 +61,28 @@ export const videoMinIntervalMs = () =>
   Math.round((24 * 60 * 60 * 1000 / VIDEO_MAX_PER_DAY()) * 0.8);
 
 export const autopostEnabled = () => process.env.VIDEO_AUTOPOST_ENABLED === "1";
+
+/** The Facebook cross-post's kill switch. Ships dark; flip to "1" to enable. */
+export const facebookCrossPostEnabled = () => process.env.VIDEO_FACEBOOK_ENABLED === "1";
+
+/**
+ * Facebook's own rolling-24h cap. Unset it and Facebook tracks YouTube, so
+ * raising VIDEO_MAX_PER_DAY does not silently leave Facebook behind; set it and
+ * Facebook throttles independently, which is the one env line this needs to be
+ * if Meta reacts badly to the volume.
+ *
+ * 0 is honoured as ZERO, not treated as unset. Someone throttling during an
+ * incident types 0 before they type 1, and `|| VIDEO_MAX_PER_DAY()` would have
+ * quietly turned that into twelve.
+ */
+export const VIDEO_FACEBOOK_MAX_PER_DAY = () => {
+  const raw = process.env.VIDEO_FACEBOOK_MAX_PER_DAY;
+  if (raw === undefined || raw === "") return VIDEO_MAX_PER_DAY();
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : VIDEO_MAX_PER_DAY();
+};
+
+const SITE_ORIGIN = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 
 const MAX_ATTEMPTS = Number.parseInt(process.env.VIDEO_MAX_ATTEMPTS_PER_CYCLE || "", 10) || 8;
 const CYCLE_HANG_MS = Number.parseInt(process.env.VIDEO_CYCLE_HANG_MS || "", 10) || 60 * 60 * 1000;
@@ -144,6 +168,92 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
   }
 }
 
+// ─── Facebook cross-post ────────────────────────────────────────────────────
+//
+// Runs AFTER the YouTube upload has already succeeded and been recorded, on the
+// same MP4, in the same cycle — well inside the 48h retention window, so the
+// file is always still on disk.
+//
+// THIS FUNCTION NEVER THROWS AND NEVER RETURNS A REASON TO RETRY. A published
+// YouTube video is irreversible; a Facebook failure must not be able to reach
+// any of the three things that would undo or repeat it:
+//
+//   markVideoFailed  — would flip a row whose YouTube video is live back to
+//                      'failed', and the stale-pending retire rule would make
+//                      the article selectable again. UNIQUE(article_id) does
+//                      not help: the row exists, it just is not 'published'.
+//                      markVideoFacebook writes a disjoint set of columns and
+//                      cannot touch `status`.
+//   isQuotaExceeded  — matches /403/ AND /quota/i on a bare message string.
+//                      Meta says both in ordinary throttling errors, and a
+//                      match there aborts the whole cycle for a YouTube quota
+//                      that is fine.
+//   the job          — a throw escaping runVideoRenderCycle re-runs the BullMQ
+//                      job, and the in-flight guard is time-based, not
+//                      idempotent.
+//
+// So every path below is caught here and reported as a value.
+export async function crossPostToFacebook(article, {
+  filePath, title, attribution, now = Date.now(),
+} = {}) {
+  // Flag off: write NOTHING. NULL in facebook_status means "never attempted",
+  // and that is exactly true of a dark period — recording 'skipped' for every
+  // video shipped while the flag is off would make the column lie about a
+  // decision that was never taken. Migration 023's header owns this.
+  if (!facebookCrossPostEnabled()) return { status: "off" };
+
+  try {
+    if (!isFacebookConfigured()) {
+      // A missing credential with the flag ON is a config problem, not an
+      // editorial one — the same distinction the spec/voice gates draw above.
+      // Recorded so a day of twelve videos and zero posts is attributable.
+      logger.error(
+        "🚨 VIDEO_FACEBOOK_ENABLED=1 but Facebook is not configured (FACEBOOK_PAGE_ID / " +
+        "FACEBOOK_PAGE_TOKEN). The video is published to YouTube; the cross-post is skipped."
+      );
+      markVideoFacebook(article.id, { status: "skipped", error: "facebook not configured" });
+      return { status: "skipped", reason: "not-configured" };
+    }
+
+    const max = VIDEO_FACEBOOK_MAX_PER_DAY();
+    const posted24h = countFacebookPostsSince(now - 24 * 60 * 60 * 1000);
+    if (posted24h >= max) {
+      logger.info(`📘 facebook cross-post SKIPPED — cap ${posted24h}/${max} in the last 24h`);
+      markVideoFacebook(article.id, { status: "skipped", error: `daily cap ${posted24h}/${max}` });
+      return { status: "skipped", reason: "daily-cap" };
+    }
+
+    // §3b/4's rule, unchanged: the original is credited and linked FIRST.
+    const description = [
+      title,
+      buildDescriptionCredit(article, attribution),
+      `Full story → ${SITE_ORIGIN}/article/${encodeURIComponent(article.id)}` +
+        `?utm_source=social_facebook_video&utm_medium=social&utm_campaign=scoop_video`,
+    ].filter(Boolean).join("\n\n");
+
+    const fb = await postVideoToFacebook({ filePath, title, description });
+    markVideoFacebook(article.id, { status: "posted", postId: fb.id });
+    logger.info(`📘 FACEBOOK CROSS-POSTED ${fb.id} (${posted24h + 1}/${max} today) — ${fb.url}`);
+    return { status: "posted", id: fb.id, url: fb.url };
+
+  } catch (err) {
+    // LOUD. Best-effort does not mean quiet: this is the only signal that the
+    // page has stopped accepting video, and the YouTube upload succeeding means
+    // nothing else in the cycle will look wrong.
+    logger.error(
+      `🚨 FACEBOOK CROSS-POST FAILED for ${article.id} — the YouTube video IS published and stays ` +
+      `published; only the Facebook post is lost. ${err.message}`
+    );
+    try {
+      markVideoFacebook(article.id, { status: "failed", error: err.message });
+    } catch (dbErr) {
+      // Even the bookkeeping is best-effort. Nothing here may reach the caller.
+      logger.error(`🚨 facebook cross-post: could not record the failure either: ${dbErr.message}`);
+    }
+    return { status: "failed", error: err.message };
+  }
+}
+
 // ─── The cycle ──────────────────────────────────────────────────────────────
 
 /**
@@ -172,6 +282,10 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     isVoiceConfigured: _isVoiceConfigured = isVoiceConfigured,
     isYouTubeConfigured: _isYouTubeConfigured = isYouTubeConfigured,
     isVideoSpecEnabled: _isVideoSpecEnabled = isVideoSpecEnabled,
+    // Stubbable so the isolation is testable: a test can make this throw and
+    // assert the YouTube publish is untouched. That property is the whole
+    // design constraint, and it is not observable any other way.
+    crossPostToFacebook: _crossPostToFacebook = crossPostToFacebook,
   } = deps;
 
   if (!autopostEnabled()) {
@@ -379,6 +493,38 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
         produced = { articleId: article.id, youtubeId: up.videoId || up.id, title };
         rec.stage = "ok";
         logger.info(`🎬 PUBLISHED ${produced.youtubeId} — "${title}"`);
+
+        // ─── Facebook cross-post ───────────────────────────────────────────
+        //
+        // NESTED INSIDE THE UPLOAD TRY, which is unavoidable here: the YouTube
+        // publish is only recorded a few lines up and the `break` is below, so
+        // there is no point in this scope that is outside it. That makes the
+        // inner catch LOAD-BEARING, not defensive decoration — it is the only
+        // thing standing between a Facebook throw and the outer `catch (err)`,
+        // which would:
+        //   - call markVideoFailed on an article whose YouTube video is LIVE,
+        //     flipping status to 'failed' so the stale-pending rule re-selects
+        //     it and uploads the same video again, and
+        //   - run isQuotaExceeded over the Meta message, where a 403 mentioning
+        //     a request limit would abort the cycle for a YouTube quota that is
+        //     perfectly healthy.
+        // crossPostToFacebook is itself written never to throw. Both guards
+        // exist because either one alone is one refactor away from failing
+        // silently, and the failure is a duplicate published video.
+        //
+        // DO NOT remove this try/catch, and do not move the cross-post above
+        // markVideoPublished.
+        try {
+          const fb = await _crossPostToFacebook(article, {
+            filePath: video.path, title, attribution, now,
+          });
+          if (fb && fb.status !== "off") produced.facebook = fb;
+        } catch (fbErr) {
+          logger.error(
+            `🚨 facebook cross-post threw past its own guard for ${article.id} — this is a code ` +
+            `defect. The YouTube video is published and unaffected. ${fbErr.message}`
+          );
+        }
         break;
       } catch (err) {
         markVideoFailed(article.id, err.message);

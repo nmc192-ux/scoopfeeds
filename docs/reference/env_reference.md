@@ -136,6 +136,80 @@ conclude no floor is the honest answer.
 | `HOMEPAGE_GROUPING` | `false` | default | yes | Group homepage cards by story. |
 | `HOMEPAGE_GROUP_TAU` | `0.86` | default | yes | Grouping threshold. |
 
+## Video autopost (§6.1) — gates, retention, cross-post
+
+The loop is `videoAutopost.runVideoRenderCycle`, enqueued hourly by the scheduler and run in
+the **worker**. See `docs/video-pipeline.md` for why the rules are what they are.
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `VIDEO_AUTOPOST_ENABLED` | unset (**off**) | `1` | yes | Master switch. The only thing between built and live. Literal `"1"`. |
+| `VIDEO_SPEC_ENABLED` | unset (**off**) | `1` | yes | Required, *and* `GEMINI_API_KEY` must be set, or the cycle aborts loudly rather than skipping every candidate. |
+| `VIDEO_MAX_PER_DAY` | `4` | **`12`** | yes | Rolling-24h publish cap. Not a calendar day — a calendar reset lets a quiet day burst. |
+| `VIDEO_MIN_INTERVAL_MS` | `24h / max × 0.8` (≈1.6h at 12/day) | default | yes | Spacing gate. The 0.8 slack gives more opportunities than videos, so a failure costs time rather than a video. |
+| `VIDEO_MAX_ATTEMPTS_PER_CYCLE` | `8` | default | yes | Candidates tried per cycle before giving up. |
+| `VIDEO_MAX_PER_PUBLISHER_PER_CYCLE` | `2` | default | yes | Publisher diversity **at selection**. The publish-time cooldown cannot fix a candidate list already monopolised by one masthead. |
+| `VIDEO_PUBLISHER_COOLDOWN_MS` | `24h` | default | yes | Per-publisher gate at publish time. |
+| `VIDEO_EVENT_COOLDOWN_MS` | `48h` | default | yes | Per-event gate at publish time. |
+| `VIDEO_CYCLE_HANG_MS` | `3600000` (1h) | default | yes | A cycle older than this is declared HUNG and a fresh one proceeds. |
+| `VIDEO_PENDING_HANG_MS` | `2700000` (45m) | default | yes | A `pending` row older than this counts as a failed attempt in the two-failure retire rule. |
+| `VIDEO_ALLOW_PK_DOMESTIC` | unset (**blocked**) | default | yes | Rule 0 escape hatch. Do not set it without reading §Rule 0 of `docs/video-pipeline.md`. |
+| `YOUTUBE_PRIVACY` | `public` | default | yes | Written to `video_posts.privacy_status` on publish. |
+
+**Artifact retention.** All three are swept at **worker startup** (`workerProcess.js` →
+`sweepAtStartup()`), not on a cron. ⚠️ Until 2026-08-04 nothing called that function, so none
+of these values had any effect — see the note in `docs/video-pipeline.md` §8.
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `VIDEO_MP4_RETENTION_HOURS` | `48` | default | restart | MP4 window. Long enough to inspect a bad upload; YouTube holds the copy that matters. |
+| `VIDEO_TTS_RETENTION_DAYS` | `7` | default | restart | TTS clip cache window. |
+| `VIDEO_FRAMES_DIR` | `os.tmpdir()/scoop-video-frames` | default | restart | Frame scratch. **Must stay off the persistent volume** — a leaked render is ~120 files. |
+| `VIDEO_TTS_CACHE_DIR` | `<persist>/tts` | default | restart | TTS clip cache location. |
+
+### Facebook cross-post
+
+Every published video is also uploaded **natively** to the Scoopfeeds page as a normal page
+video post (`POST /{page-id}/videos`), in the same cycle, immediately after the YouTube
+upload. Best-effort: a Facebook failure is logged loudly and recorded in
+`video_posts.facebook_status`, and can never fail, retry or undo the YouTube upload.
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `VIDEO_FACEBOOK_ENABLED` | `0` (**dark**) | *set at ship* | yes | Kill switch. Off = nothing attempted and nothing recorded (`facebook_status` stays NULL). |
+| `VIDEO_FACEBOOK_MAX_PER_DAY` | falls through to `VIDEO_MAX_PER_DAY` (so `12`) | default | yes | Independent rolling-24h cap. **`0` means zero**, not unset — throttling to nothing is one env line. |
+| `FACEBOOK_PAGE_ID` | — | set | restart | Numeric page id, not the username. |
+| `FACEBOOK_PAGE_TOKEN` | — | set | restart | Page token. Needs `pages_manage_posts` + `pages_read_engagement` + **`pages_show_list`** — the third is required by `/videos` and its absence appears only at upload time. |
+| `FACEBOOK_VIDEO_MAX_MB` | `200` | default | yes | Single-request upload ceiling. Renders are ~2 MB; above this the code refuses rather than silently 400ing, and Meta's Resumable Upload API is the answer, not a bigger number. |
+| `FACEBOOK_VIDEO_TIMEOUT_MS` | `120000` | default | yes | Upload timeout. `fetch()` has none by default and a stall would hold the cycle open until the hang guard fires. |
+
+> ⚠️ **The page token cache outranks the env var.** `facebookClient._loadToken()` reads
+> `<persist>/facebook-token.json` **first** and only falls back to `FACEBOOK_PAGE_TOKEN`.
+> Rotating the env var without deleting that file is a no-op. Delete it on rotation.
+
+> ⚠️ **The Graph API version is pinned and expires.** `facebookClient.js` pins `v26.0`
+> (released 2026-07-29). Meta does not hard-fail an expired version — it silently routes to
+> the oldest live one, so this drifts without an error. Versions live ~2 years.
+
+### Legacy `video_jobs` publisher — separate pipeline
+
+`videoPublisher.js` + `runVideoPublishCycle` (hourly) publish **short-form** jobs from the
+`video_jobs` table to YouTube Shorts / IG Reels / FB Reels / TikTok. Unrelated to the
+autopost loop above and gated off in prod.
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `VIDEO_AUTO_APPROVE` | unset (**off**) | `0` | yes | Auto-promote `ready` jobs to `review_approved`. Off = human review only. |
+| `VIDEO_AUTO_APPROVE_MIN_CREDIBILITY` | `8` | default | yes | Auto-approval credibility floor. |
+| `VIDEO_AUTO_APPROVE_MAX_AGE_HOURS` | `24` | default | yes | Auto-approval staleness limit. |
+| `ENABLE_INPROCESS_VIDEO_CRON` | `false` | default | restart | Runs the legacy generator in-process on the web container. Parsed as the string `"true"`. |
+
+**Not listed here, on purpose:** the render-tuning vars (`VIDEO_FPS`, `VIDEO_DRIFT_*`,
+`VIDEO_CROSSFADE_SECS`, `VIDEO_SLIDE_TAIL`, `VIDEO_SPEC_MODEL`, `VIDEO_SPEC_WPM`,
+`VIDEO_SPEC_*_CHARS`, `VIDEO_*_MAX_OUTPUT_TOKENS`, `VIDEO_FULLTEXT_*`, `VIDEO_TTS_TIMEOUT_MS`).
+They change how a video looks or costs, never whether or where one publishes, and all run on
+their code defaults in prod.
+
 ## Undocumented-var audit
 
 `262` distinct `process.env.*` reads in `backend/`; `backend/.env.example` covered `77`.

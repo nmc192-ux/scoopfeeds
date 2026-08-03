@@ -13,40 +13,25 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import Database from "better-sqlite3";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// CLAUDE.md says to build a test DB through makeTestDb() from
-// src/testing/testDb.js. That file does NOT exist on this branch: it landed in
-// 9d6c3e4 on j-loop/issue-1-schema-bootstrap-order, which is not merged to
-// main, and it depends on bootstrapSchema() which is also absent here. It is
-// the same gap that leaves 64 skills/scoring tests failing on this branch.
+// These tests exercise the REAL production functions, which all reach the
+// getDb() singleton — so the fixture is a temp SCOOP_PERSISTENT_DATA_DIR and a
+// normal boot, not makeTestDb()'s separate handle. getDb() goes through
+// bootstrapSchema() (initializeSchema → initRealityIndex → runMigrations), so
+// the schema here cannot drift from production's.
 //
-// So the fixture reproduces its INTENT with what exists. runMigrations() alone
-// on an empty DB dies at 011 ("no such table: event_articles") because that
-// migration assumes initRealityIndex has run — verified, not assumed. The way
-// through, without calling runMigrations directly:
-//   1. pre-mark migrations 001-021 as applied, so none of them execute
-//   2. let getDb() run initializeSchema (idempotent CREATE TABLE IF NOT EXISTS),
-//      which owns `articles`
-//   3. leave 022 unapplied so it is the only migration that actually runs
-// 022 creates a standalone table and depends on nothing earlier, which is what
-// makes this safe rather than a fudge.
+// This block used to pre-mark every migration EXCEPT 022 as already applied, to
+// work around runMigrations() dying at 011 on a branch where bootstrapSchema()
+// did not exist yet. Both it and src/testing/testDb.js are on main now, so the
+// workaround is obsolete — and it was actively dangerous: written as
+// "everything except 022", it silently suppressed every migration added after
+// it. 023 would never have run, and the facebook_* columns these tests depend
+// on would have been missing with no error to say why.
 const TMP = mkdtempSync(path.join(os.tmpdir(), "videoautopost-"));
 process.env.SCOOP_PERSISTENT_DATA_DIR = TMP;
-{
-  const seed = new Database(path.join(TMP, "news.db"));
-  seed.exec("CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)");
-  const ins = seed.prepare("INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)");
-  const { getRegisteredMigrations } = await import("../db/migrate.js");
-  for (const id of getRegisteredMigrations()) {
-    if (id === "022_video_posts") continue;   // the one under test
-    ins.run(id, Date.now());
-  }
-  seed.close();
-}
 
 const HOUR = 3600 * 1000;
 const { getDb } = await import("../models/database.js");
@@ -57,6 +42,7 @@ const {
   findFreshUnvideoedArticles, countVideosPublishedSince, lastVideoPublishedAt,
   publisherPublishedSince, eventPublishedSince, recentPublishedVideos,
   markVideoPrivacy, VIDEO_PENDING_HANG_MS,
+  markVideoFacebook, countFacebookPostsSince,
 } = await import("../models/database.js");
 
 const { rateGate, isQuotaExceeded, VIDEO_MAX_PER_DAY, videoMinIntervalMs } =
@@ -446,6 +432,209 @@ test("event breadth breaks ties among articles saturated at the 5,000-char cap",
     "at equal length, the story carried by six outlets must outrank the one carried by one");
   assert.equal(got[1], lonely);
   db.exec("DELETE FROM event_articles");
+});
+
+// ─── Facebook cross-post ────────────────────────────────────────────────────
+//
+// The load-bearing property is NEGATIVE: a Facebook failure must not be able to
+// touch the YouTube upload that already succeeded. `status` stays 'published',
+// the article stays retired, the cycle still reports produced, and nothing
+// throws. Everything else here is bookkeeping around that.
+
+const {
+  crossPostToFacebook, facebookCrossPostEnabled, VIDEO_FACEBOOK_MAX_PER_DAY,
+} = await import("./videoAutopost.js");
+
+function fbEnv({ enabled = "1", max } = {}) {
+  process.env.VIDEO_FACEBOOK_ENABLED = enabled;
+  if (max === undefined) delete process.env.VIDEO_FACEBOOK_MAX_PER_DAY;
+  else process.env.VIDEO_FACEBOOK_MAX_PER_DAY = String(max);
+  process.env.FACEBOOK_PAGE_ID = "1126859220500685";
+  process.env.FACEBOOK_PAGE_TOKEN = "test-token-not-real";
+}
+
+/** An article that has already been published to YouTube. */
+function publishedArticle(source = "Reuters") {
+  const id = seedArticle({ source });
+  claimVideoPost({ articleId: id, sourceName: source, title: "t" });
+  markVideoPublished(id, { youtubeId: `yt-${id}`, privacyStatus: "public" });
+  return id;
+}
+
+test("the cap defaults to VIDEO_MAX_PER_DAY, so raising one does not leave the other behind", () => {
+  const savedMax = process.env.VIDEO_MAX_PER_DAY;
+  delete process.env.VIDEO_FACEBOOK_MAX_PER_DAY;
+  process.env.VIDEO_MAX_PER_DAY = "12";
+  assert.equal(VIDEO_FACEBOOK_MAX_PER_DAY(), 12);
+  process.env.VIDEO_MAX_PER_DAY = "4";
+  assert.equal(VIDEO_FACEBOOK_MAX_PER_DAY(), 4, "unset must TRACK the YouTube cap, not pin a literal");
+  if (savedMax === undefined) delete process.env.VIDEO_MAX_PER_DAY; else process.env.VIDEO_MAX_PER_DAY = savedMax;
+});
+
+test("an explicit cap overrides, and 0 means ZERO rather than falling through", () => {
+  // Someone throttling mid-incident types 0 before they type 1. `|| default`
+  // would have turned that into twelve.
+  process.env.VIDEO_MAX_PER_DAY = "12";
+  process.env.VIDEO_FACEBOOK_MAX_PER_DAY = "3";
+  assert.equal(VIDEO_FACEBOOK_MAX_PER_DAY(), 3);
+  process.env.VIDEO_FACEBOOK_MAX_PER_DAY = "0";
+  assert.equal(VIDEO_FACEBOOK_MAX_PER_DAY(), 0, "0 must throttle to nothing, not fall through to 12");
+  delete process.env.VIDEO_FACEBOOK_MAX_PER_DAY;
+});
+
+test("the kill switch is off by default and writes NOTHING when off", async () => {
+  cycleEnv();
+  delete process.env.VIDEO_FACEBOOK_ENABLED;
+  assert.equal(facebookCrossPostEnabled(), false, "must ship dark");
+
+  const id = publishedArticle();
+  const res = await crossPostToFacebook({ id }, { filePath: "/nonexistent.mp4", title: "t" });
+
+  assert.equal(res.status, "off");
+  // NULL means "never attempted". Writing 'skipped' for every video shipped
+  // during a dark period would make the column lie about a decision never taken.
+  assert.equal(getVideoPost(id).facebook_status, null);
+});
+
+test("the daily cap skips without attempting an upload", async () => {
+  cycleEnv();
+  fbEnv({ max: 1 });
+
+  const first = publishedArticle("CapWireA");
+  markVideoFacebook(first, { status: "posted", postId: "fb-1" });
+
+  const second = publishedArticle("CapWireB");
+  const res = await crossPostToFacebook({ id: second }, { filePath: "/nonexistent.mp4", title: "t" });
+
+  assert.equal(res.status, "skipped");
+  assert.equal(res.reason, "daily-cap");
+  const row = getVideoPost(second);
+  assert.equal(row.facebook_status, "skipped");
+  assert.match(row.facebook_error, /daily cap 1\/1/);
+  assert.equal(row.status, "published", "the YouTube state is untouched");
+});
+
+test("the cap counts a ROLLING 24h — a post 25h old does not consume a slot", () => {
+  cycleEnv();
+  const now = Date.now();
+  const old = publishedArticle("RollWire");
+  markVideoFacebook(old, { status: "posted", postId: "fb-old" });
+  db.prepare("UPDATE video_posts SET published_at = ? WHERE article_id = ?").run(now - 25 * HOUR, old);
+  assert.equal(countFacebookPostsSince(now - 24 * HOUR), 0);
+
+  const recent = publishedArticle("RollWire2");
+  markVideoFacebook(recent, { status: "posted", postId: "fb-new" });
+  assert.equal(countFacebookPostsSince(now - 24 * HOUR), 1);
+});
+
+test("a failed upload records 'failed' and NEVER throws", async () => {
+  cycleEnv();
+  fbEnv();
+  const id = publishedArticle("FailWire");
+
+  // No stub needed: the real client is configured but the file does not exist,
+  // so postVideoToFacebook throws before any network call.
+  const res = await crossPostToFacebook({ id }, { filePath: "/definitely/not/here.mp4", title: "t" });
+
+  assert.equal(res.status, "failed");
+  const row = getVideoPost(id);
+  assert.equal(row.facebook_status, "failed");
+  assert.ok(row.facebook_error, "the failure must be attributable without reading logs");
+});
+
+test("A FACEBOOK FAILURE CANNOT UNDO THE YOUTUBE PUBLISH", async () => {
+  // The whole point. markVideoFailed would flip status back to 'failed', and
+  // the stale-pending retire rule would make the article selectable again —
+  // uploading the same video to YouTube twice. markVideoFacebook writes a
+  // disjoint set of columns, so it structurally cannot.
+  cycleEnv();
+  fbEnv();
+  const id = publishedArticle("IsolationWire");
+  const before = getVideoPost(id);
+
+  await crossPostToFacebook({ id }, { filePath: "/definitely/not/here.mp4", title: "t" });
+
+  const after = getVideoPost(id);
+  assert.equal(after.status, "published", "status must NOT move to 'failed'");
+  assert.equal(after.youtube_id, before.youtube_id);
+  assert.equal(after.published_at, before.published_at);
+  assert.equal(after.attempts, before.attempts, "no attempt may be consumed");
+  assert.equal(after.error, null, "the YouTube error column must stay clean");
+  assert.ok(!ids(findFreshUnvideoedArticles({ limit: 50 })).includes(id),
+    "the article must stay retired — re-selection would publish to YouTube twice");
+});
+
+test("markVideoFacebook cannot write the YouTube status column at all", () => {
+  cycleEnv();
+  const id = publishedArticle("ColumnWire");
+  markVideoFacebook(id, { status: "failed", error: "meta 500" });
+  const row = getVideoPost(id);
+  assert.equal(row.status, "published");
+  assert.equal(row.facebook_status, "failed");
+});
+
+test("a Meta 403 mentioning a rate limit does not trip the YouTube quota abort", () => {
+  // isQuotaExceeded matches /403/ AND /quota|dailyLimitExceeded/i on a bare
+  // message. Meta says all of these; none of them are a YouTube quota, and a
+  // match would abort the cycle for the rest of the day.
+  assert.equal(isQuotaExceeded(new Error("facebook /videos → 403 (#4) Application request limit reached")), false);
+  assert.equal(isQuotaExceeded(new Error("facebook /videos → 403 (#80001) There have been too many calls from this page")), false);
+  // And the one that WOULD match textually is unreachable, because the
+  // cross-post is outside the try/catch that consults isQuotaExceeded at all.
+});
+
+test("the cycle still reports produced when the cross-post fails", async () => {
+  cycleEnv();
+  fbEnv();
+  seedArticle({ source: "Reuters", cred: 9 });
+
+  const res = await runVideoRenderCycle({
+    deps: {
+      ...baseDeps(),
+      crossPostToFacebook: async () => { throw new Error("meta exploded past its own guard"); },
+    },
+  });
+
+  assert.equal(res.error, undefined, `a cross-post throw must not fail the cycle: ${res.error}`);
+  assert.equal(res.produced?.youtubeId, "yt-e2e", "the YouTube publish must still be reported");
+  assert.equal(res.attempts.at(-1).stage, "ok", "the attempt must still read as a success");
+  assert.equal(getVideoPost(res.produced.articleId).status, "published");
+});
+
+test("a successful cross-post is attached to the cycle result", async () => {
+  cycleEnv();
+  fbEnv();
+  seedArticle({ source: "Reuters", cred: 9 });
+
+  const res = await runVideoRenderCycle({
+    deps: {
+      ...baseDeps(),
+      crossPostToFacebook: async () => ({ status: "posted", id: "fb-99", url: "https://fb/1" }),
+    },
+  });
+
+  assert.equal(res.produced?.facebook?.status, "posted");
+  assert.equal(res.produced.facebook.id, "fb-99");
+});
+
+test("the cross-post runs on the SAME MP4 the upload used, in the same cycle", async () => {
+  // "Before the 48h sweep" is satisfied structurally rather than by a check:
+  // the file is the one produceVideo just returned and the cycle has not ended.
+  cycleEnv();
+  fbEnv();
+  seedArticle({ source: "Reuters", cred: 9 });
+
+  const rendered = path.join(TMP, "same-file.mp4");
+  let seenByFacebook = null;
+  await runVideoRenderCycle({
+    deps: {
+      ...baseDeps(),
+      produceVideo: async () => ({ path: rendered, slides: [] }),
+      crossPostToFacebook: async (_a, opts) => { seenByFacebook = opts.filePath; return { status: "posted", id: "fb-1" }; },
+    },
+  });
+
+  assert.equal(seenByFacebook, rendered);
 });
 
 test("event breadth is SECONDARY — a thin linked story does not outrank a dense unlinked one", () => {
