@@ -38,8 +38,8 @@ accent per frame, code-rendered rather than filmed. Six card types:
 There is **no attribution card** — it was removed because a credit slide at
 position 2 is a dead beat where retention is decided.
 
-**Motion is keyframes, not frames.** Each card renders 4–6 *states* (empty →
-line 1 → line 2 → complete); ffmpeg crossfades between them and applies a slow
+**Motion is keyframes, not frames.** Each card renders 4 *states* — 5 for
+`stat` — (empty → line 1 → line 2 → complete); ffmpeg crossfades between them and applies a slow
 drift over the whole slide. A true 30fps sequence measured 1,800 renders,
 150s CPU and 71MB per video; keyframes are ~95 renders, ~8s, ~4MB.
 
@@ -103,8 +103,10 @@ Four independent levers were tried and **all came back flat**:
 | source breadth (8 sibling outlets) | Δ 0.00 beats |
 
 **Conclusion: most news stories genuinely contain 4–8 distinct verifiable
-facts.** The 6–20 slide target was wrong for this corpus. Real shape is 6–10
-slides, 60–100 seconds. Density matters, not length — an analysis feature
+facts.** The 6–20 slide target was wrong for this corpus. Observed typical
+output is 6–10 slides, 60–100 seconds — that is what the corpus produces, **not
+a floor**. The floor is `MIN_SLIDES = 5`, below which the article is skipped as
+too thin rather than padded up to it. Density matters, not length — an analysis feature
 yields 8 beats, a wire update yields 4, regardless of word count.
 
 The spec emits `beats` as data first (`{kind, beat, evidence}`), and content
@@ -120,8 +122,22 @@ sees. Anything the model is shown, it anchors on.
 - **Sport** and **live blogs** — rolling updates have no stable narrative
 - **Stock commentary** — requires *both* ticker focus (title or body) *and*
   rating vocabulary (price target, analyst rating, buy/hold). Either alone
-  passes, so Fed/Nvidia/Tesla stories survive. Caught after it published
-  "SoundHound AI Stock: Why Analysts Predict 100% Gains" in a dry run.
+  passes, so Fed/Nvidia/Tesla stories survive.
+
+  Caught by a **dry run, before the loop was armed** — nothing reached the
+  channel. The article was:
+
+  > "SoundHound AI's Next Earnings Report on Aug. 5 Could Send the Stock
+  > Soaring. Here's Why."
+
+  **That headline is the whole lesson.** It names the company at the start and
+  calls it "the Stock" later, so the company and the word are never *adjacent* —
+  and every `<Company> stock` pattern needs the two touching. The adjacency rule
+  could not see it at all; `THE_STOCK_RE` exists precisely for this shape (a
+  bare definite-article reference to a single security in a title that also
+  carries a proper noun, excluding "the stock market"). Body dominance caught it
+  independently, but only because the piece named SoundHound five times — a
+  shorter one would have gone through.
 - **Publisher diversity** — max 2 candidates per publisher per cycle, then
   **round-robin interleave**. Capping alone wasn't enough: length-first
   ordering still put both Yahoo Finance articles at attempts 1 and 2.
@@ -182,8 +198,17 @@ simply have been almost nothing to extract from.
 - `VIDEO_AUTOPOST_ENABLED` — master switch, the only thing between built and live
 - `VIDEO_SPEC_ENABLED=1` — required, or every candidate skips
 - `YOUTUBE_PRIVACY` defaults to `public`
-- Dry run without publishing:
-  `docker compose ... run --rm -T -w /app/backend -e VIDEO_AUTOPOST_ENABLED=1 web node _dryrun.mjs`
+- Dry run without publishing — inline, so it works on a fresh checkout
+  (`backend/_*.mjs` is gitignored, so any local harness must be recreated):
+
+  ```bash
+  docker compose -f docker-compose.production.yml run --rm -T -w /app/backend \
+    -e VIDEO_AUTOPOST_ENABLED=1 -e VIDEO_SPEC_ENABLED=1 web \
+    node -e "import('./src/services/videoAutopost.js').then(m=>m.runVideoRenderCycle({dryRun:true})).then(r=>console.log(JSON.stringify(r,null,2)))"
+  ```
+
+  `dryRun: true` renders and stops: it never claims a `video_posts` row and
+  never uploads.
 
 **YouTube auth**
 
