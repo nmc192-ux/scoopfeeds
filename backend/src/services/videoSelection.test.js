@@ -10,7 +10,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { staticGate, tooSimilar, diversifyByPublisher, _internals } from "./videoSelection.js";
+import { staticGate, tooSimilar, diversifyByPublisher, dominantCompany, _internals } from "./videoSelection.js";
 
 const art = (over = {}) => ({ id: "a1", title: "T", description: "", category: "world", source_name: "Reuters", ...over });
 
@@ -301,4 +301,78 @@ test("the WEAK path needs TWO signals — this is what protects earnings coverag
     const g = staticGate(withBody(t, c));
     assert.equal(g.ok, true, `${t} — ${g.reason || ""}`);
   }
+});
+
+// ─── The real evasion, as a permanent fixture ───────────────────────────────
+//
+// The article the gate passed twice on 2026-08-03, verbatim:
+//
+//   "SoundHound AI's Next Earnings Report on Aug. 5 Could Send the Stock
+//    Soaring. Here's Why."
+//   Yahoo Finance — finance.yahoo.com/markets/stocks/articles/
+//   soundhound-ais-next-earnings-report-214501723.html
+//
+// WHY IT EVADED: the company is named at the START of the headline and referred
+// to as "the Stock" later, so nothing is ADJACENT. Every "<Company> stock"
+// pattern needs the two touching, and this headline never puts them together.
+// DrJ called this exactly.
+
+const SOUNDHOUND_TITLE =
+  "SoundHound AI’s Next Earnings Report on Aug. 5 Could Send the Stock Soaring. Here’s Why.";
+
+// Realistic Yahoo Finance body: analyst ratings, a price target, SoundHound
+// dominant. No exchange ticker — these pieces usually omit it, which is why the
+// strongest signal is unavailable here.
+const SOUNDHOUND_BODY = [
+  "SoundHound AI reports second-quarter results on Aug. 5, and the setup looks unusually favourable.",
+  "SoundHound has beaten revenue expectations in three of the last four quarters, and management raised full-year guidance in May.",
+  "Wall Street is broadly constructive. Every analyst covering the company rates it a buy, and the average price target implies roughly 40% upside from where SoundHound shares trade today.",
+  "One firm upgraded the stock to overweight last month, citing the automotive pipeline.",
+  "SoundHound ended the quarter with a record backlog. If SoundHound converts even part of that into recognised revenue, the consensus rating is unlikely to move lower.",
+].join("\n\n");
+
+const soundhound = () => art({
+  title: SOUNDHOUND_TITLE, content: SOUNDHOUND_BODY,
+  source_name: "Yahoo Finance", category: "business",
+  url: "https://finance.yahoo.com/markets/stocks/articles/soundhound-ais-next-earnings-report-214501723.html",
+});
+
+test("THE REAL EVASION is blocked, and the reason names the signal", () => {
+  const g = staticGate(soundhound());
+  assert.equal(g.ok, false, "the article that evaded the gate twice must not evade it again");
+  assert.equal(g.gate, "stock-commentary");
+  assert.match(g.reason, /title focus \("the Stock"\)/,
+    `the reason must say WHICH signal caught it — got: ${g.reason}`);
+  assert.match(g.reason, /rating signal/);
+});
+
+test("the ADJACENT pattern genuinely cannot see this headline", () => {
+  // Pinned so nobody later "simplifies" THE_STOCK_RE away believing the older
+  // pattern already covers it. It does not, and this is the proof.
+  assert.equal(_internals.TICKER_FOCUS_RE.test(SOUNDHOUND_TITLE), false,
+    "if this ever passes, the adjacency pattern changed and THE_STOCK_RE may look redundant — it is not");
+  assert.equal(_internals.titleTickerFocus(SOUNDHOUND_TITLE), "the Stock");
+});
+
+test("body dominance catches it TOO — two independent signals, not one", () => {
+  // Defence in depth: the title rule is exact, the body rule is statistical,
+  // and each alone is enough. A rewrite of the headline loses the first; a
+  // shorter piece with fewer mentions loses the second.
+  assert.ok(dominantCompany(SOUNDHOUND_BODY), "SoundHound must dominate the body");
+  const headlineRewritten = { ...soundhound(), title: "An Earnings Setup Worth Watching Next Week" };
+  const g = staticGate(headlineRewritten);
+  assert.equal(g.ok, false, "a re-skinned headline must still be caught by the body");
+  assert.match(g.reason, /body-dominant focus/);
+});
+
+test("\"the stock market\" is NOT single-security focus", () => {
+  // The exclusion that keeps the new title rule from swallowing market
+  // coverage. Without it, "What the stock market decline means for pensions"
+  // plus any analyst quote would be blocked.
+  const g = staticGate(withBody(
+    "What the stock market decline means for pensions",
+    "The Wall Street selloff continued. Analysts cut price targets across the board.",
+  ));
+  assert.equal(g.ok, true, g.reason);
+  assert.equal(_internals.THE_STOCK_RE.test("what the stock market decline means"), false);
 });
