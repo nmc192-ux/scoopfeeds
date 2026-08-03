@@ -105,6 +105,18 @@ const GENERIC_MASTHEAD_WORDS = new Set([
   "today", "online", "network", "service", "agency", "group", "and", "of",
 ]);
 
+/**
+ * Publisher → domains that ARE that publisher, where no string rule could see
+ * it. Keyed on the normalised source_name (lowercased, single-spaced).
+ *
+ * IEEE Spectrum publishes through Wiley's platform, so its article URLs are
+ * wiley.com — measured, 5 occurrences in the local corpus. The magazine is the
+ * publisher; Wiley is the press. DrJ's ruling, 2026-08-03.
+ */
+const PUBLISHER_ALIASES = new Map([
+  ["ieee spectrum", new Set(["wiley.com", "spectrum.ieee.org", "ieee.org"])],
+]);
+
 /** Minimum fragment length for a CONTAINMENT match. Shorter names ("AP", "DW")
  *  must match a label exactly — "ap" inside "apple.com" is not attribution. */
 const MIN_CONTAINMENT = 3;
@@ -123,6 +135,14 @@ export function domainMatchesSource(domain, sourceName) {
   const tokens = String(sourceName || "")
     .toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   if (!label || !tokens.length) return false;
+
+  // RULED EXCEPTIONS. A publisher whose articles live on a platform domain
+  // that carries no trace of its name — the masthead is real, the general rule
+  // simply cannot see it. Each entry is a DrJ ruling, not a guess, and this
+  // table stays small on purpose: it is the maintenance burden the URL rule
+  // exists to avoid, so an entry has to be justified by a real observed source.
+  const alias = PUBLISHER_ALIASES.get(tokens.join(" "));
+  if (alias && alias.has(domain)) return true;
 
   const concat = tokens.join("");
   // INITIALISM. Measured over 33,300 real articles, the single largest override

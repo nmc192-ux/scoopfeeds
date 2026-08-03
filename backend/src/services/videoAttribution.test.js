@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs";
 import {
   registrableDomain, domainMatchesSource, resolveAttribution, buildDescriptionCredit,
 } from "./videoAttribution.js";
-import { buildAttributionCard } from "./videoSpecSchema.js";
+import { decorateTitleCard } from "./videoSpecSchema.js";
 
 // ─── The two cases DrJ named ────────────────────────────────────────────────
 
@@ -35,12 +35,13 @@ test("THE REAL CASE: seanhelvey.com under \"Hacker News\" is credited to the blo
   assert.equal(a.matched, false);
   assert.equal(a.domain, "seanhelvey.com");
 
-  // And the card — the surface that would have printed the lie.
-  const card = buildAttributionCard(article);
+  // And the TITLE card, which absorbed the attribution card and is now the
+  // surface that would have printed the lie.
+  const card = decorateTitleCard({ t: "title", lines: [["X", "white"]], caption: "The claim." }, article);
   assert.equal(card.outlet, "seanhelvey.com");
-  assert.equal(card.caption, "Reported by seanhelvey.com.");
+  assert.match(card.caption, /Reported by seanhelvey\.com\.$/);
   assert.ok(!/Hacker News/.test(JSON.stringify(card)),
-    "the aggregator must appear nowhere on the attribution card");
+    "the aggregator must appear nowhere on the title card");
 });
 
 test("BBC News with a bbc.co.uk url still reads \"BBC News\"", () => {
@@ -56,7 +57,8 @@ test("BBC News with a bbc.co.uk url still reads \"BBC News\"", () => {
   assert.equal(a.matched, true);
   assert.equal(a.domain, "bbc.co.uk", "co.uk is a multi-part suffix, not the registrable domain");
 
-  assert.equal(buildAttributionCard(article).caption, "Reported by BBC News.");
+  assert.match(decorateTitleCard({ t: "title", lines: [["X", "white"]], caption: "The claim." }, article).caption,
+    /^The claim\. Reported by BBC News\.$/);
 });
 
 // ─── Registrable domain ─────────────────────────────────────────────────────
@@ -170,7 +172,9 @@ test("neither one yields no publisher, and no card", () => {
   const a = resolveAttribution({});
   assert.equal(a.publisher, null);
   assert.equal(a.basis, "none");
-  assert.equal(buildAttributionCard({ title: "T" }), null);
+  assert.equal(decorateTitleCard({ t: "stat", value: "1", caption: "c", source: "s" }, {}), null,
+    "decorating a non-title card must refuse rather than pick the wrong slide");
+  assert.equal(decorateTitleCard({ t: "title", lines: [["X", "white"]], caption: "c" }, {}).outlet, undefined);
 });
 
 // ─── §3b/4 description credit ───────────────────────────────────────────────
