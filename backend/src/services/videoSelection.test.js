@@ -141,7 +141,7 @@ test("THE REGRESSION: SoundHound AI Stock + analyst price targets is blocked", (
   ));
   assert.equal(g.ok, false);
   assert.equal(g.gate, "stock-commentary");
-  assert.match(g.reason, /single-ticker focus/);
+  assert.match(g.reason, /title focus/);
 });
 
 test("rating vocabulary is caught in several forms", () => {
@@ -205,7 +205,8 @@ test("no more than 2 candidates from one publisher", () => {
     src("Yahoo Finance", "y1"), src("Yahoo Finance", "y2"), src("Yahoo Finance", "y3"),
     src("Reuters", "r1"), src("Yahoo Finance", "y4"), src("BBC News", "b1"),
   ]);
-  assert.deepEqual(kept.map(a => a.id), ["y1", "y2", "r1", "b1"]);
+  // Round-robin: one per publisher before anyone gets a second.
+  assert.deepEqual(kept.map(a => a.id), ["y1", "r1", "b1", "y2"]);
   assert.deepEqual(dropped.map(a => a.id), ["y3", "y4"]);
 });
 
@@ -232,6 +233,72 @@ test("publisher matching is case-insensitive and survives a missing name", () =>
     src("Yahoo Finance", "y1"), src("YAHOO FINANCE", "y2"), src("yahoo finance", "y3"),
     src(null, "n1"), src(undefined, "n2"), src("", "n3"),
   ]);
-  assert.deepEqual(kept.map(a => a.id), ["y1", "y2", "n1", "n2"],
+  assert.deepEqual(kept.map(a => a.id), ["y1", "n1", "y2", "n2"],
     "case variants are one publisher, and unnamed sources are capped together");
+});
+
+
+test("ROUND-ROBIN: one masthead cannot own the front of the queue", () => {
+  // Capping the COUNT was not enough. Both Yahoo Finance survivors were still
+  // attempts 1 and 2, so a cycle that found its video early never reached BBC,
+  // The Hindu or ABC at all — the cap decided who was in the room, not who
+  // spoke first.
+  const { kept } = diversifyByPublisher([
+    src("Yahoo Finance", "y1"), src("Yahoo Finance", "y2"), src("Yahoo Finance", "y3"),
+    src("BBC News", "b1"), src("The Hindu", "h1"), src("BBC News", "b2"),
+  ]);
+  assert.deepEqual(kept.map(a => a.id), ["y1", "b1", "h1", "y2", "b2"]);
+  const firstThree = kept.slice(0, 3).map(a => a.source_name);
+  assert.equal(new Set(firstThree).size, 3, "the first three attempts must be three publishers");
+});
+
+test("the highest-ranked article overall still goes FIRST", () => {
+  // Length-first ordering still decides which articles survive per publisher
+  // AND which single article opens the cycle. Round-robin only governs who
+  // follows.
+  const { kept } = diversifyByPublisher([
+    src("The Hindu", "densest"), src("Yahoo Finance", "y1"), src("The Hindu", "h2"),
+  ]);
+  assert.equal(kept[0].id, "densest");
+});
+
+// ─── Body-side ticker focus (the second SoundHound miss) ────────────────────
+
+test("an exchange ticker anywhere in the BODY establishes focus", () => {
+  const g = staticGate(withBody(
+    "Why This AI Company Could Soar",
+    "SoundHound AI (NASDAQ: SOUN) reported growth. Every analyst covering the company rates it a buy.",
+  ));
+  assert.equal(g.ok, false);
+  assert.match(g.reason, /exchange-ticker focus/);
+});
+
+test("one company dominating the body establishes WEAK focus, needing 2 signals", () => {
+  // The headline names no company at all. Title-only was always going to lose
+  // this race — a headline is the most re-skinnable surface in an article.
+  const g = staticGate(withBody(
+    "A Quiet Winner In Voice AI",
+    "SoundHound has expanded. SoundHound stock rose. Analysts covering SoundHound raised their " +
+    "price target. SoundHound now carries a consensus rating of buy and SoundHound shares trade " +
+    "below the average target.",
+  ));
+  assert.equal(g.ok, false);
+  assert.match(g.reason, /body-dominant focus/);
+});
+
+test("the WEAK path needs TWO signals — this is what protects earnings coverage", () => {
+  // An earnings story is dominated by its company and mentions a price target
+  // once in passing. A rating note is BUILT out of rating language. Without the
+  // asymmetry the whole survival set would fall to the body-dominance rule.
+  for (const [t, c] of [
+    ["Nvidia reports record quarterly revenue",
+     "Nvidia said revenue rose. Nvidia data-centre sales doubled. Nvidia expects growth. " +
+     "Nvidia shipped more units. Several analysts raised their price target after the print."],
+    ["Tesla recalls 400,000 vehicles over a steering fault",
+     "Tesla said the recall covers three model years. Tesla will replace the part. Tesla " +
+     "notified regulators. Tesla shares fell. One analyst cut their price target."],
+  ]) {
+    const g = staticGate(withBody(t, c));
+    assert.equal(g.ok, true, `${t} — ${g.reason || ""}`);
+  }
 });
