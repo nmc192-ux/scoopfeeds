@@ -96,6 +96,26 @@ test("the source part carries a PLAIN filename and an explicit video/mp4 type", 
   } finally { restore(); }
 });
 
+test("`source` is the LAST part and `access_token` the FIRST", async () => {
+  // Field order is part of the contract on this edge, and it is invisible in the
+  // response: sending `source` first put ~2 MB of binary ahead of the credential
+  // and drew the SAME generic 400 that a bad filename draws, so the two causes
+  // cannot be told apart from Meta's reply. The verified-live shape sends the
+  // token first and the payload last.
+  //
+  // FormData preserves insertion order and undici serialises the parts in that
+  // order, so asserting the key order asserts the wire order.
+  const { calls, restore } = stubFetch([{ status: 200, body: { id: "1" } }]);
+  try {
+    await postVideoToFacebook({ filePath: MP4, title: "T", description: "D" });
+    const order = [...calls[0].init.body.keys()];
+    assert.equal(order[0], "access_token", "the credential must precede the payload");
+    assert.equal(order.at(-1), "source", "the binary must be the last part on the wire");
+    assert.ok(order.indexOf("title") < order.indexOf("source"), "metadata before payload");
+    assert.ok(order.indexOf("description") < order.indexOf("source"), "metadata before payload");
+  } finally { restore(); }
+});
+
 test("the version pin is current, not the expired v19.0", async () => {
   // v19.0 expired 2026-05-21. Meta does not hard-fail an expired version — it
   // silently routes to the oldest live one, so this drifts without an error and

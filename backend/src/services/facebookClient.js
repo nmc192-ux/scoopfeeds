@@ -290,30 +290,40 @@ export async function postVideoToFacebook({ filePath, title = "", description = 
     );
   }
 
-  const fd = new FormData();
-  // A PLAIN, FIXED FILENAME. Not path.basename(filePath), which is what this
-  // sent first and what Meta rejected with the generic, unattributable 400
-  // "There was a problem uploading your video file" — the render names its
+  // FIELD ORDER IS PART OF THE CONTRACT HERE. `source` goes LAST, after every
+  // metadata field, and `access_token` goes FIRST — matching the shape verified
+  // live against /v26.0/{page-id}/videos.
+  //
+  // The client originally appended `source` first, which put ~2 MB of binary on
+  // the wire ahead of the credential. Meta streams these uploads, and the
+  // rejection was the generic, unattributable 400 "There was a problem
+  // uploading your video file" — the same error it gives for a bad filename, so
+  // the two causes are indistinguishable from the response alone.
+  //
+  // Both shapes were captured against a local server and diffed part by part.
+  // After the filename fix the `source` part itself is byte-for-byte identical
+  // between the two — same filename, same Content-Type, same payload length —
+  // and the only remaining structural difference was this ordering.
+  //
+  // A PLAIN, FIXED FILENAME, not path.basename(filePath). The renderer names its
   // output `<article-uuid>-<design-key>.mp4`, e.g.
-  // `3bcca812-366a-5429-8be7-0bbc7e3fc224-vid-v1-752611f057b9.mp4`.
+  // `3bcca812-366a-5429-8be7-0bbc7e3fc224-vid-v1-752611f057b9.mp4`; Meta rejects
+  // that and accepts `video.mp4` for the identical bytes.
   //
-  // Measured, not guessed: both shapes were captured against a local server and
-  // diffed. The failing and working requests are IDENTICAL except for this
-  // string — same `Content-Type: video/mp4` on the part, same
-  // `filename="…"` attribute present, and the payload bytes of both match the
-  // file on disk exactly. So the defect was never a missing filename or a
-  // missing content type; it is this filename's VALUE. Which property of it
-  // Meta objects to is not documented and not worth reverse-engineering — a
-  // plain name is free.
-  //
-  // The same capture showed `fs.openAsBlob(path, {type})` and
-  // `new Blob([buffer], {type})` produce a byte-identical part, so this stays on
-  // `new Blob`: openAsBlob is Node 19.8+ and CI still builds on 18.x.
-  fd.append("source", new Blob([bytes], { type: "video/mp4" }), "video.mp4");
+  // `new Blob([buffer])` rather than `fs.openAsBlob()`: the capture showed both
+  // emit an identical part, and openAsBlob is Node 19.8+ while CI builds on 18.x.
+  const fd = new FormData();
+  fd.append("access_token", t.pageToken);
   if (title) fd.append("title", title);
   if (description) fd.append("description", description);
+  // `published` defaults to true on this edge; sent explicitly so a change to
+  // that default cannot silently turn every cross-post into an unpublished
+  // draft. NOTE: this and `description` are the two fields the verified raw
+  // script did NOT send — they are documented optional params, but they have
+  // not themselves been exercised against Meta. If a 400 survives this commit,
+  // they are the next thing to bisect.
   fd.append("published", "true");
-  fd.append("access_token", t.pageToken);
+  fd.append("source", new Blob([bytes], { type: "video/mp4" }), "video.mp4");
 
   // fetch() has no default timeout. Without this a stalled upload holds the
   // render cycle open until the 60-minute hang guard notices, and the cycle is
