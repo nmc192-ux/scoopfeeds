@@ -98,8 +98,12 @@ const RATING_LANGUAGE_RE = new RegExp([
 //
 // Deliberately SINGULAR. "European stocks fall after the ECB decision" is
 // market coverage and must survive, so the plural generic never matches.
+// Applied to TITLE AND BODY — an exchange ticker is unambiguous wherever it
+// appears, and in practice it appears in the first body paragraph far more
+// often than in the headline.
+const EXCHANGE_TICKER_RE = /\((?:NASDAQ|NYSE|NYSEARCA|NYSEAMERICAN|AMEX|LSE|TSX|TSXV|ASX|OTC|OTCMKTS|BSE|NSE)\s*:\s*[A-Z.]{1,6}\)/;
+
 const TICKER_FOCUS_RE = new RegExp([
-  /\((?:NASDAQ|NYSE|NYSEARCA|AMEX|LSE|TSX|ASX|OTC)\s*:\s*[A-Z.]{1,6}\)/,
   // The leading token stays case-SENSITIVE (a proper noun is what makes this
   // single-ticker), but "stock"/"shares" must match either case: the live miss
   // was "SoundHound AI Stock: Why Analysts Predict 100% Gains", title-cased.
@@ -107,19 +111,84 @@ const TICKER_FOCUS_RE = new RegExp([
   /\b(?:[Ss]tock|[Ss]hares)\s+of\s+[A-Z]/,
 ].map(r => r.source).join("|"));
 
+// Words that start sentences or head lists and are not company names. Without
+// this the "dominant company" count is won by "The" on every article.
+const NOT_A_COMPANY = new Set([
+  "the", "a", "an", "and", "but", "for", "it", "its", "this", "that", "these",
+  "those", "he", "she", "they", "we", "you", "i", "in", "on", "at", "by", "to",
+  "of", "as", "if", "so", "then", "there", "here", "what", "when", "while",
+  "after", "before", "since", "however", "meanwhile", "still", "analysts",
+  "investors", "shares", "stock", "wall", "street", "monday", "tuesday",
+  "wednesday", "thursday", "friday", "saturday", "sunday", "reuters", "bloomberg",
+]);
+
 /**
- * The genre, caught by SHAPE rather than by phrasing: this headline is about
- * one security, and the body talks in ratings. Either alone is fine — a stock
- * profile with no rating language is a company story, and rating language under
- * a market-wide headline is ordinary market reporting.
+ * Is one company the subject of this text?
+ *
+ * Counts capitalised tokens that are not sentence-scaffolding and asks whether
+ * a single one dominates. Crude on purpose — it is a FOCUS signal, not entity
+ * extraction, and it is never trusted alone (see isRatingNote).
+ */
+export function dominantCompany(text) {
+  const counts = new Map();
+  for (const m of String(text || "").matchAll(/\b[A-Z][A-Za-z.&'’-]{1,}\b/g)) {
+    const w = m[0];
+    const k = w.toLowerCase();
+    if (NOT_A_COMPANY.has(k) || k.length < 3) continue;
+    counts.set(w, (counts.get(w) || 0) + 1);
+  }
+  let total = 0, top = null, topN = 0;
+  for (const [w, n] of counts) { total += n; if (n > topN) { top = w; topN = n; } }
+  // No high "total" floor. Text that mentions ONE company four times and
+  // almost nothing else is the strongest dominance signal there is, and an
+  // earlier total>=6 guard rejected exactly that case.
+  if (!top || total < 4 || topN < 4) return null;
+  const share = topN / total;
+  return share >= 0.35 ? { name: top, count: topN, share } : null;
+}
+
+/**
+ * The genre, caught by SHAPE rather than by phrasing.
+ *
+ * TICKER FOCUS IS READ FROM THE BODY TOO (DrJ, 2026-08-03). Title-only was
+ * always going to lose this race — a headline is the most re-skinnable surface
+ * in a news article, and the SoundHound piece evaded the title pattern twice.
+ * Three ways to establish focus, in descending strength:
+ *
+ *   STRONG  an exchange ticker anywhere — "(NASDAQ: SOUN)". Unambiguous.
+ *   STRONG  the title names one company's stock/shares.
+ *   WEAK    one company dominates the body's mentions.
+ *
+ * A STRONG focus needs one rating signal. A WEAK focus needs TWO DISTINCT ones,
+ * and that asymmetry is what protects finance as a subject: an earnings report
+ * is dominated by its company and mentions a price target once in passing,
+ * whereas a rating note is BUILT out of rating language. Without the asymmetry,
+ * "Nvidia reports record quarterly revenue" would be blocked by a single
+ * analyst quote in its body.
  */
 export function isRatingNote(article) {
   const title = String(article?.title || "");
-  if (!TICKER_FOCUS_RE.test(title)) return null;
   const body = `${article?.description || ""} ${article?.content || ""}`;
-  const m = body.match(RATING_LANGUAGE_RE);
-  if (!m) return null;
-  return { ticker: title.match(TICKER_FOCUS_RE)?.[0]?.trim(), rating: m[0] };
+  const all = `${title} ${body}`;
+
+  const exchange = all.match(EXCHANGE_TICKER_RE);
+  const titleFocus = title.match(TICKER_FOCUS_RE);
+  const strong = exchange || titleFocus;
+  const weak = strong ? null : dominantCompany(body);
+  if (!strong && !weak) return null;
+
+  const hits = [...new Set(
+    [...all.matchAll(new RegExp(RATING_LANGUAGE_RE.source, "gi"))].map(m => m[0].toLowerCase())
+  )];
+  const need = strong ? 1 : 2;
+  if (hits.length < need) return null;
+
+  return {
+    ticker: (exchange?.[0] || titleFocus?.[0] || weak?.name || "").trim(),
+    focus: strong ? (exchange ? "exchange-ticker" : "title") : "body-dominant",
+    rating: hits.slice(0, 2).join(", "),
+    signals: hits.length,
+  };
 }
 
 /**
@@ -136,15 +205,33 @@ export function isRatingNote(article) {
 export const MAX_PER_PUBLISHER = Number.parseInt(process.env.VIDEO_MAX_PER_PUBLISHER_PER_CYCLE || "", 10) || 2;
 
 export function diversifyByPublisher(articles, { max = MAX_PER_PUBLISHER } = {}) {
-  const seen = new Map();
-  const kept = [];
+  // Pass 1 — cap per publisher, preserving the substance ordering WITHIN each
+  // publisher's bucket. This decides WHICH of a publisher's articles survive.
+  const buckets = new Map();
   const dropped = [];
   for (const a of articles || []) {
     const key = String(a?.source_name || "").toLowerCase() || "(none)";
-    const n = seen.get(key) || 0;
-    if (n >= max) { dropped.push(a); continue; }
-    seen.set(key, n + 1);
-    kept.push(a);
+    if (!buckets.has(key)) buckets.set(key, []);
+    const b = buckets.get(key);
+    if (b.length >= max) { dropped.push(a); continue; }
+    b.push(a);
+  }
+
+  // Pass 2 — ROUND-ROBIN across publishers (DrJ, 2026-08-03). Capping the
+  // COUNT was not enough: both Yahoo Finance survivors were still attempts 1
+  // and 2, so a cycle that found its video early never reached BBC, The Hindu
+  // or ABC at all. The cap decided who was in the room; it did not stop one
+  // masthead owning the front of the queue.
+  //
+  // Bucket ORDER is the order publishers first appear, so the article the
+  // substance ordering ranked highest overall still goes first. After that it
+  // is one per publisher before anyone gets a second.
+  const kept = [];
+  const lists = [...buckets.values()];
+  for (let round = 0; round < max; round++) {
+    for (const list of lists) {
+      if (list[round]) kept.push(list[round]);
+    }
   }
   return { kept, dropped };
 }
@@ -187,7 +274,7 @@ export function staticGate(article) {
   if (note) {
     return {
       ok: false, gate: "stock-commentary",
-      reason: `single-ticker focus ("${note.ticker}") with rating language ("${note.rating}")`,
+      reason: `${note.focus} focus ("${note.ticker}") with ${note.signals} rating signal(s): ${note.rating}`,
     };
   }
 
@@ -243,4 +330,4 @@ export function selectionGate(article, opts = {}) {
   return cooldownGate(article, opts);
 }
 
-export const _internals = { LIVE_BLOG_RE, STOCK_COMMENTARY_RE, SPORT_CATEGORIES, norm, RATING_LANGUAGE_RE, TICKER_FOCUS_RE };
+export const _internals = { LIVE_BLOG_RE, STOCK_COMMENTARY_RE, SPORT_CATEGORIES, norm, RATING_LANGUAGE_RE, TICKER_FOCUS_RE, EXCHANGE_TICKER_RE, NOT_A_COMPANY };
