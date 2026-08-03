@@ -210,6 +210,20 @@ autopost loop above and gated off in prod.
 They change how a video looks or costs, never whether or where one publishes, and all run on
 their code defaults in prod.
 
+## Instagram captions
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `IG_CAPTION_V2` | unset (**off**) | unset (**off**) | yes | Keyword-first six-block caption: `seo_line · summary · reality-index callout · engagement · link-in-bio · tags`. Off = the V1 caption, byte-for-byte. Accepts `1`/`true`/`yes`/`on`; read at call time, so a restart is not required. Rollback for the whole caption-SEO workstream is unsetting this. |
+
+Alt text on carousel children and the `event_carousel_copy.seo_line` column are
+**not** flag-gated: alt text is an additive Graph API parameter with its own commit,
+and `seo_line` is generated and cached but never read unless `IG_CAPTION_V2` is on.
+
+**Gap, found not fixed:** `IG_CAROUSEL_MODE`, `IG_POST_STYLE`, `IG_MIN_INTERVAL_MS`
+and `CARD_STYLE` all gate live IG behaviour and are absent from this file. `IG_CAROUSEL_MODE=event`
+and `CARD_STYLE=scoopfeeds` are what put the 7-slide carousel in prod today.
+
 ## Undocumented-var audit
 
 `262` distinct `process.env.*` reads in `backend/`; `backend/.env.example` covered `77`.
