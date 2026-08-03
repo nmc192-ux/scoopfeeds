@@ -51,8 +51,9 @@ import {
 } from "../realityIndex/llmQueue.js";
 import {
   MODEL_EMITTABLE, THUMBNAIL_ANGLES, MIN_SLIDES, MAX_SLIDES,
-  validateSpec, validatePackaging,
+  validateSpec, validatePackaging, decorateTitleCard,
 } from "./videoSpecSchema.js";
+import { resolveAttribution } from "./videoAttribution.js";
 
 // TWO PINS, deliberately different tiers for two different jobs.
 //
@@ -644,6 +645,21 @@ ${dropLines.length ? `\nCards discarded from that attempt:\n${dropLines.join("\n
 Re-read the CARD GRAMMAR above and match the field shapes exactly. Emit the FULL spec again — do not emit a patch or only the corrected cards. Re-enumerate the story's beats and emit one card per beat; do not aim for any particular number of cards.`;
 }
 
+/**
+ * Inject the title card's badge, date and verbal credit into a PARSED spec,
+ * before validation. Returns a new object; leaves a spec with no title alone
+ * so the missing-opener rule reports the real cause.
+ */
+function decorateParsedSpec(parsed, article, attribution) {
+  if (!parsed || !Array.isArray(parsed.slides)) return parsed;
+  return {
+    ...parsed,
+    slides: parsed.slides.map(c =>
+      c && c.t === "title" ? (decorateTitleCard(c, article, attribution) || c) : c
+    ),
+  };
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
@@ -690,6 +706,10 @@ export async function writeVideoSpec(article, {
   slideCeiling = null,
   bodyText = null,
   fetchFullText = true,
+  // Resolved once by the caller and passed in so the credit on the card, the
+  // SOURCE: line and the validator are the same string. Resolved here if
+  // absent, which is the same answer by the same function.
+  attribution = null,
 } = {}) {
   const reject = (reason, costUsd = 0, attempts = 0) => ({ ok: false, spec: null, costUsd, reason, attempts });
   if (!isVideoSpecEnabled()) return reject("VIDEO_SPEC_ENABLED not set");
@@ -712,8 +732,16 @@ export async function writeVideoSpec(article, {
     // every correctly-sourced figure drawn from the part it could not see.
     const sourceText = `${article.title || ""} ${article.description || ""} ${resolved.text}`;
     const basePrompt = buildSpecPrompt({ article, allowedSources, bodyText: resolved.text });
+    // ONE resolved publisher, and it feeds BOTH the injected credit and the
+    // check for it. preCreditedSources was previously accepted from the caller
+    // and then never destructured — it reached nothing, so validateSpec always
+    // ran with an empty list and every first figure card had to credit itself.
+    // Deriving it here from the same attribution that decorates the card makes
+    // the two impossible to disagree.
+    const credit = attribution || resolveAttribution(article);
     const validateOpts = {
       allowedSources, sourceText,
+      preCreditedSources: [credit?.publisher].filter(Boolean),
       ...(slideCeiling ? { maxSlides: slideCeiling } : {}),
     };
 
@@ -734,6 +762,15 @@ export async function writeVideoSpec(article, {
       // (the call never returned usage), which is itself worth reporting.
       if (!result) return reject("model call failed (see the rejection line)", spentUsd, attempts);
       spentUsd += result.cost;
+
+      // DECORATE BEFORE VALIDATING. This ran the other way round and cost a
+      // live video its figure cards: stat@1 and bars@4 were dropped for "first
+      // use of Yahoo Finance carries no verbal credit" on a spec whose title
+      // caption receives exactly that credit — from decoration that had not
+      // happened yet. The §3b/3 title check needs the injected credit to be
+      // present, and the per-figure fallback must only fire for a SECOND,
+      // genuinely uncredited source, which is its actual purpose.
+      result.parsed = decorateParsedSpec(result.parsed, article, credit);
 
       v = validateSpec(result.parsed, validateOpts);
       if (v.ok) break;
@@ -901,7 +938,7 @@ export async function writePackaging(spec, article) {
   }
 }
 
-export const _internals = {
+export const _internals = { decorateParsedSpec,
   buildSpecPrompt, buildPackagingPrompt, CARD_GRAMMAR,
   extractJsonPayload, stripCounts, isThinnessError, isInvalidArgument,
 };

@@ -40,7 +40,6 @@ import {
 } from "../models/database.js";
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
 import { selectionGate } from "./videoSelection.js";
-import { decorateTitleCard } from "./videoSpecSchema.js";
 import { resolveAttribution, buildDescriptionCredit } from "./videoAttribution.js";
 import { writeVideoSpec, writePackaging, isVideoSpecEnabled } from "./videoSpecWriter.js";
 import { statesForCard, renderState, fitStatesToDuration, videoDesignKey } from "./videoSlideRenderer.js";
@@ -101,17 +100,12 @@ export function rateGate({ now = Date.now() } = {}) {
 // ─── Produce one video ──────────────────────────────────────────────────────
 
 async function produceVideo(article, spec, attribution = resolveAttribution(article)) {
-  // ONE resolved publisher, threaded to every surface that names one. The
-  // credit, the badge and the SOURCE: line used to read article.source_name
-  // independently — which is how a personal blog carried under "Hacker News"
-  // would have been credited to Hacker News on all three.
-  //
-  // No card is INSERTED any more. The attribution card was removed (DrJ,
-  // 2026-08-03) and the title carries the badge, the date and the one spoken
-  // credit — so the story starts on slide one instead of slide two.
-  const slides = spec.slides.map(c =>
-    c?.t === "title" ? (decorateTitleCard(c, article, attribution) || c) : c
-  );
+  // The spec arrives ALREADY DECORATED. writeVideoSpec injects the title's
+  // badge, date and verbal credit BEFORE it validates, because §3b/3 checks the
+  // title caption for that credit — decorating here instead is what dropped
+  // stat@1 and bars@4 from a live video for "first use of Yahoo Finance carries
+  // no verbal credit". One owner, and it is the one that runs first.
+  const slides = spec.slides;
 
   const audio = await voiceSpec(slides, { articleId: article.id });
 
@@ -287,7 +281,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       rec.stage = "spec";
       const r = await _writeVideoSpec(article, {
         allowedSources: [attribution.publisher].filter(Boolean),
-        preCreditedSources: [attribution.publisher].filter(Boolean),
+        attribution,
       });
       // ASSERT THE SHAPE, DON'T TRUST IT. writeVideoSpec's contract is
       // `{ ok, spec, costUsd, reason, attempts }` on every path, but reading
