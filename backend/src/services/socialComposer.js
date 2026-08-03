@@ -13,6 +13,7 @@
 // the import or DB read fails — caption falls back to the original layout.
 
 import { realityIndexCallout as _riCallout } from "../realityIndex/generation/socialCaptionEnricher.js";
+import { tagsForCategory } from "./categoryTags.js";
 
 function safeRiCallout(articleId) {
   try { return _riCallout(articleId); } catch { return null; }
@@ -586,7 +587,96 @@ function pickIgEngagement(article, cleanTitle) {
   return pool[h % pool.length];
 }
 
-function composeInstagramFeed(article) {
+// ── IG caption V2 (dark behind IG_CAPTION_V2) ───────────────────────────
+//
+// Discovery-first restructure. V1 opens with the card's own headline, which
+// duplicates the image and spends the only line IG shows before "…more" on
+// text the reader is already looking at. V2 opens with a KEYWORD line instead
+// and lets the card carry the hook.
+//
+// Six blocks, blank line between each, no leading whitespace:
+//
+//   {seo_line}          keyword-first, from the model or derived by rule
+//   {summary}           ig_summary, or sentence-truncated description
+//   {reality index}     optional, and now gated on market liveness
+//   {engagement}        optional (dropped on tragedy keywords)
+//   {link in bio}
+//   {tags}              3-5 from tagsForCategory, NOT the 15-tag V1 block
+//
+// The ".\n.\n." separator is gone with the 15-tag block it existed to push
+// below the fold; 5 tags do not need hiding.
+//
+// Read at CALL time, never at module load: dotenv load order otherwise freezes
+// whatever the flag was when this module was first imported.
+function igCaptionV2Enabled() {
+  const v = String(process.env.IG_CAPTION_V2 ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+// Instagram's hard caption ceiling.
+const IG_CAPTION_LIMIT = 2200;
+
+/**
+ * The V2 caption body.
+ *
+ * `seoLine` is passed in rather than looked up: on the event path it comes
+ * from the SAME copy object that rendered the slides, so the caption and the
+ * cards cannot disagree. Absent (the article path, or an event whose copy
+ * predates the column) it is derived from the title by rule.
+ */
+export function composeInstagramCaptionV2(article, { seoLine = "" } = {}) {
+  // Trailing punctuation is stripped HERE, at render — not validated at
+  // generation, where rejecting an otherwise-good line into the fallback is
+  // the worse outcome. Formatting, not repair.
+  const seo = String(seoLine || "").trim().replace(/[\s.,;:!?—–-]+$/, "")
+    || deterministicSeoLine(article.title);
+
+  const igSummaryText = String(article.ig_summary || "").trim();
+  const desc = String(article.description || "").trim();
+  const summaryRaw = igSummaryText || (desc ? truncateBySentence(desc, 300) : "");
+
+  const riLine     = safeRiCallout(article.id);
+  const engagement = pickIgEngagement(article, cleanHeadline(article.title) || article.title || "");
+  const igHandle   = (process.env.INSTAGRAM_HANDLE || "scoop.feeds").trim();
+  const linkCta    = `🔗 Full story → Link in bio @${igHandle}`;
+  const tags       = tagsForCategory(article.category).join(" ");
+
+  // Only the summary is truncatable. seo_line is the discovery surface and
+  // tags are the classification hint — cutting either to fit would sacrifice
+  // the entire point of the restructure to save prose that has a fallback.
+  const fixed = [seo, riLine, engagement, linkCta, tags].filter(Boolean);
+  const separators = 2 * (fixed.length + (summaryRaw ? 1 : 0) - 1);
+  const budget = IG_CAPTION_LIMIT - fixed.join("").length - separators;
+  const summary = summaryRaw && summaryRaw.length > budget
+    ? truncateBySentence(summaryRaw, Math.max(0, budget))
+    : summaryRaw;
+
+  const caption = [seo, summary || null, riLine || null, engagement || null, linkCta, tags]
+    .filter(Boolean)
+    .join("\n\n");
+
+  return {
+    caption,
+    characterCount: caption.length,
+    meta: {
+      variant: "v2",
+      seoLine: seo,
+      seoLineSource: seoLine ? "copy" : "deterministic",
+      realityIndex: riLine ? "included" : "absent",
+      tagCount: tags ? tags.split(" ").length : 0,
+    },
+  };
+}
+
+function composeInstagramFeed(article, opts = {}) {
+  if (igCaptionV2Enabled()) {
+    const v2 = composeInstagramCaptionV2(article, opts);
+    return { ...v2, url: utmUrl(article.id, "instagram") };
+  }
+
+  // ── V1 below, untouched. With the flag unset this path is byte-identical
+  // to what production posts today. ────────────────────────────────────────
+
   // Instagram captions: no clickable links in body — pin them in bio.
   // Best-practice structure for news accounts (maximises comments + saves,
   // the two signals that most boost IG reach in the feed algorithm):
@@ -774,7 +864,9 @@ function composeBluesky(article) {
 
 // ── Public entry ────────────────────────────────────────────────────────
 
-export function composeAllPlatforms(article) {
+// `opts.seoLine` reaches composeInstagramFeed only; every other composer takes
+// the article alone and is unaffected.
+export function composeAllPlatforms(article, opts = {}) {
   if (!article || !article.id || !article.title) {
     throw new Error("composeAllPlatforms: article with id + title required");
   }
@@ -792,7 +884,7 @@ export function composeAllPlatforms(article) {
       threads:        composeThreads(article),
       facebook:       composeFacebook(article),
       linkedin:       composeLinkedIn(article),
-      instagram_feed: composeInstagramFeed(article),
+      instagram_feed: composeInstagramFeed(article, opts),
       pinterest:      composePinterest(article),
       bluesky:        composeBluesky(article),
     },

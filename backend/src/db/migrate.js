@@ -32,6 +32,60 @@ import * as migration024 from "./migrations/024_event_carousel_seo_line.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021, migration022, migration023, migration024];
 
+// MIGRATIONS is a hand-maintained array, which makes it the one place two
+// people — or two agents — can collide without anything failing. This is not
+// hypothetical: 023_video_posts_facebook and 024_event_carousel_seo_line were
+// appended minutes apart by two sessions sharing one working directory, and
+// only luck put them in different slots.
+//
+// A DUPLICATE id is the dangerous case, and it is SILENT. runMigrations skips
+// any id already in schema_migrations, so the second migration with the same
+// id never runs, never errors, and never appears missing — the table simply
+// lacks its columns, and the divergence surfaces later as an inexplicable
+// "no such column" from application code. A gap or an out-of-order entry is
+// milder but still means the file numbering has stopped describing the apply
+// order, which is the only thing the number is for.
+//
+// Asserted at MODULE LOAD so it is a startup crash on every entry point that
+// touches the database — getDb(), the db:migrate CLI, makeTestDb() — rather
+// than a check some code paths skip. A malformed array should stop the process,
+// not run half of itself.
+export function assertMigrationOrder(migrations = MIGRATIONS) {
+  const seen = new Map();
+  let prev = -Infinity;
+
+  migrations.forEach((migration, index) => {
+    const id = migration?.id;
+    if (typeof id !== "string" || !id.trim()) {
+      throw new Error(`migrate: MIGRATIONS[${index}] has no string \`id\` — every migration module must export one.`);
+    }
+    if (seen.has(id)) {
+      throw new Error(
+        `migrate: duplicate migration id "${id}" at positions ${seen.get(id)} and ${index}. ` +
+        `The second one would be SILENTLY SKIPPED — schema_migrations is keyed on id, so its ` +
+        `statements never run and the schema diverges with no error. Renumber it.`
+      );
+    }
+    seen.set(id, index);
+
+    const n = Number.parseInt(id.slice(0, 3), 10);
+    if (!Number.isInteger(n)) {
+      throw new Error(`migrate: migration id "${id}" does not start with a 3-digit number.`);
+    }
+    if (n <= prev) {
+      throw new Error(
+        `migrate: migration ids are not strictly ascending — "${id}" (${n}) follows ${prev} at position ${index}. ` +
+        `The file number must describe the apply order; reorder the MIGRATIONS array or renumber the file.`
+      );
+    }
+    prev = n;
+  });
+
+  return { count: migrations.length, highest: prev };
+}
+
+assertMigrationOrder();
+
 function ensureSchemaMigrationsTable(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (

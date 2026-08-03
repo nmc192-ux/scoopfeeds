@@ -156,6 +156,14 @@ async function tryBuildEventCarousel(article, preEvent = null) {
   return {
     eventId: event.id,
     eventSlug: event.slug,
+    // Carried out so the caption can be rebuilt from the SAME copy object that
+    // rendered the slides. The caption is composed from the LEAD ARTICLE up in
+    // runPlatformCycle, before this function has run — and it must be, because
+    // generating copy is the paid step and only happens for the event actually
+    // being posted. So an event's seo_line cannot be known at compose time;
+    // without this the event path would silently fall back to a line derived
+    // from the lead article's title, and Commit 3 would never be visible.
+    seoLine: copy.seo_line || "",
     imageUrls: Array.from({ length: EVENT_CAROUSEL_SLIDES }, (_, i) => `${SITE}/api/cards/carousel${i + 1}/event/${slug}.png`),
     altTexts: [
       String(event.title || "").slice(0, 100),
@@ -309,15 +317,30 @@ const ADAPTERS = {
         if (bad.length) {
           logger.error(`📸 IG event-carousel REFUSED pre-publish: ${bad.length}/7 card URLs failed self-check for "${evt.eventSlug}": ${JSON.stringify(bad)} — falling back to article carousel`);
         } else {
+          // Rebuild the caption with the EVENT's seo_line now that copy exists.
+          // Only the seo_line differs; every other block is article-derived
+          // exactly as before. Under IG_CAPTION_V2=off this is a no-op — V1
+          // ignores opts entirely — so the flag stays byte-identical.
+          let text = composed.caption;
+          if (evt.seoLine) {
+            try {
+              const re = composeAllPlatforms(article, { seoLine: evt.seoLine });
+              text = re.platforms.instagram_feed.caption;
+            } catch (err) {
+              logger.warn(`📸 caption rebuild with event seo_line failed (${err.message}) — posting the article-derived caption`);
+            }
+          }
           logIgAttempt({ style, kind: "event-carousel(7)", subjectId: `event:${evt.eventId}`, imageUrls: evt.imageUrls });
           try {
             const out = await postCarouselToInstagram({
-              text: composed.caption, imageUrls: evt.imageUrls, altTexts: evt.altTexts,
+              text, imageUrls: evt.imageUrls, altTexts: evt.altTexts,
             });
             logger.info(`🎠 posted 7-slide event carousel for "${evt.eventSlug}"`);
             // eventId flows back so runPlatformCycle records the post event-keyed;
             // the partial unique index then enforces once-per-event-per-platform.
-            return { url: out.url, platformPostId: out.id, eventId: evt.eventId };
+            // `caption` flows back so social_posts records what was ACTUALLY
+            // posted, not the pre-rebuild text.
+            return { url: out.url, platformPostId: out.id, eventId: evt.eventId, caption: text };
           } catch (err) {
             logIgFailure(`event-carousel "${evt.eventSlug}"`, err);
             throw err; // no silent fallback from a SUBMITTED event carousel
@@ -570,7 +593,9 @@ export async function runPlatformCycle(platform, { dryRun = false, minCredibilit
       status: "posted",
       platformPostId: result.platformPostId,
       url: result.url,
-      caption: composed.caption,
+      // The IG event path may rebuild the caption with the event's seo_line
+      // after copy generation; record what actually went out.
+      caption: result.caption ?? composed.caption,
       // Set only by the IG event carousel; NULL for every article-only post.
       eventId: result.eventId ?? null,
     });
