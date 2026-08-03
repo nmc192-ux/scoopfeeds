@@ -190,7 +190,16 @@ simply have been almost nothing to extract from.
 - Config: `backend/.env` — gitignored, single copy, back it up before edits
 - Volume: `/var/lib/docker/volumes/scoopfeeds_scoop_data/_data` (root-owned)
 - MP4s kept 48h, frames in container tmpdir, TTS cache 7 days — all swept at
-  **startup**, not on a cron (a cron that stops firing is invisible)
+  **worker startup** (`workerProcess.js` → `videoArtifacts.sweepAtStartup()`),
+  not on a cron (a cron that stops firing is invisible). The worker is the only
+  process that creates any of the three, and the sweep is awaited before the
+  queue workers register so it cannot race a render's scratch dir.
+- ⚠️ **All three sweeps were dead code until 2026-08-04.** `sweepAtStartup()`
+  had no caller in any process, so nothing reclaimed video disk anywhere —
+  this bullet described intent, not behaviour, for the whole life of the
+  pipeline. A local checkout still held a rendered MP4 fifteen days old.
+  `videoArtifacts.test.js` now asserts the function is reachable from a process
+  entry point and fails if it is ever unwired again.
 
 **Deploy rules learned the hard way**
 

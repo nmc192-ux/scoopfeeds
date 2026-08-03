@@ -10,7 +10,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, existsSync, rmSync, utimesSync, readdirSync } from "fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync, utimesSync, readdirSync, readFileSync } from "fs";
 import os from "os";
 import path from "path";
 
@@ -143,4 +143,63 @@ test("sweepAtStartup runs every sweep and reports each", async () => {
   assert.equal(r.videos.removed, 1);
   assert.ok(r.tts, "the TTS cache must be swept here too — one place to look for what reclaims disk");
   assert.equal(readdirSync(FRAMES_ROOT).length, 0);
+});
+
+// ─── The wiring ─────────────────────────────────────────────────────────────
+//
+// Every test above this line passed for months while sweepAtStartup() had NO
+// CALLER ANYWHERE. All three sweeps were dead code in all three processes: the
+// 48h MP4 window, the frame-leak backstop and the 7-day TTS cache never ran,
+// and docs/video-pipeline.md documented them as working. A local checkout still
+// held a rendered MP4 fifteen days old.
+//
+// A sweeper is only a sweeper if something calls it, so that is what this
+// asserts — reachability from a process entry point, not the presence of a
+// literal string in one known file. Move the wiring into a shared bootstrap and
+// this still passes; delete it and it fails.
+
+const BACKEND_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+
+const PROCESS_ENTRY_POINTS = [
+  "server.js",                      // web
+  "src/jobs/schedulerProcess.js",   // scheduler
+  "src/jobs/workerProcess.js",      // worker
+];
+
+/** Every module reachable from `entry` by relative import, transitively. */
+function reachableFrom(entry) {
+  const seen = new Set();
+  const queue = [path.resolve(BACKEND_ROOT, entry)];
+  while (queue.length) {
+    const file = queue.pop();
+    if (seen.has(file) || !existsSync(file)) continue;
+    seen.add(file);
+    const src = readFileSync(file, "utf8");
+    // `from "./x.js"`, `import("./x.js")` — internal modules are always relative.
+    for (const m of src.matchAll(/(?:from\s*|import\s*\(\s*)["'](\.[^"']+)["']/g)) {
+      queue.push(path.resolve(path.dirname(file), m[1].split("?")[0]));
+    }
+  }
+  return seen;
+}
+
+test("the startup sweep is WIRED — reachable from a process entry point", () => {
+  const callers = [];
+  for (const entry of PROCESS_ENTRY_POINTS) {
+    for (const file of reachableFrom(entry)) {
+      if (file.endsWith(".test.js")) continue;
+      if (file === path.resolve(BACKEND_ROOT, "src/services/videoArtifacts.js")) continue; // the definition
+      if (/\bsweepAtStartup\s*\(/.test(readFileSync(file, "utf8"))) {
+        callers.push(`${entry} → ${path.relative(BACKEND_ROOT, file)}`);
+      }
+    }
+  }
+  assert.ok(
+    callers.length > 0,
+    "sweepAtStartup() has no caller reachable from server.js, schedulerProcess.js or " +
+    "workerProcess.js. Every sweep in this module is therefore dead code and nothing " +
+    "reclaims video disk — the exact state this file shipped in. Wire it into a process " +
+    "that starts. (If you added a fourth process, add its entry point to " +
+    "PROCESS_ENTRY_POINTS above.)"
+  );
 });
