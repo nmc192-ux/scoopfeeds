@@ -139,6 +139,9 @@ const Y = Object.freeze({
   titleLine1:  300,
   titleLine2:  436,
   titleSub:    610,
+  // The absorbed attribution date. Below the sub-line, 260px clear of
+  // RESERVED_BOTTOM_Y — it is a provenance detail, not a headline element.
+  titleDate:   700,
   // Stat stack, tightened upward (ruling 6): credit lands at 806+32 = 838,
   // clear of RESERVED_BOTTOM_Y by 122px.
   statValue:   238,
@@ -146,10 +149,6 @@ const Y = Object.freeze({
   statLine2:   686,
   statRule:    772,
   statCredit:  806,
-  attrOutlet:  296,
-  attrHead:    452,
-  attrRule:    628,
-  attrDate:    660,
   diagramRule: 552,
   barsFirst:   264,
   kickTop:     300,
@@ -170,38 +169,22 @@ function titleStates(card, ctx) {
     { key: "s1", lime: false, tree: root([...base()]) },
     { key: "s2", lime: limeIdx === 0, tree: root([...base(), line(l1, Y.titleLine1)].filter(Boolean)) },
     { key: "s3", lime: limeIdx >= 0, tree: root([...base(), line(l1, Y.titleLine1), line(l2, Y.titleLine2)].filter(Boolean)) },
+    // s4 is where the absorbed attribution card lands: the badge was already
+    // here, and the DATE line joins it. Both are code-injected onto the card by
+    // decorateTitleCard, never model-written. The spoken credit rides in the
+    // caption, so nothing else needs a slide of its own.
     { key: "s4", lime: limeIdx >= 0, tree: root([
         ...base(), line(l1, Y.titleLine1), line(l2, Y.titleLine2),
         card.sub ? text(card.sub, { position: "absolute", left: MARGIN_X, top: Y.titleSub, fontSize: 42, fontWeight: 600, color: C.sub, maxWidth: 1400 }) : null,
         sourceBadge(ctx.outlet),
+        card.date ? text(card.date, {
+          position: "absolute", left: MARGIN_X, top: Y.titleDate,
+          fontSize: 26, fontWeight: 600, letterSpacing: 3, color: C.dim,
+        }) : null,
       ].filter(Boolean)) },
   ];
 }
 
-function attributionStates(card, ctx) {
-  const base = () => [...chrome(ctx), eyebrow(card.eyebrow || "REPORTING BY", Y.eyebrow)];
-  // The lime is a structural bar beside the outlet, not type — it credits
-  // without competing with the masthead's own name.
-  const limeBar = abs({ left: MARGIN_X, top: Y.attrOutlet + 12, width: 6, height: 92, background: C.lime });
-  const outlet = text(card.outlet, {
-    position: "absolute", left: MARGIN_X + 34, top: Y.attrOutlet,
-    fontFamily: F.anton, fontSize: 96, lineHeight: 1.05, color: C.white,
-  });
-  const headline = text(card.headline, {
-    position: "absolute", left: MARGIN_X, top: Y.attrHead, maxWidth: 1240,
-    fontSize: 44, fontWeight: 600, lineHeight: 1.32, color: C.sub,
-  });
-  const dateLine = text(
-    card.date ? `${card.date}  ·  THIS VIDEO IS BASED ON THEIR REPORTING` : "THIS VIDEO IS BASED ON THEIR REPORTING",
-    { position: "absolute", left: MARGIN_X, top: Y.attrDate, fontSize: 28, fontWeight: 600, letterSpacing: 3, color: C.dim }
-  );
-  return [
-    { key: "s1", lime: false, tree: root([...base()]) },
-    { key: "s2", lime: true,  tree: root([...base(), limeBar, outlet]) },
-    { key: "s3", lime: true,  tree: root([...base(), limeBar, outlet, headline]) },
-    { key: "s4", lime: true,  tree: root([...base(), limeBar, outlet, headline, hairline(Y.attrRule, 900), dateLine]) },
-  ];
-}
 
 function statStates(card, ctx) {
   const base = () => [...chrome(ctx), eyebrow(card.eyebrow || "", Y.eyebrow)];
@@ -393,7 +376,7 @@ function kickerStates(card, ctx) {
 }
 
 const BUILDERS = {
-  title: titleStates, attribution: attributionStates, stat: statStates,
+  title: titleStates, stat: statStates,
   bars: barsStates, diagram: diagramStates, turn: turnStates, kicker: kickerStates,
 };
 

@@ -20,7 +20,6 @@ const ctx = { outlet: "Reuters", slideIndex: 2, slideCount: 7 };
 
 const CARDS = {
   title:       { t: "title", eyebrow: "SUBSEA", lines: [["THE CABLES", "white"], ["CARRY EVERYTHING", "lime"]], sub: "s", caption: "c" },
-  attribution: { t: "attribution", outlet: "Reuters", headline: "A headline", date: "2026-08-02", caption: "c" },
   stat:        { t: "stat", eyebrow: "FAULTS", value: 70, unit: "%", lines: ["of faults", "are anchors"], hi: 1, source: "Reuters", caption: "c" },
   diagram:     { t: "diagram", eyebrow: "HOW", nodes: [["SHIP", "a"], ["SHELF", "b"], ["CABLE", "c"], ["OUTAGE", "d"]], marker: { on: 2, label: "BREAK" }, caption: "c" },
   bars:        { t: "bars", eyebrow: "CAUSE", bars: [["anchors", 70], ["gear", 18], ["natural", 9], ["sabotage", 3]], source: "Reuters", caption: "c" },

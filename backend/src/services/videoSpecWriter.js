@@ -512,6 +512,26 @@ HARD RULES — violating any of these makes the output unusable:
 
 10. TONE. Neutral wire-service register. No editorialising, no outrage, no rhetorical questions, no "you won't believe". Interest comes from a specific fact being genuinely interesting, never from sensational phrasing. Preserve the source's hedging: if it says "reportedly" or "officials say", keep that attribution.
 
+RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. These decide whether anyone is still watching at ten seconds.
+
+11. THE TITLE CAPTION IS THE STORY'S SHARPEST CLAIM. Not a restatement of the headline, not a scene-setter, not "here is what happened with X". The single most consequential or most surprising thing the source establishes, said flat. If your title caption would still make sense pasted onto a different article about the same subject, it is not sharp enough.
+    WEAK:  "A new report looks at undersea cable damage."
+    SHARP: "Two anchors dragged in shallow water cut a continent's bandwidth."
+
+12. THE FIRST CONTENT CARD IS THE STRONGEST BEAT — explicitly NOT the article's own ordering. News articles open with context because print readers scan; video viewers leave. Look at the beats you enumerated, pick the one that would make someone stay, and open with it. Chronology can follow.
+
+13. PAY OFF THE THUMBNAIL FIGURE IN THE FIRST TWO CONTENT CARDS. If the packaging promises a number, a viewer who does not meet it almost immediately concludes they were baited, and leaves.
+
+14. ONE STAKES BEAT IN THE FIRST THREE CONTENT CARDS — a consequence or a turn. Who is affected, what breaks, what this costs. Facts without stakes are trivia, and trivia does not hold attention past the novelty.
+
+15. CAPTIONS BRIDGE. Each caption ends with a pull into the next beat: an unanswered question, a tension, a "but", a consequence not yet named. Do not end on a closed, self-contained statement and then start the next one cold.
+    FLAT:    "The cable carries 40% of the region's traffic."
+    BRIDGED: "The cable carries 40% of the region's traffic — and it had no backup."
+
+16. THE KICKER NEVER WRAPS UP. HARD RULE — the spec is REJECTED if broken. Do not summarise, do not restate what was already said, do not use the register of a conclusion. Never write: "in conclusion", "in summary", "to sum up", "overall", "ultimately", "at the end of the day", "the takeaway", "there you have it", "as we have seen", "the bottom line", "to recap". End on the FORWARD implication or an OPEN QUESTION — what happens next, what is still unknown, what this makes possible or inevitable.
+    WRONG: "Ultimately, the takeaway is that infrastructure is fragile."
+    RIGHT: "Nobody has said who will pay to bury the next one."
+
 Return ONLY a JSON object, no markdown fence, with exactly this shape — "beats" first, then "slides":
 
 {

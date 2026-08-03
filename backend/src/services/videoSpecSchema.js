@@ -23,23 +23,26 @@
  *      number under a real masthead, which is the single most expensive thing
  *      this pipeline could publish.
  *
- *   3. THE `attribution` CARD IS CODE-INJECTED, NEVER MODEL-EMITTED. A
- *      model-written `attribution` card is dropped and recorded like any other
- *      per-card violation. The card's entire job is to say WHOSE REPORTING
- *      THIS IS — outlet, headline, date — which is a database question; a
- *      model asked to answer it will answer it fluently whether or not it
- *      knows, and a fabricated byline is the worst thing this pipeline could
- *      put on screen. Section 6 injects it from the article row.
+ *   3. WHOSE REPORTING THIS IS, IS CODE-INJECTED, NEVER MODEL-EMITTED. That
+ *      used to be a dedicated `attribution` card at position 1. DrJ removed it
+ *      (2026-08-03): a whole slide of throat-clearing before the story starts,
+ *      paid for out of the opening seconds that decide whether anyone stays.
+ *      The TITLE card absorbed it — badge, date, and the video's single verbal
+ *      credit in its caption. The card is gone; the rule is not. `outlet` and
+ *      `date` on a title are stripped if the model writes them and injected by
+ *      decorateTitleCard from the article row, because a model asked whose
+ *      reporting this is will answer fluently whether or not it knows, and a
+ *      fabricated byline is the worst thing this pipeline could put on screen.
  *
- * NO SCORE FIELD — measured on prod 2026-08-02, and the reason the attribution
- * card carries none:
+ * NO SCORE FIELD — measured on prod 2026-08-02, and the reason the credit
+ * carries none:
  *   - `sources.quality_score` is populated on 0 of 154 sources. Unusable.
  *   - `articles.credibility` is real but coarse: a 4-value tier
  *     (7→13,116 · 9→11,800 · 8→10,045 · 10→4,517). Not a stuck default, but
  *     rendering a 4-value tier as "9.4" is false precision — inventing
  *     resolution the underlying data does not have, on the one card whose
  *     whole purpose is to be trustworthy.
- * So the card names the outlet and its reporting, and carries NO score.
+ * So the credit names the outlet and its reporting, and carries NO score.
  * Do not add one back without a measurement that justifies it.
  *
  * BRAND INVARIANT, enforced here rather than in the renderer: accent #dde706
@@ -48,6 +51,10 @@
  * at render, it's a re-render of the whole batch.
  */
 
+// The ONLY import here, and it stays that way: this module is otherwise pure.
+// videoAttribution imports nothing, so there is no cycle.
+import { resolveAttribution } from "./videoAttribution.js";
+
 // ─── The closed set ─────────────────────────────────────────────────────────
 
 export const CARD_TYPES = Object.freeze([
@@ -55,7 +62,6 @@ export const CARD_TYPES = Object.freeze([
   "stat",     // one dominant number
   "diagram",  // node chain / flow, optional marker on one node
   "bars",     // small comparison set
-  "attribution", // whose reporting this is (CODE-INJECTED — see rule 3)
   "turn",     // the pivot beat: "but here is what that misses"
   "kicker",   // closer
 ]);
@@ -78,10 +84,12 @@ export const THUMBNAIL_ANGLES = Object.freeze([
 // Padding does not just waste runtime, it forces the model to manufacture
 // content, which is where invented figures come from.
 //
-// MIN_SLIDES is therefore a THINNESS TEST, not a length preference: below six
-// surviving cards the article does not carry a video and is skipped, never
-// padded up to the floor.
-export const MIN_SLIDES = 6;
+// MIN_SLIDES is therefore a THINNESS TEST, not a length preference: below the
+// floor the article does not carry a video and is skipped, never padded up to
+// it. Lowered 6 -> 5 on 2026-08-03 when the attribution card was absorbed into
+// the title: the floor counted that code-injected card, so keeping 6 would
+// have quietly raised the bar on the MODEL by one card overnight.
+export const MIN_SLIDES = 5;
 export const MAX_SLIDES = 34;
 
 // Drop-rate gate. A spec can satisfy every surviving-card rule and still be a
@@ -117,6 +125,44 @@ export const BEAT_KINDS = Object.freeze(["figure", "mechanism", "turn", "consequ
 // editorial one), which is why it is a gate rather than a preference. At least
 // one card must be a diagram or a turn — the two types that exist to say
 // something the source did not say in that form.
+// KICKER REGISTER — a hard rule (DrJ, 2026-08-03).
+//
+// A kicker that wraps up is a retention leak at the exact moment a viewer
+// decides whether to watch anything else: summarising tells them the thing is
+// over and they already have it. The closer ends on the FORWARD implication or
+// an open question, never on a restatement of what was just said.
+//
+// Enforced as a banned-phrase check rather than a style note because "don't
+// summarise" is precisely the instruction models comply with least — it reads
+// as a tone preference. These are the register markers, not a blocklist of
+// words: matching one means the card is in summary voice.
+export const KICKER_BANNED_PHRASES = Object.freeze([
+  "in conclusion", "to conclude", "in summary", "to summarise", "to summarize",
+  "in short", "all in all", "to sum up", "summing up", "overall",
+  "in the end", "at the end of the day", "ultimately",
+  "as we have seen", "as we saw", "as mentioned", "as discussed",
+  "that is the story", "that's the story", "so there you have it",
+  "there you have it", "the takeaway", "key takeaway", "to recap", "recapping",
+  "in essence", "essentially then", "the bottom line",
+]);
+
+// CAPTION BRIDGING — a STYLE SIGNAL, never a reject.
+//
+// Each caption should end with a pull into the next beat. This cannot be
+// detected reliably, so it is deliberately not a gate: the check looks for
+// forward-pointing devices and warns only when MOST content captions carry
+// none. It is a nudge in the logs for prompt tuning, and a false warning costs
+// nothing because nothing is refused on it.
+const BRIDGE_MARKERS = /\b(but|yet|until|unless|however|still|though|because|which is why|that is why|so far|not yet|next|then|now|what happens|the problem|the catch|the question|turns out|except)\b/i;
+const BRIDGE_PUNCT = /[?:…]\s*$|—\s*$/;
+export const MIN_BRIDGE_SHARE = 0.5;
+
+export function captionBridges(caption) {
+  const c = String(caption || "").trim();
+  if (!c) return false;
+  return BRIDGE_PUNCT.test(c) || BRIDGE_MARKERS.test(c);
+}
+
 export const OWN_LAYER_TYPES = Object.freeze(["diagram", "turn"]);
 
 // Card-type mix. See the mix pass in validateSpec for the derivation.
@@ -141,19 +187,23 @@ const SHARE_EXEMPT_TYPES = new Set(["title", "kicker"]);
 // field is either model noise or a contract drift, and both should be visible
 // as a diff against this table rather than silently reaching a layout function.
 const CARD_FIELDS = {
-  title:   { required: ["lines", "caption"],                 optional: ["eyebrow", "sub"] },
+  // `outlet` and `date` are CODE-INJECTED onto the title by decorateTitleCard,
+  // never model-emitted — they are the absorbed attribution card (see below).
+  title:   { required: ["lines", "caption"],                 optional: ["eyebrow", "sub", "outlet", "date"] },
   stat:    { required: ["value", "caption", "source"],       optional: ["eyebrow", "unit", "lines", "hi"] },
   diagram: { required: ["nodes", "caption"],                 optional: ["eyebrow", "marker"] },
   bars:    { required: ["bars", "caption", "source"],        optional: ["eyebrow", "source_note"] },
-  attribution: { required: ["outlet", "headline", "caption"], optional: ["eyebrow", "date", "note"] },
   turn:    { required: ["lines", "caption"],                 optional: ["eyebrow", "sub"] },
   kicker:  { required: ["top", "bottom", "caption"],         optional: ["sub"] },
 };
 
-// Card types the MODEL is allowed to emit. `attribution` is absent by design.
-export const MODEL_EMITTABLE = Object.freeze(
-  CARD_TYPES.filter(t => t !== "attribution")
-);
+// Card types the MODEL is allowed to emit. The `attribution` card is GONE —
+// the title card absorbed its badge, date and verbal credit (DrJ, 2026-08-03),
+// which removes a whole slide of throat-clearing before the story starts.
+// What the model still may not write are the title's `outlet` and `date`
+// fields; those are stripped and code-injected. See decorateTitleCard.
+export const MODEL_EMITTABLE = Object.freeze([...CARD_TYPES]);
+export const CODE_INJECTED_TITLE_FIELDS = Object.freeze(["outlet", "date"]);
 
 // ─── Small helpers ──────────────────────────────────────────────────────────
 
@@ -245,6 +295,10 @@ function validateCardShape(card, idx) {
   switch (t) {
     case "title":
     case "turn": {
+      // Code-injected on `title` only (the absorbed attribution card). Shape is
+      // still checked, because injection is code and code has bugs.
+      if (card.outlet !== undefined && !isStr(card.outlet)) e.push(`${at} (${t}): "outlet" must be a non-empty string`);
+      if (card.date   !== undefined && !isStr(card.date))   e.push(`${at} (${t}): "date" must be a string when present`);
       if (card.lines !== undefined) {
         if (!isArr(card.lines) || card.lines.length === 0) {
           e.push(`${at} (${t}): "lines" must be a non-empty array`);
@@ -316,14 +370,6 @@ function validateCardShape(card, idx) {
       }
       break;
     }
-    case "attribution": {
-      // Shape is checked so a CODE-INJECTED card is still validated. A
-      // MODEL-emitted one is rejected earlier, in validateSpec.
-      if (card.outlet   !== undefined && !isStr(card.outlet))   e.push(`${at} (attribution): "outlet" must be a non-empty string`);
-      if (card.headline !== undefined && !isStr(card.headline)) e.push(`${at} (attribution): "headline" must be a non-empty string`);
-      if (card.date     !== undefined && !isStr(card.date))     e.push(`${at} (attribution): "date" must be a string when present`);
-      break;
-    }
     case "kicker": {
       if (card.top    !== undefined && !isStr(card.top))    e.push(`${at} (kicker): "top" must be a non-empty string`);
       if (card.bottom !== undefined && !isStr(card.bottom)) e.push(`${at} (kicker): "bottom" must be a non-empty string`);
@@ -358,8 +404,8 @@ function pruneCard(card) {
  * @param {string} [opts.sourceText]    — article title+description+content. When
  *        supplied, numbers on stat/bars cards are additionally checked to
  *        appear in it. Mirrors scriptWriter.verifyGrounding's normalisation.
- * @param {boolean} [opts.allowAttributionCard=false] — set ONLY by the code path
- *        that injects the DB-built attribution card.
+ * @param {string[]} [opts.preCreditedSources] — the outlet the TITLE caption is
+ *        expected to credit aloud. Verified against that caption, not assumed.
  *
  * @returns {{ok, spec, errors, dropped, stats}}
  *   ok=false means SKIP THE ARTICLE. `dropped` lists every refused card, each
@@ -373,9 +419,11 @@ function pruneCard(card) {
 export function validateSpec(spec, {
   allowedSources = [],
   sourceText = "",
-  allowAttributionCard = false,
-  // Sources already named ALOUD before the model's cards run — in practice the
-  // primary outlet, credited by the injected attribution card at position 1.
+  // The outlet whose credit the TITLE caption must carry — the video's single
+  // verbal source mention (§3b/3). Previously this was trusted blindly, because
+  // the attribution card at position 1 was guaranteed to say it. With that card
+  // absorbed into the title, the claim is VERIFIED against the title caption
+  // instead of assumed, and only counts as pre-credited once it checks out.
   preCreditedSources = [],
   minSlides = MIN_SLIDES,
   maxSlides = MAX_SLIDES,
@@ -385,7 +433,27 @@ export function validateSpec(spec, {
   const errors   = [];
   const dropped  = [];
   const warnings = [];
-  const creditedSources = new Set(preCreditedSources.filter(Boolean).map(String));
+  // §3b/3 NOW TARGETS THE TITLE CAPTION. The attribution card that used to
+  // guarantee the video's one spoken credit is gone; the title absorbed it. So
+  // the credit is CHECKED where it now lives rather than taken on trust — a
+  // caller passing preCreditedSources whose title caption does not actually
+  // name that outlet would otherwise suppress the per-figure credit rule and
+  // ship a video that credits nobody aloud at all.
+  const creditedSources = new Set();
+  {
+    const titleCard = Array.isArray(spec?.slides)
+      ? spec.slides.find(c => c && typeof c === "object" && c.t === "title") : null;
+    for (const src of preCreditedSources.filter(Boolean).map(String)) {
+      if (titleCard && captionCreditsSource(titleCard.caption, src)) {
+        creditedSources.add(src);
+      } else {
+        errors.push(
+          `title caption does not credit "${src}" aloud — §3b/3 puts the video's ` +
+          `single verbal source mention on the title card`
+        );
+      }
+    }
+  }
 
   if (!spec || typeof spec !== "object") {
     return { ok: false, spec: null, errors: ["spec is not an object"], warnings, dropped, stats: null };
@@ -417,7 +485,7 @@ export function validateSpec(spec, {
       if (!isStr(b.evidence))           errors.push(`beats[${i}]: "evidence" must quote the source words that ground it`);
     });
     const contentCards = spec.slides.filter(c =>
-      c && typeof c === "object" && c.t !== "title" && c.t !== "kicker" && c.t !== "attribution"
+      c && typeof c === "object" && c.t !== "title" && c.t !== "kicker"
     ).length;
     if (contentCards !== beats.length) {
       errors.push(`one card per beat: enumerated ${beats.length} beats but emitted ${contentCards} content cards`);
@@ -440,12 +508,6 @@ export function validateSpec(spec, {
       continue;
     }
 
-    // Rule 3 — the model may not write the attribution card.
-    if (card.t === "attribution" && !allowAttributionCard) {
-      dropped.push({ index: i, t: "attribution", kind: "structural", reason: `model-emitted "attribution" card — code-injected from the article row only` });
-      continue;
-    }
-
     // Traceability + grounding (§3: "no source → drop the card, do not invent one").
     if (card.t === "stat" || card.t === "bars") {
       if (!sourceMatches(card.source, allowedSources)) {
@@ -464,10 +526,10 @@ export function validateSpec(spec, {
       // genuinely needs its own mention. A counter would silently do the wrong
       // thing there.
       //
-      // The attribution card is injected before any figure card and carries
-      // the primary outlet's credit, so callers pass that outlet in
-      // `preCreditedSources` and the model's figure captions correctly carry
-      // none.
+      // The TITLE caption carries the primary outlet's credit and runs before
+      // any figure card, so callers pass that outlet in `preCreditedSources`
+      // and the model's figure captions correctly carry none. It is seeded
+      // only after the title caption is confirmed to say it.
       const already = [...creditedSources].some(c => sourceMatches(card.source, [c]));
       if (!already) {
         if (!captionCreditsSource(card.caption, card.source)) {
@@ -573,6 +635,36 @@ export function validateSpec(spec, {
     if (kept[0].t !== "title") errors.push(`first surviving card must be "title", got "${kept[0].t}"`);
     const last = kept[kept.length - 1];
     if (last.t !== "kicker")   errors.push(`final surviving card must be "kicker", got "${last.t}"`);
+
+    // KICKER REGISTER — hard rule. A closer in summary voice tells the viewer
+    // the thing is over at the one moment retention is decided. Spec-level, not
+    // a card drop: dropping the kicker would only trip "missing closer" one line
+    // above and report the wrong cause. This routes into the regeneration retry
+    // with the offending phrase named, which the model can act on.
+    if (last.t === "kicker") {
+      const hay = [last.caption, last.top, last.bottom, last.sub]
+        .filter(Boolean).map(String).join(" ").toLowerCase();
+      const hit = KICKER_BANNED_PHRASES.find(ph => hay.includes(ph));
+      if (hit) {
+        errors.push(
+          `kicker is in summary register ("${hit}") — the closer must end on the ` +
+          `forward implication or an open question, never restate what was said`
+        );
+      }
+    }
+
+    // CAPTION BRIDGING — style only, never a reject. See MIN_BRIDGE_SHARE.
+    const contentCaps = kept.filter(c => c.t !== "title").map(c => c.caption);
+    if (contentCaps.length >= 3) {
+      const bridged = contentCaps.filter(captionBridges).length;
+      if (bridged / contentCaps.length < MIN_BRIDGE_SHARE) {
+        warnings.push(
+          `captions read flat: ${bridged}/${contentCaps.length} end with a pull into ` +
+          `the next beat (want >= ${Math.round(MIN_BRIDGE_SHARE * 100)}%). Style signal only — ` +
+          `nothing was refused on it.`
+        );
+      }
+    }
   }
 
   // §3b/5 — the pipeline's own layer must exist.
@@ -820,26 +912,35 @@ export function validatePackaging(packaging, validatedSpec) {
 }
 
 /**
- * Build the code-injected `attribution` card from the article row.
+ * Fold "whose reporting this is" into the TITLE card.
  *
- * SINGULAR by design (§3b). The old `sources` card was a plural roll-up that
- * needed 2+ outlets and therefore vanished on exactly the stories most in need
- * of attribution — a single-source scoop. This names the reporting the video is
- * built on: which outlet, which piece, when.
+ * Replaces buildAttributionCard (DrJ, 2026-08-03). The dedicated attribution
+ * card spent a whole slide — and several of the opening seconds that decide
+ * whether anyone stays — saying something the title can carry as a badge, a
+ * date and one clause of narration.
  *
- * Returns null only when there is no outlet to name. There is no minimum
- * outlet count: one is the normal case, and "whose reporting is this" has an
- * answer for every article.
+ * Three things are injected, all from the article row, none from the model:
+ *   - `outlet` — drives the on-screen source badge
+ *   - `date`   — ISO day only; a timestamp reads as machine output, and the
+ *                publication DAY is what a viewer needs to judge currency
+ *   - the credit clause appended to `caption` — THE video's single verbal
+ *     source mention (§3b/3), and what validateSpec now checks for.
+ *
+ * The model's own `outlet`/`date` are STRIPPED first. A model asked whose
+ * reporting this is answers fluently whether or not it knows.
+ *
+ * Returns a NEW card; never mutates. Returns the card unchanged when there is
+ * no publisher to name, and null for a non-title card, so a caller cannot
+ * quietly decorate the wrong slide.
  */
-export function buildAttributionCard(article, { eyebrow = "REPORTING BY", note = null } = {}) {
-  const outlet = String(article?.source_name || "").trim();
-  if (!outlet) return null;
+export function decorateTitleCard(card, article, attribution = null) {
+  if (!card || card.t !== "title") return null;
+  const resolved = attribution || resolveAttribution(article);
+  const outlet = String(resolved?.publisher || "").trim();
 
-  const headline = String(article?.headline || article?.title || "").trim();
-  if (!headline) return null;
+  const { outlet: _drop1, date: _drop2, ...clean } = card;
+  if (!outlet) return clean;
 
-  // ISO date only — a timestamp on screen reads as machine output, and the
-  // publication DAY is what a viewer needs to judge how current this is.
   let date = null;
   const raw = article?.published_at ?? article?.date ?? null;
   if (raw != null) {
@@ -847,17 +948,16 @@ export function buildAttributionCard(article, { eyebrow = "REPORTING BY", note =
     if (!Number.isNaN(d.getTime())) date = d.toISOString().slice(0, 10);
   }
 
-  return {
-    t: "attribution",
-    eyebrow,
-    outlet,
-    headline: headline.length > 140 ? headline.slice(0, 137) + "…" : headline,
-    ...(date ? { date } : {}),
-    ...(note ? { note } : {}),
-    // THE video's single verbal source mention (§3b/3 as amended 2026-08-02).
-    // Phrased as a broadcast credit, not as a legal disclosure: "Reported by
-    // Reuters" is what a presenter says; "This report is based on Reuters'
-    // reporting" is what a contract says, and it reads as hedging aloud.
-    caption: `Reported by ${outlet}.`,
-  };
+  // Phrased as a broadcast credit, not a legal disclosure: "Reported by
+  // Reuters" is what a presenter says; "This report is based on Reuters'
+  // reporting" is what a contract says, and it reads as hedging aloud.
+  // Appended rather than prepended — the caption's FIRST clause is the story's
+  // sharpest claim and must not be pushed behind a credit.
+  const base = String(clean.caption || "").trim();
+  const credit = `Reported by ${outlet}.`;
+  const caption = captionCreditsSource(base, outlet)
+    ? base                                   // already says it; do not say it twice
+    : (base ? `${base} ${credit}` : credit);
+
+  return { ...clean, outlet, ...(date ? { date } : {}), caption };
 }

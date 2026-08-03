@@ -13,9 +13,10 @@ import assert from "node:assert/strict";
 import {
   validateSpec,
   validatePackaging,
-  buildAttributionCard,
+  decorateTitleCard,
   CARD_TYPES,
   MODEL_EMITTABLE,
+  MIN_SLIDES,
 } from "./videoSpecSchema.js";
 
 const SOURCES = ["Reuters", "BBC News", "Associated Press"];
@@ -23,7 +24,7 @@ const TEXT = "Reuters reported that 70 percent of cable faults involve anchors. 
              "The network spans 500 cables and carries 99 percent of traffic. " +
              "Repairs took 30 days on average across 12 incidents.";
 
-const titleCard  = () => ({ t: "title",  eyebrow: "SUBSEA", lines: [["THE CABLES", "white"], ["500", "lime"]], sub: "what carries the internet", caption: "Five hundred cables carry almost everything." });
+const titleCard  = () => ({ t: "title",  eyebrow: "SUBSEA", lines: [["THE CABLES", "white"], ["500", "lime"]], sub: "what carries the internet", caption: "Five hundred cables carry almost everything. Reported by Reuters." });
 const kickerCard = () => ({ t: "kicker", top: "NOT SATELLITE", bottom: "CABLE", sub: "the map is the story", caption: "The internet is a map of cables, not satellites." });
 const statCard   = (over = {}) => ({ t: "stat", eyebrow: "FAULTS", value: 70, unit: "%", lines: ["of faults", "involve anchors"], hi: 1, source: "Reuters", caption: "Reuters reports that seventy percent of faults involve anchors.", ...over });
 const barsCard   = (over = {}) => ({ t: "bars", eyebrow: "CAUSE", bars: [["anchors", 70], ["nature", 30]], source: "BBC", caption: "The BBC reports anchors outweigh natural causes.", ...over });
@@ -49,7 +50,7 @@ const plainFiller = (n) => FILLER_CYCLE[n % 2](n);
 const BEAT_KIND_CYCLE = ["figure", "mechanism", "turn", "consequence"];
 function beatsFor(slides) {
   return slides
-    .filter(c => c && typeof c === "object" && c.t !== "title" && c.t !== "kicker" && c.t !== "attribution")
+    .filter(c => c && typeof c === "object" && c.t !== "title" && c.t !== "kicker")
     .map((c, i) => ({
       kind: BEAT_KIND_CYCLE[i % 4],
       beat: `Beat ${i} of the story as the source states it.`,
@@ -96,25 +97,8 @@ test("two malformed bars cards do NOT kill a 22-slide spec — the live 2026-08-
   assert.equal(v.stats.slides, 20); // 22 raw − 2 dropped
 });
 
-test("the closed set excludes `attribution` from what the model may emit", () => {
-  assert.ok(CARD_TYPES.includes("attribution"));
-  assert.ok(!MODEL_EMITTABLE.includes("attribution"));
-});
 
-test("a model-emitted attribution card is DROPPED — a fabricated byline never renders", () => {
-  const s = spec([{ t: "attribution", eyebrow: "REPORTING BY", outlet: "Reuters", headline: "Invented headline", caption: "Based on Reuters reporting." }]);
-  const v = validateSpec(s, opts);
-  assert.equal(v.ok, true, v.errors.join("; "));
-  assert.equal(v.dropped.length, 1);
-  assert.match(v.dropped[0].reason, /code-injected from the article row/);
-  assert.ok(!v.spec.slides.some(c => c.t === "attribution"));
-});
 
-test("the same attribution card passes when the code path injects it", () => {
-  const s = spec([{ t: "attribution", eyebrow: "REPORTING BY", outlet: "Reuters", headline: "Cable faults traced to anchors", date: "2026-08-02", caption: "Based on Reuters reporting." }]);
-  const v = validateSpec(s, { ...opts, allowAttributionCard: true });
-  assert.equal(v.ok, true, v.errors.join("; "));
-});
 
 // ─── Source traceability — drop, don't invent ───────────────────────────────
 
@@ -235,14 +219,6 @@ test("a beat with an unknown kind, or missing evidence, rejects the spec", () =>
   assert.match(validateSpec(b, opts).errors.join(" "), /"evidence" must quote the source words/);
 });
 
-test("the injected attribution card never counts against one-card-per-beat", () => {
-  // Section 6 injects it AFTER generation; revalidation with the injected card
-  // and the model's original beats must still balance.
-  const s = spec([statCard()]);
-  s.slides.splice(s.slides.length - 1, 0, { t: "attribution", outlet: "Reuters", headline: "Cable faults traced to anchors", caption: "Based on Reuters reporting." });
-  const v = validateSpec(s, { ...opts, allowAttributionCard: true });
-  assert.equal(v.ok, true, v.errors.join("; "));
-});
 
 test("beat stats are reported — count and kind tally", () => {
   const v = validateSpec(spec([statCard()]), opts);
@@ -317,11 +293,11 @@ test("MIN_CARDS_PER_TYPE keeps the share cap safe on small specs", () => {
 
 // ─── Length floor (duration is a ceiling, not a target) ─────────────────────
 
-test("a spec below the 6-card floor is skipped as too thin, never padded", () => {
+test("a spec below the floor is skipped as too thin, never padded", () => {
   const s = withBeats([titleCard(), plainFiller(0), plainFiller(1), kickerCard()]);
   const v = validateSpec(s, opts);
   assert.equal(v.ok, false);
-  assert.match(v.errors.join(" "), /only 4 slides remain.*< 6.*too thin for a video/);
+  assert.match(v.errors.join(" "), /only 4 slides remain.*< 5.*too thin for a video/);
 });
 
 test("exactly 6 surviving cards is enough", () => {
@@ -389,12 +365,6 @@ test("crediting the second outlet satisfies it, and does not re-arm the first", 
   assert.equal(v.dropped.filter(d => d.kind === "sourcing").length, 0);
 });
 
-test("the attribution card carries the video's one verbal credit, phrased as broadcast", () => {
-  const card = buildAttributionCard({ source_name: "Yahoo Finance", title: "A headline", published_at: Date.UTC(2026, 7, 2) });
-  assert.equal(card.caption, "Reported by Yahoo Finance.");
-  assert.ok(!/based on|reporting\./.test(card.caption),
-    "a legal-sounding disclosure reads as hedging when spoken aloud");
-});
 
 test("newsreader shortening is accepted — 'BBC' credits 'BBC News'", () => {
   const v = validateSpec(spec([barsCard({ source: "BBC News", caption: "The BBC reports anchors outweigh nature." })]), opts);
@@ -752,37 +722,93 @@ test("a short-but-valid variant set ships — fewer than 3 is a warning, not a f
 
 // ─── The code-injected sources card ─────────────────────────────────────────
 
-test("buildAttributionCard names the reporting and carries NO score field", () => {
-  const card = buildAttributionCard({
-    source_name: "Reuters",
-    title: "Cable faults traced to dragged anchors",
-    published_at: Date.UTC(2026, 7, 2),
-  });
-  assert.equal(card.t, "attribution");
+
+test("ONE publisher is enough — the credit survives a single-source scoop", () => {
+  // The plural `sources` card needed 2+ outlets and vanished on exactly the
+  // stories most in need of attribution. The title credit has no such floor.
+  const card = decorateTitleCard(
+    { t: "title", lines: [["X", "white"]], caption: "A single-source scoop." },
+    { source_name: "Reuters", url: "https://www.reuters.com/x" },
+  );
+  assert.match(card.caption, /Reported by Reuters\.$/);
+});
+
+
+
+
+// ─── The attribution card, absorbed into the title (DrJ, 2026-08-03) ────────
+
+test("the `attribution` card type no longer exists", () => {
+  assert.ok(!CARD_TYPES.includes("attribution"));
+  assert.ok(!MODEL_EMITTABLE.includes("attribution"));
+});
+
+test("MIN_SLIDES drops to 5 — the floor counted the card that is now gone", () => {
+  // Keeping 6 would have quietly raised the bar on the MODEL by one card,
+  // because the code-injected attribution slide used to count toward the floor.
+  assert.equal(MIN_SLIDES, 5);
+});
+
+test("decorateTitleCard injects badge, date and the one verbal credit", () => {
+  const card = decorateTitleCard(
+    { t: "title", lines: [["ANCHORS", "lime"]], caption: "Two anchors cut a continent's bandwidth." },
+    { source_name: "Reuters", url: "https://www.reuters.com/world/x", published_at: Date.UTC(2026, 7, 2) },
+  );
   assert.equal(card.outlet, "Reuters");
-  assert.equal(card.headline, "Cable faults traced to dragged anchors");
   assert.equal(card.date, "2026-08-02");
-  // quality_score is 0/154 populated and credibility is a 4-value tier; a
-  // number here would be false precision on the one card that must be trusted.
-  const flat = JSON.stringify(card);
-  assert.ok(!/score|credibility/i.test(flat), `no score field may appear: ${flat}`);
+  assert.match(card.caption, /^Two anchors cut a continent's bandwidth\. Reported by Reuters\.$/);
+  assert.equal(card.t, "title");
+  assert.ok(!("score" in card), "no score field — the data does not support one");
 });
 
-test("ONE outlet is enough — the plural card vanished on single-source scoops", () => {
-  const card = buildAttributionCard({ source_name: "Reuters", title: "A single-source scoop" });
-  assert.ok(card, "a single outlet must still produce an attribution card");
+test("a model-written outlet/date on the title is STRIPPED before injection", () => {
+  // Same rule as the old code-injected card: a model asked whose reporting this
+  // is answers fluently whether or not it knows.
+  const card = decorateTitleCard(
+    { t: "title", lines: [["X", "white"]], caption: "A claim.", outlet: "Invented Wire", date: "1999-01-01" },
+    { source_name: "Reuters", url: "https://www.reuters.com/x", published_at: Date.UTC(2026, 7, 2) },
+  );
   assert.equal(card.outlet, "Reuters");
-  assert.equal(card.date, undefined, "no date when the article has none");
+  assert.equal(card.date, "2026-08-02");
 });
 
-test("buildAttributionCard returns null only when there is nothing to name", () => {
-  assert.equal(buildAttributionCard({ title: "no outlet" }), null);
-  assert.equal(buildAttributionCard({ source_name: "Reuters" }), null);
-  assert.equal(buildAttributionCard(null), null);
+test("the credit is not said twice when the caption already names the outlet", () => {
+  const card = decorateTitleCard(
+    { t: "title", lines: [["X", "white"]], caption: "Reuters found two anchors were to blame." },
+    { source_name: "Reuters", url: "https://www.reuters.com/x" },
+  );
+  assert.equal((card.caption.match(/Reuters/g) || []).length, 1);
 });
 
-test("a card built by buildAttributionCard validates under the injection flag", () => {
-  const card = buildAttributionCard({ source_name: "Reuters", title: "Cable faults traced to anchors", published_at: Date.UTC(2026, 7, 2) });
-  const v = validateSpec(spec([card]), { ...opts, allowAttributionCard: true });
-  assert.equal(v.ok, true, v.errors.join("; "));
+test("§3b/3 now targets the TITLE caption — a title that credits nobody is rejected", () => {
+  const s2 = spec([]);
+  const t = s2.slides.find(c => c.t === "title");
+  t.caption = "A claim with no credit in it.";
+  const v = validateSpec(s2, { allowedSources: ["Reuters"], preCreditedSources: ["Reuters"] });
+  assert.equal(v.ok, false);
+  assert.ok(v.errors.some(e => /title caption does not credit/.test(e)), JSON.stringify(v.errors));
+});
+
+test("a kicker in summary register is REJECTED — hard rule", () => {
+  for (const bad of ["In conclusion, the system is fragile.", "So there you have it.", "The bottom line is simple."]) {
+    const s2 = spec([]);
+    s2.slides[s2.slides.length - 1].caption = bad;
+    const v = validateSpec(s2, { allowedSources: ["Reuters"] });
+    assert.ok(v.errors.some(e => /summary register/.test(e)), `${bad} -> ${JSON.stringify(v.errors)}`);
+  }
+});
+
+test("a forward-looking kicker passes", () => {
+  const s2 = spec([]);
+  s2.slides[s2.slides.length - 1].caption = "Nobody has said who will pay to bury the next one.";
+  const v = validateSpec(s2, { allowedSources: ["Reuters"] });
+  assert.ok(!v.errors.some(e => /summary register/.test(e)), JSON.stringify(v.errors));
+});
+
+test("flat captions WARN and never reject", () => {
+  const s2 = spec([]);
+  for (const c of s2.slides) if (c.t !== "title") c.caption = "A closed self contained statement.";
+  const v = validateSpec(s2, { allowedSources: ["Reuters"] });
+  assert.ok(v.warnings.some(w => /captions read flat/.test(w)), JSON.stringify(v.warnings));
+  assert.ok(!v.errors.some(e => /flat/.test(e)), "bridging must never be a reject");
 });
