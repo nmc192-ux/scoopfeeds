@@ -40,8 +40,16 @@ position 2 is a dead beat where retention is decided.
 
 **Motion is keyframes, not frames.** Each card renders 4 *states* — 5 for
 `stat` — (empty → line 1 → line 2 → complete); ffmpeg crossfades between them and applies a slow
-drift over the whole slide. A true 30fps sequence measured 1,800 renders,
-150s CPU and 71MB per video; keyframes are ~95 renders, ~8s, ~4MB.
+drift over the whole slide.
+
+A true 30fps sequence is 1,800 renders for a 60s video — that figure is frames
+per second times duration and does not depend on card count. Keyframes are
+**27–46 renders**, computed from the real shape rather than assumed: 6–10
+slides at 4 states each, 5 for `stat`, with `stat` capped near a third of the
+cards by the mix rule (2 of 6, 3 of 10), plus 3 thumbnail variants. The earlier
+"~95 renders, ~8s, ~4MB" assumed a 20-card video; the CPU and size figures were
+measured against that assumption and scale roughly with render count, so the
+real cost is well under them.
 
 **The drift must be supersampled 4×.** At output resolution the crop
 coordinates are integers (and yuv420p forces them even), so ~0.3px/frame of
