@@ -170,7 +170,7 @@ export const SEO_STOPWORDS = new Set([
 //
 // So the cut must happen BEFORE stopword removal, not after. Order is
 // load-bearing: cleanHeadline -> clause cut -> stopwords -> word cap.
-const SEO_CLAUSE_BREAK = /[,;:]|\s+[-–—]\s+|\s+(?:as|after|amid|while)\s+/gi;
+const SEO_CLAUSE_BREAK = /[,;:?!]|\s+[-–—]\s+|\s+(?:as|after|amid|while)\s+/gi;
 
 // The EARLIEST boundary that still leaves a usable head. A title opening with a
 // connective ("As it happened, ...") would otherwise cut to nothing, so a
@@ -191,18 +191,22 @@ function cutAtClause(text, minWords = 3) {
 /**
  * A keyword-first line derived from a title, by rule.
  *
- * Publisher suffix stripped (via cleanHeadline), cut at the first clause
- * boundary, function words stripped, capped at `maxWords`. Never throws;
- * returns "" only when the title is itself empty.
+ * cleanHeadline (publisher suffix) -> cut at the first clause boundary -> cap
+ * at `maxWords` -> strip trailing punctuation. Never throws; returns "" only
+ * when the title is itself empty.
+ *
+ * FUNCTION WORDS ARE KEPT. An earlier version stripped them, on the theory
+ * that a search line should be keywords. It produced machine output: "This
+ * Type of Exercise Can Help You Build More Muscle" became "Type Exercise Help
+ * You Build More Muscle", and "Who wins Game 7 of Lightning-Canadiens? Our
+ * panel ..." became "Who wins Game 7 Lightning-Canadiens? panel" — "our" is a
+ * stopword, so the subject of the trailing clause vanished and left a dangling
+ * noun. Every defect observed across five real captions traced to the
+ * stripping. Stopwords carry no keyword value to strip in the first place, and
+ * they are the entire difference between English and a bag of words.
  *
  * This path fires exactly when the model's own seo_line was bad, so it carries
- * the weakest posts — it has to read as English on its own, not as keywords
- * shaken loose from a sentence.
- *
- * Stopword-stripping is ABANDONED when it would leave fewer than 3 words —
- * "Is it over?" must not collapse to "over". The unstripped cleaned title is
- * better than a one-word fragment, and short titles are exactly where stopword
- * removal does the most damage.
+ * the weakest posts and has to read as a sentence on its own.
  */
 export function deterministicSeoLine(title, { maxWords = 10 } = {}) {
   let cleaned = "";
@@ -213,20 +217,72 @@ export function deterministicSeoLine(title, { maxWords = 10 } = {}) {
   }
   if (!cleaned) return "";
 
-  cleaned = cutAtClause(cleaned);
-  const words = cleaned.split(/\s+/).filter(Boolean);
-  const kept = words.filter((w) => {
-    const bare = w.toLowerCase().replace(/[^a-z0-9]/g, "");
-    return bare && !SEO_STOPWORDS.has(bare);
-  });
-
-  const chosen = kept.length >= 3 ? kept : words;
-  return chosen
+  return cutAtClause(cleaned)
+    .split(/\s+/)
+    .filter(Boolean)
     .slice(0, maxWords)
     .join(" ")
     // Trailing punctuation only — an interior hyphen or apostrophe is content.
     .replace(/[\s.,;:!?—–-]+$/, "")
     .trim();
+}
+
+// ── Scraped image credits ───────────────────────────────────────────────
+//
+// Wire descriptions routinely carry the photo credit inline, and it reads as
+// prose to a truncator: one real caption published "...may benefit older
+// individuals. DragonImages/Getty Images A lesser-known type of exercise..."
+// mid-sentence. This is a display-time sanitiser, not an ingest change —
+// articles.description keeps whatever the feed sent.
+//
+// Conservative by construction. Every pattern needs an explicit credit marker:
+// a labelled prefix, a parenthesised credit, or an agency name joined by a
+// slash. "Reuters reported that..." and "Getty sued..." are untouched, because
+// prose almost never writes "Name/Getty Images" or "Photo:". Deliberately NOT
+// matching a bare "Source:" — that appears in legitimate copy far more often
+// than the others.
+const IMAGE_CREDIT_PATTERNS = [
+  // "Photo: Jane Doe" / "Image credit: Reuters" — up to the sentence end.
+  /\b(?:Photo|Photograph|Picture|Image|Credit|Photo credit|Image credit|Pic)\s*:\s*[^.!?\n]{0,80}/gi,
+  // "(Photo by Jane Doe/Getty Images)" / "[Image: AFP]"
+  /[([](?:Photo|Photograph|Image|Picture|Credit)\b[^)\]]{0,80}[)\]]/gi,
+  // "DragonImages/Getty Images", "REUTERS/Jane Doe", "AP Photo/Jane Doe"
+  /\b[A-Z][\w.'’-]*\s*\/\s*(?:Getty Images|Getty|Reuters|REUTERS|AFP|AP|Shutterstock|iStock|Alamy|EPA|Bloomberg)\b/g,
+  /\b(?:REUTERS|AP Photo|AFP|EPA)\s*\/\s*[A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*)?/g,
+  // Standalone agency tails.
+  /\b(?:via\s+)?Getty Images\b/g,
+  /\b(?:Shutterstock|iStock|Alamy)\b/g,
+];
+
+/** Remove inline photo credits and tidy the seams they leave behind. */
+export function stripImageCredits(text) {
+  let s = String(text || "");
+  if (!s) return "";
+  for (const re of IMAGE_CREDIT_PATTERNS) s = s.replace(re, " ");
+  return s
+    .replace(/\s{2,}/g, " ")          // collapse the gaps the removals left
+    .replace(/\s+([.,;:!?])/g, "$1")  // no space before punctuation
+    .replace(/([.!?])\s*\1+/g, "$1")  // no doubled sentence enders
+    .trim();
+}
+
+// ── Duplicate-block suppression ─────────────────────────────────────────
+//
+// When a feed sets description === title, the seo_line and the summary say the
+// same thing — and the seo_line is the DEGRADED copy of the two, printed
+// directly above the correct sentence. V1 hid this because its first line was
+// the emoji-prefixed headline, which the eye reads as hook-then-body.
+function nearlyDuplicate(a, b) {
+  const norm = (s) => String(s || "").toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  const A = norm(a), B = norm(b);
+  if (!A || !B) return false;
+  if (B.includes(A)) return true;
+  const at = A.split(" ").filter(Boolean);
+  const bt = new Set(B.split(" ").filter(Boolean));
+  if (!at.length) return false;
+  const hits = at.filter((t) => bt.has(t)).length;
+  return hits / at.length >= 0.8;
 }
 
 // Pull a numeric sport score (e.g. "62-24", "2-1") out of a string. Used to
@@ -631,9 +687,15 @@ export function composeInstagramCaptionV2(article, { seoLine = "" } = {}) {
   const seo = String(seoLine || "").trim().replace(/[\s.,;:!?—–-]+$/, "")
     || deterministicSeoLine(article.title);
 
-  const igSummaryText = String(article.ig_summary || "").trim();
-  const desc = String(article.description || "").trim();
+  // Credits are stripped BEFORE truncation, not after: a credit sitting inside
+  // the first 300 chars would otherwise consume budget and could leave a
+  // half-removed fragment at the cut.
+  const igSummaryText = stripImageCredits(article.ig_summary);
+  const desc = stripImageCredits(article.description);
   const summaryRaw = igSummaryText || (desc ? truncateBySentence(desc, 300) : "");
+
+  // seo_line is dropped, not the summary: it is the degraded copy of the two.
+  const seoLineForCaption = nearlyDuplicate(seo, summaryRaw) ? "" : seo;
 
   const riLine     = safeRiCallout(article.id);
   const engagement = pickIgEngagement(article, cleanHeadline(article.title) || article.title || "");
@@ -644,14 +706,14 @@ export function composeInstagramCaptionV2(article, { seoLine = "" } = {}) {
   // Only the summary is truncatable. seo_line is the discovery surface and
   // tags are the classification hint — cutting either to fit would sacrifice
   // the entire point of the restructure to save prose that has a fallback.
-  const fixed = [seo, riLine, engagement, linkCta, tags].filter(Boolean);
+  const fixed = [seoLineForCaption, riLine, engagement, linkCta, tags].filter(Boolean);
   const separators = 2 * (fixed.length + (summaryRaw ? 1 : 0) - 1);
   const budget = IG_CAPTION_LIMIT - fixed.join("").length - separators;
   const summary = summaryRaw && summaryRaw.length > budget
     ? truncateBySentence(summaryRaw, Math.max(0, budget))
     : summaryRaw;
 
-  const caption = [seo, summary || null, riLine || null, engagement || null, linkCta, tags]
+  const caption = [seoLineForCaption || null, summary || null, riLine || null, engagement || null, linkCta, tags]
     .filter(Boolean)
     .join("\n\n");
 
@@ -660,8 +722,9 @@ export function composeInstagramCaptionV2(article, { seoLine = "" } = {}) {
     characterCount: caption.length,
     meta: {
       variant: "v2",
-      seoLine: seo,
+      seoLine: seoLineForCaption,
       seoLineSource: seoLine ? "copy" : "deterministic",
+      seoLineSuppressed: seoLineForCaption === "" && seo !== "",
       realityIndex: riLine ? "included" : "absent",
       tagCount: tags ? tags.split(" ").length : 0,
     },

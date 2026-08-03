@@ -153,32 +153,55 @@ test("COPY_RULES_VER is v4 and changes the content hash", () => {
 
 // ── Deterministic fallback ───────────────────────────────────────────────
 
-test("deterministicSeoLine strips publisher suffix, stopwords, and caps at 10 words", () => {
+test("deterministicSeoLine strips the publisher suffix and caps at 10 words", () => {
   assert.equal(
     deterministicSeoLine("The president of the United States will visit the border - BBC News"),
-    "president United States visit border"
+    "The president of the United States will visit the border"
   );
   assert.equal(
     deterministicSeoLine("A very long title with many words that should be cut off at exactly ten words here"),
-    "very long title many words should cut off exactly ten"
+    "A very long title with many words that should be"
   );
   assert.ok(deterministicSeoLine("Iran oil sanctions tighten").split(/\s+/).length <= 10);
   // The suffix must be gone, not merely shortened.
   assert.ok(!/BBC/.test(deterministicSeoLine("Markets slide on rate fears - BBC News")));
 });
 
-test("deterministicSeoLine cuts at the first clause boundary, before stopword removal", () => {
-  // The regression this exists for: "as" is itself a stopword, so stripping
-  // function words after the fact FUSED two clauses into a run-on.
+test("deterministicSeoLine KEEPS function words — it must read as English", () => {
+  // The regression: stripping stopwords produced machine output. "our" is a
+  // stopword, so the subject of the trailing clause vanished and left a
+  // dangling noun; "This/of/Can" left telegraphese.
+  assert.equal(
+    deterministicSeoLine("This Type of Exercise Can Help You Build More Muscle With Less Effort"),
+    "This Type of Exercise Can Help You Build More Muscle"
+  );
+  // A "?" is a boundary, so the truncated trailing clause is cut, not mangled.
+  assert.equal(
+    deterministicSeoLine("Who wins Game 7 of Lightning-Canadiens? Our panel ..."),
+    "Who wins Game 7 of Lightning-Canadiens"
+  );
+  for (const out of [
+    deterministicSeoLine("The message from talks on exiting fossil fuels"),
+    deterministicSeoLine("First dots on the road map to exiting fossil fuels"),
+  ]) {
+    assert.match(out, /\b(?:the|on|of|to)\b/, `function words must survive: "${out}"`);
+  }
+});
+
+test("deterministicSeoLine cuts at the first clause boundary", () => {
+  // Originally a fix for clause FUSION: "as" was a stopword, so stripping
+  // function words welded two clauses into a run-on. Stopword stripping is
+  // gone now, but the cut still earns its place — it is what keeps the line
+  // to one clause instead of a whole sentence.
   assert.equal(
     deterministicSeoLine("Iran oil sanctions tighten as European refiners pause purchases"),
     "Iran oil sanctions tighten"
   );
   // Every boundary form.
-  assert.equal(deterministicSeoLine("Markets slide on rate fears, analysts warn"), "Markets slide rate fears");
+  assert.equal(deterministicSeoLine("Markets slide on rate fears, analysts warn"), "Markets slide on rate fears");
   assert.equal(deterministicSeoLine("Nvidia earnings beat forecasts — shares jump"), "Nvidia earnings beat forecasts");
-  assert.equal(deterministicSeoLine("Ceasefire holds in Gaza after talks in Cairo"), "Ceasefire holds Gaza");
-  assert.equal(deterministicSeoLine("Flooding worsens in Sindh amid record monsoon rain"), "Flooding worsens Sindh");
+  assert.equal(deterministicSeoLine("Ceasefire holds in Gaza after talks in Cairo"), "Ceasefire holds in Gaza");
+  assert.equal(deterministicSeoLine("Flooding worsens in Sindh amid record monsoon rain"), "Flooding worsens in Sindh");
   assert.equal(deterministicSeoLine("Strike enters third week while talks stall"), "Strike enters third week");
   assert.equal(deterministicSeoLine("Fed holds rates: what it means"), "Fed holds rates");
 });
@@ -190,11 +213,10 @@ test("deterministicSeoLine does not cut when the head would be too short", () =>
   assert.ok(/iran|happened/i.test(out), `got "${out}"`);
 });
 
-test("deterministicSeoLine keeps stopwords when stripping would leave under 3 words", () => {
-  // "Is it over?" -> stripping leaves "over" alone; the cleaned title is better.
-  const out = deterministicSeoLine("Is it over?");
-  assert.ok(out.split(/\s+/).length >= 2, `got "${out}"`);
-  assert.ok(!/[?.!,;:]$/.test(out), "trailing punctuation must be gone");
+test("deterministicSeoLine leaves a short title intact but drops its trailing punctuation", () => {
+  // Under the old stripping rule this collapsed to the single word "over".
+  assert.equal(deterministicSeoLine("Is it over?"), "Is it over");
+  assert.equal(deterministicSeoLine("Nvidia earnings beat forecasts."), "Nvidia earnings beat forecasts");
 });
 
 test("deterministicSeoLine never throws and returns '' only for empty input", () => {
