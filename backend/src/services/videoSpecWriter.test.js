@@ -12,6 +12,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { _internals, writeVideoSpec } from "./videoSpecWriter.js";
+import { validateSpec } from "./videoSpecSchema.js";
+import { resolveAttribution } from "./videoAttribution.js";
 
 const { extractJsonPayload, buildSpecPrompt } = _internals;
 
@@ -287,4 +289,116 @@ test("no object at all stays null", () => {
   assert.equal(extractJsonPayload("I cannot produce a spec for this article."), null);
   assert.equal(extractJsonPayload(""), null);
   assert.equal(extractJsonPayload(null), null);
+});
+
+// ─── Decoration must run BEFORE validation ──────────────────────────────────
+//
+// THE LIVE DEFECT (2026-08-03). A dry run produced a video whose stat@1 and
+// bars@4 were dropped with "first use of Yahoo Finance carries no verbal
+// credit (§3b/3)" — on a spec whose title caption RECEIVES that credit from
+// decorateTitleCard. Validation ran first, so the title had no credit yet, the
+// §3b/3 fallback fired, and the figure cards were stripped out of an otherwise
+// valid video.
+//
+// Two causes, both fixed and both covered here: the ordering, and
+// `preCreditedSources` never being destructured in writeVideoSpec — so it
+// reached nothing and validateSpec always ran with an empty credit set.
+
+test("a model spec with NO written credit validates clean once decorated", () => {
+  // The regression DrJ asked for, checked at the seam where the ordering lives:
+  // decorate, then validate, and expect ZERO §3b/3 drops.
+  const article = {
+    id: "a1", source_name: "Yahoo Finance",
+    url: "https://finance.yahoo.com/news/x", published_at: Date.UTC(2026, 7, 3),
+  };
+  const attribution = resolveAttribution(article);
+
+  // Exactly what the model emits: figure cards whose captions credit nobody.
+  const parsed = {
+    beats: [
+      { kind: "figure", beat: "three names drove 40% of the move", evidence: "forty percent" },
+      { kind: "mechanism", beat: "inflows reach price through the index", evidence: "index" },
+      { kind: "turn", beat: "the flows reversed", evidence: "reversed" },
+      { kind: "consequence", beat: "concentration is unpriced", evidence: "sixty" },
+    ],
+    slides: [
+      { t: "title", eyebrow: "MARKETS", lines: [["THE GAP", "white"], ["40%", "lime"]],
+        caption: "Forty percent of the move came from three names." },
+      { t: "stat", eyebrow: "SHARE", value: 40, unit: "%", lines: ["of the move"],
+        source: "Yahoo Finance", caption: "Three names carried forty percent of it." },
+      { t: "diagram", eyebrow: "FLOW", nodes: [["inflow", "cash"], ["index", "weights"], ["price", "print"]],
+        caption: "The money moves through the index before it reaches price." },
+      { t: "turn", lines: [["BUT THE FLOWS", "white"], ["REVERSED", "lime"]],
+        caption: "Then the flows reversed, and nobody had priced that." },
+      { t: "bars", eyebrow: "SPLIT", bars: [["three names", 40], ["everyone else", 60]],
+        source: "Yahoo Finance", caption: "The rest of the market did the other sixty." },
+      { t: "kicker", top: "STILL", bottom: "CONCENTRATED",
+        caption: "Nobody has said what happens when the next one sells." },
+    ],
+  };
+
+  const decorated = _internals.decorateParsedSpec(parsed, article, attribution);
+  const title = decorated.slides[0];
+  assert.match(title.caption, /Reported by Yahoo Finance\.$/,
+    "decoration must put the credit on the title caption");
+
+  const v = validateSpec(decorated, {
+    allowedSources: ["Yahoo Finance"],
+    preCreditedSources: [attribution.publisher],
+    sourceText: "Forty percent 40 of the move came from three names, sixty 60 for the rest.",
+  });
+
+  const sourcingDrops = v.dropped.filter(d => d.kind === "sourcing");
+  assert.deepEqual(sourcingDrops, [],
+    `zero §3b/3 drops expected, got ${JSON.stringify(v.dropped)}`);
+  assert.ok(v.spec.slides.some(c => c.t === "stat"), "the stat card must survive");
+  assert.ok(v.spec.slides.some(c => c.t === "bars"), "the bars card must survive");
+  assert.ok(!v.errors.some(e => /title caption does not credit/.test(e)), JSON.stringify(v.errors));
+});
+
+test("the per-figure credit rule still fires for a SECOND, uncredited source", () => {
+  // Its actual purpose. Decoration credits the primary outlet only; a figure
+  // attributed to a DIFFERENT outlet must still name that one aloud.
+  const article = { id: "a2", source_name: "Reuters", url: "https://www.reuters.com/x" };
+  const parsed = {
+    beats: [
+      { kind: "figure", beat: "70% of faults involve anchors", evidence: "seventy" },
+      { kind: "turn", beat: "the cause was not weather", evidence: "anchors" },
+    ],
+    slides: [
+      { t: "title", lines: [["X", "white"]], caption: "A claim." },
+      { t: "stat", value: 70, unit: "%", lines: ["of faults"], source: "BBC News",
+        caption: "Seventy percent of faults involve anchors." },
+      { t: "diagram", nodes: [["a", "one"], ["b", "two"], ["c", "three"]], caption: "It moves through here first." },
+      { t: "turn", lines: [["BUT", "white"]], caption: "But the cause was not the weather." },
+      { t: "kicker", top: "NOT", bottom: "WEATHER", caption: "Nobody has said who pays next." },
+    ],
+  };
+  const decorated = _internals.decorateParsedSpec(parsed, article, resolveAttribution(article));
+  const v = validateSpec(decorated, {
+    allowedSources: ["Reuters", "BBC News"],
+    preCreditedSources: ["Reuters"],
+    sourceText: "seventy 70 percent of faults involve anchors",
+  });
+  assert.ok(
+    v.dropped.some(d => d.kind === "sourcing" && /BBC News/.test(d.reason)),
+    `the second uncredited outlet must still be caught: ${JSON.stringify(v.dropped)}`
+  );
+});
+
+test("writeVideoSpec DESTRUCTURES the credit it is given — no silent drop", () => {
+  // preCreditedSources was accepted by the caller and never destructured, so it
+  // reached nothing. The credit is now derived inside writeVideoSpec from the
+  // same attribution that decorates the card, which makes the two unable to
+  // disagree. Source-walked because the failure was invisible at runtime.
+  const raw = readFileSync(new URL("./videoSpecWriter.js", import.meta.url), "utf8");
+  const fn = raw.slice(raw.indexOf("export async function writeVideoSpec"));
+  const body = fn.slice(0, fn.indexOf("\n}\n"));
+  assert.match(body, /preCreditedSources:\s*\[credit\?\.publisher\]/,
+    "validateOpts must carry the credit derived alongside the decoration");
+  const decorateAt = body.indexOf("decorateParsedSpec");
+  const validateAt = body.indexOf("validateSpec(");
+  assert.ok(decorateAt !== -1 && validateAt !== -1);
+  assert.ok(decorateAt < validateAt,
+    "decoration must appear BEFORE validation — the ordering is the bug");
 });
