@@ -10,7 +10,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { staticGate, tooSimilar, _internals } from "./videoSelection.js";
+import { staticGate, tooSimilar, diversifyByPublisher, _internals } from "./videoSelection.js";
 
 const art = (over = {}) => ({ id: "a1", title: "T", description: "", category: "world", source_name: "Reuters", ...over });
 
@@ -118,4 +118,120 @@ test("it is the SAME measure the source bundle used — recovered, not rewritten
   const a = "the quick brown foxes jumped over the lazy sleeping hounds";
   assert.equal(tooSimilar(a, [wordSet(a)]), true);
   assert.equal(tooSimilar("completely unrelated vocabulary appearing nowhere", [wordSet(a)]), false);
+});
+
+// ─── Content-level rating language (the SoundHound miss) ────────────────────
+//
+// THE REGRESSION. "SoundHound AI Stock: Why Analysts Predict 100% Gains"
+// passed every title pattern on 2026-08-03 while its beats were analyst price
+// targets and buy ratings. Under a live loop that publishes investment
+// promotion under the brand.
+//
+// The fix reads the BODY for rating vocabulary, which is far harder to
+// paraphrase away than a headline formula — you cannot write about price
+// targets without naming them. It needs BOTH halves: single-ticker focus in
+// the title AND rating language in the body.
+
+const withBody = (title, content) => art({ title, content, category: "business" });
+
+test("THE REGRESSION: SoundHound AI Stock + analyst price targets is blocked", () => {
+  const g = staticGate(withBody(
+    "SoundHound AI Stock: Why Analysts Predict 100% Gains",
+    "Analysts covering the stock raised their price target after the quarter.",
+  ));
+  assert.equal(g.ok, false);
+  assert.equal(g.gate, "stock-commentary");
+  assert.match(g.reason, /single-ticker focus/);
+});
+
+test("rating vocabulary is caught in several forms", () => {
+  for (const [t, c] of [
+    ["Is Palantir Stock Worth Holding?", "The consensus rating is hold with an average target of $32."],
+    ["Rigetti Computing (NASDAQ: RGTI) climbs", "Wall Street analysts lifted price targets sharply."],
+    ["Why AMD Shares Could Double", "The average analyst target implies 100% upside."],
+    ["Coinbase Stock After the Print", "Two banks upgraded the stock to overweight."],
+  ]) {
+    const g = staticGate(withBody(t, c));
+    assert.equal(g.ok, false, t);
+    assert.equal(g.gate, "stock-commentary", t);
+  }
+});
+
+test("finance as a SUBJECT still survives — the survival set is unchanged", () => {
+  // DrJ's standing list, now with rating language deliberately in the BODY:
+  // an earnings report or a recall that happens to quote an analyst is not a
+  // stock tip, and the title-side ticker focus is what protects it.
+  for (const [t, c] of [
+    ["Fed holds rates steady as inflation cools", "Officials signalled patience."],
+    ["Nvidia reports record quarterly revenue", "Several analysts raised their price target after the print."],
+    ["Tesla recalls 400,000 vehicles over a steering fault", "One analyst cut their price target on the news."],
+    ["European stocks fall after the ECB decision", "Analysts said the consensus rating across the index was unchanged."],
+    ["What the bond selloff means for mortgages", "Rates moved sharply this week."],
+  ]) {
+    const g = staticGate(withBody(t, c));
+    assert.equal(g.ok, true, `${t} — ${g.reason || ""}`);
+  }
+});
+
+test("BOTH halves are required — ticker focus alone is a company story", () => {
+  // This is what keeps the gate on the GENRE rather than on the subject. Same
+  // company, same "Stock" in the title, no rating language: it is news.
+  const g = staticGate(withBody(
+    "SoundHound AI Stock jumps on a defence contract",
+    "The company said the deal runs for five years and covers three sites.",
+  ));
+  assert.equal(g.ok, true, g.reason);
+});
+
+test("rating language alone, under a market-wide headline, is ordinary reporting", () => {
+  const g = staticGate(withBody(
+    "Analysts turn cautious on the tech rally",
+    "Several price targets were cut across the sector this week.",
+  ));
+  assert.equal(g.ok, true, g.reason);
+});
+
+// ─── Publisher diversity at SELECTION ───────────────────────────────────────
+//
+// Length-first ordering handed the window to whoever writes longest: Yahoo
+// Finance took 5 of 7 candidates, then 2 of 2. The publish-time cooldown
+// cannot help — it refuses the second VIDEO, long after the cycle has spent
+// every attempt inside one masthead and found nothing.
+
+const src = (source_name, id) => ({ id, source_name });
+
+test("no more than 2 candidates from one publisher", () => {
+  const { kept, dropped } = diversifyByPublisher([
+    src("Yahoo Finance", "y1"), src("Yahoo Finance", "y2"), src("Yahoo Finance", "y3"),
+    src("Reuters", "r1"), src("Yahoo Finance", "y4"), src("BBC News", "b1"),
+  ]);
+  assert.deepEqual(kept.map(a => a.id), ["y1", "y2", "r1", "b1"]);
+  assert.deepEqual(dropped.map(a => a.id), ["y3", "y4"]);
+});
+
+test("ORDER is preserved — substance still decides which two survive", () => {
+  // The cap drops the surplus; it never reshuffles. The length-first ordering
+  // upstream is what picks WHICH two of a publisher's articles are kept.
+  const { kept } = diversifyByPublisher([
+    src("Yahoo Finance", "best"), src("Reuters", "r1"), src("Yahoo Finance", "second"),
+    src("Yahoo Finance", "third"),
+  ]);
+  assert.deepEqual(kept.map(a => a.id), ["best", "r1", "second"]);
+});
+
+test("the cap is per publisher, not global", () => {
+  const { kept, dropped } = diversifyByPublisher([
+    src("A", "a1"), src("B", "b1"), src("C", "c1"), src("D", "d1"), src("E", "e1"),
+  ]);
+  assert.equal(kept.length, 5);
+  assert.equal(dropped.length, 0);
+});
+
+test("publisher matching is case-insensitive and survives a missing name", () => {
+  const { kept } = diversifyByPublisher([
+    src("Yahoo Finance", "y1"), src("YAHOO FINANCE", "y2"), src("yahoo finance", "y3"),
+    src(null, "n1"), src(undefined, "n2"), src("", "n3"),
+  ]);
+  assert.deepEqual(kept.map(a => a.id), ["y1", "y2", "n1", "n2"],
+    "case variants are one publisher, and unnamed sources are capped together");
 });

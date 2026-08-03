@@ -67,6 +67,88 @@ const STOCK_COMMENTARY_RE = new RegExp([
   /\bmy top\s+\d*\s*(stock|pick)/,
 ].map(r => r.source).join("|"), "i");
 
+// CONTENT-LEVEL rating language. The title patterns above are a genre filter on
+// PHRASING, and phrasing is endlessly re-skinnable: "SoundHound AI Stock: Why
+// Analysts Predict 100% Gains" passed every one of them on 2026-08-03, and its
+// beats were analyst price targets and buy ratings. Under a live loop that
+// publishes investment promotion under the brand.
+//
+// So this reads the BODY for the vocabulary of a rating note, which is much
+// harder to paraphrase away than a headline formula — you cannot write about
+// price targets without naming them.
+const RATING_LANGUAGE_RE = new RegExp([
+  /\bprice target(?:s)?\b/,
+  /\bprice forecast(?:s)?\b/,
+  /\banalyst(?:s)?['’]? (?:rating|consensus|estimate|target|price)/,
+  /\bconsensus (?:rating|target|estimate)\b/,
+  /\b(?:buy|hold|sell|strong buy|strong sell) rating\b/,
+  /\brated (?:a )?(?:buy|hold|sell|outperform|underperform)\b/,
+  /\b(?:overweight|underweight|outperform|underperform|market perform)\b/,
+  /\banalysts? (?:covering|who cover) (?:the )?(?:stock|shares|company)\b/,
+  /\b(?:upgraded|downgraded) (?:the stock )?to\b/,
+  /\b(?:average|median|mean) (?:analyst )?(?:price )?target\b/,
+  /\bwall street (?:analysts|consensus|price target)/,
+].map(r => r.source).join("|"), "i");
+
+// SINGLE-TICKER FOCUS, read off the TITLE. This is the half that protects
+// finance as a SUBJECT: an earnings report or a recall whose body happens to
+// quote an analyst is not a stock tip. It requires the headline itself to be
+// about one security — a named company's "stock"/"shares", or an explicit
+// exchange ticker.
+//
+// Deliberately SINGULAR. "European stocks fall after the ECB decision" is
+// market coverage and must survive, so the plural generic never matches.
+const TICKER_FOCUS_RE = new RegExp([
+  /\((?:NASDAQ|NYSE|NYSEARCA|AMEX|LSE|TSX|ASX|OTC)\s*:\s*[A-Z.]{1,6}\)/,
+  // The leading token stays case-SENSITIVE (a proper noun is what makes this
+  // single-ticker), but "stock"/"shares" must match either case: the live miss
+  // was "SoundHound AI Stock: Why Analysts Predict 100% Gains", title-cased.
+  /\b[A-Z][\w.&'’-]*(?:\s+[A-Z][\w.&'’-]*){0,3}\s+(?:[Ss]tock|[Ss]hares)\b/,
+  /\b(?:[Ss]tock|[Ss]hares)\s+of\s+[A-Z]/,
+].map(r => r.source).join("|"));
+
+/**
+ * The genre, caught by SHAPE rather than by phrasing: this headline is about
+ * one security, and the body talks in ratings. Either alone is fine — a stock
+ * profile with no rating language is a company story, and rating language under
+ * a market-wide headline is ordinary market reporting.
+ */
+export function isRatingNote(article) {
+  const title = String(article?.title || "");
+  if (!TICKER_FOCUS_RE.test(title)) return null;
+  const body = `${article?.description || ""} ${article?.content || ""}`;
+  const m = body.match(RATING_LANGUAGE_RE);
+  if (!m) return null;
+  return { ticker: title.match(TICKER_FOCUS_RE)?.[0]?.trim(), rating: m[0] };
+}
+
+/**
+ * PUBLISHER DIVERSITY AT SELECTION (DrJ, 2026-08-03).
+ *
+ * Length-first ordering handed the window to whoever writes longest: Yahoo
+ * Finance took 5 of 7 candidates, then 2 of 2. The publish-time cooldown cannot
+ * help — it only refuses the SECOND video, after the whole cycle has already
+ * spent its attempts inside one masthead and found nothing.
+ *
+ * Order is preserved; the surplus is dropped, not reshuffled, so the substance
+ * ordering still decides WHICH two survive from each publisher.
+ */
+export const MAX_PER_PUBLISHER = Number.parseInt(process.env.VIDEO_MAX_PER_PUBLISHER_PER_CYCLE || "", 10) || 2;
+
+export function diversifyByPublisher(articles, { max = MAX_PER_PUBLISHER } = {}) {
+  const seen = new Map();
+  const kept = [];
+  const dropped = [];
+  for (const a of articles || []) {
+    const key = String(a?.source_name || "").toLowerCase() || "(none)";
+    const n = seen.get(key) || 0;
+    if (n >= max) { dropped.push(a); continue; }
+    seen.set(key, n + 1);
+    kept.push(a);
+  }
+  return { kept, dropped };
+}
+
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 
 /**
@@ -99,6 +181,15 @@ export function staticGate(article) {
   const haystack = `${title} ${article?.description || ""}`;
   const m = haystack.match(STOCK_COMMENTARY_RE);
   if (m) return { ok: false, gate: "stock-commentary", reason: `matched "${m[0].slice(0, 48)}"` };
+
+  // The content-level signal, after the cheap title patterns.
+  const note = isRatingNote(article);
+  if (note) {
+    return {
+      ok: false, gate: "stock-commentary",
+      reason: `single-ticker focus ("${note.ticker}") with rating language ("${note.rating}")`,
+    };
+  }
 
   return { ok: true };
 }
@@ -152,4 +243,4 @@ export function selectionGate(article, opts = {}) {
   return cooldownGate(article, opts);
 }
 
-export const _internals = { LIVE_BLOG_RE, STOCK_COMMENTARY_RE, SPORT_CATEGORIES, norm };
+export const _internals = { LIVE_BLOG_RE, STOCK_COMMENTARY_RE, SPORT_CATEGORIES, norm, RATING_LANGUAGE_RE, TICKER_FOCUS_RE };
