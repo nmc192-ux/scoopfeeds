@@ -416,13 +416,27 @@ function categoryFraming(category) {
 // by Google News / Discover guidelines and broader E-E-A-T signals. Without
 // these, sitemap-news.xml submissions get indexed then deranked as low-trust.
 router.get("/about", (_req, res) => {
+  const orgJsonld = {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Scoop",
+    "url": SITE,
+    "logo": `${SITE}/news-icon.svg`,
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "email": "hi@scoopfeeds.com",
+      "contactType": "editorial",
+    },
+    "sameAs": [],
+  };
   res.type("html").send(renderStaticPage({
     title: "About Scoop",
     slug: "about",
+    jsonld: orgJsonld,
     body: `
       <h1>About Scoop</h1>
-      <p><strong>Scoop</strong> is a news aggregator that surfaces the most important stories of the day from around the world, with a focus on context, comparison, and speed.</p>
-      <p>We don't write the original reporting — we curate, synthesize, and translate it. Every Scoop article page links back to the primary source and, where available, shows how other outlets are covering the same story side-by-side. The goal is simple: help readers see the news in one place, compare sources, and click through to the original reporting when they want depth.</p>
+      <p><strong>Scoop</strong> is an AI-powered news aggregator covering global stories across politics, technology, science, sports, health, and more. We surface the most important reporting of the day from around the world — with context, cross-source comparison, and AI-generated summaries on every article page.</p>
+      <p>We aggregate from <strong>88+ reputable sources</strong>, provide <strong>AI-generated summaries</strong> clearly labeled on each article, and publish in both <strong>English and Urdu</strong>. Every Scoop page links prominently back to the original publisher.</p>
       <h2>What we cover</h2>
       <ul>
         <li><strong>Top stories</strong> — the day's biggest developing news.</li>
@@ -431,11 +445,12 @@ router.get("/about", (_req, res) => {
         <li><strong>Science, medicine, public health</strong> — research, policy, clinical developments.</li>
         <li><strong>AI, cars, sports, environment</strong> — deep verticals with rotating editorial weight.</li>
       </ul>
-      <h2>How Scoop is made</h2>
-      <p>Articles are ingested from 80+ reputable RSS feeds operated by established news publishers. A credibility weighting system prioritizes high-signal sources, and a 3-hour bucket algorithm mixes fresh reporting across categories so the front page isn't dominated by one vertical.</p>
-      <p>The Scoop newsroom writes original synthesis on each article page — the "Key takeaways" bullets, the cross-source comparison, and the framing are ours. The body text is a preview of the source's original reporting, which we link to prominently.</p>
+      <h2>Our team</h2>
+      <p>Edited by the <strong>Scoop Newsroom</strong> — a team of engineers and editors committed to fast, accurate news delivery.</p>
+      <h2>Our mission</h2>
+      <p>Our mission is to surface the most credible, relevant news from around the world — filtered by credibility scoring, not clicks.</p>
       <h2>Languages</h2>
-      <p>Scoop ships in English and Urdu (اردو). Machine translation is used for Urdu coverage and is flagged as such.</p>
+      <p>Scoop publishes in English and Urdu (اردو). Machine translation is used for Urdu coverage and is flagged as such.</p>
       <h2>Contact</h2>
       <p>Editorial: <a href="/contact">see contact page</a>. Corrections: <a href="/corrections">corrections policy</a>.</p>
     `,
@@ -448,28 +463,23 @@ router.get("/editorial-policy", (_req, res) => {
     slug: "editorial-policy",
     body: `
       <h1>Editorial Policy</h1>
-      <p>Scoop aggregates, synthesizes, and links to journalism from established news publishers. This page explains how we choose sources, how we write our own synthesis, and the standards we hold ourselves to.</p>
+      <p>Scoop aggregates, synthesizes, and links to journalism from established news publishers. This page explains how we choose sources, how we handle AI summaries, and the standards we hold ourselves to.</p>
       <h2>Source selection</h2>
-      <p>We ingest only publishers with editorial oversight, a masthead, and a track record of news reporting. Sources are weighted by a credibility score (1-10); only sources scoring 7 or higher appear on the homepage featured rotation. New sources are reviewed by the Scoop newsroom before being added.</p>
+      <p>We ingest only publishers with editorial oversight, a masthead, and a track record of news reporting. Sources are weighted by a credibility score (1–10); only sources scoring <strong>7 or higher</strong> appear on the homepage featured rotation. We currently aggregate from <strong>88 vetted outlets</strong>. New sources are reviewed by the Scoop Newsroom before being added.</p>
+      <h2>AI summaries</h2>
+      <p>AI-generated summaries are <strong>clearly labeled</strong> on every article page and always link to the original source. Summaries are derived from the source's own reporting and are not presented as independent journalism. The Scoop Newsroom reviews summary quality on an ongoing basis.</p>
+      <h2>Corrections</h2>
+      <p>Errors in our summaries or article metadata are corrected promptly. See our <a href="/corrections">corrections policy</a> for how to report a factual error.</p>
+      <h2>Breaking news</h2>
+      <p>Breaking news stories are only surfaced after initial verification against at least one established wire service or outlet. Unverified reports are held until corroborated.</p>
+      <h2>Prohibited categories</h2>
+      <p>Auto-posting is suppressed for content involving violence, tragedy, or graphic harm. Stories in these categories require <strong>human review</strong> by the Scoop Newsroom before publication.</p>
       <h2>Attribution</h2>
-      <p>Every article page on Scoop clearly names the original publisher in the headline metadata, the article byline, and the primary call-to-action ("Read full story on [source] →"). We do not rewrite articles to obscure their origin. Body text on our article pages is a truncated preview of the original, with the full story available via the source link.</p>
-      <h2>Our original work</h2>
-      <p>Three components on each article page are written by the Scoop newsroom:</p>
-      <ul>
-        <li><strong>Key takeaways</strong> — a condensed summary derived from the source's reporting.</li>
-        <li><strong>Why this matters</strong> — editorial framing for each category.</li>
-        <li><strong>Cross-source coverage</strong> — links to how other outlets reported the same story, for comparison.</li>
-      </ul>
-      <h2>Machine translation</h2>
-      <p>Urdu coverage is produced via machine translation from English sources. Translated content is flagged and disclosed; no story is presented as originating in Urdu when it did not.</p>
-      <h2>AI disclosure</h2>
-      <p>Scoop uses automated systems for source ingestion, credibility scoring, category classification, and summary generation. All editorial framing ("Why this matters") is written by the Scoop newsroom, not generated by AI. Where AI is used to summarize source content, it is flagged as such and reviewed in aggregate.</p>
+      <p>Every article page on Scoop clearly names the original publisher in the headline metadata, the article byline, and the primary call-to-action ("Read full story on [source] →"). We do not rewrite articles to obscure their origin.</p>
       <h2>Advertising &amp; commercial relationships</h2>
       <p>Scoop is ad-supported (Google AdSense) and may include affiliate links where relevant. Advertising is never a factor in which stories we surface or how we rank them. Sponsored content, when present, is always clearly labeled.</p>
-      <h2>Independence</h2>
-      <p>Scoop is not owned by, funded by, or politically affiliated with any government, political party, or corporate interest. The platform is independently operated.</p>
-      <h2>Updates to this policy</h2>
-      <p>This policy is reviewed quarterly. Material changes are dated at the bottom of the page.</p>
+      <h2>Accountability</h2>
+      <p>Editorial decisions are overseen by the <strong>Scoop Newsroom</strong>. For concerns, contact <a href="mailto:hi@scoopfeeds.com">hi@scoopfeeds.com</a>.</p>
       <p class="updated">Last updated: ${new Date().toISOString().slice(0, 10)}</p>
     `,
   }));
@@ -477,17 +487,17 @@ router.get("/editorial-policy", (_req, res) => {
 
 router.get("/corrections", (_req, res) => {
   res.type("html").send(renderStaticPage({
-    title: "Corrections Policy",
+    title: "Corrections & Clarifications",
     slug: "corrections",
     body: `
-      <h1>Corrections</h1>
-      <p>Scoop takes accuracy seriously. Because we aggregate reporting from other publishers, corrections can apply to:</p>
+      <h1>Corrections &amp; Clarifications</h1>
+      <p>Scoop links to primary sources for all news content. Errors in aggregated summaries are corrected promptly. Because we aggregate reporting from other publishers, corrections can apply to:</p>
       <ul>
         <li><strong>Source-level errors</strong> — inaccuracies in the original reporting. We link readers to the source and encourage them to submit corrections directly to the publisher.</li>
-        <li><strong>Scoop-level errors</strong> — inaccuracies in our key-takeaways summary, category framing, cross-source links, or headline display. These we correct.</li>
+        <li><strong>Scoop-level errors</strong> — inaccuracies in our AI summaries, key takeaways, category framing, cross-source links, or headline display. These we correct directly.</li>
       </ul>
-      <h2>How to submit a correction</h2>
-      <p>Email <strong>corrections@scoopfeeds.com</strong> with:</p>
+      <h2>How to report a factual error</h2>
+      <p>Email <a href="mailto:hi@scoopfeeds.com"><strong>hi@scoopfeeds.com</strong></a> with the article URL and the correction. Please include:</p>
       <ul>
         <li>The URL of the Scoop article page.</li>
         <li>The specific claim you believe is inaccurate.</li>
@@ -495,10 +505,8 @@ router.get("/corrections", (_req, res) => {
       </ul>
       <p>We aim to respond within 48 hours. Verified corrections are applied to the article page and logged below.</p>
       <h2>Correction log</h2>
-      <p>Corrections are logged here with date, article ID, and a brief description of what was changed. This log will begin populating as corrections are received.</p>
+      <p>Individual corrections are logged here with date, article ID, and a brief description of what was changed.</p>
       <p><em>No corrections have been logged to date.</em></p>
-      <h2>Takedown requests</h2>
-      <p>If you are a rights-holder and believe Scoop is displaying your content in a way that exceeds fair use, email <strong>takedowns@scoopfeeds.com</strong>. We respond to good-faith takedown requests within 72 hours.</p>
     `,
   }));
 });
@@ -508,23 +516,29 @@ router.get("/contact", (_req, res) => {
     title: "Contact Scoop",
     slug: "contact",
     body: `
-      <h1>Contact</h1>
+      <h1>Contact Scoop</h1>
       <p>Scoop is operated by a small independent team. The best way to reach us is email.</p>
       <ul>
-        <li><strong>General / editorial:</strong> hello@scoopfeeds.com</li>
-        <li><strong>Corrections:</strong> corrections@scoopfeeds.com (see our <a href="/corrections">corrections policy</a>)</li>
-        <li><strong>Takedown / rights:</strong> takedowns@scoopfeeds.com</li>
-        <li><strong>Advertising &amp; sponsorships:</strong> sponsor@scoopfeeds.com</li>
-        <li><strong>Press:</strong> press@scoopfeeds.com</li>
+        <li><strong>Editorial / corrections:</strong> <a href="mailto:hi@scoopfeeds.com">hi@scoopfeeds.com</a> (see our <a href="/corrections">corrections policy</a>)</li>
+        <li><strong>Advertising / sponsorships:</strong> <a href="mailto:hi@scoopfeeds.com">hi@scoopfeeds.com</a></li>
       </ul>
-      <p>We aim to respond to all inquiries within 48 hours. Corrections and takedown requests are prioritized.</p>
-      <h2>Submit a source</h2>
-      <p>If you operate a news publication and would like to be considered for inclusion in our source list, email hello@scoopfeeds.com with:</p>
-      <ul>
-        <li>Your publication's name and homepage URL.</li>
-        <li>Your RSS feed URL(s).</li>
-        <li>A one-paragraph description of your editorial oversight and coverage areas.</li>
-      </ul>
+      <p>We aim to respond to all inquiries within 48 hours. Corrections are prioritized.</p>
+      <h2>Send us a message</h2>
+      <form action="mailto:hi@scoopfeeds.com" method="post" enctype="text/plain" style="margin-top:8px;">
+        <div style="margin-bottom:14px;">
+          <label for="contact-name" style="display:block;font-size:14px;font-weight:600;margin-bottom:4px;">Name</label>
+          <input id="contact-name" name="Name" type="text" placeholder="Your name" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;">
+        </div>
+        <div style="margin-bottom:14px;">
+          <label for="contact-email" style="display:block;font-size:14px;font-weight:600;margin-bottom:4px;">Email</label>
+          <input id="contact-email" name="Email" type="email" placeholder="you@example.com" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;">
+        </div>
+        <div style="margin-bottom:18px;">
+          <label for="contact-message" style="display:block;font-size:14px;font-weight:600;margin-bottom:4px;">Message</label>
+          <textarea id="contact-message" name="Message" rows="5" placeholder="Your message…" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit;resize:vertical;"></textarea>
+        </div>
+        <button type="submit" style="background:#DC2626;color:#fff;border:none;padding:11px 24px;border-radius:999px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;">Send message</button>
+      </form>
     `,
   }));
 });
@@ -536,36 +550,37 @@ router.get("/privacy", (_req, res) => {
     body: `
       <h1>Privacy Policy</h1>
       <p>Scoop respects your privacy. This policy explains what data we collect, why, and what you can do about it.</p>
-      <h2>What we collect</h2>
+      <h2>Data we collect</h2>
       <ul>
-        <li><strong>Anonymous usage data.</strong> Aggregated pageviews, article views, search terms, and category preferences. IP addresses are cryptographically hashed (SHA-256) before storage — we do not retain raw IPs.</li>
-        <li><strong>Newsletter subscriptions.</strong> If you sign up for the Scoop digest, we store your email address, preferred country/language, and chosen topics. You can unsubscribe at any time via the link in every email.</li>
-        <li><strong>Local device storage.</strong> Saved articles, topic preferences, and language are stored in your browser's local storage. They never leave your device unless you create an account.</li>
+        <li><strong>Anonymous analytics.</strong> Aggregated pageviews, article views, category preferences, and session data. IP addresses are not stored in personally identifiable form.</li>
+        <li><strong>Newsletter email.</strong> If you subscribe to the Scoop digest, we store your email address and topic preferences. You can unsubscribe at any time via the link in every email.</li>
+        <li><strong>Push notification token.</strong> If you opt in to breaking-news push notifications, we store a device token to deliver pushes. You can revoke this at any time in your browser or device settings.</li>
       </ul>
-      <h2>What we don't do</h2>
+      <h2>How we use it</h2>
       <ul>
-        <li>We don't sell your data.</li>
-        <li>We don't build advertising profiles on you.</li>
-        <li>We don't require an account to read Scoop.</li>
+        <li><strong>Improve content ranking</strong> — anonymous analytics inform which sources and categories are prioritized.</li>
+        <li><strong>Send digest emails</strong> — newsletter subscribers receive a curated daily or weekly digest.</li>
+        <li><strong>Send breaking news pushes</strong> — opted-in users receive push notifications for major breaking stories.</li>
       </ul>
       <h2>Third parties</h2>
       <p>Scoop uses the following third-party services, each with their own privacy policies:</p>
       <ul>
+        <li><strong>Google AdSense</strong> (publisher: pub-6168047656143190) — advertising. AdSense may use cookies to personalize ads; you can opt out at <a href="https://adssettings.google.com" rel="noopener noreferrer">adssettings.google.com</a>. See <a href="https://policies.google.com/privacy" rel="noopener noreferrer">Google's privacy policy</a>.</li>
+        <li><strong>Skimlinks</strong> — affiliate links. Skimlinks may automatically convert some product links into affiliate links. See <a href="https://skimlinks.com/privacy-policy" rel="noopener noreferrer">Skimlinks' privacy policy</a>.</li>
         <li><strong>Google Analytics (GA4)</strong> — aggregate usage measurement.</li>
-        <li><strong>Google AdSense</strong> — advertising. AdSense may use cookies to personalize ads; you can opt out at <a href="https://adssettings.google.com">adssettings.google.com</a>.</li>
       </ul>
-      <h2>Your rights</h2>
-      <p>You can request deletion of any personally identifiable data (newsletter subscription) by emailing privacy@scoopfeeds.com. We respond within 30 days.</p>
       <h2>Cookies</h2>
-      <p>Scoop uses cookies for (a) remembering your preferences, (b) Google Analytics measurement, and (c) Google AdSense. You can disable cookies in your browser settings; some features (like saved articles) depend on local storage.</p>
-      <h2>Changes</h2>
-      <p>Updates to this policy are dated below. Material changes will be announced on the homepage.</p>
-      <p class="updated">Last updated: ${new Date().toISOString().slice(0, 10)}</p>
+      <p>Scoop uses cookies for (a) analytics measurement, and (b) ad personalization via Google AdSense. You can disable cookies in your browser settings. Users in the EU/EEA may opt out of personalized advertising via the AdSense opt-out link above.</p>
+      <h2>Your rights (GDPR)</h2>
+      <p>If you are in the EU/EEA, you have the right to access, correct, or request deletion of your personal data (newsletter email, push token). To exercise these rights, email <a href="mailto:hi@scoopfeeds.com">hi@scoopfeeds.com</a>. We respond within 30 days.</p>
+      <h2>Contact</h2>
+      <p>Privacy questions: <a href="mailto:hi@scoopfeeds.com">hi@scoopfeeds.com</a>.</p>
+      <p class="updated">Last updated: April 2026</p>
     `,
   }));
 });
 
-function renderStaticPage({ title, slug, body }) {
+function renderStaticPage({ title, slug, body, jsonld = null }) {
   const pageTitle = `${title} — Scoop`;
   const canonical = `${SITE}/${slug}`;
   const desc = `${title} — Scoop is a news aggregator surfacing the day's biggest stories from trusted sources, with original editorial synthesis and cross-source comparison.`;
@@ -585,6 +600,7 @@ function renderStaticPage({ title, slug, body }) {
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="${xmlEscape(pageTitle)}">
 <meta name="twitter:description" content="${xmlEscape(desc)}">
+${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld)}</script>` : ""}
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-E7CDBSB5KY"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-E7CDBSB5KY');</script>
 <style>
