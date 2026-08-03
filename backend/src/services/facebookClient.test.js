@@ -25,7 +25,11 @@ process.env.FACEBOOK_PAGE_TOKEN = "test-token-not-real";
 
 const { postVideoToFacebook, isFacebookConfigured } = await import("./facebookClient.js");
 
-const MP4 = path.join(TMP, "video.mp4");
+// Named exactly as the renderer names its output — `<article-uuid>-<design-key>.mp4`
+// (videoAutopost.produceVideo). Using a tidy `video.mp4` fixture here would have
+// hidden the bug this file now pins: Meta rejected the on-disk basename with a
+// generic 400 while accepting the identical bytes under a plain filename.
+const MP4 = path.join(TMP, "3bcca812-366a-5429-8be7-0bbc7e3fc224-vid-v1-752611f057b9.mp4");
 writeFileSync(MP4, Buffer.alloc(50_000, 1));
 
 /** Record every fetch and reply with a scripted response. */
@@ -62,9 +66,33 @@ test("a successful upload POSTs multipart to /{page-id}/videos and returns the i
     assert.equal(calls[0].init.method, "POST");
     assert.ok(calls[0].init.body instanceof FormData, "must be multipart, not a query string");
     assert.ok(calls[0].init.body.get("source"), "the MP4 bytes go in `source`");
+    assert.equal(calls[0].init.body.get("source").size, 50_000, "the whole file, not a truncated view");
     assert.equal(calls[0].init.body.get("title"), "T");
     assert.equal(calls[0].init.body.get("description"), "D");
     assert.equal(calls[0].init.body.get("published"), "true");
+  } finally { restore(); }
+});
+
+test("the source part carries a PLAIN filename and an explicit video/mp4 type", async () => {
+  // The video endpoint's actual contract, learned live. Both of these were
+  // already present when Meta returned the generic, unattributable 400 "There
+  // was a problem uploading your video file" — the filename was the on-disk
+  // basename, and that is what it rejected. The same requests captured against a
+  // local server were identical in every other respect: same part Content-Type,
+  // payload bytes matching the file exactly.
+  //
+  // So this pins three things, and the third is the one that regresses: the type
+  // is set, a filename is set, and the filename is a PLAIN one rather than
+  // whatever the renderer happened to call the file. The photo path tolerates
+  // all of this, which is why copying _postPhotoBuffer's shape was wrong.
+  const { calls, restore } = stubFetch([{ status: 200, body: { id: "1" } }]);
+  try {
+    await postVideoToFacebook({ filePath: MP4 });
+    const source = calls[0].init.body.get("source");
+    assert.equal(source.type, "video/mp4", "an explicit content type on the part");
+    assert.equal(source.name, "video.mp4", "a plain filename");
+    assert.notEqual(source.name, path.basename(MP4),
+      "must NOT be the on-disk basename — that is the shape Meta rejected with a generic 400");
   } finally { restore(); }
 });
 

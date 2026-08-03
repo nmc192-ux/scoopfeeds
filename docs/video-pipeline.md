@@ -237,6 +237,31 @@ simply have been almost nothing to extract from.
 - Check the site returns 200 after any recreate (Caddy port drift once caused a
   45-minute outage on a deploy that was otherwise fine)
 
+**Verifying the Facebook page token**
+
+- **`/me` is the only reliable identity check.** `GET /{page-id}?fields=name`
+  returns the page's public name for **any** valid token, including one minted
+  for a different page entirely — so it confirms nothing about what the token
+  can do. This cost a debugging session: the token in `.env` was a valid page
+  token for the wrong page, `/{page-id}?fields=name` cheerfully returned
+  "Scoopfeeds", and only `/me` revealed it was scoped to "Morpheus".
+
+  ```bash
+  curl -sG "https://graph.facebook.com/v26.0/me" \
+    --data-urlencode "fields=id,name" \
+    --data-urlencode "access_token=$FACEBOOK_PAGE_TOKEN"
+  ```
+
+  The `id` must equal `FACEBOOK_PAGE_ID` and the `name` must be the page you
+  expect. Anything else — including a 200 — means the wrong token.
+- `GET /debug_token?input_token=…&access_token=…` for scopes and expiry. The
+  page token needs `pages_manage_posts`, `pages_read_engagement` **and**
+  `pages_show_list`; the third is only exercised by `/videos`, so a token
+  missing it posts photos fine and fails on video.
+- ⚠️ **The disk cache outranks the env var.** `_loadToken()` reads
+  `<persist>/facebook-token.json` first. Rotating `FACEBOOK_PAGE_TOKEN` without
+  deleting that file changes nothing.
+
 **Switches**
 
 - `VIDEO_AUTOPOST_ENABLED` — master switch, the only thing between built and live

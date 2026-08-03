@@ -187,6 +187,10 @@ upload. Best-effort: a Facebook failure is logged loudly and recorded in
 > `<persist>/facebook-token.json` **first** and only falls back to `FACEBOOK_PAGE_TOKEN`.
 > Rotating the env var without deleting that file is a no-op. Delete it on rotation.
 
+> ⚠️ **Verify a page token with `/me`, never with `/{page-id}?fields=name`** — the latter
+> returns the page's public name for *any* valid token, including one scoped to a different
+> page. See `docs/video-pipeline.md` §8 for the check and the incident.
+
 > ⚠️ **The Graph API version is pinned and expires.** `facebookClient.js` pins `v26.0`
 > (released 2026-07-29). Meta does not hard-fail an expired version — it silently routes to
 > the oldest live one, so this drifts without an error. Versions live ~2 years.

@@ -30,6 +30,12 @@
 //   5. GET /me/accounts?access_token={long-lived-user-token}
 //      → find your page → copy its `access_token` — this is permanent.
 //   6. Set FACEBOOK_PAGE_TOKEN to that value.
+//   7. VERIFY WITH /me, NOT WITH /{page-id}. `GET /{page-id}?fields=name`
+//      returns the page's public name for ANY valid token, including one minted
+//      for a different page, so it proves nothing. `GET /me?fields=id,name` on a
+//      page token returns THAT page — its id must equal FACEBOOK_PAGE_ID. A
+//      token for the wrong page once passed the /{page-id} check and failed
+//      every upload.
 //
 // Optional: FACEBOOK_HANDLE — username shown after facebook.com/ in post URLs.
 
@@ -285,7 +291,25 @@ export async function postVideoToFacebook({ filePath, title = "", description = 
   }
 
   const fd = new FormData();
-  fd.append("source", new Blob([bytes], { type: "video/mp4" }), path.basename(filePath));
+  // A PLAIN, FIXED FILENAME. Not path.basename(filePath), which is what this
+  // sent first and what Meta rejected with the generic, unattributable 400
+  // "There was a problem uploading your video file" — the render names its
+  // output `<article-uuid>-<design-key>.mp4`, e.g.
+  // `3bcca812-366a-5429-8be7-0bbc7e3fc224-vid-v1-752611f057b9.mp4`.
+  //
+  // Measured, not guessed: both shapes were captured against a local server and
+  // diffed. The failing and working requests are IDENTICAL except for this
+  // string — same `Content-Type: video/mp4` on the part, same
+  // `filename="…"` attribute present, and the payload bytes of both match the
+  // file on disk exactly. So the defect was never a missing filename or a
+  // missing content type; it is this filename's VALUE. Which property of it
+  // Meta objects to is not documented and not worth reverse-engineering — a
+  // plain name is free.
+  //
+  // The same capture showed `fs.openAsBlob(path, {type})` and
+  // `new Blob([buffer], {type})` produce a byte-identical part, so this stays on
+  // `new Blob`: openAsBlob is Node 19.8+ and CI still builds on 18.x.
+  fd.append("source", new Blob([bytes], { type: "video/mp4" }), "video.mp4");
   if (title) fd.append("title", title);
   if (description) fd.append("description", description);
   fd.append("published", "true");
