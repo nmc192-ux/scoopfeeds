@@ -41,6 +41,7 @@ import {
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
 import { selectionGate } from "./videoSelection.js";
 import { buildAttributionCard } from "./videoSpecSchema.js";
+import { resolveAttribution, buildDescriptionCredit } from "./videoAttribution.js";
 import { writeVideoSpec, writePackaging, isVideoSpecEnabled } from "./videoSpecWriter.js";
 import { statesForCard, renderState, fitStatesToDuration, videoDesignKey } from "./videoSlideRenderer.js";
 import { assembleSlide, concatSlides, holdForAudio } from "./videoAssembler.js";
@@ -99,10 +100,14 @@ export function rateGate({ now = Date.now() } = {}) {
 
 // ─── Produce one video ──────────────────────────────────────────────────────
 
-async function produceVideo(article, spec) {
-  const attribution = buildAttributionCard(article);
+async function produceVideo(article, spec, attribution = resolveAttribution(article)) {
+  // ONE resolved publisher, threaded to every surface that names one. Both the
+  // attribution card and the on-screen SOURCE: line used to read
+  // article.source_name independently — which is how a personal blog carried
+  // under "Hacker News" would have been credited to Hacker News on both.
+  const attributionCard = buildAttributionCard(article, { attribution });
   const slides = [...spec.slides];
-  if (attribution) slides.splice(1, 0, attribution);
+  if (attributionCard) slides.splice(1, 0, attributionCard);
 
   const audio = await voiceSpec(slides, { articleId: article.id });
 
@@ -112,7 +117,7 @@ async function produceVideo(article, spec) {
     for (let i = 0; i < slides.length; i++) {
       const card = slides[i];
       const audioSecs = audio[i].durationSecs;
-      let states = statesForCard(card, { outlet: article.source_name, slideIndex: i, slideCount: slides.length });
+      let states = statesForCard(card, { outlet: attribution.publisher, slideIndex: i, slideCount: slides.length });
       states = fitStatesToDuration(states, audioSecs, { cardType: card.t, slideIndex: i });
       const hold = holdForAudio(audioSecs, states.length);
 
@@ -259,10 +264,26 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
         continue;
       }
 
+      // Resolved ONCE, before anything names a publisher. §3b/3's verbal-credit
+      // matching keys off this too — if the spec must credit someone aloud, it
+      // has to be the same someone the card and the SOURCE: line show.
+      const attribution = resolveAttribution(article);
+      rec.publisher = attribution.publisher;
+      rec.attributionBasis = attribution.basis;
+      if (attribution.basis === "url_domain") {
+        // Not a failure — the general rule working. Logged because a run that
+        // suddenly credits bare domains is either meeting a lot of aggregators
+        // or has a broken suffix table, and those need telling apart.
+        logger.info(
+          `🎬 ${n} attribution: source_name "${attribution.sourceName}" does not match ` +
+          `${attribution.domain} — crediting the domain`
+        );
+      }
+
       rec.stage = "spec";
       const r = await _writeVideoSpec(article, {
-        allowedSources: [article.source_name].filter(Boolean),
-        preCreditedSources: [article.source_name].filter(Boolean),
+        allowedSources: [attribution.publisher].filter(Boolean),
+        preCreditedSources: [attribution.publisher].filter(Boolean),
       });
       // ASSERT THE SHAPE, DON'T TRUST IT. writeVideoSpec's contract is
       // `{ ok, spec, costUsd, reason, attempts }` on every path, but reading
@@ -294,7 +315,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       let video;
       rec.stage = "produce";
       try {
-        video = await _produceVideo(article, r.spec);
+        video = await _produceVideo(article, r.spec, attribution);
       } catch (err) {
         rec.reason = err.message;
         logger.warn(`🎬 ${n} SKIP produce: ${err.message}`);
@@ -325,7 +346,14 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       try {
         const up = await _uploadToYouTube({
           filePath: video.path, title,
-          description: packaging?.description_hook || "",
+          // §3b/4 — the original, linked ABOVE THE FOLD. YouTube shows roughly
+          // two lines before "more", so the credit goes FIRST and the hook
+          // follows it. This was previously the hook alone, with no credit and
+          // no link at all.
+          description: [
+            buildDescriptionCredit(article, attribution),
+            packaging?.description_hook || "",
+          ].filter(Boolean).join("\n\n"),
           tags: packaging?.tags || [], isShort: false,
         });
         markVideoPublished(article.id, {

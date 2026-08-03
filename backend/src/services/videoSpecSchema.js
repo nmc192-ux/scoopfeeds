@@ -48,6 +48,10 @@
  * at render, it's a re-render of the whole batch.
  */
 
+// The ONLY import here, and it stays that way: this module is otherwise pure.
+// videoAttribution imports nothing, so there is no cycle.
+import { resolveAttribution } from "./videoAttribution.js";
+
 // ─── The closed set ─────────────────────────────────────────────────────────
 
 export const CARD_TYPES = Object.freeze([
@@ -831,8 +835,14 @@ export function validatePackaging(packaging, validatedSpec) {
  * outlet count: one is the normal case, and "whose reporting is this" has an
  * answer for every article.
  */
-export function buildAttributionCard(article, { eyebrow = "REPORTING BY", note = null } = {}) {
-  const outlet = String(article?.source_name || "").trim();
+export function buildAttributionCard(article, { eyebrow = "REPORTING BY", note = null, attribution = null } = {}) {
+  // NEVER article.source_name directly. A live run selected a personal blog,
+  // seanhelvey.com, carried under source_name "Hacker News" — this card would
+  // have said "Reported by Hacker News", false on the one card whose whole job
+  // is honest sourcing. resolveAttribution cross-checks the name against the
+  // article's own URL and prefers the domain when they disagree.
+  const resolved = attribution || resolveAttribution(article);
+  const outlet = String(resolved?.publisher || "").trim();
   if (!outlet) return null;
 
   const headline = String(article?.headline || article?.title || "").trim();
