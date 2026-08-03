@@ -111,6 +111,25 @@ const TICKER_FOCUS_RE = new RegExp([
   /\b(?:[Ss]tock|[Ss]hares)\s+of\s+[A-Z]/,
 ].map(r => r.source).join("|"));
 
+// "...Could Send the Stock Soaring" — the real 2026-08-03 evasion. The company
+// is named at the START of the headline and referred to as "the Stock" later,
+// so nothing is ADJACENT and the pattern above cannot fire. Requires both a
+// proper noun in the title and a bare definite-article reference to a single
+// security, and excludes "the stock market/exchange/index", which is
+// market-wide coverage rather than one company.
+const THE_STOCK_RE = /\bthe\s+(?:[Ss]tock|[Ss]hares)\b(?!\s+(?:market|markets|exchange|exchanges|index|indexes|indices))/;
+const TITLE_PROPER_NOUN_RE = /\b[A-Z][A-Za-z.&'’-]{2,}\b/;
+
+/** Does the TITLE single out one security, adjacently or by definite article? */
+function titleTickerFocus(title) {
+  const direct = title.match(TICKER_FOCUS_RE);
+  if (direct) return direct[0];
+  if (THE_STOCK_RE.test(title) && TITLE_PROPER_NOUN_RE.test(title)) {
+    return title.match(THE_STOCK_RE)[0].trim();
+  }
+  return null;
+}
+
 // Words that start sentences or head lists and are not company names. Without
 // this the "dominant company" count is won by "The" on every article.
 const NOT_A_COMPANY = new Set([
@@ -172,7 +191,7 @@ export function isRatingNote(article) {
   const all = `${title} ${body}`;
 
   const exchange = all.match(EXCHANGE_TICKER_RE);
-  const titleFocus = title.match(TICKER_FOCUS_RE);
+  const titleFocus = titleTickerFocus(title);
   const strong = exchange || titleFocus;
   const weak = strong ? null : dominantCompany(body);
   if (!strong && !weak) return null;
@@ -184,7 +203,7 @@ export function isRatingNote(article) {
   if (hits.length < need) return null;
 
   return {
-    ticker: (exchange?.[0] || titleFocus?.[0] || weak?.name || "").trim(),
+    ticker: (exchange?.[0] || titleFocus || weak?.name || "").trim(),
     focus: strong ? (exchange ? "exchange-ticker" : "title") : "body-dominant",
     rating: hits.slice(0, 2).join(", "),
     signals: hits.length,
@@ -330,4 +349,4 @@ export function selectionGate(article, opts = {}) {
   return cooldownGate(article, opts);
 }
 
-export const _internals = { LIVE_BLOG_RE, STOCK_COMMENTARY_RE, SPORT_CATEGORIES, norm, RATING_LANGUAGE_RE, TICKER_FOCUS_RE, EXCHANGE_TICKER_RE, NOT_A_COMPANY };
+export const _internals = { LIVE_BLOG_RE, STOCK_COMMENTARY_RE, SPORT_CATEGORIES, norm, RATING_LANGUAGE_RE, TICKER_FOCUS_RE, EXCHANGE_TICKER_RE, NOT_A_COMPANY, THE_STOCK_RE, titleTickerFocus };

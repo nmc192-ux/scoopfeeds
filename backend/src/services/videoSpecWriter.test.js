@@ -12,7 +12,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { _internals, writeVideoSpec } from "./videoSpecWriter.js";
-import { validateSpec } from "./videoSpecSchema.js";
+import { validateSpec, CAPTION_MAX_CHARS } from "./videoSpecSchema.js";
 import { resolveAttribution } from "./videoAttribution.js";
 
 const { extractJsonPayload, buildSpecPrompt } = _internals;
@@ -401,4 +401,34 @@ test("writeVideoSpec DESTRUCTURES the credit it is given — no silent drop", ()
   assert.ok(decorateAt !== -1 && validateAt !== -1);
   assert.ok(decorateAt < validateAt,
     "decoration must appear BEFORE validation — the ordering is the bug");
+});
+
+// ─── Caption length: a writing constraint, never a gate ─────────────────────
+
+test("the prompt states the measured caption-length constraint", () => {
+  const p = promptFor();
+  assert.match(p, /CAPTION LENGTH IS A HARD WRITING CONSTRAINT/);
+  assert.match(p, new RegExp(`at or under ${CAPTION_MAX_CHARS} characters`),
+    "the number must come from CAPTION_MAX_CHARS, not be written twice");
+  assert.match(p, /measured width of two lines/,
+    "state WHY, so it is not read as an arbitrary style preference");
+  assert.match(p, /do not compress by deleting the source credit or the figure/,
+    "shortening must not come out of attribution or grounding");
+});
+
+test("caption length is NOT enforced anywhere — no reject, no drop", () => {
+  // DrJ's ruling: a three-line caption sits slightly higher than the band
+  // intends; discarding an otherwise good video over one long sentence is a far
+  // larger cost. The assembler's warning stays and refuses nothing.
+  const schema = readFileSync(new URL("./videoSpecSchema.js", import.meta.url), "utf8");
+  const code = schema.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  assert.ok(!/CAPTION_MAX_CHARS/.test(code.replace(/export const CAPTION_MAX_CHARS = \d+;/, "")),
+    "CAPTION_MAX_CHARS must be declared and never used as a validation threshold");
+
+  const assembler = readFileSync(new URL("./videoAssembler.js", import.meta.url), "utf8");
+  assert.match(assembler, /caption wraps to \$\{lines\.length\} lines/,
+    "the assembler keeps its warning");
+  const warnBlock = assembler.slice(assembler.indexOf("caption wraps to") - 400, assembler.indexOf("caption wraps to") + 400);
+  assert.ok(!/throw|return null|dropped\.push/.test(warnBlock),
+    "the wrap warning must refuse nothing");
 });
