@@ -118,13 +118,6 @@ export const MAX_SOURCING_DROPS = 2;
 // the logs show whether the model found 5 beats or 15.
 export const BEAT_KINDS = Object.freeze(["figure", "mechanism", "turn", "consequence"]);
 
-// §3b/5 — THE PIPELINE'S OWN LAYER. A spec made only of title + stat + kicker
-// is a restatement of someone else's article with numbers pulled out: no
-// analysis added, nothing that is ours. §3b names this as BOTH the
-// transformative element (the copyright argument) and the differentiator (the
-// editorial one), which is why it is a gate rather than a preference. At least
-// one card must be a diagram or a turn — the two types that exist to say
-// something the source did not say in that form.
 // KICKER REGISTER — a hard rule (DrJ, 2026-08-03).
 //
 // A kicker that wraps up is a retention leak at the exact moment a viewer
@@ -163,6 +156,33 @@ export function captionBridges(caption) {
   return BRIDGE_PUNCT.test(c) || BRIDGE_MARKERS.test(c);
 }
 
+// CAPTION LENGTH — a WRITING CONSTRAINT, never a gate (DrJ, 2026-08-03).
+//
+// DERIVED FROM MEASUREMENT, not chosen. At the rendered caption size (34px)
+// against the caption band's usable width (1608px), measured through the real
+// font via renderCore.measureTextWidth:
+//   - average advance on caption prose: 16.88px/char
+//   - two-line budget: 1608 x 2 = 3216px -> 190 chars theoretical
+//   - longest real-prose prefix still wrapping to two lines: 192 chars
+//   - natural captions in the corpus run 120-145 chars and fit comfortably
+// 160 sits above natural sentence length and below the measured ceiling, so it
+// binds only on genuinely long captions and leaves room for the word-boundary
+// waste that wrapping causes at the end of each line.
+//
+// NO VALIDATION CEILING, deliberately. A three-line caption sits slightly
+// higher than the band intends; discarding an otherwise good video over one
+// long sentence is a far larger cost. videoAssembler keeps its warning — which
+// is now a TRUE report, since wrapCaption measures through the real font
+// rather than predicting from character count — and nothing is refused on it.
+export const CAPTION_MAX_CHARS = 160;
+
+// §3b/5 — THE PIPELINE'S OWN LAYER. A spec made only of title + stat + kicker
+// is a restatement of someone else's article with numbers pulled out: no
+// analysis added, nothing that is ours. §3b names this as BOTH the
+// transformative element (the copyright argument) and the differentiator (the
+// editorial one), which is why it is a gate rather than a preference. At least
+// one card must be a diagram or a turn — the two types that exist to say
+// something the source did not say in that form.
 export const OWN_LAYER_TYPES = Object.freeze(["diagram", "turn"]);
 
 // Card-type mix. See the mix pass in validateSpec for the derivation.

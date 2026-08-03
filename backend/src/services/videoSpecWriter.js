@@ -50,7 +50,7 @@ import {
   markGeminiModelGone,
 } from "../realityIndex/llmQueue.js";
 import {
-  MODEL_EMITTABLE, THUMBNAIL_ANGLES, MIN_SLIDES, MAX_SLIDES,
+  MODEL_EMITTABLE, THUMBNAIL_ANGLES, MIN_SLIDES, MAX_SLIDES, CAPTION_MAX_CHARS,
   validateSpec, validatePackaging, decorateTitleCard,
 } from "./videoSpecSchema.js";
 import { resolveAttribution } from "./videoAttribution.js";
@@ -512,6 +512,8 @@ HARD RULES — violating any of these makes the output unusable:
    AT LEAST ONE "diagram" OR "turn" IS REQUIRED. These are the cards that add something the source did not already say in that form — a mechanism drawn as a chain, or the point where the obvious reading gives way. A spec of only headline and figures is a restatement of someone else's article with the numbers pulled out; it is rejected outright. This is the part of the video that is ours.
 
 10. TONE. Neutral wire-service register. No editorialising, no outrage, no rhetorical questions, no "you won't believe". Interest comes from a specific fact being genuinely interesting, never from sensational phrasing. Preserve the source's hedging: if it says "reportedly" or "officials say", keep that attribution.
+
+17. CAPTION LENGTH IS A HARD WRITING CONSTRAINT: keep every caption at or under ${CAPTION_MAX_CHARS} characters. This is not a style preference — it is the measured width of two lines of burned-in caption at the size they are rendered. A longer caption wraps to a third line and sits higher than the band is designed for. Write shorter sentences; do not compress by deleting the source credit or the figure.
 
 RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. These decide whether anyone is still watching at ten seconds.
 
