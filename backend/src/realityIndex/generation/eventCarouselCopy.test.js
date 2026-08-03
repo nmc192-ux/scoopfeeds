@@ -167,6 +167,29 @@ test("deterministicSeoLine strips publisher suffix, stopwords, and caps at 10 wo
   assert.ok(!/BBC/.test(deterministicSeoLine("Markets slide on rate fears - BBC News")));
 });
 
+test("deterministicSeoLine cuts at the first clause boundary, before stopword removal", () => {
+  // The regression this exists for: "as" is itself a stopword, so stripping
+  // function words after the fact FUSED two clauses into a run-on.
+  assert.equal(
+    deterministicSeoLine("Iran oil sanctions tighten as European refiners pause purchases"),
+    "Iran oil sanctions tighten"
+  );
+  // Every boundary form.
+  assert.equal(deterministicSeoLine("Markets slide on rate fears, analysts warn"), "Markets slide rate fears");
+  assert.equal(deterministicSeoLine("Nvidia earnings beat forecasts — shares jump"), "Nvidia earnings beat forecasts");
+  assert.equal(deterministicSeoLine("Ceasefire holds in Gaza after talks in Cairo"), "Ceasefire holds Gaza");
+  assert.equal(deterministicSeoLine("Flooding worsens in Sindh amid record monsoon rain"), "Flooding worsens Sindh");
+  assert.equal(deterministicSeoLine("Strike enters third week while talks stall"), "Strike enters third week");
+  assert.equal(deterministicSeoLine("Fed holds rates: what it means"), "Fed holds rates");
+});
+
+test("deterministicSeoLine does not cut when the head would be too short", () => {
+  // A leading connective must not truncate the line to nothing.
+  const out = deterministicSeoLine("As it happened, Iran sanctions tightened");
+  assert.ok(out.split(/\s+/).length >= 3, `got "${out}"`);
+  assert.ok(/iran|happened/i.test(out), `got "${out}"`);
+});
+
 test("deterministicSeoLine keeps stopwords when stripping would leave under 3 words", () => {
   // "Is it over?" -> stripping leaves "over" alone; the cleaned title is better.
   const out = deterministicSeoLine("Is it over?");

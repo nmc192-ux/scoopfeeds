@@ -159,12 +159,44 @@ export const SEO_STOPWORDS = new Set([
   "do", "does", "did", "so", "than", "then", "there", "here",
 ]);
 
+// Clause boundaries: punctuation, a spaced dash, or a subordinating connective.
+//
+// Cutting here is not cosmetic. Several of these connectives — "as" above all —
+// are themselves stopwords, so stripping function words WELDS the two clauses
+// into one ungrammatical run: "Iran oil sanctions tighten as European refiners
+// pause purchases" became "Iran oil sanctions tighten European refiners pause
+// purchases". Two clauses fused by removing the word that separated them.
+//
+// So the cut must happen BEFORE stopword removal, not after. Order is
+// load-bearing: cleanHeadline -> clause cut -> stopwords -> word cap.
+const SEO_CLAUSE_BREAK = /[,;:]|\s+[-–—]\s+|\s+(?:as|after|amid|while)\s+/gi;
+
+// The EARLIEST boundary that still leaves a usable head. A title opening with a
+// connective ("As it happened, ...") would otherwise cut to nothing, so a
+// candidate whose head is shorter than minWords is skipped rather than taken.
+function cutAtClause(text, minWords = 3) {
+  SEO_CLAUSE_BREAK.lastIndex = 0;          // shared regex — reset before use
+  let m;
+  while ((m = SEO_CLAUSE_BREAK.exec(text)) !== null) {
+    const head = text.slice(0, m.index).trim();
+    if (head.split(/\s+/).filter(Boolean).length >= minWords) {
+      SEO_CLAUSE_BREAK.lastIndex = 0;
+      return head;
+    }
+  }
+  return text;
+}
+
 /**
  * A keyword-first line derived from a title, by rule.
  *
- * Publisher suffix stripped (via cleanHeadline), function words stripped,
- * truncated to `maxWords`. Never throws; returns "" only when the title is
- * itself empty.
+ * Publisher suffix stripped (via cleanHeadline), cut at the first clause
+ * boundary, function words stripped, capped at `maxWords`. Never throws;
+ * returns "" only when the title is itself empty.
+ *
+ * This path fires exactly when the model's own seo_line was bad, so it carries
+ * the weakest posts — it has to read as English on its own, not as keywords
+ * shaken loose from a sentence.
  *
  * Stopword-stripping is ABANDONED when it would leave fewer than 3 words —
  * "Is it over?" must not collapse to "over". The unstripped cleaned title is
@@ -180,6 +212,7 @@ export function deterministicSeoLine(title, { maxWords = 10 } = {}) {
   }
   if (!cleaned) return "";
 
+  cleaned = cutAtClause(cleaned);
   const words = cleaned.split(/\s+/).filter(Boolean);
   const kept = words.filter((w) => {
     const bare = w.toLowerCase().replace(/[^a-z0-9]/g, "");
