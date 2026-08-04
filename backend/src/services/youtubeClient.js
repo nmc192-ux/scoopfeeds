@@ -21,6 +21,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
+import { isTokenFresh } from "./tokenCache.js";
 
 const __dirname    = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = path.resolve(__dirname, "../..");
@@ -52,11 +53,24 @@ export function isYouTubeConfigured() {
 let _cached = null; // { accessToken, expiresAt }
 
 function _readCached() {
-  if (_cached) return _cached;
+  // THE IN-MEMORY HIT IS EXPIRY-CHECKED TOO. It used to be a bare
+  // `if (_cached) return _cached`, so once this process refreshed once it
+  // pinned that access token forever — and YouTube's last an hour. The disk
+  // branch below always checked, and _getAccessToken always computed
+  // `expiresAt` correctly; the value was simply never read on this path.
+  //
+  // The symptom was split by process lifetime: the long-running worker 401'd on
+  // every upload while getChannelInfo in a throwaway container succeeded,
+  // because a fresh module scope falls through to the disk read. That looks
+  // exactly like a bad credential and is not one.
+  if (isTokenFresh(_cached)) return _cached;
+  // Drop the stale entry rather than leaving it to be re-tested on every call,
+  // and so the disk read below can install a token another process refreshed.
+  _cached = null;
   try {
     if (!existsSync(TOKEN_PATH)) return null;
     const raw = JSON.parse(readFileSync(TOKEN_PATH, "utf8"));
-    if (raw?.accessToken && raw?.expiresAt > Date.now() + 60_000) {
+    if (isTokenFresh(raw)) {
       _cached = raw;
       return raw;
     }
