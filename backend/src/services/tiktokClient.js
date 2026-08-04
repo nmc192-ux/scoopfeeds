@@ -34,6 +34,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
+import { isTokenFresh } from "./tokenCache.js";
 
 const __dirname    = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = path.resolve(__dirname, "../..");
@@ -63,11 +64,18 @@ export function isTikTokConfigured() {
 let _cached = null;
 
 function _readCached() {
-  if (_cached) return _cached;
+  // Same fix as youtubeClient, same bug, found by auditing for the shape rather
+  // than by anything failing: the in-memory hit ignored `expiresAt` while the
+  // disk read checked it. TikTok access tokens last 24h (and the env-token path
+  // below pins 23h), so a worker that outlives a day would have held a dead
+  // token indefinitely. Latent only because nothing publishes here often enough
+  // to have hit it yet.
+  if (isTokenFresh(_cached)) return _cached;
+  _cached = null;
   try {
     if (!existsSync(TOKEN_PATH)) return null;
     const raw = JSON.parse(readFileSync(TOKEN_PATH, "utf8"));
-    if (raw?.accessToken && raw?.expiresAt > Date.now() + 60_000) {
+    if (isTokenFresh(raw)) {
       _cached = raw;
       return raw;
     }
