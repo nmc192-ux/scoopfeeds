@@ -10,7 +10,6 @@
 // Cadence guard: each adapter has a `minIntervalMs`. If the last successful
 // post on that platform was more recent than that, this cycle is a no-op.
 
-import axios from "axios";
 import {
   findFreshUnpostedArticles,
   recordSocialPost,
@@ -31,6 +30,7 @@ import { isLinkedinConfigured, postToLinkedin } from "./linkedinClient.js";
 import { isPinterestConfigured, postToPinterest } from "./pinterestClient.js";
 import { ensureIgSummary } from "./igSummaryService.js";
 import { logger } from "./logger.js";
+import { HEARTBEAT_PING_URLS, pingHeartbeat, pingFail, uniformFailure } from "./heartbeatPing.js";
 
 const SITE = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 
@@ -624,28 +624,38 @@ const PLATFORM_STALE_MULTIPLIER = 2.5;   // × each platform's minIntervalMs
 // completion is defanged by the ownership guard on the heartbeat write below.
 let cycleInFlight = null; // { startedAt } | null
 
-// External dead-man's switch (Healthchecks.io free tier or equivalent). This
-// is the ONLY signal that survives a fully-down process — the in-process
-// staleness check below cannot fire when nothing is running, which by
-// definition is the outage. Strictly telemetry: no-op when unset (no error,
-// no log spam), ~3s timeout, every error swallowed. It must never block or
-// break a posting cycle.
-//
-// Fired as a START/SUCCESS PAIR, not once. A single ping at cycle start goes
-// green the moment the runner begins — so a cycle that starts, pings, then
-// wedges on a hung HTTP call keeps the monitor green while nothing posts,
-// which is the exact failure the switch exists to catch. Pinging {url}/start
-// on entry and {url} only on successful completion means a hang shows as a
-// start with no matching success, and the monitor alerts on it.
+// External dead-man's switch. The reasoning — why an external monitor at all,
+// why a start/success PAIR, why no alert state lives in this repo — now lives
+// in heartbeatPing.js, shared with the video and ingestion cycles, which need
+// the same three states against their own independent checks.
+const SOCIAL_PING = HEARTBEAT_PING_URLS.social;
 function pingHeartbeatUrl(pathSuffix = "") {
-  const base = process.env.SOCIAL_HEARTBEAT_PING_URL;
-  if (!base) return; // unset → complete no-op
-  try {
-    const url = `${String(base).replace(/\/+$/, "")}${pathSuffix}`;
-    // Fire-and-forget: not awaited, rejection swallowed so it can never
-    // surface as an unhandled rejection or delay the cycle.
-    axios.get(url, { timeout: 3000 }).catch(() => {});
-  } catch { /* never let telemetry break posting */ }
+  pingHeartbeat(SOCIAL_PING, pathSuffix);
+}
+
+// A whole-cycle failure that the dead-man switch cannot see: the cycle ran, on
+// schedule, and pinged success — while every platform that actually attempted a
+// post failed. Declining to post is HEALTHY here and always has been (cadence
+// guard, no candidate, everything filtered), so those are not attempts and are
+// excluded; only compose/post failures count.
+const SOCIAL_HEALTHY_DECLINES = new Set([
+  "not_configured", "cadence_guard", "no_candidate", "all_filtered", "dry_run",
+]);
+const SOCIAL_MIN_ATTEMPTS = () =>
+  Number.parseInt(process.env.SOCIAL_FAIL_PING_MIN_ATTEMPTS || "", 10) || 2;
+
+/**
+ * Map per-platform results onto the shared uniform-failure shape.
+ * Exported for verification — the mapping is where the healthy/failed
+ * distinction is actually made, and getting it wrong pages on a quiet night.
+ */
+export function socialCycleFailure(out, { minAttempts = SOCIAL_MIN_ATTEMPTS() } = {}) {
+  const attempted = Object.values(out || {})
+    .filter((r) => r && !r.posted && r.reason && !SOCIAL_HEALTHY_DECLINES.has(r.reason))
+    .map((r) => ({ stage: r.reason, reason: r.error || r.reason, platform: r.platform }));
+  const posted = Object.values(out || {}).some((r) => r?.posted);
+  if (posted) return { uniform: false };   // something got out; not an incident
+  return uniformFailure(attempted, { minAttempts });
 }
 
 // Evaluate both signals, emit a greppable logger.error on staleness, and
@@ -760,7 +770,20 @@ export async function runAllPlatformsCycle(opts = {}) {
       recordCycleCompletionGuarded(startedAt, {
         phase: "complete", startedAt, completedAt, durationMs: completedAt - startedAt,
       });
-      pingHeartbeatUrl();
+      // A completed cycle in which every attempting platform failed the same
+      // way is an incident the dead-man switch cannot see — it ran, it finished,
+      // it would have pinged success. Ping /fail INSTEAD of success so the
+      // monitor goes red rather than green-with-a-log-line nobody reads.
+      const failure = socialCycleFailure(out);
+      if (failure.uniform) {
+        const detail =
+          `social cycle: ${failure.count}/${failure.count} attempting platforms failed at ` +
+          `"${failure.stage}" — ${failure.reason || "no reason recorded"}`;
+        logger.error(`🫀 ${detail}. Every platform that tried, failed the same way — this is a dependency, not a quiet news day.`);
+        pingFail(SOCIAL_PING, detail);
+      } else {
+        pingHeartbeatUrl();
+      }
     }
     return out;
   } catch (err) {
@@ -773,6 +796,10 @@ export async function runAllPlatformsCycle(opts = {}) {
         phase: "error", startedAt, failedAt, durationMs: failedAt - startedAt,
         error: String(err?.message || err).slice(0, 200),
       });
+      // A thrown cycle is unambiguous — /fail rather than merely withholding
+      // success, so the monitor reports it now instead of after the grace
+      // period the missing success ping would have to expire first.
+      pingFail(SOCIAL_PING, `social cycle threw: ${String(err?.message || err).slice(0, 500)}`);
     }
     throw err;
   } finally {

@@ -14,6 +14,9 @@ import { refreshAllEvents } from "./liveEvents.js";
 import { refreshAnalysis } from "./analysisService.js";
 import { startBreakingNewsPushDetached } from "./breakingNewsPusher.js";
 import { runSocialCycleWithTimeout, listEnabledPlatforms } from "./socialPublisher.js";
+import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail } from "./heartbeatPing.js";
+
+const INGESTION_PING = HEARTBEAT_PING_URLS.ingestion;
 import { runXQueueGenerationCycle } from "./xPostGenerator.js";
 import { isVideoConfigured, generateVideo, generateRecapVideo, generateLiveEventVideo, previewSlide } from "./videoGenerator.js";
 import { runVideoPublishAndApproveCycle } from "./videoPublisher.js";
@@ -833,10 +836,14 @@ export async function runEnrichCycle({ batchSize = 40, concurrency = 4 } = {}) {
 }
 
 export async function runIngestionCycle() {
+  // The skip returns BEFORE any ping. A /start from an invocation that declined
+  // to run would refresh the monitor while the wedged original is still stuck —
+  // the same false-green the start/success pair exists to prevent.
   if (isRunning) { logger.warn("⏸️ News already running"); return; }
   isRunning = true;
   lastRun   = new Date().toISOString();
   logger.info(`🔄 News ingestion [${RSS_SOURCES.length} sources]`);
+  pingStart(INGESTION_PING);
   try {
     const r = await fetchAllSources(RSS_SOURCES);
     logger.info(`📰 Done: +${r.totalNew} in ${r.duration}ms`);
@@ -878,8 +885,17 @@ export async function runIngestionCycle() {
     // failure pattern: queue errors don't block ingestion.
     try { runXQueueGenerationCycle(); }
     catch (err) { logger.error("❌ X queue generation failed", { error: err.message }); }
+
+    // Success only on a clean pass. Ingestion is the ROOT cycle — the social
+    // tail and the breaking push both hang off it — so when this stops firing,
+    // several downstream signals go quiet together and every one of them looks
+    // like its own separate outage.
+    pingSuccess(INGESTION_PING);
   } catch (err) {
     logger.error("❌ News failed", { error: err.message });
+    // /fail rather than silence: the monitor reports now instead of waiting out
+    // the grace period a missing success ping would have to expire first.
+    pingFail(INGESTION_PING, `ingestion cycle threw: ${String(err?.message || err).slice(0, 500)}`);
   } finally {
     isRunning = false;
     updateNextRun();

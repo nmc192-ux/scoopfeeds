@@ -237,6 +237,27 @@ simply have been almost nothing to extract from.
 - Check the site returns 200 after any recreate (Caddy port drift once caused a
   45-minute outage on a deploy that was otherwise fine)
 
+**Liveness**
+
+- Three independent dead-man switches, one per cycle:
+  `INGESTION_HEARTBEAT_PING_URL`, `SOCIAL_HEARTBEAT_PING_URL`,
+  `VIDEO_HEARTBEAT_PING_URL`. Start/success pair, plus `/fail` when the cycle
+  knows it is broken. **An in-process check cannot report a dead process** —
+  that is the whole reason these exist, and the reason the 933m staleness
+  warning only appeared at recovery.
+- `/fail` fires when the cycle threw, aborted on config (no spec / no voice /
+  no YouTube / quota), or **every attempt failed at the same stage**. That last
+  one is the shape a dead-man switch misses entirely: a dead YouTube token kept
+  the loop green for 17h because the cycle itself completed fine every hour.
+- The video cycle now has a **staleness threshold** (`VIDEO_CYCLE_STALE_MS`,
+  3h = 3 missed hourly runs). It previously had hang detection only, so a loop
+  that simply stopped being dispatched produced no signal whatsoever.
+- No alert state, cooldown or dedupe lives in this repo. The external monitor
+  owns edge-triggering and the re-arm ceiling; rebuilding that here is how a
+  warning becomes noise.
+- ⚠️ `breaking_push` is a heartbeat with **no reader** — written in four places,
+  consumed nowhere. Detached push failures are invisible. Known, not fixed.
+
 **Verifying the Facebook page token**
 
 - **`/me` is the only reliable identity check.** `GET /{page-id}?fields=name`
