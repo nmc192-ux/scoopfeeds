@@ -25,25 +25,54 @@ recalibration · sentiment module hidden on comprehensibility grounds.
 verbatim artifacts, 🛑 at the report) → build → COW-validate → dark behind a URL param →
 live eyeball → default flip. DrJ deploys; agents never touch prod deploys.
 
+## Operational insurance — ahead of the open items
+
+<!-- /plan drains this section BEFORE the numbered open items below.
+     Added 2026-08 after docs_gap_analysis_2026-08.md. Same [queued] markers. -->
+
+These are small, and they are the difference between an incident and a catastrophe.
+None of them are features; all of them are things whose absence only shows up on the
+worst day.
+
+- **I1. Backup + restore for prod `news.db`** `[queued]` — `npm run db:backup` exists as a
+command; nothing documents a schedule, an off-site copy, or a restore path. The event graph
+is one SQLite file on one VPS. Deliverable: `docs/ops/runbooks/backup_restore.md`, a scheduled
+backup with an off-site target, and **one restore drill actually performed and recorded**.
+Un-drilled backups are folklore.
+- **I2. Uptime alerting on `/api/healthz`** `[queued]` — nothing pages anyone when prod dies.
+The record: a 45-minute Caddy port outage, a worker on month-old code for a week, a dead
+YouTube token logged as healthy for weeks. `/api/healthz` now reports `degraded` state
+(PR #2), so there is something worth watching. Deliverable: an external check hitting it on
+an interval, alerting to Slack, plus the runbook entry for what to do when it fires.
+- **I3. Run the test suite in CI** `[queued]` — `execution_method_v1.md` §6 Level 1 states
+"If CI is red, work doesn't merge", but CI runs only install, frontend build, and
+`node --check`. The 464-test suite runs on whichever laptop remembers. This is how 64
+failures sat on `main` for weeks. Deliverable: `node --test "src/**/*.test.js"` in
+`.github/workflows/node.js.yml`, green, with the docs' claim made true.
+
 ## Open items — roughly in priority order
 
-1. **Markets GROUND** *(next up)* — a resolved England–France market rendered on the
+<!-- J Loop status markers: [queued] available · [proposed] awaiting DrJ approval ·
+     [building] in progress · [shipped] merged. /plan reads these; /review updates them.
+     Priority order is DrJ's — the loop takes the lowest-numbered [queued] item. -->
+
+1. **Markets GROUND** `[queued]` *(next up)* — a resolved England–France market rendered on the
 Argentina event. With sentiment hidden, **prediction markets are the only Intelligence
 module left, and it is currently wrong**. Read-only GROUND on binding + staleness, 🛑 at
 the report.
-2. **Merge-survivor `last_activity_at`** — one-liner. The promoter's merge path links the
+2. **Merge-survivor `last_activity_at`** `[queued]` — one-liner. The promoter's merge path links the
 absorbed event's articles onto the survivor but never bumps the survivor's
 `last_activity_at` (`markMerged` updates the *absorbed* row). Fix:
 `touchActivity.run(now, now, survivor)` after the link loop.
-3. **Machine-event quarantine at ingest** — USGS/NOAA article-less events have caused
+3. **Machine-event quarantine at ingest** `[queued]` — USGS/NOAA article-less events have caused
 **two** production failures. Quarantine at ingest or distinct status; structural fix.
-4. **W2.1 floor recalibration** — re-sweep from the SAME/porous distributions once a week
+4. **W2.1 floor recalibration** `[queued]` — re-sweep from the SAME/porous distributions once a week
 of 🧭 `promoter-merge` lines has accumulated. "No floor" is an acceptable outcome.
-5. **Wave 3** — husk cleanup, blob dissolution, summary repair. Porous-absorb contamination
+5. **Wave 3** `[queued]` — husk cleanup, blob dissolution, summary repair. Porous-absorb contamination
 is **reader-visible** today, which raises its priority. Also improves A5 facet coverage.
-6. **Gates (b) routing + (c) accounting** — outstanding from the LLM incident sequence.
-7. **Sprint 3 hygiene** — junk faucet, prominence ranking miscalibration, single-source floor.
-8. **A4 perf / SSR + SEO** — the site does not surface in search for its own headlines.
+6. **Gates (b) routing + (c) accounting** `[queued]` — outstanding from the LLM incident sequence.
+7. **Sprint 3 hygiene** `[queued]` — junk faucet, prominence ranking miscalibration, single-source floor.
+8. **A4 perf / SSR + SEO** `[queued]` — the site does not surface in search for its own headlines.
 Unblocked once the graph settles.
 
 ## Active workstreams outside the strategic plan's phase sequence

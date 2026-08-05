@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# J Loop daemon — unattended worker for the Mac Mini.
+#
+# Cost model: the queue check is a plain `gh` call and the approval check is a
+# plain Slack API call. Neither spends model tokens. `claude` is invoked ONLY
+# when there is real work, so an idle 24/7 daemon costs nothing.
+#
+# Cycle order each tick:
+#   1. process Slack approvals   (free)
+#   2. /build  if an issue is spec-ready
+#   3. /review if an issue is built
+#   4. /plan   if everything is idle and fewer than 2 proposals are pending
+set -uo pipefail
+
+INTERVAL="${JLOOP_INTERVAL:-60}"
+MAX_TURNS="${JLOOP_MAX_TURNS:-200}"
+MODEL_BUILD="${JLOOP_MODEL_BUILD:-sonnet}"
+MODEL_REVIEW="${JLOOP_MODEL_REVIEW:-opus}"
+MODEL_PLAN="${JLOOP_MODEL_PLAN:-opus}"
+DAILY_CAP="${JLOOP_DAILY_CAP:-40}"
+MAX_FAILS="${JLOOP_MAX_FAILS:-3}"
+ENABLE_PLAN="${JLOOP_ENABLE_PLAN:-1}"
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+STATE_DIR="$REPO_ROOT/.j-loop"; LOG_DIR="$STATE_DIR/logs"
+NOTIFY="$REPO_ROOT/.claude/bin/jloop-notify"
+APPROVE="$REPO_ROOT/.claude/bin/jloop-approve"
+COUNT_FILE="$STATE_DIR/daily-count"
+
+cd "$REPO_ROOT" || exit 1
+mkdir -p "$LOG_DIR"
+FAILS=0
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+die() {
+  log "FATAL: $1"
+  "$NOTIFY" failed "J Loop daemon stopped" "$1
+
+Halted instead of retrying. Restart:
+launchctl kickstart -k gui/\$(id -u)/com.jloop.scoopfeeds" >/dev/null 2>&1
+  exit 1
+}
+
+today() { date '+%Y-%m-%d'; }
+cycles_today() {
+  [ -f "$COUNT_FILE" ] || { echo 0; return; }
+  local s c; s="$(cut -d' ' -f1 "$COUNT_FILE" 2>/dev/null)"; c="$(cut -d' ' -f2 "$COUNT_FILE" 2>/dev/null)"
+  if [ "$s" = "$(today)" ]; then echo "${c:-0}"; else echo 0; fi
+}
+bump_cycles() { echo "$(today) $(( $(cycles_today) + 1 ))" > "$COUNT_FILE"; }
+
+count_label() {
+  gh issue list --label "$1" --state open --json number --jq 'length' 2>/dev/null || echo 0
+}
+first_issue() {
+  gh issue list --label "$1" --state open --json number,createdAt \
+    --jq 'sort_by(.createdAt) | .[0].number // empty' 2>/dev/null
+}
+
+run_cycle() {
+  local skill="$1" label="$2" model stamp logf code
+  case "$skill" in
+    build)  model="$MODEL_BUILD" ;;
+    review) model="$MODEL_REVIEW" ;;
+    plan)   model="$MODEL_PLAN" ;;
+    *)      model="sonnet" ;;
+  esac
+  stamp="$(date '+%Y%m%d-%H%M%S')"; logf="$LOG_DIR/${skill}-${stamp}.log"
+  log "/$skill on $model ${label}"
+
+  if [ "${JLOOP_DRYRUN:-0}" = "1" ]; then log "  DRYRUN"; return 0; fi
+
+  claude -p "/$skill" --model "$model" --permission-mode acceptEdits --max-turns "$MAX_TURNS" > "$logf" 2>&1
+  code=$?; bump_cycles
+
+  if grep -qiE "session limit|usage limit|rate limit|quota|credit balance|invalid api key|401|403" "$logf"; then
+    die "Account limit or auth failure during /$skill.
+$(head -3 "$logf")
+Log: $logf"
+  fi
+
+  if grep -q "JLOOP_IDLE" "$logf"; then log "  /$skill had nothing to do"; FAILS=0; return 10; fi
+
+  if [ $code -ne 0 ]; then
+    FAILS=$((FAILS+1))
+    log "  /$skill exited $code (failure $FAILS/$MAX_FAILS) — $logf"
+    [ $FAILS -ge $MAX_FAILS ] && die "$MAX_FAILS consecutive failures.
+$(tail -5 "$logf")
+Log: $logf"
+    sleep $((60*FAILS)); return 1
+  fi
+
+  FAILS=0; log "  /$skill finished — $logf"; return 0
+}
+
+prune_logs() { find "$LOG_DIR" -name "*.log" -mtime +7 -delete 2>/dev/null; }
+
+trap 'log "stopped."; exit 0' INT TERM
+
+log "J Loop daemon starting"
+log "  repo:     $REPO_ROOT"
+log "  models:   plan=$MODEL_PLAN build=$MODEL_BUILD review=$MODEL_REVIEW"
+log "  interval: ${INTERVAL}s   daily cap: ${DAILY_CAP}   /plan: $ENABLE_PLAN"
+
+command -v claude >/dev/null 2>&1 || die "claude not found in PATH"
+command -v gh >/dev/null 2>&1 || die "gh not found in PATH"
+gh auth status >/dev/null 2>&1 || die "gh is not authenticated"
+if [ -n "${SLACK_BOT_TOKEN:-}" ] && [ -n "${SLACK_CHANNEL_ID:-}" ]; then
+  log "  slack:    bot token (emoji approval enabled)"
+else
+  log "  slack:    webhook or file only — approve with gh issue edit instead"
+fi
+
+PRUNE_TICK=0
+
+while true; do
+  if [ "$DAILY_CAP" -gt 0 ] && [ "$(cycles_today)" -ge "$DAILY_CAP" ]; then
+    log "daily cap reached ($DAILY_CAP) — idling"; sleep 900; continue
+  fi
+
+  # 1. Approvals — free.
+  [ -x "$APPROVE" ] && "$APPROVE" 2>&1 | sed 's/^/  approvals: /' | grep -v '^  approvals: $' || true
+
+  did_work=0
+
+  # 2. Build.
+  b="$(first_issue 'j-loop:spec-ready')"
+  if [ -n "$b" ]; then run_cycle build "for issue #$b"; [ $? -ne 10 ] && did_work=1; fi
+
+  # 3. Review.
+  r="$(first_issue 'j-loop:built')"
+  if [ -n "$r" ]; then run_cycle review "for issue #$r"; [ $? -ne 10 ] && did_work=1; fi
+
+  # 4. Plan — only when nothing else is moving.
+  if [ "$ENABLE_PLAN" = "1" ] && [ $did_work -eq 0 ]; then
+    inflight=0
+    for L in j-loop:spec-ready j-loop:building j-loop:built j-loop:reviewing j-loop:ready-to-ship; do
+      inflight=$(( inflight + $(count_label "$L") ))
+    done
+    pending="$(count_label 'j-loop:proposed')"
+    if [ "$inflight" -eq 0 ] && [ "$pending" -lt 2 ]; then
+      run_cycle plan "(queue empty, $pending proposal(s) pending)"; [ $? -ne 10 ] && did_work=1
+    fi
+  fi
+
+  PRUNE_TICK=$((PRUNE_TICK+1)); [ $((PRUNE_TICK % 60)) -eq 0 ] && prune_logs
+
+  if [ $did_work -eq 1 ]; then sleep 10; else sleep "$INTERVAL"; fi
+done

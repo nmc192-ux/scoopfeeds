@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# J Loop approval poller.
+# Reads reactions on pending approval messages in Slack and acts on them:
+#   ✅ white_check_mark / +1 / rocket  -> promote j-loop:proposed to j-loop:spec-ready
+#   ❌ x / -1 / no_entry               -> close the issue as rejected
+#
+# Needs SLACK_BOT_TOKEN with scopes: channels:history, reactions:read
+# (and groups:history if #j-loop is private). Safe to run repeatedly.
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PENDING="$REPO_ROOT/.j-loop/pending-approvals.tsv"
+NOTIFY="$REPO_ROOT/.claude/bin/jloop-notify"
+
+APPROVE_EMOJI="white_check_mark|heavy_check_mark|+1|thumbsup|rocket"
+REJECT_EMOJI="x|-1|thumbsdown|no_entry|no_entry_sign"
+
+[ -f "$PENDING" ] || exit 0
+[ -s "$PENDING" ] || exit 0
+
+if [ -z "${SLACK_BOT_TOKEN:-}" ] || [ -z "${SLACK_CHANNEL_ID:-}" ]; then
+  echo "jloop-approve: SLACK_BOT_TOKEN/SLACK_CHANNEL_ID not set — skipping" >&2
+  exit 0
+fi
+
+TMP="$(mktemp)"
+CHANGED=0
+
+while IFS=$'\t' read -r TS ISSUE TITLE; do
+  [ -n "${TS:-}" ] || continue
+  [ -n "${ISSUE:-}" ] || continue
+
+  # If the issue is no longer proposed, the entry is stale — drop it.
+  LABELS="$(gh issue view "$ISSUE" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null || echo "GONE")"
+  if [ "$LABELS" = "GONE" ] || ! printf '%s' "$LABELS" | grep -q "j-loop:proposed"; then
+    CHANGED=1
+    continue
+  fi
+
+  RESP="$(curl -s --max-time 15 -G https://slack.com/api/reactions.get \
+    -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+    --data-urlencode "channel=${SLACK_CHANNEL_ID}" \
+    --data-urlencode "timestamp=${TS}" 2>&1)"
+
+  NAMES="$(printf '%s' "$RESP" | python3 -c '
+import json,sys
+try:
+    d = json.load(sys.stdin)
+    if not d.get("ok"): sys.exit(0)
+    msg = d.get("message") or {}
+    print(",".join(r.get("name","") for r in msg.get("reactions", [])))
+except Exception:
+    pass' 2>/dev/null)"
+
+  if printf '%s' "$NAMES" | grep -qE "(^|,)($REJECT_EMOJI)(,|$)"; then
+    echo "issue #$ISSUE rejected by reaction"
+    gh issue comment "$ISSUE" --body "Rejected by DrJ via Slack reaction. Not building. The STATE_OF_PLAY item stays available for a future proposal." >/dev/null 2>&1
+    gh issue edit "$ISSUE" --remove-label "j-loop:proposed" >/dev/null 2>&1
+    gh issue close "$ISSUE" >/dev/null 2>&1
+    "$NOTIFY" info "#$ISSUE rejected" "Closed without building. The plan item remains open." >/dev/null 2>&1
+    CHANGED=1
+    continue
+  fi
+
+  if printf '%s' "$NAMES" | grep -qE "(^|,)($APPROVE_EMOJI)(,|$)"; then
+    echo "issue #$ISSUE approved by reaction — promoting to spec-ready"
+    gh issue comment "$ISSUE" --body "Approved by DrJ via Slack reaction. Promoting to j-loop:spec-ready." >/dev/null 2>&1
+    if gh issue edit "$ISSUE" --remove-label "j-loop:proposed" --add-label "j-loop:spec-ready" >/dev/null 2>&1; then
+      CHANGED=1
+      continue
+    fi
+    echo "  failed to relabel #$ISSUE — leaving pending" >&2
+  fi
+
+  # Still waiting.
+  printf '%s\t%s\t%s\n' "$TS" "$ISSUE" "$TITLE" >> "$TMP"
+done < "$PENDING"
+
+if [ $CHANGED -eq 1 ]; then
+  cat "$TMP" > "$PENDING"
+fi
+rm -f "$TMP"

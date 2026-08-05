@@ -1,7 +1,21 @@
 #!/usr/bin/env bash
+# J Loop notifier.
+#   jloop-notify <kind> <title> <body> [issue-number]
+#
+# kind: approve | gate | ready | blocked | shipped | failed | info
+#
+# If SLACK_BOT_TOKEN + SLACK_CHANNEL_ID are set, posts via chat.postMessage so the
+# message timestamp can be captured — that is what makes emoji approval possible.
+# Falls back to SLACK_WEBHOOK_URL (one-way), then to a local file.
 set -uo pipefail
-KIND="${1:-info}"; TITLE="${2:-J Loop}"; BODY="${3:-}"
+
+KIND="${1:-info}"; TITLE="${2:-J Loop}"; BODY="${3:-}"; ISSUE="${4:-}"
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PENDING="$REPO_ROOT/.j-loop/pending-approvals.tsv"
+
 case "$KIND" in
+  approve) ICON="🟣"; LEAD="Approve to build" ;;
   gate)    ICON="🟠"; LEAD="Needs your decision" ;;
   ready)   ICON="🟢"; LEAD="Ready to ship" ;;
   blocked) ICON="🔴"; LEAD="Blocked" ;;
@@ -9,16 +23,57 @@ case "$KIND" in
   failed)  ICON="⚠️";  LEAD="Failed" ;;
   *)       ICON="ℹ️";  LEAD="Update" ;;
 esac
+
 TEXT="${ICON} *${LEAD}: ${TITLE}*"
 [ -n "$BODY" ] && TEXT="${TEXT}
 
 ${BODY}"
-if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
-  PAYLOAD=$(printf '%s' "$TEXT" | python3 -c 'import json,sys; print(json.dumps({"text": sys.stdin.read()}))')
-  RESP=$(curl -s --max-time 10 -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d "$PAYLOAD" 2>&1)
-  if [ "$RESP" = "ok" ]; then echo "notified: $KIND — $TITLE"; exit 0; fi
-  echo "slack failed ($RESP) — falling back to file" >&2
+
+json_field() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'; }
+
+# --- preferred: bot token (two-way) ---------------------------------------
+if [ -n "${SLACK_BOT_TOKEN:-}" ] && [ -n "${SLACK_CHANNEL_ID:-}" ]; then
+  PAYLOAD="{\"channel\":\"${SLACK_CHANNEL_ID}\",\"text\":$(json_field "$TEXT")}"
+  RESP="$(curl -s --max-time 15 -X POST https://slack.com/api/chat.postMessage \
+    -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+    -H 'Content-Type: application/json; charset=utf-8' \
+    -d "$PAYLOAD" 2>&1)"
+
+  OK="$(printf '%s' "$RESP" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("ok"))
+except Exception: print("False")' 2>/dev/null)"
+
+  if [ "$OK" = "True" ]; then
+    TS="$(printf '%s' "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("ts",""))')"
+    if [ "$KIND" = "approve" ] && [ -n "$ISSUE" ] && [ -n "$TS" ]; then
+      mkdir -p "$(dirname "$PENDING")"
+      printf '%s\t%s\t%s\n' "$TS" "$ISSUE" "$TITLE" >> "$PENDING"
+      echo "notified: $KIND — $TITLE (awaiting reaction on ts=$TS)"
+    else
+      echo "notified: $KIND — $TITLE"
+    fi
+    exit 0
+  fi
+  ERR="$(printf '%s' "$RESP" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("error","unknown"))
+except Exception: print("unparseable")' 2>/dev/null)"
+  echo "slack bot post failed ($ERR) — falling back" >&2
 fi
-INBOX="${JLOOP_INBOX:-J-LOOP-INBOX.md}"
+
+# --- fallback: incoming webhook (one-way) ---------------------------------
+if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
+  RESP=$(curl -s --max-time 10 -X POST "$SLACK_WEBHOOK_URL" \
+    -H 'Content-Type: application/json' \
+    -d "{\"text\":$(json_field "$TEXT")}" 2>&1)
+  if [ "$RESP" = "ok" ]; then
+    [ "$KIND" = "approve" ] && echo "NOTE: webhook mode — emoji approval unavailable. Approve with: gh issue edit $ISSUE --remove-label j-loop:proposed --add-label j-loop:spec-ready" >&2
+    echo "notified: $KIND — $TITLE"
+    exit 0
+  fi
+  echo "slack webhook failed ($RESP) — falling back to file" >&2
+fi
+
+# --- last resort: local file ----------------------------------------------
+INBOX="${JLOOP_INBOX:-$REPO_ROOT/J-LOOP-INBOX.md}"
 { echo ""; echo "## ${ICON} ${LEAD}: ${TITLE}"; echo "_$(date '+%Y-%m-%d %H:%M')_"; echo ""; echo "$BODY"; } >> "$INBOX"
 echo "wrote to $INBOX"
