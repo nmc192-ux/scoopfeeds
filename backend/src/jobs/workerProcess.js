@@ -11,6 +11,7 @@ import { logger } from "../services/logger.js";
 import { runEnrichCycle, runIngestionCycle, runVideoCycle } from "../services/scheduler.js";
 import { sweepAtStartup } from "../services/videoArtifacts.js";
 import { runVideoRenderCycle } from "../services/videoAutopost.js";
+import { runSocialCycleWithTimeout } from "../services/socialPublisher.js";
 import { withJobRunLogging } from "./jobLogger.js";
 import { queueConcurrency, JOB_NAMES, QUEUE_NAMES, BULLMQ_PREFIX } from "./jobOptions.js";
 import { assertRedisAvailable, assertRedisStartup, closeRedisConnections, createRedisConnection } from "./redis.js";
@@ -128,9 +129,22 @@ try {
       queueConcurrency.enrichment,
       async (job) => runEnrichCycle(job.data || {})
     );
+    // Social posting on its OWN queue. It used to be a tail step inside
+    // runIngestionCycle, which meant any ingestion fault — a wedged flag, a
+    // dispatch that never landed — took all six platforms down with it, and
+    // "social is dark" was never a social problem to diagnose. It already owns
+    // everything it needs to stand alone: a stale-overridable single-flight
+    // guard, its own heartbeat, per-platform interval gating and its own
+    // dead-man switch.
+    registerWorker(
+      QUEUE_NAMES.social,
+      JOB_NAMES.socialPostAll,
+      queueConcurrency.social,
+      async () => runSocialCycleWithTimeout()
+    );
 
     logger.info(`[${PROCESS_ROLE}] ready`, {
-      queues: [QUEUE_NAMES.ingestion, QUEUE_NAMES.video, QUEUE_NAMES.videoRender, QUEUE_NAMES.enrichment],
+      queues: [QUEUE_NAMES.ingestion, QUEUE_NAMES.video, QUEUE_NAMES.videoRender, QUEUE_NAMES.social, QUEUE_NAMES.enrichment],
       concurrency: queueConcurrency,
     });
   }

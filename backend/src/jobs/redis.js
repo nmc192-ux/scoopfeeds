@@ -26,6 +26,24 @@ export function shouldUseBullMQ() {
   return isTruthy(process.env.USE_BULLMQ);
 }
 
+/**
+ * Is Redis CONFIGURED? Synchronous, and it performs NO I/O WHATSOEVER.
+ *
+ * READ THAT AGAIN BEFORE BLAMING IT FOR A HANG. This function opens no socket,
+ * sends no PING, and never touches a connection object. It is `Boolean(REDIS_URL)`
+ * plus a throw when REQUIRE_REDIS is set. It cannot block, cannot time out, is
+ * unaffected by `enableOfflineQueue`, and its answer cannot change at runtime.
+ *
+ * The `maxRetriesPerRequest: 1` connection a few lines below belongs to
+ * getRedisStatus(), a DIFFERENT function that really does ping. The two sit
+ * adjacent in this file and have been conflated once already, in a live outage
+ * post-mortem, costing a round of debugging aimed at the wrong layer: the
+ * ingestion dispatch path calls THIS function, not that one.
+ *
+ * "Available" here means configured, not reachable. Reachability is
+ * getRedisStatus(); if you need it in a hot path, you are asking for I/O and
+ * should bound it.
+ */
 export function assertRedisAvailable({ role = "process" } = {}) {
   if (isRedisConfigured()) return true;
 
@@ -77,7 +95,18 @@ export async function getRedisStatus({ connectionName = "status" } = {}) {
   }
 }
 
-export function createRedisConnection(name, { maxRetriesPerRequest = null } = {}) {
+/**
+ * @param {string} name
+ * @param {object} [opts]
+ * @param {number|null} [opts.maxRetriesPerRequest]
+ * @param {boolean} [opts.enableOfflineQueue] — buffer commands while the socket
+ *   is down (ioredis default true). Leave it TRUE for BullMQ *worker*
+ *   connections: they hold blocking reads across reconnects and disabling it
+ *   makes them throw during ordinary blips. Set it FALSE for producers, where a
+ *   command buffered against a dead socket is a failure pretending to be
+ *   latency — it neither resolves nor rejects, so the caller waits forever.
+ */
+export function createRedisConnection(name, { maxRetriesPerRequest = null, enableOfflineQueue = true } = {}) {
   const redisUrl = getRedisUrl();
   if (!redisUrl) return null;
 
@@ -86,6 +115,7 @@ export function createRedisConnection(name, { maxRetriesPerRequest = null } = {}
 
   const connection = new IORedis(redisUrl, {
     maxRetriesPerRequest,
+    enableOfflineQueue,
     enableReadyCheck: true,
     connectionName: `${BULLMQ_PREFIX}:${name}`,
   });

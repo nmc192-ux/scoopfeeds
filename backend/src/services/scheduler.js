@@ -96,32 +96,123 @@ function bullmqEnabledForScheduler() {
   return assertRedisAvailable({ role: "scheduler" });
 }
 
-async function dispatchIngestionCycle() {
+/**
+ * ONE SHAPE FOR EVERY DISPATCH.
+ *
+ * Four cycles enqueued from here, and they used to come in two shapes: three
+ * helpers that consulted bullmqEnabledForScheduler() and fell back to running
+ * in-process, and the video-autopost cron which called enqueueSingletonJob
+ * directly with no check at all. Nothing marked the difference as deliberate,
+ * and an asymmetry nobody wrote down is how one subsystem dies quietly while
+ * its neighbour keeps working — and how a post-mortem ends up reading the
+ * difference as the cause.
+ *
+ * The difference that IS legitimate is whether an in-process fallback exists,
+ * so that is now the single explicit parameter. `inProcess: null` means the
+ * work genuinely cannot run here — videoRender spawns ffmpeg and satori, which
+ * belong in the worker; running them in the scheduler container is not a
+ * degraded mode, it is a different bug. With BullMQ off, that case now says so
+ * instead of silently doing nothing.
+ */
+async function dispatchCycle({ queue, job, data = {}, inProcess = null, label }) {
   if (!bullmqEnabledForScheduler()) {
-    return runIngestionCycle();
+    if (inProcess) return inProcess();
+    logger.warn(
+      `⚠️ ${label} SKIPPED — BullMQ is off (USE_BULLMQ / REDIS_URL) and this cycle has no ` +
+      `in-process fallback by design. It runs in the worker or not at all.`
+    );
+    return null;
   }
-  return enqueueSingletonJob(QUEUE_NAMES.ingestion, JOB_NAMES.newsIngestAll);
+  return enqueueSingletonJob(queue, job, data);
 }
 
-async function dispatchVideoCycle() {
-  if (!bullmqEnabledForScheduler()) {
-    return runVideoCycle();
-  }
-  return enqueueSingletonJob(QUEUE_NAMES.video, JOB_NAMES.videosIngestAll);
-}
+const dispatchIngestionCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.ingestion, job: JOB_NAMES.newsIngestAll,
+  inProcess: runIngestionCycle, label: "news ingestion",
+});
 
-async function dispatchEnrichCycle(options = { batchSize: 40, concurrency: 4 }) {
-  if (!bullmqEnabledForScheduler()) {
-    return runEnrichCycle(options);
-  }
-  return enqueueSingletonJob(QUEUE_NAMES.enrichment, JOB_NAMES.articlesEnrichBatch, options);
-}
+const dispatchVideoCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.video, job: JOB_NAMES.videosIngestAll,
+  inProcess: runVideoCycle, label: "video ingestion",
+});
 
+const dispatchEnrichCycle = (options = { batchSize: 40, concurrency: 4 }) => dispatchCycle({
+  queue: QUEUE_NAMES.enrichment, job: JOB_NAMES.articlesEnrichBatch, data: options,
+  inProcess: () => runEnrichCycle(options), label: "article enrichment",
+});
+
+// ffmpeg + satori: worker-only, so no in-process fallback on purpose.
+const dispatchVideoRenderCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.videoRender, job: JOB_NAMES.videoRenderCycle,
+  inProcess: null, label: "video autopost",
+});
+
+// Social posting: network I/O only, so it COULD run here — but it is queued
+// like the rest so the worker owns every outbound cycle and the singleton jobId
+// gives it the same dedup and diagnostics as its neighbours.
+const dispatchSocialCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.social, job: JOB_NAMES.socialPostAll,
+  inProcess: () => runSocialCycleWithTimeout(), label: "social posting",
+});
+
+// How long a dispatch may stay pending before we say so. Longer than the
+// per-await deadline inside enqueueSingletonJob, so a hang THERE surfaces as a
+// rejection naming the step, and this only fires for a hang somewhere else.
+const DISPATCH_STUCK_MS = () =>
+  Number.parseInt(process.env.DISPATCH_STUCK_MS || "", 10) || 60_000;
+
+/**
+ * Fire-and-forget dispatch, instrumented at both ends.
+ *
+ * THIS IS THE DIAGNOSTIC, and it is the point of the whole change. Ingestion
+ * stopped dispatching twice in one day and left NOTHING in the log — not an
+ * error, not a skip, not an "Enqueued". The only ingestion log line lived
+ * inside enqueueSingletonJob AFTER four un-bounded awaits, so "the cron never
+ * fired" and "the cron fired and hung on Redis" were indistinguishable, and two
+ * successive hypotheses were argued from an absence of evidence.
+ *
+ * The START line goes out BEFORE the first await — before `task` is even
+ * invoked — so the three cases now separate themselves without correlation:
+ *
+ *   no START at all           → the cron is not firing. Look at node-cron.
+ *   START, no OK and no FAIL  → hung inside the dispatch. The STUCK line names
+ *                               how long, and enqueueSingletonJob's deadline
+ *                               names which await.
+ *   START then FAIL           → it threw, and now the reason is attached.
+ *
+ * There is deliberately no in-flight guard here. A previous reading of this
+ * function assumed one had wedged; there is no state to wedge, and adding a
+ * flag would CREATE the failure it was meant to prevent — the bare-boolean
+ * wedge this codebase has already hit twice elsewhere.
+ */
 function runDispatch(task, label) {
+  const startedAt = Date.now();
+  let settled = false;
+  logger.info(`⏱️ ${label} dispatch START`);
+
+  const stuckTimer = setTimeout(() => {
+    if (settled) return;
+    logger.error(
+      `🫀 ${label} dispatch STUCK — ${Math.round(DISPATCH_STUCK_MS() / 1000)}s with no result. ` +
+      `The cron fired and the task never settled; this is a hang, not a missed tick.`
+    );
+  }, DISPATCH_STUCK_MS());
+  stuckTimer.unref?.();   // telemetry must never hold the process open
+
   Promise.resolve()
     .then(task)
+    .then(() => {
+      settled = true;
+      clearTimeout(stuckTimer);
+      logger.info(`⏱️ ${label} dispatch OK in ${Date.now() - startedAt}ms`);
+    })
     .catch((error) => {
-      logger.error(`❌ ${label} dispatch failed`, { error: error.message });
+      settled = true;
+      clearTimeout(stuckTimer);
+      logger.error(
+        `❌ ${label} dispatch failed after ${Date.now() - startedAt}ms`,
+        { error: error.message }
+      );
     });
 }
 
@@ -153,6 +244,17 @@ export function startScheduler() {
   // Delay first analysis pass — 5 min after startup, needs ingested articles.
   scheduleTimer(runAnalysisCycle, 5 * 60 * 1000);
   scheduleCron("*/30 * * * *", () => runDispatch(() => dispatchIngestionCycle(), "news ingestion"));
+  // Social posting, INDEPENDENT of ingestion. Offset to 15/45 rather than 0/30
+  // so it runs a quarter-hour after ingestion normally lands — fresh articles
+  // are available when it selects — while remaining completely unaffected if
+  // that ingestion tick failed, hung, or never dispatched at all. The adapters'
+  // own minIntervalMs still decides whether any platform actually posts.
+  if (String(process.env.ENABLE_AUTO_SOCIAL ?? "true").toLowerCase() !== "false") {
+    scheduleCron("15,45 * * * *", () => runDispatch(() => dispatchSocialCycle(), "social posting"));
+    logger.info(`📣 Social posting cron registered (15,45 — independent of ingestion) — platforms=${listEnabledPlatforms().length}`);
+  } else {
+    logger.info("📣 Social posting cron NOT registered (ENABLE_AUTO_SOCIAL=false)");
+  }
   scheduleCron("0 * * * *",    () => runDispatch(() => dispatchVideoCycle(), "video ingestion"));
   scheduleCron("*/15 * * * *", () => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"));
   scheduleCron("0 * * * *",    () => runEventsCycle());
@@ -171,9 +273,7 @@ export function startScheduler() {
   // missed at 14:00 is simply retried at 15:00 rather than lost for the day.
   // QUEUE_NAMES.videoRender, never QUEUE_NAMES.video — that one is YouTube
   // ingestion and a job on it would run fetchAllYouTube instead.
-  scheduleCron("7 * * * *", () => runDispatch(
-    () => enqueueSingletonJob(QUEUE_NAMES.videoRender, JOB_NAMES.videoRenderCycle, {}),
-    "video autopost"));
+  scheduleCron("7 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "video autopost"));
   logger.info(`🎬 Video autopost cron registered (hourly; gates decide) — enabled=${process.env.VIDEO_AUTOPOST_ENABLED === "1"}`);
 
   const inProcessVideoEnabled = String(process.env.ENABLE_INPROCESS_VIDEO_CRON || "").toLowerCase() === "true";
@@ -860,24 +960,17 @@ export async function runIngestionCycle() {
     if (String(process.env.ENABLE_BREAKING_PUSH ?? "true").toLowerCase() !== "false") {
       startBreakingNewsPushDetached();
     }
-    // Tail step: auto-post to social. Each adapter's own minIntervalMs
-    // throttles how often it actually fires; if no platform is configured
-    // (env vars missing) this is a near-instant no-op.
+    // SOCIAL IS NO LONGER A TAIL STEP HERE. It ran inside this function's
+    // isRunning guard, which coupled the two in both directions: a wedged social
+    // cycle held the flag and blocked all RSS ingestion (fixed once with
+    // SOCIAL_TAIL_TIMEOUT_MS), and — the failure that actually kept recurring —
+    // ANY ingestion fault took all six platforms down with it. Ingestion stopped
+    // dispatching twice in one day and social went dark alongside it, so "social
+    // is dark" was never a social problem to diagnose.
     //
-    // Timeout-bounded (SOCIAL_TAIL_TIMEOUT_MS, default 10 min): this tail runs
-    // inside THIS function's isRunning guard, so a social cycle wedged on a
-    // hung HTTP call would otherwise hold isRunning true and block ALL RSS
-    // ingestion indefinitely. Social must never be able to stop ingestion —
-    // on timeout the wrapper logs and returns, the finally below releases
-    // isRunning, and the abandoned cycle is handled by socialPublisher's
-    // in-flight guard + hang detection on later ticks.
-    if (String(process.env.ENABLE_AUTO_SOCIAL ?? "true").toLowerCase() !== "false") {
-      const enabled = listEnabledPlatforms();
-      if (enabled.length) {
-        try { await runSocialCycleWithTimeout(); }
-        catch (err) { logger.error("❌ Auto-social failed", { error: err.message }); }
-      }
-    }
+    // It now has its own queue, its own cron and its own worker consumer. An
+    // ingestion fault costs fresh articles; it no longer costs the posting
+    // schedule. See dispatchSocialCycle and the "15,45" cron in startScheduler.
 
     // X-Posting Queue (Phase B Sprint 2.x.1). Generates X-ready posts from
     // fresh unposted articles and queues them for daily email digest delivery
@@ -1181,3 +1274,11 @@ export async function syncVideoMetrics() {
   logger.info(`📊 YouTube metrics synced: ${synced} videos`);
   return { synced };
 }
+
+/**
+ * Test seam. runDispatch has no in-flight guard BY DESIGN and that absence is
+ * load-bearing — it is what stops a never-settling task from wedging the cron
+ * forever — so it needs a test asserting the absence, not just the presence of
+ * behaviour. Not part of the module's contract.
+ */
+export const __testing = { runDispatch, dispatchCycle };
