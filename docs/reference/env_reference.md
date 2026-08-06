@@ -278,6 +278,54 @@ Registered heartbeats in `system_heartbeats`: `social_cycle` (stale 90m, hang 15
 > and the surface *looks* monitored. Left as-is deliberately; noted so it is a decision
 > rather than an oversight. Detached broadcast failures are currently invisible.
 
+## Dispatch observability + queues
+
+The scheduler enqueues; the worker runs. Ingestion stopped dispatching twice in one day and
+left **nothing** in the log — the only ingestion line lived inside `enqueueSingletonJob`
+*after* four unbounded Redis awaits, so "the cron never fired" and "the cron fired and hung"
+were indistinguishable and two successive diagnoses were argued from an absence of evidence.
+
+`runDispatch` now logs **START before the first await**, then OK-with-elapsed or
+FAIL-with-reason, so the three cases separate themselves:
+
+| Log seen | Meaning |
+|---|---|
+| no START at all | the cron is not firing — look at node-cron, not at Redis |
+| START, then nothing (plus a STUCK line) | the task hung; the enqueue deadline names which await |
+| START then `dispatch failed` | it threw, with the reason attached |
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `DISPATCH_STUCK_MS` | `60000` | default | yes | A dispatch pending this long logs `STUCK`. Set **above** `QUEUE_ENQUEUE_TIMEOUT_MS` so an enqueue hang surfaces as a named rejection first and this only fires for a hang elsewhere. |
+| `QUEUE_ENQUEUE_TIMEOUT_MS` | `10000` | default | yes | Per-await deadline inside `enqueueSingletonJob` (`getJob` / `getState` / `remove` / `add`). **Rejects naming the step, queue, job and jobId — never retries.** A hang turned into a silent retry is the same failure wearing a hat. |
+| `QUEUE_CONCURRENCY_SOCIAL` | `1` | default | restart | **Strictly 1.** `socialPublisher`'s single-flight guard is process-local, so a second concurrent consumer would not see it and both would post. |
+
+> ⚠️ **`assertRedisAvailable` does no I/O.** It is `Boolean(REDIS_URL)` plus a `REQUIRE_REDIS`
+> throw — no socket, no PING, no connection object. It cannot hang and cannot be affected by
+> `enableOfflineQueue`. The `maxRetriesPerRequest: 1` connection a few lines below it in
+> `redis.js` belongs to `getRedisStatus()`, a different function that really does ping. The
+> two are adjacent and have been conflated once already in an outage post-mortem, costing a
+> round of debugging aimed at the wrong layer.
+
+**Producer connections do not buffer.** The `bullmq-queues` connection is now created with
+`enableOfflineQueue: false`. With ioredis's default (`true`), an `add()` issued while the
+socket is down is queued and **never settles** — not resolved, not rejected — taking the
+dispatch promise with it. A producer wants to be told it cannot reach Redis; the caller can
+skip a cycle, it cannot un-wait. Worker connections keep the default, because they hold
+blocking reads across reconnects and would throw on ordinary blips.
+
+**Social is decoupled from ingestion.** It was a tail step inside `runIngestionCycle`, which
+coupled them both ways: a wedged social cycle held ingestion's `isRunning` flag, and — the
+one that kept recurring — any ingestion fault took all six platforms down with it. It now has
+its own queue (`social`), its own singleton job (`social.post.all`), its own worker consumer,
+and its own cron at `15,45` — offset a quarter-hour after ingestion so fresh articles are
+available, but unaffected if that tick failed, hung, or never dispatched.
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `ENABLE_AUTO_SOCIAL` | `true` | default | restart | Now gates **cron registration**, not a step inside ingestion. |
+| `SOCIAL_TAIL_TIMEOUT_MS` | `600000` (10m) | default | yes | Still bounds the cycle. Kept: it no longer protects ingestion, but it stops one wedged run holding the worker's social slot. |
+
 ## Undocumented-var audit
 
 `262` distinct `process.env.*` reads in `backend/`; `backend/.env.example` covered `77`.
