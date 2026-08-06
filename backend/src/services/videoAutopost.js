@@ -49,8 +49,68 @@ import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.j
 import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
 import { uploadToYouTube, isYouTubeConfigured } from "./youtubeClient.js";
 import { postVideoToFacebook, isFacebookConfigured } from "./facebookClient.js";
+import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
+const VIDEO_PING = HEARTBEAT_PING_URLS.video;
+
+/**
+ * Staleness threshold for the video cycle — 3 missed hourly runs.
+ *
+ * This did not exist. getVideoCycleHealth detected a HUNG cycle (started and
+ * never completed) and nothing else, so a loop that simply stopped being
+ * dispatched was invisible: no start to go stale, no error, no failed row. That
+ * is the gap that let a dead YouTube token run for 17h.
+ *
+ * Mirrors the social cycle's rule — 3 missed runs — against this cron's hourly
+ * cadence rather than the social cycle's half-hourly one. Deliberately NOT derived from
+ * VIDEO_MIN_INTERVAL_MS: the gates decide whether a cycle PUBLISHES, and a
+ * cycle that runs and correctly declines is healthy. What is being measured
+ * here is whether the runner fires at all.
+ */
+export const VIDEO_CYCLE_STALE_MS = () =>
+  Number.parseInt(process.env.VIDEO_CYCLE_STALE_MS || "", 10) || 3 * 60 * 60 * 1000;
+
+/**
+ * Stages excluded from the uniform-failure check. EMPTY BY DEFAULT — every
+ * stage counts, per the rule this was built to: if all N attempts died at the
+ * same stage, that is a dependency, not a quiet news day.
+ *
+ * The lever exists because one stage is genuinely ambiguous. `spec` rejects an
+ * article for being too thin, and on 2026-08-03 a real run rejected 8 of 8 that
+ * way — a candidate-ORDERING defect, not an outage. Fixing the ordering is what
+ * the length-first `ORDER BY` was for, so a recurrence would be a regression
+ * worth paging on; but a genuinely thin news hour reads identically from here.
+ * If this turns out to page on quiet nights, `VIDEO_FAIL_PING_IGNORE_STAGES=spec`
+ * is the whole fix and needs no deploy.
+ *
+ * Editorial gate names for reference (videoSelection.js): sport, live-blog,
+ * stock-commentary, publisher-24h, event-48h, title-similarity.
+ */
+const failPingIgnoredStages = () =>
+  new Set(
+    String(process.env.VIDEO_FAIL_PING_IGNORE_STAGES || "")
+      .split(",").map((s) => s.trim()).filter(Boolean)
+  );
+
+const VIDEO_MIN_ATTEMPTS = () =>
+  Number.parseInt(process.env.VIDEO_FAIL_PING_MIN_ATTEMPTS || "", 10) || 3;
+
+/**
+ * Did this cycle fail uniformly? Exported for verification — the classification
+ * is where incident and bad-news-day are told apart, and getting it wrong either
+ * pages on a quiet night or misses the next 17-hour 401.
+ *
+ * `ok`/`ok-dry` anywhere means a video was produced, which is not a failure
+ * however many candidates were rejected on the way.
+ */
+export function videoCycleFailure(attempts, { minAttempts = VIDEO_MIN_ATTEMPTS() } = {}) {
+  if (!Array.isArray(attempts)) return { uniform: false };
+  if (attempts.some((a) => a?.stage === "ok" || a?.stage === "ok-dry")) return { uniform: false };
+  const ignored = failPingIgnoredStages();
+  const counted = attempts.filter((a) => a?.stage && !ignored.has(a.stage));
+  return uniformFailure(counted, { minAttempts });
+}
 
 export const VIDEO_MAX_PER_DAY = () =>
   Number.parseInt(process.env.VIDEO_MAX_PER_DAY || "", 10) || 4;
@@ -308,7 +368,12 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
 
   const startedAt = now;
   cycleInFlight = { startedAt };
+  // Evaluate staleness against the PREVIOUS heartbeat before stamping this one,
+  // so a cycle returning after a gap logs the gap it recovered from — the same
+  // ordering the social cycle uses, and the reason that one reported 933m.
+  try { getVideoCycleHealth({ now }); } catch { /* telemetry never blocks */ }
   try { recordHeartbeat(VIDEO_CYCLE_HEARTBEAT, { phase: "start", startedAt }); } catch { /* telemetry never blocks */ }
+  if (!dryRun) pingStart(VIDEO_PING);
 
   const attempts = [];
   let produced = null, spendUsd = 0;
@@ -577,19 +642,79 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
         tried, produced: produced ? 1 : 0, spendUsd: Number(spendUsd.toFixed(5)),
       });
     } catch { /* telemetry never blocks */ }
+
+    // ─── The external switch ──────────────────────────────────────────────
+    //
+    // /fail rather than merely withholding success wherever the cycle KNOWS it
+    // is broken, so the monitor reports now instead of after its grace period
+    // expires. Three shapes qualify, and none of them is "produced nothing":
+    //
+    //   - the cycle threw
+    //   - it aborted on configuration (no spec, no voice, no YouTube) or on
+    //     YouTube quota — a missing flag is never an editorial outcome
+    //   - every attempt died at the same stage, which is the 17-hour-401 shape:
+    //     the cycle ran on schedule and would otherwise have pinged success
+    //
+    // A cycle that runs, tries, and correctly declines to publish is HEALTHY and
+    // pings success. That distinction is the whole reason this is not just
+    // "produced === 0".
+    if (!dryRun) {
+      const configAborts = new Set(["no-spec", "no-voice", "no-youtube", "quota-exceeded"]);
+      const failure = videoCycleFailure(attempts);
+      let detail = null;
+      if (extra?.error) {
+        detail = `video cycle threw: ${String(extra.error).slice(0, 500)}`;
+      } else if (extra?.skipped && configAborts.has(extra.skipped)) {
+        detail = `video cycle aborted: ${extra.skipped} — ${extra.reason || "no reason recorded"}`;
+      } else if (failure.uniform) {
+        detail =
+          `video cycle: ${failure.count}/${tried} attempts failed at "${failure.stage}" — ` +
+          `${failure.reason || "no reason recorded"}`;
+        logger.error(`🫀 ${detail}. Every attempt failed the same way — this is a dependency, not a quiet news day.`);
+      }
+      if (detail) pingFail(VIDEO_PING, detail);
+      else pingSuccess(VIDEO_PING);
+    }
     return { ...extra, tried, attempts, spendUsd, produced };
   }
 }
 
-/** Health for the ops route: a start with no matching complete is a hang. */
+/**
+ * Health for the ops route. TWO DISTINCT SIGNALS, matching the social cycle:
+ *
+ *   STALE — the runner is not firing at all. This did not exist. Only `hung`
+ *     was checked, so a loop that simply stopped being dispatched produced no
+ *     signal whatsoever: no start to go stale, no error, no failed row. A dead
+ *     YouTube token ran for 17h behind exactly that gap.
+ *   HUNG  — it started and never came back, which a bare timestamp cannot tell
+ *     from a healthy in-flight run.
+ *
+ * Never-fired ≠ stale, as in socialPublisher: a fresh deploy that has not
+ * reached its first tick has nothing to be late for.
+ */
 export function getVideoCycleHealth({ now = Date.now() } = {}) {
   const { lastAt, meta } = getHeartbeatRow(VIDEO_CYCLE_HEARTBEAT);
   const phase = meta && typeof meta === "object" ? meta.phase : null;
   const startedAt = meta && typeof meta === "object" ? meta.startedAt || null : null;
   const startAge = startedAt ? now - startedAt : null;
+
+  const ageMs = lastAt ? now - lastAt : null;
+  const staleThresholdMs = VIDEO_CYCLE_STALE_MS();
+  const stale = lastAt ? ageMs > staleThresholdMs : false;
+  if (stale) {
+    logger.error(
+      `🫀 video cycle STALE — last execution ${Math.round(ageMs / 60000)}m ago ` +
+      `(threshold ${Math.round(staleThresholdMs / 60000)}m). The render loop is not firing.`
+    );
+  }
+
   const hung = phase === "start" && startAge != null && startAge > CYCLE_HANG_MS;
   if (hung) {
     logger.error(`🫀 video cycle HUNG — started ${Math.round(startAge / 60000)}m ago and never completed.`);
   }
-  return { lastAt, ageMs: lastAt ? now - lastAt : null, phase, startedAt, hung, hangThresholdMs: CYCLE_HANG_MS };
+  return {
+    lastAt, ageMs, phase, startedAt,
+    stale, staleThresholdMs,
+    hung, hangThresholdMs: CYCLE_HANG_MS,
+  };
 }

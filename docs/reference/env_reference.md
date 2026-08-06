@@ -214,6 +214,70 @@ autopost loop above and gated off in prod.
 They change how a video looks or costs, never whether or where one publishes, and all run on
 their code defaults in prod.
 
+## Liveness — dead-man switches and cycle health
+
+**An in-process check cannot report a dead process.** Every staleness check in
+`socialPublisher`/`videoAutopost` runs only when the cycle it monitors runs, so a runner that
+stops firing produces exactly one warning — at recovery, from the cycle that finally ran.
+That is what these external checks are for: the monitor notices the *absence* of a ping,
+which no code inside the absent process can do.
+
+Three **independent** checks, one per cycle. Each fires a start/success pair: `{url}/start`
+on entry, `{url}` only on clean completion, so a wedged cycle shows as a start with no
+success. `{url}/fail` is pinged when the cycle *knows* it is broken. All are no-ops when
+unset — and log a one-time "no external dead-man switch" line at first use so an unarmed
+monitor is visible in the boot log rather than indistinguishable from a healthy one.
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `SOCIAL_HEARTBEAT_PING_URL` | unset (**no switch**) | *unverified* | restart | Social posting cycle (`*/30`, as a tail of ingestion). |
+| `VIDEO_HEARTBEAT_PING_URL` | unset (**no switch**) | *set at ship* | restart | Video render/publish cycle (hourly at `:07`). |
+| `INGESTION_HEARTBEAT_PING_URL` | unset (**no switch**) | *set at ship* | restart | RSS ingestion (`*/30`) — the **root** cycle; social and breaking-push hang off it. |
+
+> **No alert state, cooldowns or dedupe table exists in this repo, deliberately.** The
+> external monitor already does edge-triggering, dedupe and the re-arm ceiling, and does
+> them across restarts and deploys, which an in-process table cannot. Rebuilding it here is
+> how the per-platform staleness warning became something to ignore.
+
+**`/fail` — the failure a dead-man switch cannot see.** A cycle can run on schedule,
+complete, and ping success while every unit of work inside it fails; a dead YouTube token
+kept the video loop green for 17h that way. So a cycle that threw, aborted on config, or in
+which **every attempt failed at the same stage** pings `/fail` with the stage and reason
+instead of success. One article failing is a bad news day; 8 of 8 failing identically is a
+dependency.
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `VIDEO_FAIL_PING_MIN_ATTEMPTS` | `3` | default | yes | Floor before uniformity means anything — at n=1 it proves nothing. |
+| `VIDEO_FAIL_PING_IGNORE_STAGES` | *empty* (every stage counts) | default | yes | Comma-separated stages excluded from the check. **`spec` is the one to reach for** if quiet nights start paging — see the note below. |
+| `SOCIAL_FAIL_PING_MIN_ATTEMPTS` | `2` | default | yes | Lower floor: social runs ~6 platforms, not 8 articles. |
+
+> ⚠️ **`spec` is the ambiguous stage.** A real run on 2026-08-03 rejected 8 of 8 candidates
+> as "too thin" — a candidate-*ordering* defect, since fixed by the length-first `ORDER BY`.
+> A recurrence would be a regression worth paging on, but a genuinely thin news hour reads
+> identically from inside the cycle. Shipped counting it, per the incident-not-a-bad-news-day
+> rule; if it pages on quiet nights, `VIDEO_FAIL_PING_IGNORE_STAGES=spec` is the whole fix.
+> Healthy declines are **already** excluded on the social side (cadence guard, no candidate,
+> everything filtered, not configured) — those are not attempts.
+
+**In-process staleness thresholds** (these log; they do not ping):
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `VIDEO_CYCLE_STALE_MS` | `10800000` (3h = 3 missed hourly runs) | default | yes | **New.** The video cycle had hang detection only, so a loop that stopped being dispatched had no signal at all — no start to go stale, no error, no failed row. |
+| `SOCIAL_CYCLE_HANG_MS` | `900000` (15m) | default | yes | A social cycle that started and never completed. |
+| `VIDEO_CYCLE_HANG_MS` | `3600000` (1h) | default | yes | Same, for the render loop. |
+| `SOCIAL_TAIL_TIMEOUT_MS` | `600000` (10m) | default | yes | Bounds how long the social tail can hold ingestion's `isRunning` guard. Social must never be able to stop ingestion. |
+
+Registered heartbeats in `system_heartbeats`: `social_cycle` (stale 90m, hang 15m),
+`video_cycle` (stale 3h, hang 1h), and `breaking_push`.
+
+> ⚠️ **`breaking_push` is written by four call sites and read by none**
+> (`breakingNewsPusher.js:133/158/161/170`). It is a heartbeat with no consumer — the same
+> shape as `sweepAtStartup()` before it was wired: the recording works, nothing acts on it,
+> and the surface *looks* monitored. Left as-is deliberately; noted so it is a decision
+> rather than an oversight. Detached broadcast failures are currently invisible.
+
 ## Undocumented-var audit
 
 `262` distinct `process.env.*` reads in `backend/`; `backend/.env.example` covered `77`.

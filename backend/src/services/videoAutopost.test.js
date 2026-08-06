@@ -637,6 +637,91 @@ test("the cross-post runs on the SAME MP4 the upload used, in the same cycle", a
   assert.equal(seenByFacebook, rendered);
 });
 
+// ─── Liveness: staleness + the /fail classification ─────────────────────────
+//
+// The video cycle had HANG detection only, so a loop that simply stopped being
+// dispatched produced no signal at all — no start to go stale, no error, no
+// failed row. A dead YouTube token ran 17h behind that gap.
+
+const { getVideoCycleHealth, videoCycleFailure, VIDEO_CYCLE_STALE_MS } =
+  await import("./videoAutopost.js");
+const { recordHeartbeat } = await import("../models/database.js");
+
+test("the video cycle now has a staleness threshold — 3 missed hourly runs", () => {
+  delete process.env.VIDEO_CYCLE_STALE_MS;
+  assert.equal(VIDEO_CYCLE_STALE_MS(), 3 * HOUR);
+  process.env.VIDEO_CYCLE_STALE_MS = "5400000";
+  assert.equal(VIDEO_CYCLE_STALE_MS(), 5400000, "tunable without a deploy");
+  delete process.env.VIDEO_CYCLE_STALE_MS;
+});
+
+test("a runner that STOPPED FIRING is reported stale — the 17h gap", () => {
+  const now = Date.now();
+  recordHeartbeat("video_cycle", { phase: "complete", startedAt: now - 17 * HOUR });
+  db.prepare("UPDATE system_heartbeats SET last_at = ? WHERE name = 'video_cycle'").run(now - 17 * HOUR);
+
+  const h = getVideoCycleHealth({ now });
+  assert.equal(h.stale, true, "a loop dark for 17h must be stale");
+  assert.equal(h.hung, false, "and NOT hung — it completed, it just never ran again");
+  assert.ok(h.ageMs >= 17 * HOUR);
+});
+
+test("a cycle that ran recently is not stale", () => {
+  const now = Date.now();
+  recordHeartbeat("video_cycle", { phase: "complete", startedAt: now - 60_000 });
+  const h = getVideoCycleHealth({ now });
+  assert.equal(h.stale, false);
+});
+
+test("NEVER-FIRED is not stale — a fresh deploy has nothing to be late for", () => {
+  db.exec("DELETE FROM system_heartbeats WHERE name = 'video_cycle'");
+  const h = getVideoCycleHealth({ now: Date.now() });
+  assert.equal(h.stale, false, "no heartbeat at all must not read as an outage");
+  // getHeartbeatRow returns lastAt: 0 for a missing row (not null); 0 is falsy,
+  // which is exactly what keeps the staleness branch from firing.
+  assert.equal(h.lastAt, 0);
+  assert.equal(h.ageMs, null, "no age is computable without a first execution");
+});
+
+test("8 of 8 failing at the SAME stage is an incident", () => {
+  const attempts = Array.from({ length: 8 }, (_, n) => ({ n, stage: "upload", reason: "401" }));
+  const r = videoCycleFailure(attempts);
+  assert.equal(r.uniform, true);
+  assert.equal(r.stage, "upload");
+});
+
+test("a cycle that PRODUCED a video is never a failure, however many were rejected", () => {
+  // Seven rejections and one success is the loop working exactly as designed.
+  const attempts = [
+    ...Array.from({ length: 7 }, () => ({ stage: "spec", reason: "too thin" })),
+    { stage: "ok" },
+  ];
+  assert.equal(videoCycleFailure(attempts).uniform, false);
+  assert.equal(videoCycleFailure([{ stage: "ok-dry" }, { stage: "spec" }, { stage: "spec" }, { stage: "spec" }]).uniform, false);
+});
+
+test("mixed rejection stages are a bad news day, not an incident", () => {
+  const attempts = [
+    { stage: "spec", reason: "too thin" },
+    { stage: "sport", reason: "category" },
+    { stage: "publisher-24h", reason: "cooldown" },
+    { stage: "spec", reason: "too thin" },
+  ];
+  assert.equal(videoCycleFailure(attempts).uniform, false);
+});
+
+test("VIDEO_FAIL_PING_IGNORE_STAGES silences one stage without a deploy", () => {
+  // `spec` is the ambiguous one: 8/8 "too thin" was a real ordering defect on
+  // 2026-08-03, but a genuinely thin news hour reads identically from here.
+  const attempts = Array.from({ length: 8 }, () => ({ stage: "spec", reason: "too thin" }));
+  assert.equal(videoCycleFailure(attempts).uniform, true, "counted by default");
+
+  process.env.VIDEO_FAIL_PING_IGNORE_STAGES = "spec";
+  try {
+    assert.equal(videoCycleFailure(attempts).uniform, false, "one env line, no deploy");
+  } finally { delete process.env.VIDEO_FAIL_PING_IGNORE_STAGES; }
+});
+
 test("event breadth is SECONDARY — a thin linked story does not outrank a dense unlinked one", () => {
   // Only 8.4% of prod candidates have event linkage (measured, 72h window).
   // Leading with breadth would hand the window to that minority regardless of
