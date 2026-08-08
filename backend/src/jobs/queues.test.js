@@ -82,6 +82,121 @@ test("a late rejection after the deadline cannot become an unhandled rejection",
   }
 });
 
+// ─── The dedup trap ─────────────────────────────────────────────────────────
+//
+// This has now caused two multi-day outages. The second one — ingestion dead
+// 43 hours — got past the first fix because that fix cleared only `completed`
+// and `failed`, and the stale key reported some other state. `queue.add` with a
+// duplicate jobId does not throw: it hands back the existing job, so the caller
+// logs a cheerful "Enqueued" over a cycle that will never run again.
+//
+// The queue is a stub on purpose. A trap that costs days in production needs a
+// test that runs on every commit, not one gated on a live broker.
+
+function fakeJob({ id, state, timestamp }) {
+  return {
+    id,
+    timestamp,
+    removed: false,
+    async getState() { return state; },
+    async remove() { this.removed = true; },
+  };
+}
+
+/** Minimal Queue stub with BullMQ's actual duplicate-jobId semantics. */
+function fakeQueue({ existing = null, removeThrows = false } = {}) {
+  const q = {
+    existing,
+    added: [],
+    async getJob() { return q.existing; },
+    async add(name, data, opts) {
+      // BullMQ: a duplicate jobId RETURNS THE EXISTING JOB rather than throwing.
+      if (q.existing) return q.existing;
+      const job = fakeJob({ id: opts.jobId, state: "waiting", timestamp: Date.now() });
+      q.added.push(job);
+      q.existing = job;
+      return job;
+    },
+  };
+  if (existing && removeThrows) existing.remove = async () => { throw new Error("locked"); };
+  if (existing) {
+    const realRemove = existing.remove.bind(existing);
+    existing.remove = async () => { await realRemove(); q.existing = null; };
+  }
+  return q;
+}
+
+const enqueue = (queue) => __testing.enqueueWithQueue(queue, "ingestion", "news.ingest.all", {});
+
+test("A COMPLETED SINGLETON IS CLEARED AND A NEW JOB IS CREATED", async () => {
+  // The case that killed ingestion for 43h, stated directly.
+  const stale = fakeJob({ id: "news-ingest-all-singleton", state: "completed", timestamp: Date.now() - 86_400_000 });
+  const q = fakeQueue({ existing: stale });
+
+  const job = await enqueue(q);
+
+  assert.equal(stale.removed, true, "the stale singleton must be removed");
+  assert.equal(q.added.length, 1, "a NEW job must be created, not the old one returned");
+  assert.notEqual(job.timestamp, stale.timestamp);
+  assert.ok(job.timestamp >= Date.now() - 5_000, "the returned job must be the fresh one");
+});
+
+test("every non-active state is cleared, including `unknown`", async () => {
+  // `unknown` is what a job whose hash outlived its state set reports, and it
+  // was NOT covered by the completed/failed rule. That gap is the whole bug.
+  for (const state of ["completed", "failed", "unknown", "waiting", "delayed", "prioritized", "waiting-children"]) {
+    const stale = fakeJob({ id: "news-ingest-all-singleton", state, timestamp: Date.now() - 3_600_000 });
+    const q = fakeQueue({ existing: stale });
+    await enqueue(q);
+    assert.equal(stale.removed, true, `state "${state}" must be cleared`);
+    assert.equal(q.added.length, 1, `state "${state}" must produce a new job`);
+  }
+});
+
+test("ACTIVE still holds — the singleton's whole point is no overlapping cycles", async () => {
+  // The one state that must NOT be cleared. Removing a job a worker is running
+  // would let two cycles publish against one daily cap.
+  const running = fakeJob({ id: "news-ingest-all-singleton", state: "active", timestamp: Date.now() - 60_000 });
+  const q = fakeQueue({ existing: running });
+
+  const job = await enqueue(q);
+
+  assert.equal(running.removed, false, "an active job must be left alone");
+  assert.equal(q.added.length, 0, "and no new job added");
+  assert.equal(job, running, "the in-flight job is returned");
+});
+
+test("a NO-OP add is a hard failure, not a cheerful log line", async () => {
+  // If removal fails, add() hands back the stale job. That must not look like a
+  // successful enqueue — logging "Enqueued" over a dead cycle is the failure.
+  const stale = fakeJob({ id: "news-ingest-all-singleton", state: "completed", timestamp: Date.now() - 86_400_000 });
+  const q = fakeQueue({ existing: stale, removeThrows: true });
+
+  await assert.rejects(() => enqueue(q), /NO-OP/);
+  await assert.rejects(() => enqueue(q), /nothing was enqueued/i);
+});
+
+test("the no-op failure names the key to delete", async () => {
+  // An outage message should carry its own remediation.
+  const stale = fakeJob({ id: "news-ingest-all-singleton", state: "completed", timestamp: Date.now() - 86_400_000 });
+  const q = fakeQueue({ existing: stale, removeThrows: true });
+  const err = await enqueue(q).catch((e) => e);
+  assert.match(err.message, /scoop:ingestion:news-ingest-all-singleton/);
+});
+
+test("an empty queue enqueues normally", async () => {
+  const q = fakeQueue();
+  const job = await enqueue(q);
+  assert.equal(q.added.length, 1);
+  assert.equal(job.id, "news-ingest-all-singleton");
+});
+
+test("only `active` holds — the holding set is exactly one state", () => {
+  // Pinned so a future edit widening this set has to argue for it: every state
+  // added here becomes a way for a cycle to stop for ever.
+  assert.deepEqual([...__testing.DEDUP_HOLDING_STATES], ["active"]);
+});
+
 test("the timeout is tunable without a deploy", async () => {
   const saved = process.env.QUEUE_ENQUEUE_TIMEOUT_MS;
   process.env.QUEUE_ENQUEUE_TIMEOUT_MS = "60";

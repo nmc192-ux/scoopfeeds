@@ -90,38 +90,63 @@ function withStepDeadline(promise, { step, queueName, jobName, jobId }) {
   return Promise.race([promise, deadline]).finally(() => { if (timer) clearTimeout(timer); });
 }
 
-/** Test seam. Not part of the module's contract. */
-export const __testing = { withStepDeadline };
 
-export async function enqueueSingletonJob(queueName, jobName, data = {}, options = {}) {
-  if (!assertRedisAvailable({ role: `queue:${queueName}` })) return null;
+/**
+ * ACTIVE is the ONLY state in which an existing singleton legitimately blocks a
+ * new one. A job someone is working on right now is what the singleton exists to
+ * protect: removing it would let two cycles run concurrently, which for the
+ * video loop means two publishes against one daily cap.
+ *
+ * EVERY OTHER STATE MUST BE CLEARED. The old rule cleared only `completed` and
+ * `failed`, on the reasoning that waiting/delayed jobs are "genuinely queued" —
+ * true, but it left `unknown` uncovered, and `unknown` is exactly what a job
+ * whose hash key outlived its state set reports. That key then blocks every
+ * future add for ever: `queue.add` with a duplicate jobId does not throw, it
+ * returns the stale job, so the caller logs a cheerful "Enqueued" for a cycle
+ * that will never run again. Ingestion was dead 43 hours behind that.
+ *
+ * A `waiting` or `delayed` job that keeps being cleared and re-added is the
+ * correct trade: for a singleton cycle job the re-add is idempotent, and the
+ * alternative is a queue entry nothing will ever drain silently outranking
+ * every subsequent tick.
+ */
+const DEDUP_HOLDING_STATES = new Set(["active"]);
 
-  const queue = getQueueByName(queueName);
-  if (!queue) throw new Error(`Queue '${queueName}' is not initialized`);
-
+/**
+ * Core, with the queue injected so it is testable without Redis. The dedup trap
+ * has now cost two multi-day outages; it needs tests that do not require a live
+ * broker to run.
+ */
+async function enqueueWithQueue(queue, queueName, jobName, data = {}, options = {}) {
   const jobId = options.jobId || JOB_IDS[jobName];
   const ctx = { queueName, jobName, jobId };
+  const enqueuedAt = Date.now();
 
-  // Singleton-jobId dedup trap: BullMQ refuses to re-add a jobId that still
-  // exists in ANY state — including completed/failed. removeOnComplete{count}
-  // never prunes a queue whose only job is this singleton, so after the first
-  // completion every subsequent add() silently returned the stale finished job
-  // and the cycle never ran again (prod: ingestion/video/enrichment all executed
-  // exactly once post-cutover, then logged "Enqueued" for days while dead).
-  // Self-heal: if the existing job is finished, remove it so the add is real.
-  // A job that is genuinely waiting/active/delayed is left alone — dedup there
-  // is the singleton's whole point (no overlapping cycles).
   const existing = await withStepDeadline(queue.getJob(jobId), { ...ctx, step: "getJob" });
   if (existing) {
     const state = await withStepDeadline(existing.getState(), { ...ctx, step: "getState" });
-    if (state === "completed" || state === "failed") {
+
+    if (DEDUP_HOLDING_STATES.has(state)) {
+      // Working as designed. Returns WITHOUT calling add: add would hand back
+      // this same job, and the freshness check below would then flag a genuine
+      // dedup as a fault.
+      logger.info(`⏸️ ${jobName} already ${state} — dedup held, no overlapping cycle`, { queue: queueName, jobId });
+      return existing;
+    }
+
+    // Every other state, terminal or not, is cleared before the add.
+    logger.info(`🧹 ${jobName} found in state "${state}" — clearing the stale singleton`, { queue: queueName, jobId });
+    try {
       await withStepDeadline(existing.remove(), { ...ctx, step: "remove" });
-    } else {
-      // Not an error — the singleton is genuinely in flight and dedup is the
-      // whole point. Logged because "add returned the existing job" and "add
-      // created a new one" were previously the same log line, which is how a
-      // queue that had silently stopped advancing still read as healthy.
-      logger.info(`⏸️ ${jobName} already ${state} — dedup held`, { queue: queueName, jobId });
+    } catch (err) {
+      // Do NOT swallow and continue quietly: the add below will hand back the
+      // stale job and this cycle will not run. Say so; the freshness check
+      // turns it into a hard failure a moment later.
+      logger.error(
+        `🚨 could not remove the stale ${jobName} singleton (state=${state}): ${err.message}. ` +
+        `The next add will return the stale job and this cycle will NOT run.`,
+        { queue: queueName, jobId }
+      );
     }
   }
 
@@ -130,8 +155,31 @@ export async function enqueueSingletonJob(queueName, jobName, data = {}, options
     { ...ctx, step: "add" }
   );
 
+  // THE ADD MUST HAVE PRODUCED A NEW JOB. BullMQ returns the pre-existing job
+  // for a duplicate jobId instead of throwing, so a no-op add is otherwise
+  // indistinguishable from a real one — the failure mode that logged "Enqueued"
+  // for days over a dead cycle. A job created before this call started cannot
+  // be one this call created.
+  if (typeof job?.timestamp === "number" && job.timestamp < enqueuedAt) {
+    throw new Error(
+      `enqueueSingletonJob NO-OP — queue=${queueName} job=${jobName} jobId=${jobId}. ` +
+      `add() returned a job created ${enqueuedAt - job.timestamp}ms before this call, so the stale ` +
+      `singleton was never cleared and NOTHING WAS ENQUEUED. Delete the key ` +
+      `(${BULLMQ_PREFIX}:${queueName}:${jobId}) to unblock the cycle.`
+    );
+  }
+
   logger.info(`📥 Enqueued ${jobName}`, { queue: queueName, jobId: job.id });
   return job;
+}
+
+export async function enqueueSingletonJob(queueName, jobName, data = {}, options = {}) {
+  if (!assertRedisAvailable({ role: `queue:${queueName}` })) return null;
+
+  const queue = getQueueByName(queueName);
+  if (!queue) throw new Error(`Queue '${queueName}' is not initialized`);
+
+  return enqueueWithQueue(queue, queueName, jobName, data, options);
 }
 
 export async function getQueueDiagnostics() {
@@ -181,3 +229,11 @@ export async function getQueueDiagnostics() {
 }
 
 export { JOB_NAMES, QUEUE_NAMES };
+
+/**
+ * Test seam. Declared at the bottom because `DEDUP_HOLDING_STATES` and
+ * `enqueueWithQueue` are `const`s further up — an export placed above them sits
+ * in the temporal dead zone and throws at import.
+ * Not part of the module's contract.
+ */
+export const __testing = { withStepDeadline, enqueueWithQueue, DEDUP_HOLDING_STATES };
