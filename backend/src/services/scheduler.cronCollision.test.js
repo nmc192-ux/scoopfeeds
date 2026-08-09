@@ -105,14 +105,16 @@ test("NO DISPATCH CRON SHARES A MINUTE WITH AN IN-PROCESS CRON", () => {
   );
 });
 
-test("the four cycles that caused the outage are DISPATCHED, not run in process", () => {
+test("the five cycles that caused the outage are DISPATCHED, not run in process", () => {
   // The real fix. Offsets only dodge the collision; this removes it.
-  for (const label of ["dispatchAnalysisCycle", "dispatchEventsCycle", "dispatchPolymarketCycle", "dispatchUsgsCycle"]) {
+  for (const label of ["dispatchAnalysisCycle", "dispatchEventsCycle", "dispatchPolymarketCycle", "dispatchUsgsCycle", "dispatchEventPromoterCycle"]) {
     const c = CRONS.find((x) => x.label === label);
     assert.ok(c, `${label} must be registered — these must never run in the scheduler again`);
     assert.equal(c.isDispatch, true, `${label} must go through runDispatch`);
   }
-  for (const gone of ["runAnalysisCycle", "runEventsCycle", "runPolymarketCycle", "runUsgsCycle"]) {
+  // runEventPromoterCronCycle joined them after being MEASURED holding the loop
+  // synchronously for 10,245ms — ten cron ticks, twice an hour.
+  for (const gone of ["runAnalysisCycle", "runEventsCycle", "runPolymarketCycle", "runUsgsCycle", "runEventPromoterCronCycle"]) {
     assert.equal(
       CRONS.some((c) => c.label === gone && !c.isDispatch), false,
       `${gone} is registered as an in-process cron again. It does network I/O and bulk DB ` +
@@ -129,7 +131,7 @@ test("no NEW in-process cron has appeared without being counted", () => {
   // takes a neighbouring dispatch cron down three weeks later.
   const inProcess = HOURLY.filter((c) => !c.isDispatch).map((c) => c.label).sort();
   assert.equal(
-    inProcess.length, 15,
+    inProcess.length, 14,
     `The number of hourly in-process crons changed (now ${inProcess.length}): ${inProcess.join(", ")}.\n` +
     "If you ADDED one: it will block the scheduler's event loop for as long as it runs, and " +
     "every cron sharing its minute will stop firing — permanently, not intermittently. " +
