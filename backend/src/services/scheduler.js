@@ -201,6 +201,15 @@ const dispatchEventPromoterCycle = () => dispatchCycle({
   inProcess: null, label: "event promoter",
 });
 
+// The sixth, and the first caught by the TIMER instrumentation rather than the
+// cron path: MEASURED at 5,481ms synchronous hold, 4 cron ticks missed, 41% of
+// the gap on CPU — ours, not the host's. It was the +540s boot pulse that fired,
+// so two commits ago this was invisible: cronInFlight only tracked crons.
+const dispatchRealityIndexComposeCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.realityIndex, job: JOB_NAMES.realityIndexCompose,
+  inProcess: null, label: "reality index compose",
+});
+
 // How long a dispatch may stay pending before we say so. Longer than the
 // per-await deadline inside enqueueSingletonJob, so a hang THERE surfaces as a
 // rejection naming the step, and this only fires for a hang somewhere else.
@@ -282,7 +291,11 @@ function runDispatch(task, label) {
 // The lag monitor is the decisive one: node-cron's tick must land inside a
 // one-second window, so a stall NAMED and TIMED tells us which cycle ate which
 // minute without inferring it from which dispatch went missing.
-const CRON_SLOW_MS = () => Number.parseInt(process.env.CRON_SLOW_MS || "", 10) || 5_000;
+// 500ms, not 5s. On a 2-core host a 500ms synchronous hold is already HALF a
+// node-cron match window, so the interesting holds were all below the old
+// threshold — only one cycle in the fleet ever crossed 5s. Raise it if the log
+// turns noisy; the number that matters is the fraction of a one-second window.
+const CRON_SLOW_MS = () => Number.parseInt(process.env.CRON_SLOW_MS || "", 10) || 500;
 const LOOP_STALL_MS = () => Number.parseInt(process.env.LOOP_STALL_MS || "", 10) || 1_500;
 // Reporting window for the lag distribution. Env-tunable so tests can drive it
 // in milliseconds instead of waiting a minute.
@@ -744,7 +757,7 @@ export function startScheduler() {
     scheduleCron("19 * * * *",    () => runEventTimelineBuilderCycle());   // every 1 hr
     scheduleCron("49 * * * *",    () => runActorExtractorCycle());         // every 1 hr, offset
     // Phase 3 — Sentiment + Composite + Anomalies
-    scheduleCron("21,51 * * * *", () => runRealityIndexComposeCycle());    // every 30 min, offset
+    scheduleCron("21,51 * * * *", () => runDispatch(() => dispatchRealityIndexComposeCycle(), "reality index compose")); // 30 min, offset
     scheduleCron("27 * * * *",    () => runSentimentScoreCycle());         // every 1 hr
     scheduleCron("3,18,33,48 * * * *", () => runAnomalyScanCycle());       // every 15 min
     // Phase 4c — Watchlist push fan-out (runs 2 min after each anomaly scan
@@ -790,7 +803,7 @@ export function startScheduler() {
     // Sprint 1.3.4 — Tracker Detector first run ~11 min after boot, between
     // eventPromoter's 8-min boot pulse and the next on-the-hour :16 cron tick.
     scheduleTimer(() => runTrackerDetectorCronCycle(), 11 * 60 * 1000);
-    scheduleTimer(() => runRealityIndexComposeCycle(), 9 * 60 * 1000);
+    scheduleTimer(() => runDispatch(() => dispatchRealityIndexComposeCycle(), "reality index compose (boot)"), 9 * 60 * 1000);
     scheduleTimer(() => runGdeltCycle(), 2 * 60 * 1000);                       // first GDELT pull 2 min after boot
     logger.info("🧠 Reality Index crons scheduled (polymarket 15m, matcher 30m, eventPromoter 30m, trackerDetector 30m, timeline+actors hourly, downsample daily, sentiment hourly, RI compose 30m, anomaly 15m, watchlist-push 15m, GDELT 30m)");
   } else {
@@ -939,7 +952,7 @@ async function runSentimentScoreCycle() {
   finally { isSentimentRun = false; }
 }
 
-async function runRealityIndexComposeCycle() {
+export async function runRealityIndexComposeCycle() {
   if (isRealityComposeRun) { logger.warn("⏸️ RI compose already running"); return null; }
   isRealityComposeRun = true;
   lastRealityComposeRun = new Date().toISOString();
@@ -1196,7 +1209,7 @@ async function runAnalystBriefCycleWrapped() {
 // runPolymarketCycle is exported at its declaration now (the worker imports it).
 export { runMarketMatcherCronCycle, runSnapshotDownsamplerCycle, snapshotActiveMarkets,
          runTrackerDetectorCronCycle, runActorExtractorCycle,
-         runSentimentScoreCycle, runRealityIndexComposeCycle, runAnomalyScanCycle,
+         runSentimentScoreCycle, runAnomalyScanCycle,
          runWatchlistPushCycle, runGdeltCycle };
 
 // Runs the auto-approve + publish pass. Safe to call as a cron tick — the

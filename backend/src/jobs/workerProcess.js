@@ -11,7 +11,7 @@ import { logger } from "../services/logger.js";
 import {
   runEnrichCycle, runIngestionCycle, runVideoCycle,
   runAnalysisCycle, runEventsCycle, runPolymarketCycle, runUsgsCycle,
-  runEventPromoterCronCycle,
+  runEventPromoterCronCycle, runRealityIndexComposeCycle,
 } from "../services/scheduler.js";
 import { sweepAtStartup } from "../services/videoArtifacts.js";
 import { runVideoRenderCycle } from "../services/videoAutopost.js";
@@ -175,6 +175,7 @@ try {
           case JOB_NAMES.marketsPolymarket: return runPolymarketCycle();
           case JOB_NAMES.geoUsgs:           return runUsgsCycle();
           case JOB_NAMES.eventsPromote:     return runEventPromoterCronCycle();
+          case JOB_NAMES.realityIndexCompose: return runRealityIndexComposeCycle();
           default:
             // Loud rather than silent: an unrecognised job name means the queue
             // and the consumer have drifted apart, and a silently-ignored job
