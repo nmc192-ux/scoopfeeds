@@ -104,6 +104,65 @@ test("a rejecting cron is reported rather than swallowed", async () => {
   assert.ok(lines.some((l) => l.level === "error" && l.m.includes("rejected: boom")));
 });
 
+// ─── Lag distribution ───────────────────────────────────────────────────────
+//
+// The first monitor logged ONLY excursions past 1500ms. It reported one stall
+// in 90 minutes of production while nearly every cron was missing most of its
+// ticks — because the fatal zone is far below that threshold and a steady lag
+// never trips an excursion alarm. Measured against node-cron 3.0.3: ~65ms
+// steady lag already costs ticks, ~2000ms kills every pattern.
+
+test("the distribution is reported even when NOTHING exceeds the stall threshold", async () => {
+  // The exact blind spot. A steady sub-threshold lag must still be visible,
+  // because that is the condition that silently kills crons.
+  process.env.LOOP_LAG_WINDOW_MS = "400";
+  process.env.LOOP_STALL_MS = "100000";   // no excursion can possibly fire
+  const { startLoopLagMonitor, stopLoopLagMonitor } = __testing;
+  try {
+    const lines = await captureLogs(async () => {
+      startLoopLagMonitor();
+      await settle(1600);
+      stopLoopLagMonitor();
+    });
+    const dist = lines.find((l) => l.m.includes("📊 loop lag"));
+    assert.ok(dist, "a distribution line must be emitted with no excursion at all");
+    assert.match(dist.m, /p50=\d+ms/);
+    assert.match(dist.m, /p95=\d+ms/);
+    assert.match(dist.m, /max=\d+ms/);
+    assert.match(dist.m, /phase drift [\d.]+s\/min/);
+    assert.equal(lines.some((l) => l.m.includes("EVENT LOOP STALLED")), false);
+  } finally {
+    process.env.LOOP_STALL_MS = "80";
+    delete process.env.LOOP_LAG_WINDOW_MS;
+    __testing.stopLoopLagMonitor();
+  }
+});
+
+test("sustained lag is escalated to a warning naming the consequence", async () => {
+  // Drift ≥1s/min means whole seconds of wall clock went unobserved, so
+  // one-second cron windows are being lost — regardless of the max.
+  process.env.LOOP_LAG_WINDOW_MS = "400";
+  process.env.LOOP_STALL_MS = "100000";
+  const { startLoopLagMonitor, stopLoopLagMonitor } = __testing;
+  try {
+    const lines = await captureLogs(async () => {
+      startLoopLagMonitor();
+      // Yield between blocks so the monitor's interval can actually fire —
+      // a tight loop starves the very sampler under test.
+      for (let i = 0; i < 6; i++) { block(300); await settle(10); }
+      stopLoopLagMonitor();
+    });
+    const warn = lines.find((l) => l.level === "warn" && l.m.includes("📊 loop lag"));
+    assert.ok(warn, "sustained drift must escalate past info");
+    assert.match(warn.m, /CRON WINDOWS ARE BEING LOST/);
+    assert.match(warn.m, /went unobserved this minute/);
+  } finally {
+    process.env.LOOP_STALL_MS = "80";
+    delete process.env.LOOP_LAG_WINDOW_MS;
+    __testing.stopLoopLagMonitor();
+  }
+});
+
 // ─── The registration manifest ──────────────────────────────────────────────
 
 test("every registration is recorded with name AND expression", async () => {
