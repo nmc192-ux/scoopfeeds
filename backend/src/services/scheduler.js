@@ -275,6 +275,9 @@ function runDispatch(task, label) {
 // minute without inferring it from which dispatch went missing.
 const CRON_SLOW_MS = () => Number.parseInt(process.env.CRON_SLOW_MS || "", 10) || 5_000;
 const LOOP_STALL_MS = () => Number.parseInt(process.env.LOOP_STALL_MS || "", 10) || 1_500;
+// Reporting window for the lag distribution. Env-tunable so tests can drive it
+// in milliseconds instead of waiting a minute.
+const LOOP_LAG_WINDOW_MS = () => Number.parseInt(process.env.LOOP_LAG_WINDOW_MS || "", 10) || 60_000;
 
 let cronInFlight = null;   // { name, startedAt } — read by the lag monitor
 
@@ -286,9 +289,8 @@ function cronName(task, expression) {
   return `${m ? m[1] : "anonymous"}@${expression}`;
 }
 
-function scheduleCron(expression, task) {
-  const name = cronName(task, expression);
-  const wrapped = () => {
+/** Run `task` with in-flight attribution and duration measurement. */
+function instrumented(name, task) {
     const startedAt = Date.now();
     const prev = cronInFlight;
     cronInFlight = { name, startedAt };
@@ -321,8 +323,11 @@ function scheduleCron(expression, task) {
       });
     }
     return out;
-  };
-  const scheduledTask = cron.schedule(expression, wrapped);
+}
+
+function scheduleCron(expression, task) {
+  const name = cronName(task, expression);
+  const scheduledTask = cron.schedule(expression, () => instrumented(name, task));
   schedulerTasks.push(scheduledTask);
   registeredCrons.push({ name, expression });
   return scheduledTask;
@@ -343,27 +348,90 @@ export function listRegisteredCrons() {
  * to be inferred from which dispatch went quiet.
  */
 let lagMonitor = null;
+
+/**
+ * DISTRIBUTION, NOT JUST EXCURSIONS. The first version of this logged only
+ * lag ≥ LOOP_STALL_MS (1500ms) and reported exactly one stall in 90 minutes
+ * while nearly every cron was missing most of its ticks — because the fatal
+ * zone sits FAR BELOW that threshold and a steady lag never trips it.
+ *
+ * Measured against node-cron 3.0.3 directly:
+ *   ~15ms steady lag  → every pattern fires
+ *   ~65ms steady lag  → a pattern already down to 83%
+ *   ~2000ms steady    → ZERO firings, every pattern
+ *
+ * So a constant 1.2s lag is invisible to a 1.5s excursion alarm and lethal to a
+ * one-second match window. p50 is the number that decides whether crons fire;
+ * the max only says whether anything dramatic happened.
+ *
+ * PHASE DRIFT is the derived number that actually answers the question. Each
+ * tick is re-armed at a fixed 1000ms AFTER the work, so every millisecond of
+ * lag advances the phase permanently. Summed over a minute it gives the seconds
+ * of wall clock the tick sequence skipped — and any cron whose one-second window
+ * falls in a skipped second does not fire. Drift ≥1s/min means ticks are being
+ * lost continuously, whatever the max says.
+ */
 function startLoopLagMonitor() {
   if (lagMonitor) return;
   let expected = Date.now() + 1000;
+  let samples = [];
+  let windowStart = Date.now();
+
+  const pct = (sorted, p) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] : 0;
+
   lagMonitor = setInterval(() => {
     const now = Date.now();
-    const lateBy = now - expected;
+    const lateBy = Math.max(0, now - expected);
     expected = now + 1000;
+    samples.push(lateBy);
+
     if (lateBy >= LOOP_STALL_MS()) {
       const culprit = cronInFlight
         ? `${cronInFlight.name} (in flight ${now - cronInFlight.startedAt}ms)`
-        : "nothing in flight — the stall came from outside the cron path";
-      logger.error(
-        `🚨 EVENT LOOP STALLED ${lateBy}ms — cron ticks in that window were missed. In flight: ${culprit}`
-      );
+        : "nothing in flight — the stall came from OUTSIDE the cron path " +
+          "(synchronous SQLite, a detached promise, or CPU contention from another container)";
+      logger.error(`🚨 EVENT LOOP STALLED ${lateBy}ms — cron ticks in that window were missed. In flight: ${culprit}`);
+    }
+
+    if (now - windowStart >= LOOP_LAG_WINDOW_MS()) {
+      const sorted = [...samples].sort((a, b) => a - b);
+      const windowMs = now - windowStart;
+      const driftMs = samples.reduce((a, b) => a + b, 0);
+      // NORMALISED so the threshold means the same thing whatever the window
+      // length — an absolute drift budget silently changes meaning when the
+      // window does, which is its own class of measurement bug.
+      const driftPerMin = driftMs / (windowMs / 60_000);
+      const line =
+        `📊 loop lag ${samples.length} samples/${Math.round(windowMs / 1000)}s: p50=${pct(sorted, 0.5)}ms p95=${pct(sorted, 0.95)}ms ` +
+        `max=${sorted.at(-1)}ms · phase drift ${(driftPerMin / 1000).toFixed(1)}s/min`;
+      // ≥1s of drift per minute means the tick sequence is skipping whole
+      // seconds continuously, so one-second cron windows are being lost.
+      if (driftPerMin >= 1000) {
+        logger.warn(
+          `${line} — AT THIS DRIFT CRON WINDOWS ARE BEING LOST. node-cron re-arms at a fixed ` +
+          `1000ms and matches an exact second; ~${Math.round(driftMs / 1000)} second(s) of wall ` +
+          `clock went unobserved this minute.`
+        );
+      } else {
+        logger.info(line);
+      }
+      samples = [];
+      windowStart = now;
     }
   }, 1000);
   lagMonitor.unref?.();
 }
 
+function stopLoopLagMonitor() {
+  if (lagMonitor) { clearInterval(lagMonitor); lagMonitor = null; }
+}
+
+// Instrumented for the same reason scheduleCron is: a boot pulse that blocks
+// the loop reported as "nothing in flight", because only cron callbacks set
+// cronInFlight. An uninstrumented timer is an unattributable stall.
 function scheduleTimer(task, delayMs) {
-  const timer = setTimeout(task, delayMs);
+  const name = cronName(task, `+${Math.round(delayMs / 1000)}s`);
+  const timer = setTimeout(() => instrumented(name, task), delayMs);
   schedulerTimers.push(timer);
   return timer;
 }
@@ -382,9 +450,9 @@ export function startScheduler() {
   runDispatch(() => dispatchVideoCycle(), "video ingestion");
   scheduleTimer(() => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"), 60_000);
   // Delay first events pass — it needs some ingested articles to work with.
-  scheduleTimer(runEventsCycle, 90_000);
+  scheduleTimer(() => runDispatch(() => dispatchEventsCycle(), "events refresh (boot)"), 90_000);
   // Delay first analysis pass — 5 min after startup, needs ingested articles.
-  scheduleTimer(runAnalysisCycle, 5 * 60 * 1000);
+  scheduleTimer(() => runDispatch(() => dispatchAnalysisCycle(), "analysis refresh (boot)"), 5 * 60 * 1000);
   // ─── MINUTE OFFSETS ARE LOAD-BEARING — read this before changing one ──────
   //
   // Every dispatch cron below sits on a minute that carries NO in-process work.
@@ -610,7 +678,7 @@ export function startScheduler() {
     // /scoop-ops/briefs (plan §5J — no auto-promotion in v1).
     scheduleCron("23 */4 * * *",       () => runAnalystBriefCycleWrapped());
     // First run shortly after boot — Polymarket cold start.
-    scheduleTimer(() => runPolymarketCycle(), 30_000);
+    scheduleTimer(() => runDispatch(() => dispatchPolymarketCycle(), "polymarket sync (boot)"), 30_000);
     scheduleTimer(() => runMarketMatcherCronCycle(), 5 * 60 * 1000);
     scheduleTimer(() => runEventPromoterCronCycle(), 8 * 60 * 1000);
     // Sprint 1.3.4 — Tracker Detector first run ~11 min after boot, between
@@ -1464,4 +1532,4 @@ export async function syncVideoMetrics() {
  * forever — so it needs a test asserting the absence, not just the presence of
  * behaviour. Not part of the module's contract.
  */
-export const __testing = { runDispatch, dispatchCycle, scheduleCron, cronName };
+export const __testing = { runDispatch, dispatchCycle, scheduleCron, cronName, startLoopLagMonitor, stopLoopLagMonitor };
