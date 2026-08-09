@@ -1,4 +1,5 @@
 import cron from "node-cron";
+import v8 from "v8";
 import { fetchAllSources } from "./rssFetcher.js";
 import { fetchAllYouTube } from "./videoFetcher.js";
 import { enrichBatch } from "./contentEnricher.js";
@@ -287,7 +288,17 @@ const LOOP_STALL_MS = () => Number.parseInt(process.env.LOOP_STALL_MS || "", 10)
 // in milliseconds instead of waiting a minute.
 const LOOP_LAG_WINDOW_MS = () => Number.parseInt(process.env.LOOP_LAG_WINDOW_MS || "", 10) || 60_000;
 
-let cronInFlight = null;   // { name, startedAt } — read by the lag monitor
+let cronInFlight = null;   // { name, startedAt } — the SYNCHRONOUS holder
+const asyncInFlight = new Set();  // entries alive for the whole async lifetime
+// Ring of recently-settled cycles. A cycle that blocks the loop finishes in a
+// MICROTASK before the monitor's next macrotask tick, so by sample time it is
+// already gone — "nothing in flight" is then true and useless. What the
+// investigation needs is who ran DURING the gap, not who is running after it.
+const recentlyRan = [];
+function rememberRan(entry, finishedAt) {
+  recentlyRan.push({ ...entry, finishedAt });
+  if (recentlyRan.length > 30) recentlyRan.shift();
+}
 
 /** Derive a readable name once, at registration, from the callback source. */
 function cronName(task, expression) {
@@ -302,6 +313,16 @@ function instrumented(name, task) {
     const startedAt = Date.now();
     const prev = cronInFlight;
     cronInFlight = { name, startedAt };
+    // ALSO tracked for the whole ASYNC lifetime, not just the synchronous part.
+    //
+    // cronInFlight alone cleared the moment `task()` returned, so a cycle still
+    // burning CPU inside .then() continuations reported as "nothing in flight" —
+    // which is exactly what the 18.6-minute event said, and it pointed the
+    // investigation at the host. With the scheduler measured at 103% CPU while
+    // the worker idles, "nothing in flight" has to be able to name an async
+    // cycle or it is worse than no attribution at all.
+    const entry = { name, startedAt };
+    asyncInFlight.add(entry);
     let out;
     try {
       out = task();
@@ -320,6 +341,8 @@ function instrumented(name, task) {
     }
     if (out && typeof out.then === "function") {
       const settle = (verb) => {
+        asyncInFlight.delete(entry);
+        rememberRan(entry, Date.now());
         const totalMs = Date.now() - startedAt;
         if (totalMs >= CRON_SLOW_MS()) {
           logger.info(`⏳ cron ${name} ${verb} after ${totalMs}ms`);
@@ -329,8 +352,31 @@ function instrumented(name, task) {
         settle("FAILED");
         logger.error(`❌ cron ${name} rejected: ${err?.message || err}`);
       });
+    } else {
+      asyncInFlight.delete(entry);
+      rememberRan(entry, Date.now());
     }
     return out;
+}
+
+/**
+ * Who to blame for a gap spanning [gapStart, now].
+ *
+ * In-flight first, then anything that OVERLAPPED the gap and has since settled.
+ * Only if both are empty is "nothing in flight" a real answer — and then it
+ * means the process genuinely was not executing our code.
+ */
+function describeInFlight(now, gapStart = now) {
+  if (cronInFlight) return `${cronInFlight.name} (synchronous, ${now - cronInFlight.startedAt}ms)`;
+  const open = [...asyncInFlight].sort((a, b) => a.startedAt - b.startedAt);
+  if (open.length) return open.map((e) => `${e.name} (async, ${now - e.startedAt}ms)`).join(", ");
+  const overlapped = recentlyRan.filter((e) => e.finishedAt >= gapStart && e.startedAt <= now);
+  if (overlapped.length) {
+    return overlapped
+      .map((e) => `${e.name} (ran during the gap, ${e.finishedAt - e.startedAt}ms)`)
+      .join(", ");
+  }
+  return "nothing in flight and nothing ran during the gap";
 }
 
 function scheduleCron(expression, task) {
@@ -379,6 +425,8 @@ let lagMonitor = null;
  * falls in a skipped second does not fire. Drift ≥1s/min means ticks are being
  * lost continuously, whatever the max says.
  */
+const heapLimitBytes = v8.getHeapStatistics().heap_size_limit;
+
 function startLoopLagMonitor() {
   if (lagMonitor) return;
   let expected = Date.now() + 1000;
@@ -410,16 +458,18 @@ function startLoopLagMonitor() {
       //                   cgroup throttling, or a hypervisor steal.
       const cpu = process.cpuUsage();
       const cpuDeltaMs = ((cpu.user - lastCpu.user) + (cpu.system - lastCpu.system)) / 1000;
-      const onCpuPct = lateBy > 0 ? Math.round((cpuDeltaMs / lateBy) * 100) : 0;
+      // Against TOTAL elapsed wall time, not the excess. `lateBy` is only the
+      // overshoot past the 1000ms interval, so dividing by it reported 225% for
+      // a plainly CPU-bound block and would have mis-set the freeze threshold.
+      const elapsedMs = lateBy + 1000;
+      const onCpuPct = Math.round((cpuDeltaMs / elapsedMs) * 100);
       const missedTicks = Math.max(0, Math.round(lateBy / 1000) - 1);
-      const culprit = cronInFlight
-        ? `${cronInFlight.name} (in flight ${now - cronInFlight.startedAt}ms)`
-        : "nothing in flight";
+      const culprit = describeInFlight(now, now - lateBy);
 
       if (onCpuPct < 10) {
         logger.error(
           `🧊 PROCESS FROZEN for ${(lateBy / 1000).toFixed(1)}s — ${missedTicks} one-second ticks never ran. ` +
-          `This process used only ${cpuDeltaMs.toFixed(0)}ms of CPU across that gap (${onCpuPct}%), so it was ` +
+          `This process used only ${cpuDeltaMs.toFixed(0)}ms of CPU across ${(elapsedMs / 1000).toFixed(1)}s (${onCpuPct}%), so it was ` +
           `NOT SCHEDULED rather than busy: nothing in this process caused it. Look at host CPU contention ` +
           `(a sibling container mid-render), swap, or cgroup throttling. In flight: ${culprit}.`
         );
@@ -445,13 +495,21 @@ function startLoopLagMonitor() {
       // shortfall is stated rather than left to be noticed in the ratio.
       const expectedSamples = Math.round(windowMs / 1000);
       const missed = Math.max(0, expectedSamples - samples.length);
+      const mem = process.memoryUsage();
+      const heapPct = Math.round((mem.heapUsed / heapLimitBytes) * 100);
       const line =
         `📊 loop lag ${samples.length}/${expectedSamples} samples in ${Math.round(windowMs / 1000)}s: ` +
         `p50=${pct(sorted, 0.5)}ms p95=${pct(sorted, 0.95)}ms max=${sorted.at(-1)}ms · ` +
         `phase drift ${(driftPerMin / 1000).toFixed(1)}s/min` +
+        ` · rss ${Math.round(mem.rss / 1048576)}MB heap ${Math.round(mem.heapUsed / 1048576)}/` +
+        `${Math.round(heapLimitBytes / 1048576)}MB (${heapPct}%)` +
         (missed > expectedSamples * 0.1
           ? ` · ⚠️ ${missed} SAMPLES MISSING — the process was frozen, not merely late`
-          : "");
+          : "") +
+        // A heap near its limit means continuous major GCs: high CPU, long
+        // pauses, and the process is fully ON-CPU throughout — so the cpuUsage
+        // discriminator would say "we burned it" and still not say why.
+        (heapPct >= 85 ? ` · 🔥 HEAP AT ${heapPct}% OF LIMIT — GC thrash burns a core and freezes the loop` : "");
       // ≥1s of drift per minute means the tick sequence is skipping whole
       // seconds continuously, so one-second cron windows are being lost.
       if (driftPerMin >= 1000) {

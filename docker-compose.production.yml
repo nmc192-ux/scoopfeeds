@@ -60,21 +60,11 @@ services:
       SCOOP_PERSISTENT_DATA_DIR: /var/lib/scoop
     volumes:
       - scoop_data:/var/lib/scoop
-    # ─── CPU WEIGHTING ────────────────────────────────────────────────────
-    # MEASURED: the scheduler was FROZEN for 18.6 minutes — 1,114,844ms with
-    # 15 samples where 1130 were due, and near-zero CPU consumed across the
-    # gap. It was not busy, it was not scheduled. Nothing in its code caused
-    # it and no code change can fix it.
-    #
-    # Nothing on this stack had any CPU limit, so a worker mid-render takes
-    # every core ffmpeg asks for (which is all of them — the encode passes no
-    # -threads) and the scheduler waits. It needs almost no CPU; it needs to
-    # be ON one, punctually, because node-cron matches an exact second.
-    #
-    # cpu_shares is a RELATIVE WEIGHT under contention, not a cap, so it
-    # needs no knowledge of the host's core count and costs the worker
-    # nothing when the scheduler is idle — which is almost always.
-    cpu_shares: 4096
+    # CPU weighting PARKED. cpu_shares 4096/512 was staged here to protect the
+    # scheduler from the worker's renders — then `docker stats` on the 2-core
+    # host read scheduler 103.14% / worker 0.12%. The scheduler is the CONSUMER,
+    # not the victim, so weighting in its favour protects it from nothing.
+    # Reinstate only if a reading ever shows the worker as the contender.
     stop_grace_period: 45s
     command: ["npm", "run", "start:scheduler"]
 
@@ -96,12 +86,6 @@ services:
       SCOOP_PERSISTENT_DATA_DIR: /var/lib/scoop
     volumes:
       - scoop_data:/var/lib/scoop
-    # Lower weight than the scheduler (4096). Under contention the renderer
-    # yields to the thing that has to be on time; when the scheduler is idle —
-    # which is essentially always, it only enqueues — the worker still gets the
-    # whole box. A cap (`cpus:`) would be the stronger lever but needs the
-    # host's core count; this needs nothing and cannot over-restrict.
-    cpu_shares: 512
     stop_grace_period: 60s
     command: ["npm", "run", "start:worker"]
 

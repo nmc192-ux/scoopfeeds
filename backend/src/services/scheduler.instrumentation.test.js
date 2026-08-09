@@ -230,6 +230,60 @@ test("a FREEZE is reported distinctly and points AWAY from this process", async 
   }
 });
 
+test("an ASYNC cycle still running is named — not reported as 'nothing in flight'", async () => {
+  // The hole that pointed the last investigation at the host. cronInFlight
+  // cleared the moment task() returned, so a cycle burning CPU in its .then()
+  // continuations reported as "nothing in flight" — which is exactly what the
+  // 18.6-minute event said, while docker stats later showed this process at
+  // 103% CPU and the worker idle.
+  process.env.LOOP_STALL_MS = "300";
+  const { startLoopLagMonitor, stopLoopLagMonitor, scheduleCron } = __testing;
+  try {
+    const lines = await captureLogs(async () => {
+      startLoopLagMonitor();
+      const t = scheduleCron("0 0 1 1 *", async () => {
+        await settle(10);
+        block(1800);          // CPU burned AFTER the synchronous part returned
+      });
+      t.now();
+      await settle(2600);
+      t.stop();
+      stopLoopLagMonitor();
+    });
+    const stall = lines.find((l) => l.m.includes("EVENT LOOP STALLED") || l.m.includes("PROCESS FROZEN"));
+    assert.ok(stall, "the stall must be reported");
+    assert.match(stall.m, /anonymous@0 0 1 1 \*/, "the async cycle must be NAMED");
+    assert.match(stall.m, /(async, \d+ms|ran during the gap, \d+ms)/,
+      "named either as still-running or as having overlapped the gap");
+    assert.equal(/nothing in flight/.test(stall.m), false,
+      "an async cycle burning CPU must never report as 'nothing in flight'");
+  } finally {
+    process.env.LOOP_STALL_MS = "80";
+    __testing.stopLoopLagMonitor();
+  }
+});
+
+test("the distribution reports heap pressure — GC thrash burns a core AND freezes the loop", async () => {
+  // cpuUsage alone would classify GC thrash as "we burned it" without saying
+  // why. Heap usage against the V8 limit is what names it.
+  process.env.LOOP_LAG_WINDOW_MS = "400";
+  const { startLoopLagMonitor, stopLoopLagMonitor } = __testing;
+  try {
+    const lines = await captureLogs(async () => {
+      startLoopLagMonitor();
+      await settle(1000);
+      stopLoopLagMonitor();
+    });
+    const dist = lines.find((l) => l.m.includes("📊 loop lag"));
+    assert.ok(dist);
+    assert.match(dist.m, /rss \d+MB/);
+    assert.match(dist.m, /heap \d+\/\d+MB \(\d+%\)/);
+  } finally {
+    delete process.env.LOOP_LAG_WINDOW_MS;
+    __testing.stopLoopLagMonitor();
+  }
+});
+
 // ─── The registration manifest ──────────────────────────────────────────────
 
 test("every registration is recorded with name AND expression", async () => {
