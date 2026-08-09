@@ -232,4 +232,11 @@ test("FIX (slug signal) — short token 'ai' does NOT slug-match 'airport'", () 
   assert.equal(r.confirmed, false);
 });
 
-test.after(() => { db.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+// Teardown deferred to process exit, same reasoning as src/testing/testDb.js:
+// these tests await network-shaped work, and closing the handle the moment the
+// last case returns lets a straggler land on a closed DB — which node:test
+// reports as a whole-file `'test failed'` with no stack.
+process.on("exit", () => {
+  try { db.close(); } catch { /* already closed */ }
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+});

@@ -16,6 +16,25 @@
  * to, with a looser column set than the real table; a `CREATE TABLE IF NOT EXISTS`
  * against the real schema would silently keep the stub and mask exactly the kind
  * of drift these tests exist to catch.
+ *
+ * TEARDOWN IS DEFERRED TO PROCESS EXIT, DELIBERATELY. cleanup() used to close the
+ * handle and rm the dir synchronously, the moment an awaited call returned. Any
+ * work that call left in flight — a fetch continuation, a queued budget write, a
+ * limiter draining — then landed on a closed handle and threw
+ * "The database connection is not open" *after the test had ended*. node:test
+ * catches that in its harness, sets exitCode 1 and reports the FILE as
+ * `'test failed'` with no stack, while every subtest stays green. Land it during
+ * a later test instead and the runner aborts the remainder of the file, which is
+ * why the suite's total test count moved between runs (610 / 524 / 484).
+ *
+ * It is a race inside a single process, so it is invisible on a fast machine and
+ * reproducible on a slower one — it surfaced only when the suite first ran on a
+ * second machine. Serial execution and a raised ulimit do not touch it.
+ *
+ * So cleanup() now only *registers* the temp dir. Handles close and dirs are
+ * removed once, at exit, when nothing can still be in flight. Tests that need
+ * true mid-file isolation should make a fresh makeTestDb() rather than reusing
+ * one across cases — which they already do.
  */
 
 import Database from "better-sqlite3";
@@ -23,6 +42,25 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { bootstrapSchema } from "../models/database.js";
+
+/** Everything awaiting teardown. Drained once, at exit. */
+const pending = new Set();
+let exitHookInstalled = false;
+
+function installExitHook() {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  // 'exit' only permits synchronous work, which is all we need: better-sqlite3
+  // close() and fs.rmSync() are both sync. Errors are swallowed — a failed temp
+  // cleanup must never be the reason a green test file reports failure.
+  process.on("exit", () => {
+    for (const entry of pending) {
+      try { entry.db.close(); } catch { /* already closed */ }
+      try { fs.rmSync(entry.dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+    pending.clear();
+  });
+}
 
 /**
  * Create a fully-seeded temp database.
@@ -41,13 +79,20 @@ export function makeTestDb({ prefix = "scoop-test-" } = {}) {
 
   bootstrapSchema(db);
 
+  const entry = { db, dir };
+
   return {
     db,
     dir,
     path: dbPath,
+    /**
+     * Mark this DB for teardown. Idempotent and safe to call mid-file: it does
+     * NOT close the handle, so late-arriving async work still finds an open
+     * connection instead of throwing after the test has ended. See the header.
+     */
     cleanup() {
-      try { db.close(); } catch { /* already closed */ }
-      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      installExitHook();
+      pending.add(entry);
     },
   };
 }
