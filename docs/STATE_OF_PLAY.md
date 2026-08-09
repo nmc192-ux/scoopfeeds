@@ -8,11 +8,15 @@ three checkouts agree, run `git fetch && git status -sb` on the Mac and on `/opt
 - Every flag, default, and prod value: [`docs/reference/env_reference.md`](reference/env_reference.md)
 - How work is run (gates, COW discipline): [`docs/agentic-workflow.md`](agentic-workflow.md)
 - Decision drift since May: [`docs/strategy/decisions_log_amendments_2026-07.md`](strategy/decisions_log_amendments_2026-07.md)
+- **Where the strategic plan stands now:** [`docs/strategy/strategic_plan_v6_delta_2026-08.md`](strategy/strategic_plan_v6_delta_2026-08.md) — read before v6
+- Code-vs-docs reconciliation (2026-08): [`docs/audits/code_vs_docs_reconciliation_2026-08.md`](audits/code_vs_docs_reconciliation_2026-08.md)
 - Phase A exit-criteria correction (Jul 2026): [`docs/phases/phase_a_exit_criteria_correction_2026-07.md`](phases/phase_a_exit_criteria_correction_2026-07.md)
 
 ## Where things stand
 
-**Shipped and default (reader-visible):** A2 restructured dossier · A6 occurrence timeline
+**Shipped and default (reader-visible):** Tracker Auto-Detection Engine (all 8 detectors,
+cron + API + `/trackers` page — previously mis-filed as deferred) · 10-locale UI with RTL for
+ur/ar (previously described as Phase E) · A2 restructured dossier · A6 occurrence timeline
 (one row per occurrence, recency-pinned, rows link to the article) · storylines/ANGLES ·
 Wave-2 unified affinity (treadmill dead) · gate-(a) LLM cost rails · timeline-writer
 starvation fix.
@@ -39,16 +43,34 @@ command; nothing documents a schedule, an off-site copy, or a restore path. The 
 is one SQLite file on one VPS. Deliverable: `docs/ops/runbooks/backup_restore.md`, a scheduled
 backup with an off-site target, and **one restore drill actually performed and recorded**.
 Un-drilled backups are folklore.
-- **I2. Uptime alerting on `/api/healthz`** `[queued]` — nothing pages anyone when prod dies.
-The record: a 45-minute Caddy port outage, a worker on month-old code for a week, a dead
-YouTube token logged as healthy for weeks. `/api/healthz` now reports `degraded` state
-(PR #2), so there is something worth watching. Deliverable: an external check hitting it on
-an interval, alerting to Slack, plus the runbook entry for what to do when it fires.
+- **I2. Finish the monitoring wiring** `[queued]` — **partly built already.**
+`backend/src/services/heartbeatPing.js` implements external dead-man switches for the social,
+video and ingestion cycles (start/success/fail triple, alert state deliberately delegated to
+Healthchecks.io). What is NOT done: (a) the checks do not exist in any monitoring account and
+the three env vars — `SOCIAL_HEARTBEAT_PING_URL`, `VIDEO_HEARTBEAT_PING_URL`,
+`INGESTION_HEARTBEAT_PING_URL` — are unset, so every ping is currently a no-op by design;
+(b) nothing watches the **web** process at all — the heartbeats cover scheduled cycles, not
+"is the site up", which is what the 45-minute Caddy outage was; (c) no runbook entry for what
+to do when one fires. Deliverable: the three checks created and their URLs set in prod `.env`,
+one uptime check on `/api/healthz` (which now reports `degraded`), alerts landing in Slack,
+and `docs/ops/runbooks/monitoring.md`. **Ground against the existing module first — do not
+rebuild it.**
 - **I3. Run the test suite in CI** `[queued]` — `execution_method_v1.md` §6 Level 1 states
 "If CI is red, work doesn't merge", but CI runs only install, frontend build, and
 `node --check`. The 464-test suite runs on whichever laptop remembers. This is how 64
 failures sat on `main` for weeks. Deliverable: `node --test "src/**/*.test.js"` in
 `.github/workflows/node.js.yml`, green, with the docs' claim made true.
+
+- **I4. Close the gate (a) LLM budget bypass** `[queued]` — three services call Gemini
+directly without `consumeLlmBudget`: `videoSpecWriter.js:85`, `scriptWriter.js:64`,
+`igSummaryService.js:37`. Investigated 2026-08 (`code_vs_docs_reconciliation_2026-08.md`):
+**oversight, not design** — the 2026-07-15 rail commit swept two call sites and there were
+three; the two later services copied the module's model-pin helpers but not the budget call.
+`videoSpecWriter` is the biggest single-call spender (8192 output tokens vs 512-1536 metered)
+and is not memoized, so a rejected candidate is re-paid hourly. Deliverable: budget call at
+each of the three sites tagged distinctly, spec-rejection memoized per article, and
+`getLlmBudgetStatus()` (currently **zero callers**) surfaced on `/scoop-ops` — an uncounted
+rail with no readout is how this recurs.
 
 ## Open items — roughly in priority order
 
@@ -87,23 +109,49 @@ founder topic inbox.
 - **Rebrand (Decision 9 amended)** — "editorial disruption" direction locked; asset
 production in progress; name and handles unchanged.
 
+## Resolved 2026-08 (see the v6 delta)
+
+- **Telegram — dropped.** No backend code ever existed; the July amendment recorded it as
+unstable in Pakistan. The three Phase B exit criteria and the ≥5,000/≥25,000 subscriber
+targets that named it are void. Web push + email digest carry the free-tier role.
+- **Source-matrix criterion — rewritten** to "≥150 active sources with a populated
+`quality_score`". The 17×10×10 taxonomy had zero of three axes in the schema; it moves to
+Deferred below rather than remaining an assumed-done axis.
+
 ## Deferred capabilities — deliberate, not forgotten (Decision 34)
 
 Parked behind graph cleanup; each re-opens with a fresh kickoff brief once Wave 3 and
 machine-event quarantine ship:
 
 - **Source matrix expansion** (~110 active vs ≥150 Phase B target) + onboarding workflow
-- **Tracker Auto-Detection Engine** and tracker surfaces
 - **Breaking news engine** and alert engine v1 (channel mix under review — Decision 13 flag)
 - **Newsletter products**
 - **Scoop search** (internal upgrade, Brave preview)
 - **Multi-source predictions** (blocked until the *existing* single-source module is
 trustworthy — open item 1)
+- **Source-matrix taxonomy** (17 categories × 10 regions × 10 types) — no axis exists in the
+schema today. Region is the highest-value slice if this re-opens.
+- **Source discovery / enrichment / editorial-review services** (Phase B brief §3.1, §3.2,
+§3.4) — the Decision-16 weekly onboarding loop. No code.
+- **Op-ed aggregation MVP** — exit criterion "op-eds on ≥80% of major events". No
+ideological-tagging or op-ed-ingest code.
+- **Track 2 architectural criteria** (§8.2: skill-contract docs, lint-enforced skill
+boundaries, image/video isolation POC). `backend/src/skills/` contains only `scoring/`.
+- **Track 3 performance sprints 0–3** (Cache-Control immutable, CDN edge, s-maxage/SWR).
+
+*The five above were surfaced by the 2026-08 reconciliation: required by the plan, absent
+from code, and absent from this list. Deferring is a decision; forgetting is not.*
 
 ## Known-good but worth watching
 
 - **Narrow-title corollary** — third live sighting ("G.O.P. Boxed In…" titling a 300-article
 event). Facet structure can detect it; treatment deferred to A5 v2 (matcher-adjacent).
-- **Two config hazards** in prod `.env`: a duplicated `STORYLINE_ENABLED`, and
-`EVENT_ENTITY_MAX_CATSPAN` read with different defaults in two modules. Both documented in
-the env reference; neither changed.
+- **One config hazard** in prod `.env`: a duplicated `STORYLINE_ENABLED` (lines 53/59).
+Documented in the env reference; unchanged. Needs eyes on the prod file — the code side is
+clean (exactly one reader). The `EVENT_ENTITY_MAX_CATSPAN` hazard was **resolved 2026-07-20**
+by splitting the signature path onto its own `EVENT_SIGNATURE_MAX_CATSPAN`.
+- **`GEMINI_GENERATION_MODEL` has two different code defaults** across six call sites —
+`gemini-2.5-flash` in `llmQueue.js:183`/`analysisService.js:47`/`liveEvents.js:42`,
+`gemini-3.1-flash-lite` in `videoSpecWriter.js:82`/`igSummaryService.js:35`/`scriptWriter.js:62`.
+Prod's single line masks it; without it the platform runs two generation models at once.
+Same bug class as the catspan hazard.

@@ -1,7 +1,7 @@
 # Decisions Log — Amendments, July 2026
 
 **Document type:** Decisions Log addendum
-**Applies to:** Decisions Log v1 (31 decisions)
+**Applies to:** Decisions Log v1 (32 decisions, incl. Decision 32 Embedding Provider added July 2026)
 **Owner:** DrJ
 **Last updated:** July 2026
 **Status:** Active
@@ -44,13 +44,16 @@
 **Was:** consistent core voice — informed, data-first, regionally aware, never partisan, never sensationalized (wire-adjacent neutrality implied everywhere).
 **Now:** unchanged for text surfaces (site, dossiers, briefs, social text posts). For **long-form video narration**, the voice carries an explicit point of view — analytical, context-driven, Vox-style — while remaining data-grounded, non-partisan in the party-political sense, and never sensationalized. A point of view is an editorial stance on *what matters and why*, not advocacy.
 **Rationale:** pure wire-service neutrality does not work as long-form video; the format requires a narrator with a perspective.
-**Risk note:** raises the geopolitical-content risk from the register; mitigation is the human review gate on all video scripts (Decision 20) plus the editorial boundary in Decision 32 below.
+**Risk note:** raises the geopolitical-content risk from the register; mitigation is the human review gate on all video scripts (Decision 20) plus the editorial boundary in Decision 35 below.
 
 ---
 
 ## New decisions
 
-### Decision 32 — Video editorial boundary (2026-07-19)
+### Decision 35 — Video editorial boundary (2026-07-19)
+
+*(Renumbered 2026-08 from 32: Decisions Log v1 had already appended its own Decision 32,
+Embedding Provider. Two documents assigned the same number.)*
 
 Skip Pakistani domestic and political news in video content unless DrJ specifically directs otherwise. Focus on global audiences and topics of wider public interest.
 **Rationale:** audience strategy (global monetization) and founder risk posture given DrJ's public role.
@@ -65,6 +68,28 @@ Use the existing ScoopFeeds brand for the video channel; no separate video sub-b
 Event-graph integrity and dossier quality (A2/A5/A6, cleanup waves, machine-event quarantine) take precedence over the Phase B feature list (trackers, breaking news engine, op-ed aggregation, alert engine, Scoop portal, source expansion to ≥150). Those capabilities are **deferred, not cancelled**; each is unblocked as the graph settles.
 **Rationale:** a comprehension platform whose events are contaminated cannot credibly layer features on top; reader-visible defects (wrong markets, porous merges, machine-slug events) are trust-destroying in a way missing features are not.
 **Review trigger:** when Wave 3 + machine-event quarantine ship, re-open Phase B scope with a fresh kickoff brief.
+
+**Sequencing note — why video is exempt (added 2026-08).** D34 defers the Phase B feature
+list while D19 pulled video *forward*, which reads as a contradiction. It is not, for two
+reasons, and both are conditions rather than opinions:
+
+1. **Video does not touch the event graph.** The pipeline reads published articles and
+   produces scripts, audio and uploads; it neither writes to nor depends on the promoter,
+   the affinity measure, or the dossier. Nothing in D34's rationale — contaminated events
+   making layered features untrustworthy — applies to it. The features D34 defers (trackers,
+   alerts, op-eds, Scoop portal, source expansion) all consume the graph. Video does not.
+2. **Distribution channels compound with time; features do not.** A YouTube channel started
+   in July is worth more in December than the same channel started in December, because
+   subscriber base, watch history and algorithmic standing accrue. A feature shipped in July
+   is worth roughly what it is worth in December. Where two pieces of work are independent,
+   the one whose value compounds should start earlier — even when the other is more urgent.
+
+**The condition on this exemption:** it holds only while video stays graph-independent. If
+the video pipeline ever begins selecting topics *from the event graph* — using events,
+prominence or clusters to choose what to cover — it inherits D34's constraint and the
+exemption lapses.
+
+**Review trigger:** any change that makes video selection read from `events`.
 
 ---
 
