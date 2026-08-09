@@ -31,8 +31,9 @@
  * reproducible on a slower one — it surfaced only when the suite first ran on a
  * second machine. Serial execution and a raised ulimit do not touch it.
  *
- * So cleanup() now only *registers* the temp dir. Handles close and dirs are
- * removed once, at exit, when nothing can still be in flight. Tests that need
+ * So cleanup() now only *registers* the temp dir, which is removed at exit.
+ * The handle is never explicitly closed: process exit reclaims it, and calling
+ * a native addon from an exit hook aborts the process outright. Tests that need
  * true mid-file isolation should make a fresh makeTestDb() rather than reusing
  * one across cases — which they already do.
  */
@@ -54,8 +55,14 @@ function installExitHook() {
   // close() and fs.rmSync() are both sync. Errors are swallowed — a failed temp
   // cleanup must never be the reason a green test file reports failure.
   process.on("exit", () => {
+    // NOTHING NATIVE IN HERE. better-sqlite3's close() is an addon call, and an
+    // addon invoked during environment teardown aborts the process with
+    //   Assertion failed: (env) != nullptr
+    // which surfaces as SIGABRT and a whole-file `'test failed'` with no stack —
+    // the same symptom this helper exists to avoid. The handle needs no explicit
+    // close: process exit reclaims the descriptor. Only the temp dir is removed,
+    // and fs.rmSync is not an addon.
     for (const entry of pending) {
-      try { entry.db.close(); } catch { /* already closed */ }
       try { fs.rmSync(entry.dir, { recursive: true, force: true }); } catch { /* best effort */ }
     }
     pending.clear();

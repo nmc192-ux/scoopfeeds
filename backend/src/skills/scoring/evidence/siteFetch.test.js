@@ -169,6 +169,8 @@ test("openSite — no editorial domain → unavailable handle", async () => {
 // last case returns lets a straggler land on a closed DB — which node:test
 // reports as a whole-file `'test failed'` with no stack.
 process.on("exit", () => {
-  try { db.close(); } catch { /* already closed */ }
+  // No db.close() here: better-sqlite3 is a native addon and calling one during
+  // environment teardown aborts with `Assertion failed: (env) != nullptr`.
+  // Process exit reclaims the handle; only the temp dir needs removing.
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
 });
