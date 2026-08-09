@@ -155,6 +155,43 @@ const dispatchSocialCycle = () => dispatchCycle({
   inProcess: () => runSocialCycleWithTimeout(), label: "social posting",
 });
 
+// ─── The four cycles that used to run IN THIS PROCESS ───────────────────────
+//
+// THIS IS THE FIX FOR THE OUTAGE, NOT A TIDY-UP. Each of these did real work —
+// network fetches, embedding passes, bulk DB writes — synchronously inside the
+// scheduler, blocking the event loop that node-cron's timers live on. node-cron
+// 3.0.3 re-arms with a fixed setTimeout(…, 1000) AFTER the work and matches on
+// an exact one-second window, so a blocked loop pushes every OTHER cron's tick
+// out of its window. Measured: at a ~3s effective tick period every pattern
+// fires ZERO times, not fewer times.
+//
+// Production confirmed it to the tick: 18h of logs, "video autopost" fired 18/18
+// and every other dispatch fired 0. Video autopost was the only cron whose
+// minute carried no heavy in-process work.
+//
+// `inProcess: null` on all four, deliberately. There is no degraded mode where
+// running these in the scheduler is acceptable — that IS the bug. With BullMQ
+// off they log and skip.
+const dispatchAnalysisCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.analysis, job: JOB_NAMES.analysisRefresh,
+  inProcess: null, label: "analysis refresh",
+});
+
+const dispatchEventsCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.realityIndex, job: JOB_NAMES.eventsRefresh,
+  inProcess: null, label: "events refresh",
+});
+
+const dispatchPolymarketCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.realityIndex, job: JOB_NAMES.marketsPolymarket,
+  inProcess: null, label: "polymarket sync",
+});
+
+const dispatchUsgsCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.realityIndex, job: JOB_NAMES.geoUsgs,
+  inProcess: null, label: "usgs sync",
+});
+
 // How long a dispatch may stay pending before we say so. Longer than the
 // per-await deadline inside enqueueSingletonJob, so a hang THERE surfaces as a
 // rejection naming the step, and this only fires for a hang somewhere else.
@@ -243,22 +280,53 @@ export function startScheduler() {
   scheduleTimer(runEventsCycle, 90_000);
   // Delay first analysis pass — 5 min after startup, needs ingested articles.
   scheduleTimer(runAnalysisCycle, 5 * 60 * 1000);
-  scheduleCron("*/30 * * * *", () => runDispatch(() => dispatchIngestionCycle(), "news ingestion"));
+  // ─── MINUTE OFFSETS ARE LOAD-BEARING — read this before changing one ──────
+  //
+  // Every dispatch cron below sits on a minute that carries NO in-process work.
+  // That is not aesthetic. node-cron 3.0.3 re-arms each task with a fixed
+  // setTimeout(…, 1000) AFTER the callback returns and matches on an exact
+  // one-second window, so a cron sharing its minute with a cycle that blocks
+  // the event loop has its own tick pushed out of that window — permanently,
+  // because the drift accumulates and never self-corrects. Measured: at a ~3s
+  // effective tick period EVERY pattern fires zero times.
+  //
+  // The collision that caused the 43h ingestion outage (verified in prod: 18h of
+  // logs, video autopost 18/18, everything else 0):
+  //
+  //   :00  ingestion + video-ingestion + enrichment dispatches, AND
+  //        runEventsCycle + runAnalysisCycle + runPolymarketCycle + runUsgsCycle
+  //   :30  ingestion + enrichment dispatches, AND analysis + polymarket + usgs
+  //   :15  social + enrichment dispatches, AND polymarket
+  //   :45  social + enrichment dispatches, AND polymarket
+  //   :07  video autopost — the ONLY dispatch with no heavy neighbour. Survived.
+  //
+  // Those four heavy cycles now run in the WORKER, so the collision is gone at
+  // the root. These offsets are the second layer: they keep dispatches off every
+  // minute occupied by the ~19 in-process crons that remain in this process.
+  //
+  // Minutes with NO hourly in-process cron, computed from this file:
+  //   1,2,6,9,11,12,17,22,25,26,28,31,32,36,39,42,47,52,53,55,56,57,58,59
+  // If you move a cron here, recompute that set — scheduler.cronCollision.test.js
+  // asserts the invariant and will fail you rather than let it drift.
+  scheduleCron("2,32 * * * *",  () => runDispatch(() => dispatchIngestionCycle(), "news ingestion"));
   // Social posting, INDEPENDENT of ingestion. Offset to 15/45 rather than 0/30
   // so it runs a quarter-hour after ingestion normally lands — fresh articles
   // are available when it selects — while remaining completely unaffected if
   // that ingestion tick failed, hung, or never dispatched at all. The adapters'
   // own minIntervalMs still decides whether any platform actually posts.
   if (String(process.env.ENABLE_AUTO_SOCIAL ?? "true").toLowerCase() !== "false") {
+    // 15,45 is clear ONLY because runPolymarketCycle moved to the worker — it
+    // used to sit here and is what took social down. Not 17,47: minute 17
+    // carries runWelcomeSequenceCycle, which the first pass of this map missed.
     scheduleCron("15,45 * * * *", () => runDispatch(() => dispatchSocialCycle(), "social posting"));
     logger.info(`📣 Social posting cron registered (15,45 — independent of ingestion) — platforms=${listEnabledPlatforms().length}`);
   } else {
     logger.info("📣 Social posting cron NOT registered (ENABLE_AUTO_SOCIAL=false)");
   }
-  scheduleCron("0 * * * *",    () => runDispatch(() => dispatchVideoCycle(), "video ingestion"));
-  scheduleCron("*/15 * * * *", () => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"));
-  scheduleCron("0 * * * *",    () => runEventsCycle());
-  scheduleCron("*/30 * * * *",  () => runAnalysisCycle()); // every 30 min (latest-news cadence; was 2h)
+  scheduleCron("9 * * * *",     () => runDispatch(() => dispatchVideoCycle(), "video ingestion"));
+  scheduleCron("6,22,36,52 * * * *", () => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"));
+  scheduleCron("28 * * * *",   () => runDispatch(() => dispatchEventsCycle(), "events refresh"));
+  scheduleCron("25,55 * * * *", () => runDispatch(() => dispatchAnalysisCycle(), "analysis refresh")); // 30-min cadence preserved
   // ─── Video generation crons (in-process) ───────────────────────────────
   // Disabled in production because Hostinger Cloud Hosting blocks subprocess
   // execution at the kernel level (RLIMIT_NPROC). Rendering is delegated to
@@ -273,7 +341,7 @@ export function startScheduler() {
   // missed at 14:00 is simply retried at 15:00 rather than lost for the day.
   // QUEUE_NAMES.videoRender, never QUEUE_NAMES.video — that one is YouTube
   // ingestion and a job on it would run fetchAllYouTube instead.
-  scheduleCron("7 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "video autopost"));
+  scheduleCron("12 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "video autopost")); // moved off :07 (shared with runMarketMatcherCronCycle)
   logger.info(`🎬 Video autopost cron registered (hourly; gates decide) — enabled=${process.env.VIDEO_AUTOPOST_ENABLED === "1"}`);
 
   const inProcessVideoEnabled = String(process.env.ENABLE_INPROCESS_VIDEO_CRON || "").toLowerCase() === "true";
@@ -385,7 +453,7 @@ export function startScheduler() {
   // Polymarket fetch-and-snapshot every 15 min. Disable with
   // ENABLE_REALITY_INDEX=false (e.g. on a cold deploy you don't want chatty).
   if (String(process.env.ENABLE_REALITY_INDEX ?? "true").toLowerCase() !== "false") {
-    scheduleCron("*/15 * * * *", () => runPolymarketCycle());
+    scheduleCron("11,26,42,57 * * * *", () => runDispatch(() => dispatchPolymarketCycle(), "polymarket sync"));
     scheduleCron("7,37 * * * *", () => runMarketMatcherCronCycle());       // every 30 min, offset
     scheduleCron("0 4 * * *",    () => runSnapshotDownsamplerCycle());     // daily 4 AM
     // Phase 2 — Event Tracker
@@ -407,7 +475,7 @@ export function startScheduler() {
     // through the same cluster→event→matcher pipeline as RSS-ingested ones.
     scheduleCron("8,38 * * * *",       () => runGdeltCycle());             // every 30 min, between RSS ticks
     // Phase 5 — USGS significant-earthquakes feed → events with geo_lat/lng
-    scheduleCron("*/10 * * * *",       () => runUsgsCycle());               // every 10 min
+    scheduleCron("1,12,22,32,42,52 * * * *", () => runDispatch(() => dispatchUsgsCycle(), "usgs sync")); // 10-min cadence preserved
     // Phase 5 — NOAA active weather alerts (Severe + Extreme) → events
     scheduleCron("4,14,24,34,44,54 * * * *", () => runNoaaCycle());          // every 10 min, +4 offset
     // Phase 5 — ACLED conflict events (last 24h, ≥1 fatality) → events.
@@ -473,7 +541,7 @@ export function stopScheduler() {
 
 // ─── Reality Index cycles ──────────────────────────────────────────────────
 
-async function runPolymarketCycle() {
+export async function runPolymarketCycle() {
   if (isPolymarketRun) { logger.warn("⏸️ Polymarket cycle already running"); return null; }
   isPolymarketRun = true;
   lastPolymarketRun = new Date().toISOString();
@@ -639,7 +707,7 @@ let lastBriefResult = null;
 let isUsgsRun = false;
 let lastUsgsRun = null;
 let lastUsgsResult = null;
-async function runUsgsCycle() {
+export async function runUsgsCycle() {
   if (isUsgsRun) { logger.warn("⏸️ USGS cycle already running"); return null; }
   isUsgsRun = true;
   lastUsgsRun = new Date().toISOString();
@@ -837,7 +905,8 @@ async function runAnalystBriefCycleWrapped() {
 }
 
 // Suppress unused-warning while exposing for ad-hoc /scoop-ops triggers later.
-export { runPolymarketCycle, runMarketMatcherCronCycle, runSnapshotDownsamplerCycle, snapshotActiveMarkets,
+// runPolymarketCycle is exported at its declaration now (the worker imports it).
+export { runMarketMatcherCronCycle, runSnapshotDownsamplerCycle, snapshotActiveMarkets,
          runEventPromoterCronCycle, runTrackerDetectorCronCycle, runActorExtractorCycle,
          runSentimentScoreCycle, runRealityIndexComposeCycle, runAnomalyScanCycle,
          runWatchlistPushCycle, runGdeltCycle };
@@ -888,7 +957,7 @@ export async function runVideoPublishCycle() {
   }
 }
 
-async function runEventsCycle() {
+export async function runEventsCycle() {
   if (isEventsRun) return;
   isEventsRun = true;
   lastEventsRun = new Date().toISOString();
@@ -901,7 +970,7 @@ async function runEventsCycle() {
   }
 }
 
-async function runAnalysisCycle() {
+export async function runAnalysisCycle() {
   if (isAnalysisRun) return;
   isAnalysisRun = true;
   lastAnalysisRun = new Date().toISOString();
