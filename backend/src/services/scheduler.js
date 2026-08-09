@@ -1,4 +1,5 @@
 import cron from "node-cron";
+import v8 from "v8";
 import { fetchAllSources } from "./rssFetcher.js";
 import { fetchAllYouTube } from "./videoFetcher.js";
 import { enrichBatch } from "./contentEnricher.js";
@@ -192,6 +193,14 @@ const dispatchUsgsCycle = () => dispatchCycle({
   inProcess: null, label: "usgs sync",
 });
 
+// The fifth, and the one caught red-handed: MEASURED holding the scheduler's
+// event loop synchronously for 10,245ms. At a one-second match window that
+// swallows ten cron ticks, every time it runs, twice an hour.
+const dispatchEventPromoterCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.realityIndex, job: JOB_NAMES.eventsPromote,
+  inProcess: null, label: "event promoter",
+});
+
 // How long a dispatch may stay pending before we say so. Longer than the
 // per-await deadline inside enqueueSingletonJob, so a hang THERE surfaces as a
 // rejection naming the step, and this only fires for a hang somewhere else.
@@ -279,7 +288,17 @@ const LOOP_STALL_MS = () => Number.parseInt(process.env.LOOP_STALL_MS || "", 10)
 // in milliseconds instead of waiting a minute.
 const LOOP_LAG_WINDOW_MS = () => Number.parseInt(process.env.LOOP_LAG_WINDOW_MS || "", 10) || 60_000;
 
-let cronInFlight = null;   // { name, startedAt } — read by the lag monitor
+let cronInFlight = null;   // { name, startedAt } — the SYNCHRONOUS holder
+const asyncInFlight = new Set();  // entries alive for the whole async lifetime
+// Ring of recently-settled cycles. A cycle that blocks the loop finishes in a
+// MICROTASK before the monitor's next macrotask tick, so by sample time it is
+// already gone — "nothing in flight" is then true and useless. What the
+// investigation needs is who ran DURING the gap, not who is running after it.
+const recentlyRan = [];
+function rememberRan(entry, finishedAt) {
+  recentlyRan.push({ ...entry, finishedAt });
+  if (recentlyRan.length > 30) recentlyRan.shift();
+}
 
 /** Derive a readable name once, at registration, from the callback source. */
 function cronName(task, expression) {
@@ -294,6 +313,16 @@ function instrumented(name, task) {
     const startedAt = Date.now();
     const prev = cronInFlight;
     cronInFlight = { name, startedAt };
+    // ALSO tracked for the whole ASYNC lifetime, not just the synchronous part.
+    //
+    // cronInFlight alone cleared the moment `task()` returned, so a cycle still
+    // burning CPU inside .then() continuations reported as "nothing in flight" —
+    // which is exactly what the 18.6-minute event said, and it pointed the
+    // investigation at the host. With the scheduler measured at 103% CPU while
+    // the worker idles, "nothing in flight" has to be able to name an async
+    // cycle or it is worse than no attribution at all.
+    const entry = { name, startedAt };
+    asyncInFlight.add(entry);
     let out;
     try {
       out = task();
@@ -312,6 +341,8 @@ function instrumented(name, task) {
     }
     if (out && typeof out.then === "function") {
       const settle = (verb) => {
+        asyncInFlight.delete(entry);
+        rememberRan(entry, Date.now());
         const totalMs = Date.now() - startedAt;
         if (totalMs >= CRON_SLOW_MS()) {
           logger.info(`⏳ cron ${name} ${verb} after ${totalMs}ms`);
@@ -321,8 +352,31 @@ function instrumented(name, task) {
         settle("FAILED");
         logger.error(`❌ cron ${name} rejected: ${err?.message || err}`);
       });
+    } else {
+      asyncInFlight.delete(entry);
+      rememberRan(entry, Date.now());
     }
     return out;
+}
+
+/**
+ * Who to blame for a gap spanning [gapStart, now].
+ *
+ * In-flight first, then anything that OVERLAPPED the gap and has since settled.
+ * Only if both are empty is "nothing in flight" a real answer — and then it
+ * means the process genuinely was not executing our code.
+ */
+function describeInFlight(now, gapStart = now) {
+  if (cronInFlight) return `${cronInFlight.name} (synchronous, ${now - cronInFlight.startedAt}ms)`;
+  const open = [...asyncInFlight].sort((a, b) => a.startedAt - b.startedAt);
+  if (open.length) return open.map((e) => `${e.name} (async, ${now - e.startedAt}ms)`).join(", ");
+  const overlapped = recentlyRan.filter((e) => e.finishedAt >= gapStart && e.startedAt <= now);
+  if (overlapped.length) {
+    return overlapped
+      .map((e) => `${e.name} (ran during the gap, ${e.finishedAt - e.startedAt}ms)`)
+      .join(", ");
+  }
+  return "nothing in flight and nothing ran during the gap";
 }
 
 function scheduleCron(expression, task) {
@@ -371,11 +425,14 @@ let lagMonitor = null;
  * falls in a skipped second does not fire. Drift ≥1s/min means ticks are being
  * lost continuously, whatever the max says.
  */
+const heapLimitBytes = v8.getHeapStatistics().heap_size_limit;
+
 function startLoopLagMonitor() {
   if (lagMonitor) return;
   let expected = Date.now() + 1000;
   let samples = [];
   let windowStart = Date.now();
+  let lastCpu = process.cpuUsage();
 
   const pct = (sorted, p) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] : 0;
 
@@ -386,12 +443,44 @@ function startLoopLagMonitor() {
     samples.push(lateBy);
 
     if (lateBy >= LOOP_STALL_MS()) {
-      const culprit = cronInFlight
-        ? `${cronInFlight.name} (in flight ${now - cronInFlight.startedAt}ms)`
-        : "nothing in flight — the stall came from OUTSIDE the cron path " +
-          "(synchronous SQLite, a detached promise, or CPU contention from another container)";
-      logger.error(`🚨 EVENT LOOP STALLED ${lateBy}ms — cron ticks in that window were missed. In flight: ${culprit}`);
+      // ─── FREEZE vs LAG: measured, not guessed ─────────────────────────────
+      //
+      // These are different events and were being reported as one. A 1,114,844ms
+      // "stall" with 15 samples in 1130s is not a late timer — the process was
+      // not running at all. Calling that "event loop stalled" points the
+      // investigation inward, at code, when nothing in the process was executing.
+      //
+      // CPU TIME IS THE DISCRIMINATOR. process.cpuUsage() counts only time this
+      // process was actually ON a core:
+      //   Δcpu ≈ Δwall  → the process BURNED the time. Ours. Look at the code.
+      //   Δcpu ≈ 0      → the process was NOT SCHEDULED. Not ours. Look at the
+      //                   host: CPU contention from a sibling container, swap,
+      //                   cgroup throttling, or a hypervisor steal.
+      const cpu = process.cpuUsage();
+      const cpuDeltaMs = ((cpu.user - lastCpu.user) + (cpu.system - lastCpu.system)) / 1000;
+      // Against TOTAL elapsed wall time, not the excess. `lateBy` is only the
+      // overshoot past the 1000ms interval, so dividing by it reported 225% for
+      // a plainly CPU-bound block and would have mis-set the freeze threshold.
+      const elapsedMs = lateBy + 1000;
+      const onCpuPct = Math.round((cpuDeltaMs / elapsedMs) * 100);
+      const missedTicks = Math.max(0, Math.round(lateBy / 1000) - 1);
+      const culprit = describeInFlight(now, now - lateBy);
+
+      if (onCpuPct < 10) {
+        logger.error(
+          `🧊 PROCESS FROZEN for ${(lateBy / 1000).toFixed(1)}s — ${missedTicks} one-second ticks never ran. ` +
+          `This process used only ${cpuDeltaMs.toFixed(0)}ms of CPU across ${(elapsedMs / 1000).toFixed(1)}s (${onCpuPct}%), so it was ` +
+          `NOT SCHEDULED rather than busy: nothing in this process caused it. Look at host CPU contention ` +
+          `(a sibling container mid-render), swap, or cgroup throttling. In flight: ${culprit}.`
+        );
+      } else {
+        logger.error(
+          `🚨 EVENT LOOP STALLED ${lateBy}ms (${onCpuPct}% of it on CPU — this process burned it) — ` +
+          `${missedTicks} cron tick(s) missed. In flight: ${culprit}.`
+        );
+      }
     }
+    lastCpu = process.cpuUsage();
 
     if (now - windowStart >= LOOP_LAG_WINDOW_MS()) {
       const sorted = [...samples].sort((a, b) => a - b);
@@ -401,9 +490,26 @@ function startLoopLagMonitor() {
       // length — an absolute drift budget silently changes meaning when the
       // window does, which is its own class of measurement bug.
       const driftPerMin = driftMs / (windowMs / 60_000);
+      // A 1s sampler should produce ~1 sample per second. Far fewer means the
+      // process was NOT RUNNING for the difference — a freeze, not lag. The
+      // shortfall is stated rather than left to be noticed in the ratio.
+      const expectedSamples = Math.round(windowMs / 1000);
+      const missed = Math.max(0, expectedSamples - samples.length);
+      const mem = process.memoryUsage();
+      const heapPct = Math.round((mem.heapUsed / heapLimitBytes) * 100);
       const line =
-        `📊 loop lag ${samples.length} samples/${Math.round(windowMs / 1000)}s: p50=${pct(sorted, 0.5)}ms p95=${pct(sorted, 0.95)}ms ` +
-        `max=${sorted.at(-1)}ms · phase drift ${(driftPerMin / 1000).toFixed(1)}s/min`;
+        `📊 loop lag ${samples.length}/${expectedSamples} samples in ${Math.round(windowMs / 1000)}s: ` +
+        `p50=${pct(sorted, 0.5)}ms p95=${pct(sorted, 0.95)}ms max=${sorted.at(-1)}ms · ` +
+        `phase drift ${(driftPerMin / 1000).toFixed(1)}s/min` +
+        ` · rss ${Math.round(mem.rss / 1048576)}MB heap ${Math.round(mem.heapUsed / 1048576)}/` +
+        `${Math.round(heapLimitBytes / 1048576)}MB (${heapPct}%)` +
+        (missed > expectedSamples * 0.1
+          ? ` · ⚠️ ${missed} SAMPLES MISSING — the process was frozen, not merely late`
+          : "") +
+        // A heap near its limit means continuous major GCs: high CPU, long
+        // pauses, and the process is fully ON-CPU throughout — so the cpuUsage
+        // discriminator would say "we burned it" and still not say why.
+        (heapPct >= 85 ? ` · 🔥 HEAP AT ${heapPct}% OF LIMIT — GC thrash burns a core and freezes the loop` : "");
       // ≥1s of drift per minute means the tick sequence is skipping whole
       // seconds continuously, so one-second cron windows are being lost.
       if (driftPerMin >= 1000) {
@@ -630,7 +736,7 @@ export function startScheduler() {
     scheduleCron("7,37 * * * *", () => runMarketMatcherCronCycle());       // every 30 min, offset
     scheduleCron("0 4 * * *",    () => runSnapshotDownsamplerCycle());     // daily 4 AM
     // Phase 2 — Event Tracker
-    scheduleCron("13,43 * * * *", () => runEventPromoterCronCycle());       // every 30 min, offset
+    scheduleCron("13,43 * * * *", () => runDispatch(() => dispatchEventPromoterCycle(), "event promoter")); // 30 min, offset
     // Sprint 1.3.4 — Tracker Auto-Detection Engine. Runs 3 min after the
     // eventPromoter cron so promoted events are fresh when the detector
     // evaluates per-template triggers. Independent of timeline+actors below.
@@ -680,7 +786,7 @@ export function startScheduler() {
     // First run shortly after boot — Polymarket cold start.
     scheduleTimer(() => runDispatch(() => dispatchPolymarketCycle(), "polymarket sync (boot)"), 30_000);
     scheduleTimer(() => runMarketMatcherCronCycle(), 5 * 60 * 1000);
-    scheduleTimer(() => runEventPromoterCronCycle(), 8 * 60 * 1000);
+    scheduleTimer(() => runDispatch(() => dispatchEventPromoterCycle(), "event promoter (boot)"), 8 * 60 * 1000);
     // Sprint 1.3.4 — Tracker Detector first run ~11 min after boot, between
     // eventPromoter's 8-min boot pulse and the next on-the-hour :16 cron tick.
     scheduleTimer(() => runTrackerDetectorCronCycle(), 11 * 60 * 1000);
@@ -757,7 +863,7 @@ async function runSnapshotDownsamplerCycle() {
   catch (err) { logger.error("❌ Snapshot downsampler failed", { error: err.message }); return null; }
 }
 
-async function runEventPromoterCronCycle() {
+export async function runEventPromoterCronCycle() {
   if (isEventPromoterRun) { logger.warn("⏸️ Event promoter already running"); return null; }
   isEventPromoterRun = true;
   try {
@@ -1089,7 +1195,7 @@ async function runAnalystBriefCycleWrapped() {
 // Suppress unused-warning while exposing for ad-hoc /scoop-ops triggers later.
 // runPolymarketCycle is exported at its declaration now (the worker imports it).
 export { runMarketMatcherCronCycle, runSnapshotDownsamplerCycle, snapshotActiveMarkets,
-         runEventPromoterCronCycle, runTrackerDetectorCronCycle, runActorExtractorCycle,
+         runTrackerDetectorCronCycle, runActorExtractorCycle,
          runSentimentScoreCycle, runRealityIndexComposeCycle, runAnomalyScanCycle,
          runWatchlistPushCycle, runGdeltCycle };
 

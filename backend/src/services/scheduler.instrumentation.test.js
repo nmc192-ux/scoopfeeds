@@ -163,6 +163,127 @@ test("sustained lag is escalated to a warning naming the consequence", async () 
   }
 });
 
+// ─── Freeze vs lag ──────────────────────────────────────────────────────────
+//
+// Reported as one event, they are two. Production logged a 1,114,844ms "EVENT
+// LOOP STALLED" with 15 samples in 1130s — the process had not been RUNNING for
+// 18.6 minutes. Calling that a stalled loop points the investigation at code
+// when nothing in the process was executing.
+//
+// process.cpuUsage() is the discriminator: it counts only time actually spent
+// on a core. Burned it → ours. Didn't → the host descheduled us.
+
+test("a BUSY stall is attributed to this process", async () => {
+  // Δcpu ≈ Δwall: we burned the time, so the message must point at code.
+  process.env.LOOP_STALL_MS = "300";
+  const { startLoopLagMonitor, stopLoopLagMonitor } = __testing;
+  try {
+    const lines = await captureLogs(async () => {
+      startLoopLagMonitor();
+      await settle(1100);
+      // Must exceed the 1s sampling interval, or the timer is never actually
+      // late — a block that fits inside its own tick window delays nothing.
+      block(1700);             // real CPU work — spins a core
+      await settle(1100);
+      stopLoopLagMonitor();
+    });
+    const stalled = lines.find((l) => l.m.includes("EVENT LOOP STALLED"));
+    assert.ok(stalled, "a CPU-burning stall must be reported as a stall");
+    assert.match(stalled.m, /% of it on CPU — this process burned it/);
+    assert.equal(lines.some((l) => l.m.includes("PROCESS FROZEN")), false,
+      "burning CPU must NOT be misreported as a freeze");
+  } finally {
+    process.env.LOOP_STALL_MS = "80";
+    __testing.stopLoopLagMonitor();
+  }
+});
+
+test("a FREEZE is reported distinctly and points AWAY from this process", async () => {
+  // Δcpu ≈ 0 across a large wall-clock gap: the process was not scheduled.
+  // Simulated by advancing the monitor's notion of elapsed time without
+  // consuming CPU — which is what starvation looks like from inside.
+  process.env.LOOP_STALL_MS = "300";
+  const { startLoopLagMonitor, stopLoopLagMonitor } = __testing;
+  const realNow = Date.now;
+  try {
+    const lines = await captureLogs(async () => {
+      startLoopLagMonitor();
+      await settle(1100);
+      let jumped = false;
+      Date.now = () => (jumped ? realNow() + 20_000 : realNow());
+      jumped = true;           // 20s of wall clock, no CPU consumed
+      await settle(1100);
+      Date.now = realNow;
+      await settle(200);
+      stopLoopLagMonitor();
+    });
+    const frozen = lines.find((l) => l.m.includes("PROCESS FROZEN"));
+    assert.ok(frozen, "a no-CPU gap must be reported as a freeze, not a stall");
+    assert.match(frozen.m, /NOT SCHEDULED rather than busy/);
+    assert.match(frozen.m, /nothing in this process caused it/);
+    assert.match(frozen.m, /host CPU contention/);
+    assert.match(frozen.m, /ticks never ran/);
+  } finally {
+    Date.now = realNow;
+    process.env.LOOP_STALL_MS = "80";
+    __testing.stopLoopLagMonitor();
+  }
+});
+
+test("an ASYNC cycle still running is named — not reported as 'nothing in flight'", async () => {
+  // The hole that pointed the last investigation at the host. cronInFlight
+  // cleared the moment task() returned, so a cycle burning CPU in its .then()
+  // continuations reported as "nothing in flight" — which is exactly what the
+  // 18.6-minute event said, while docker stats later showed this process at
+  // 103% CPU and the worker idle.
+  process.env.LOOP_STALL_MS = "300";
+  const { startLoopLagMonitor, stopLoopLagMonitor, scheduleCron } = __testing;
+  try {
+    const lines = await captureLogs(async () => {
+      startLoopLagMonitor();
+      const t = scheduleCron("0 0 1 1 *", async () => {
+        await settle(10);
+        block(1800);          // CPU burned AFTER the synchronous part returned
+      });
+      t.now();
+      await settle(2600);
+      t.stop();
+      stopLoopLagMonitor();
+    });
+    const stall = lines.find((l) => l.m.includes("EVENT LOOP STALLED") || l.m.includes("PROCESS FROZEN"));
+    assert.ok(stall, "the stall must be reported");
+    assert.match(stall.m, /anonymous@0 0 1 1 \*/, "the async cycle must be NAMED");
+    assert.match(stall.m, /(async, \d+ms|ran during the gap, \d+ms)/,
+      "named either as still-running or as having overlapped the gap");
+    assert.equal(/nothing in flight/.test(stall.m), false,
+      "an async cycle burning CPU must never report as 'nothing in flight'");
+  } finally {
+    process.env.LOOP_STALL_MS = "80";
+    __testing.stopLoopLagMonitor();
+  }
+});
+
+test("the distribution reports heap pressure — GC thrash burns a core AND freezes the loop", async () => {
+  // cpuUsage alone would classify GC thrash as "we burned it" without saying
+  // why. Heap usage against the V8 limit is what names it.
+  process.env.LOOP_LAG_WINDOW_MS = "400";
+  const { startLoopLagMonitor, stopLoopLagMonitor } = __testing;
+  try {
+    const lines = await captureLogs(async () => {
+      startLoopLagMonitor();
+      await settle(1000);
+      stopLoopLagMonitor();
+    });
+    const dist = lines.find((l) => l.m.includes("📊 loop lag"));
+    assert.ok(dist);
+    assert.match(dist.m, /rss \d+MB/);
+    assert.match(dist.m, /heap \d+\/\d+MB \(\d+%\)/);
+  } finally {
+    delete process.env.LOOP_LAG_WINDOW_MS;
+    __testing.stopLoopLagMonitor();
+  }
+});
+
 // ─── The registration manifest ──────────────────────────────────────────────
 
 test("every registration is recorded with name AND expression", async () => {

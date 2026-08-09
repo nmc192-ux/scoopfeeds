@@ -60,6 +60,11 @@ services:
       SCOOP_PERSISTENT_DATA_DIR: /var/lib/scoop
     volumes:
       - scoop_data:/var/lib/scoop
+    # CPU weighting PARKED. cpu_shares 4096/512 was staged here to protect the
+    # scheduler from the worker's renders — then `docker stats` on the 2-core
+    # host read scheduler 103.14% / worker 0.12%. The scheduler is the CONSUMER,
+    # not the victim, so weighting in its favour protects it from nothing.
+    # Reinstate only if a reading ever shows the worker as the contender.
     stop_grace_period: 45s
     command: ["npm", "run", "start:scheduler"]
 
