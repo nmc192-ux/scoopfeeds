@@ -43,18 +43,24 @@ command; nothing documents a schedule, an off-site copy, or a restore path. The 
 is one SQLite file on one VPS. Deliverable: `docs/ops/runbooks/backup_restore.md`, a scheduled
 backup with an off-site target, and **one restore drill actually performed and recorded**.
 Un-drilled backups are folklore.
-- **I2. Finish the monitoring wiring** `[queued]` — **partly built already.**
-`backend/src/services/heartbeatPing.js` implements external dead-man switches for the social,
-video and ingestion cycles (start/success/fail triple, alert state deliberately delegated to
-Healthchecks.io). What is NOT done: (a) the checks do not exist in any monitoring account and
-the three env vars — `SOCIAL_HEARTBEAT_PING_URL`, `VIDEO_HEARTBEAT_PING_URL`,
-`INGESTION_HEARTBEAT_PING_URL` — are unset, so every ping is currently a no-op by design;
-(b) nothing watches the **web** process at all — the heartbeats cover scheduled cycles, not
-"is the site up", which is what the 45-minute Caddy outage was; (c) no runbook entry for what
-to do when one fires. Deliverable: the three checks created and their URLs set in prod `.env`,
-one uptime check on `/api/healthz` (which now reports `degraded`), alerts landing in Slack,
-and `docs/ops/runbooks/monitoring.md`. **Ground against the existing module first — do not
-rebuild it.**
+- **I2. Finish the monitoring wiring** `[queued]` — **the code is done; the wiring is not.**
+Re-grounded 2026-08 after `feat/deadman-switches` merged (`cc59772`). Built and live:
+`services/heartbeatPing.js` with start/success/fail on all three scheduled cycles —
+ingestion (`scheduler.js:1015,1055,1060`), social (`socialPublisher.js:757,783,785,802`),
+video (`videoAutopost.js:376,675,676`) — plus `uniformFailure` to catch the case a dead-man
+switch structurally misses (cycle green, every unit of work inside it failing). Documented in
+`env_reference.md:233-235`. Nothing further to build here.
+
+  What remains is **not code**: (a) the three checks do not exist in any monitoring account,
+so all three URLs are unset and every ping is a no-op — `env_reference` marks social
+*unverified* and video/ingestion *set at ship*, which needs confirming against the real prod
+`.env`; (b) **nothing watches the web process** — the switches cover scheduled cycles, not
+"is the site reachable", which is exactly what the 45-minute Caddy outage was.
+`/api/healthz` exists (`server.js:329`) and now reports `degraded`, so there is something
+worth polling; (c) `docs/ops/runbooks/` is still empty — no runbook says what to do when one
+fires. Deliverable: three Healthchecks-style checks created and their URLs confirmed in prod,
+one external uptime check on `/api/healthz`, alerts landing in Slack, and
+`docs/ops/runbooks/monitoring.md`. **Do not rebuild `heartbeatPing.js`.**
 - **I3. Run the test suite in CI** `[queued]` — `execution_method_v1.md` §6 Level 1 states
 "If CI is red, work doesn't merge", but CI runs only install, frontend build, and
 `node --check`. The 464-test suite runs on whichever laptop remembers. This is how 64
@@ -71,6 +77,16 @@ and is not memoized, so a rejected candidate is re-paid hourly. Deliverable: bud
 each of the three sites tagged distinctly, spec-rejection memoized per article, and
 `getLlmBudgetStatus()` (currently **zero callers**) surfaced on `/scoop-ops` — an uncounted
 rail with no readout is how this recurs.
+
+- **I5. SIGABRT in the test suite — identify the addon** `[queued]` — 6-9 files fail as a
+whole with no stack and `signal: SIGABRT`; subtests pass; the total test count varies between
+runs. Cause is `Assertion failed: (env) != nullptr` — a native addon called during environment
+teardown. Ruled out: concurrency, ulimit, `.env`, the Sentry profiler. Two attempted fixes did
+not resolve it (one *introduced* an instance of the same abort by calling `db.close()` from an
+exit hook). Reproduces on the Mac Mini build worker, not on the MacBook — it is timing
+dependent. **This blocks I3**: putting the suite in CI before this is fixed makes every PR go
+red intermittently. Next step is cheap: the native frames beneath `node::Assert` name the
+addon. Full context in `CLAUDE.md` under "Known-flaky".
 
 ## Open items — roughly in priority order
 

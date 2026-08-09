@@ -59,6 +59,37 @@ box (every failure a bare `SQLITE_ERROR`) because those tests built a temp DB wi
 creates. Fixed by the `bootstrapSchema()` ordering contract (issue #1); a failure now is
 probably yours.
 
+### Known-flaky: SIGABRT on a subset of test files (2026-08, UNRESOLVED)
+
+On some machines 6-9 test files fail as a whole with `'test failed'`, **no stack**, and
+`signal: SIGABRT`. Their individual subtests all pass; the file passes when run alone. The
+suite's total test count **varies between runs** (610 / 524 / 516 / 485 observed), because a
+straggler landing during a later test aborts the remainder of that file.
+
+Root cause, confirmed from the abort text: `Assertion failed: (env) != nullptr` in
+`node::Assert` — a **native addon called during environment teardown**. Which addon is not
+yet identified. Ruled out: test concurrency (`--test-concurrency=1` does not help), file
+descriptors (`ulimit -n 8192` does not help), missing `.env`, and
+`@sentry-internal/node-cpu-profiler` (identical on both machines, and it ships no Node 24 ABI
+build). Two fixes have already been made in this area and neither resolved it —
+`src/testing/testDb.js` no longer closes handles at all, precisely because doing so from an
+exit hook *caused* this same abort.
+
+**It is timing-dependent, so it reproduces on some machines and not others.** As of
+2026-08 the MacBook is green (610/610) and the Mac Mini build worker is not.
+
+**For /review: these failures are NOT caused by the PR under review.** Establish the baseline
+by running the suite on `main` first, and report the delta. A file in the list below failing
+is not evidence of a regression; a *new* file failing is.
+
+Commonly affected: `src/db/bootstrapOrder.test.js`, `src/services/videoAutopost.test.js`,
+`src/skills/scoring/evidence/{articleBodyPrepass,bylineCrossCheck,coiAndSeverity,
+judgmentOnPresence,ownership_2_4_a,pageDiscovery,primaryLinks,siteFetch,wikidataClient}.test.js`,
+`src/skills/scoring/runtime/founderReview.test.js`.
+
+Next diagnostic step: the native frames beneath `node::Assert` in the assertion output name
+the addon. Tracked as insurance item I5 in `docs/STATE_OF_PLAY.md`.
+
 **Never call `runMigrations()` directly to build a test DB** — use
 `makeTestDb()` from `src/testing/testDb.js`, which seeds the real base schema in the real
 order. `runMigrations()` on an unseeded DB now throws a named precondition error.
