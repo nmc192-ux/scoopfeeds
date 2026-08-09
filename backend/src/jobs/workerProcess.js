@@ -8,7 +8,10 @@ import {
 } from "../config/observability.js";
 import { getDbStatus } from "../models/database.js";
 import { logger } from "../services/logger.js";
-import { runEnrichCycle, runIngestionCycle, runVideoCycle } from "../services/scheduler.js";
+import {
+  runEnrichCycle, runIngestionCycle, runVideoCycle,
+  runAnalysisCycle, runEventsCycle, runPolymarketCycle, runUsgsCycle,
+} from "../services/scheduler.js";
 import { sweepAtStartup } from "../services/videoArtifacts.js";
 import { runVideoRenderCycle } from "../services/videoAutopost.js";
 import { runSocialCycleWithTimeout } from "../services/socialPublisher.js";
@@ -142,9 +145,47 @@ try {
       queueConcurrency.social,
       async () => runSocialCycleWithTimeout()
     );
+    // ─── The four cycles that used to block the scheduler's event loop ──────
+    //
+    // They ran in-process on the scheduler, doing network fetches and bulk DB
+    // writes synchronously — which pushed every cron sharing their minute out of
+    // node-cron's one-second match window and kept it out. Ingestion was dead 43
+    // hours behind that; prod logs showed video autopost firing 18/18 and every
+    // other dispatch 0, because :07 was the only minute with no heavy neighbour.
+    //
+    // Here they block a worker that has nothing to keep punctual, which is the
+    // point: the scheduler's only job is to be on time.
+    registerWorker(
+      QUEUE_NAMES.analysis,
+      JOB_NAMES.analysisRefresh,
+      queueConcurrency.analysis,
+      async () => runAnalysisCycle()
+    );
+    // Three jobs share the realityIndex queue and a concurrency of 1, so they
+    // serialise against each other — they contend for the same tables, and
+    // running them in parallel would trade a scheduler stall for lock contention.
+    registerWorker(
+      QUEUE_NAMES.realityIndex,
+      JOB_NAMES.eventsRefresh,
+      queueConcurrency.realityIndex,
+      async (job) => {
+        switch (job.name) {
+          case JOB_NAMES.eventsRefresh:     return runEventsCycle();
+          case JOB_NAMES.marketsPolymarket: return runPolymarketCycle();
+          case JOB_NAMES.geoUsgs:           return runUsgsCycle();
+          default:
+            // Loud rather than silent: an unrecognised job name means the queue
+            // and the consumer have drifted apart, and a silently-ignored job
+            // looks exactly like the outage this whole change exists to fix.
+            logger.error(`[${PROCESS_ROLE}] unhandled job on ${QUEUE_NAMES.realityIndex}: ${job.name}`);
+            return null;
+        }
+      }
+    );
 
     logger.info(`[${PROCESS_ROLE}] ready`, {
-      queues: [QUEUE_NAMES.ingestion, QUEUE_NAMES.video, QUEUE_NAMES.videoRender, QUEUE_NAMES.social, QUEUE_NAMES.enrichment],
+      queues: [QUEUE_NAMES.ingestion, QUEUE_NAMES.video, QUEUE_NAMES.videoRender, QUEUE_NAMES.social,
+               QUEUE_NAMES.enrichment, QUEUE_NAMES.analysis, QUEUE_NAMES.realityIndex],
       concurrency: queueConcurrency,
     });
   }

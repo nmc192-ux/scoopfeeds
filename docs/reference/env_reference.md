@@ -326,6 +326,46 @@ available, but unaffected if that tick failed, hung, or never dispatched.
 | `ENABLE_AUTO_SOCIAL` | `true` | default | restart | Now gates **cron registration**, not a step inside ingestion. |
 | `SOCIAL_TAIL_TIMEOUT_MS` | `600000` (10m) | default | yes | Still bounds the cycle. Kept: it no longer protects ingestion, but it stops one wedged run holding the worker's social slot. |
 
+## Scheduler cron offsets — why the minutes are what they are
+
+⚠️ **Minute offsets in `scheduler.js` are load-bearing. Do not "tidy" them back to `*/30`.**
+
+`node-cron@3.0.3` re-arms every task with a fixed `setTimeout(matchTime, 1000)` **after** the
+callback returns, and matches on an exact **one-second window** (`time-matcher.js` compares
+`getSeconds()`; a 5-field expression expands with seconds `= "0"`). The look-back loop that
+would recover a missed tick is gated on `recoverMissedExecutions`, which defaults to `false`
+and is not passed. So the tick must *land* inside its second, the period is always ≥1000ms,
+and the drift never self-corrects.
+
+Measured directly against 3.0.3:
+
+| Effective tick period | Result |
+|---|---|
+| ~1015ms (idle) | every pattern fires |
+| ~1065ms (moderate event-loop lag) | 83% for one pattern |
+| ~3023ms (heavy lag) | **zero firings, every pattern** |
+
+So a cron sharing its minute with a cycle that blocks the loop does not fire *less often* —
+it stops. Production, 18h of scheduler logs: `video autopost dispatch START` **18/18**, every
+other dispatch **0**. `:07` was the only dispatch minute with no heavy in-process neighbour.
+
+**The fix was structural**: `runAnalysisCycle`, `runEventsCycle`, `runPolymarketCycle` and
+`runUsgsCycle` now run in the **worker** (queues `analysis` and `reality-index`), per the
+codebase's own rule that the scheduler only enqueues. Offsets are the second layer.
+
+`src/services/scheduler.cronCollision.test.js` asserts the invariant — **no dispatch cron may
+share a minute with an in-process cron** — plus a snapshot count of in-process crons, so
+adding one is a decision rather than an accident.
+
+**`recoverMissedExecutions: true` is not the fix.** Measured: it recovers 0% → 100% under
+heavy lag, but **double-fires** under light lag. On non-idempotent cycles that is a worse
+failure than the one it solves.
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `QUEUE_CONCURRENCY_ANALYSIS` | `1` | default | restart | **Strictly 1** — `runAnalysisCycle` guards itself with a process-local `isRunning` flag a second consumer would not see. |
+| `QUEUE_CONCURRENCY_REALITY_INDEX` | `1` | default | restart | **Strictly 1** — events / polymarket / usgs share this queue and contend for the same tables. |
+
 ## Undocumented-var audit
 
 `262` distinct `process.env.*` reads in `backend/`; `backend/.env.example` covered `77`.

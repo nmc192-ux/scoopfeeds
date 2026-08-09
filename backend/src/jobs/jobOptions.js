@@ -25,6 +25,12 @@ export const JOB_NAMES = {
   articlesEnrichBatch: "articles.enrich.batch",
   videoRenderCycle: "video.render.cycle",
   socialPostAll: "social.post.all",
+  // Heavy in-process cycles moved OFF the scheduler — see the collision note
+  // in scheduler.js. Each blocked the event loop the cron timers live on.
+  analysisRefresh: "analysis.refresh",
+  eventsRefresh: "events.refresh",
+  marketsPolymarket: "markets.polymarket.sync",
+  geoUsgs: "geo.usgs.sync",
 };
 
 export const JOB_IDS = {
@@ -33,6 +39,10 @@ export const JOB_IDS = {
   [JOB_NAMES.articlesEnrichBatch]: "articles-enrich-batch-singleton",
   [JOB_NAMES.videoRenderCycle]: "video-render-cycle-singleton",
   [JOB_NAMES.socialPostAll]: "social-post-all-singleton",
+  [JOB_NAMES.analysisRefresh]: "analysis-refresh-singleton",
+  [JOB_NAMES.eventsRefresh]: "events-refresh-singleton",
+  [JOB_NAMES.marketsPolymarket]: "markets-polymarket-singleton",
+  [JOB_NAMES.geoUsgs]: "geo-usgs-singleton",
 };
 
 export const defaultJobOptions = {
@@ -55,4 +65,8 @@ export const queueConcurrency = {
   // STRICTLY 1. socialPublisher's single-flight guard is PROCESS-LOCAL, so a
   // second concurrent consumer would not see it and both would post.
   social: parseIntEnv("QUEUE_CONCURRENCY_SOCIAL", 1),
+  // 1 each: every one of these guards itself with a process-local isRunning
+  // flag, which a second concurrent consumer would not see.
+  analysis: parseIntEnv("QUEUE_CONCURRENCY_ANALYSIS", 1),
+  realityIndex: parseIntEnv("QUEUE_CONCURRENCY_REALITY_INDEX", 1),
 };
