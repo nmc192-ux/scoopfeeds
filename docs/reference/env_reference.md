@@ -364,7 +364,28 @@ failure than the one it solves.
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
 | `QUEUE_CONCURRENCY_ANALYSIS` | `1` | default | restart | **Strictly 1** — `runAnalysisCycle` guards itself with a process-local `isRunning` flag a second consumer would not see. |
-| `QUEUE_CONCURRENCY_REALITY_INDEX` | `1` | default | restart | **Strictly 1** — events / polymarket / usgs share this queue and contend for the same tables. |
+| `QUEUE_CONCURRENCY_REALITY_INDEX` | `1` | default | restart | **Strictly 1** — events / polymarket / usgs / promoter / RI-compose share this queue and contend for the same tables. |
+| `CRON_SLOW_MS` | `500` | default | yes | A cron holding the loop synchronously this long is logged. **500ms, not 5s**: on the 2-core prod host that is already half a node-cron match window, and only one cycle in the fleet ever crossed 5s. |
+| `LOOP_STALL_MS` | `1500` | default | yes | Excursion threshold for the stall/freeze line. The **distribution** (p50/p95/max/drift/heap) is logged every window regardless — an excursion-only alarm reported one event in 90 minutes while nearly every cron was missing ticks. |
+| `LOOP_LAG_WINDOW_MS` | `60000` | default | yes | Reporting window for the lag distribution. |
+
+**Six cycles have been moved from the scheduler to the worker, each after being MEASURED
+holding the event loop** — never on suspicion:
+
+| Cycle | Measured hold | Caught by |
+|---|---|---|
+| `runRealityIndexComposeCycle` | 5,481ms, 4 ticks missed, 41% on CPU | timer instrumentation (`+540s` boot pulse) |
+| `runEventPromoterCronCycle` | 10,245ms | cron instrumentation |
+| `runAnalysisCycle` / `runEventsCycle` / `runPolymarketCycle` / `runUsgsCycle` | — | the `:00`/`:30` collision map |
+
+> **A theory that did not survive measurement**, recorded so it is not revived: *"runNoaaCycle
+> blocks the social cron."* NOAA sits at `4,14,24,34,44,54` and never appeared in the slow
+> list. Proximity in the minute map is not evidence.
+
+> **`cpu_shares` is PARKED, not adopted.** 4096/512 was staged to protect the scheduler from
+> the worker's renders. A later reading showed scheduler 0.04% / worker 111% mid-render, and
+> the earlier 103% scheduler reading was a transient snapshot. Weighting is aimed at a
+> contender that is not contending. See the comment in `docker-compose.production.yml`.
 
 ## Undocumented-var audit
 

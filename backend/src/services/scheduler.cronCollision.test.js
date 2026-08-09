@@ -20,8 +20,12 @@
  * autopost dispatch START" 18 times and every other dispatch 0. :07 was the only
  * dispatch minute carrying no heavy in-process work.
  *
- * The four cycles that did the blocking (analysis, events, polymarket, usgs) now
- * run in the worker. These tests stop them — or anything like them — coming back.
+ * Six cycles have been moved to the worker, each after being MEASURED holding
+ * the loop — never on suspicion. These tests stop them coming back.
+ *
+ * A theory that did NOT survive measurement, recorded so it is not revived:
+ * "runNoaaCycle blocks the social cron". NOAA sits at 4,14,24,34,44,54 and never
+ * appeared in the slow list. Proximity in the minute map is not evidence.
  */
 
 import test from "node:test";
@@ -105,16 +109,19 @@ test("NO DISPATCH CRON SHARES A MINUTE WITH AN IN-PROCESS CRON", () => {
   );
 });
 
-test("the five cycles that caused the outage are DISPATCHED, not run in process", () => {
+test("the six cycles that caused the outage are DISPATCHED, not run in process", () => {
   // The real fix. Offsets only dodge the collision; this removes it.
-  for (const label of ["dispatchAnalysisCycle", "dispatchEventsCycle", "dispatchPolymarketCycle", "dispatchUsgsCycle", "dispatchEventPromoterCycle"]) {
+  for (const label of ["dispatchAnalysisCycle", "dispatchEventsCycle", "dispatchPolymarketCycle", "dispatchUsgsCycle", "dispatchEventPromoterCycle", "dispatchRealityIndexComposeCycle"]) {
     const c = CRONS.find((x) => x.label === label);
     assert.ok(c, `${label} must be registered — these must never run in the scheduler again`);
     assert.equal(c.isDispatch, true, `${label} must go through runDispatch`);
   }
-  // runEventPromoterCronCycle joined them after being MEASURED holding the loop
-  // synchronously for 10,245ms — ten cron ticks, twice an hour.
-  for (const gone of ["runAnalysisCycle", "runEventsCycle", "runPolymarketCycle", "runUsgsCycle", "runEventPromoterCronCycle"]) {
+  // Each joined this list only after being MEASURED, never on suspicion:
+  //   runEventPromoterCronCycle    10,245ms synchronous hold
+  //   runRealityIndexComposeCycle   5,481ms, 4 cron ticks missed, 41% on CPU
+  // The second was caught by the TIMER instrumentation, not the cron path — it
+  // fired as the +540s boot pulse and was invisible before that existed.
+  for (const gone of ["runAnalysisCycle", "runEventsCycle", "runPolymarketCycle", "runUsgsCycle", "runEventPromoterCronCycle", "runRealityIndexComposeCycle"]) {
     assert.equal(
       CRONS.some((c) => c.label === gone && !c.isDispatch), false,
       `${gone} is registered as an in-process cron again. It does network I/O and bulk DB ` +
@@ -131,7 +138,7 @@ test("no NEW in-process cron has appeared without being counted", () => {
   // takes a neighbouring dispatch cron down three weeks later.
   const inProcess = HOURLY.filter((c) => !c.isDispatch).map((c) => c.label).sort();
   assert.equal(
-    inProcess.length, 14,
+    inProcess.length, 13,
     `The number of hourly in-process crons changed (now ${inProcess.length}): ${inProcess.join(", ")}.\n` +
     "If you ADDED one: it will block the scheduler's event loop for as long as it runs, and " +
     "every cron sharing its minute will stop firing — permanently, not intermittently. " +

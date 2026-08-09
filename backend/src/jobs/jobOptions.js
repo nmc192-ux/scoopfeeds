@@ -32,6 +32,7 @@ export const JOB_NAMES = {
   marketsPolymarket: "markets.polymarket.sync",
   geoUsgs: "geo.usgs.sync",
   eventsPromote: "events.promote",
+  realityIndexCompose: "reality-index.compose",
 };
 
 export const JOB_IDS = {
@@ -45,6 +46,7 @@ export const JOB_IDS = {
   [JOB_NAMES.marketsPolymarket]: "markets-polymarket-singleton",
   [JOB_NAMES.geoUsgs]: "geo-usgs-singleton",
   [JOB_NAMES.eventsPromote]: "events-promote-singleton",
+  [JOB_NAMES.realityIndexCompose]: "reality-index-compose-singleton",
 };
 
 export const defaultJobOptions = {
