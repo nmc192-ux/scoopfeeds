@@ -253,10 +253,113 @@ function runDispatch(task, label) {
     });
 }
 
+// ─── Cron instrumentation ───────────────────────────────────────────────────
+//
+// The collision map catalogued which MINUTE each cron starts on. It said nothing
+// about how LONG each in-process cycle RUNS, so "minute :21 is occupied" was
+// modelled as a point when it is really an interval — and a cycle that blocks
+// the loop for four minutes swallows every cron tick in that span, not just its
+// own minute. Placing a dispatch on a "free" minute inside someone else's
+// interval is exactly as fatal as sharing their start minute.
+//
+// Durations were never measured because nothing measured them. These three
+// instruments close that, and they are the ONLY way the interval model gets
+// built from data rather than guessed at:
+//
+//   ⏳ per-cron duration       — how long each cycle actually takes
+//   🐌 synchronous-block warn  — the part that starves node-cron's timers
+//   🚨 loop-lag monitor        — names the cron in flight when the loop stalls
+//
+// The lag monitor is the decisive one: node-cron's tick must land inside a
+// one-second window, so a stall NAMED and TIMED tells us which cycle ate which
+// minute without inferring it from which dispatch went missing.
+const CRON_SLOW_MS = () => Number.parseInt(process.env.CRON_SLOW_MS || "", 10) || 5_000;
+const LOOP_STALL_MS = () => Number.parseInt(process.env.LOOP_STALL_MS || "", 10) || 1_500;
+
+let cronInFlight = null;   // { name, startedAt } — read by the lag monitor
+
+/** Derive a readable name once, at registration, from the callback source. */
+function cronName(task, expression) {
+  const src = String(task);
+  const m = src.match(/=>\s*runDispatch\([^,]*,\s*"([^"]+)"/)   // runDispatch(fn, "label")
+    || src.match(/=>\s*(?:runDispatch\(\s*\(\)\s*=>\s*)?([A-Za-z_][\w]*)/);
+  return `${m ? m[1] : "anonymous"}@${expression}`;
+}
+
 function scheduleCron(expression, task) {
-  const scheduledTask = cron.schedule(expression, task);
+  const name = cronName(task, expression);
+  const wrapped = () => {
+    const startedAt = Date.now();
+    const prev = cronInFlight;
+    cronInFlight = { name, startedAt };
+    let out;
+    try {
+      out = task();
+    } finally {
+      // Everything up to the first await. This is the number that matters for
+      // the timers: an async function that never yields blocks just as hard as
+      // a sync one, and this measures what actually held the loop.
+      const syncMs = Date.now() - startedAt;
+      if (syncMs >= CRON_SLOW_MS()) {
+        logger.warn(
+          `🐌 cron ${name} held the event loop SYNCHRONOUSLY for ${syncMs}ms — ` +
+          `any cron whose minute fell inside that window did not fire.`
+        );
+      }
+      cronInFlight = prev;
+    }
+    if (out && typeof out.then === "function") {
+      const settle = (verb) => {
+        const totalMs = Date.now() - startedAt;
+        if (totalMs >= CRON_SLOW_MS()) {
+          logger.info(`⏳ cron ${name} ${verb} after ${totalMs}ms`);
+        }
+      };
+      out.then(() => settle("finished"), (err) => {
+        settle("FAILED");
+        logger.error(`❌ cron ${name} rejected: ${err?.message || err}`);
+      });
+    }
+    return out;
+  };
+  const scheduledTask = cron.schedule(expression, wrapped);
   schedulerTasks.push(scheduledTask);
+  registeredCrons.push({ name, expression });
   return scheduledTask;
+}
+
+/** Every cron registered in this process, for the boot summary and ops. */
+const registeredCrons = [];
+export function listRegisteredCrons() {
+  return registeredCrons.map((c) => ({ ...c }));
+}
+
+/**
+ * Event-loop lag monitor.
+ *
+ * A 1s interval that measures how late it actually ran. node-cron needs the
+ * loop punctual to within a second; anything past LOOP_STALL_MS means some cron
+ * window was missed, and `cronInFlight` names the culprit rather than leaving it
+ * to be inferred from which dispatch went quiet.
+ */
+let lagMonitor = null;
+function startLoopLagMonitor() {
+  if (lagMonitor) return;
+  let expected = Date.now() + 1000;
+  lagMonitor = setInterval(() => {
+    const now = Date.now();
+    const lateBy = now - expected;
+    expected = now + 1000;
+    if (lateBy >= LOOP_STALL_MS()) {
+      const culprit = cronInFlight
+        ? `${cronInFlight.name} (in flight ${now - cronInFlight.startedAt}ms)`
+        : "nothing in flight — the stall came from outside the cron path";
+      logger.error(
+        `🚨 EVENT LOOP STALLED ${lateBy}ms — cron ticks in that window were missed. In flight: ${culprit}`
+      );
+    }
+  }, 1000);
+  lagMonitor.unref?.();
 }
 
 function scheduleTimer(task, delayMs) {
@@ -272,6 +375,8 @@ export function startScheduler() {
   }
 
   schedulerStarted = true;
+  // Armed BEFORE any cron registers, so a stall during startup is caught too.
+  startLoopLagMonitor();
   logger.info("⏰ Scheduler initialized — 30 min news, 60 min video, 15 min enrich, 60 min events, 2 AM video gen");
   runDispatch(() => dispatchIngestionCycle(), "news ingestion");
   runDispatch(() => dispatchVideoCycle(), "video ingestion");
@@ -518,6 +623,13 @@ export function startScheduler() {
     logger.info("🧠 Reality Index crons disabled via ENABLE_REALITY_INDEX=false");
   }
 
+  // AUTHORITATIVE REGISTRATION MANIFEST. Reading which crons fired by MINUTE is
+  // ambiguous — five minutes carry two dispatch crons each, so ":22 fired" can
+  // mean enrichment, usgs, or one of the two. This prints name@expression for
+  // every registration, so the boot log answers "was it registered?" and the
+  // per-tick lines answer "did it fire?" without either being inferred.
+  logger.info(`⏰ ${registeredCrons.length} crons registered: ${registeredCrons.map((c) => `${c.name}`).join(" | ")}`);
+
   updateNextRun();
   return true;
 }
@@ -533,6 +645,8 @@ export function stopScheduler() {
     clearTimeout(timer);
   }
 
+  if (lagMonitor) { clearInterval(lagMonitor); lagMonitor = null; }
+  registeredCrons.length = 0;
   schedulerStarted = false;
   nextRun = null;
   logger.info("⏹️ Scheduler stopped");
@@ -1350,4 +1464,4 @@ export async function syncVideoMetrics() {
  * forever — so it needs a test asserting the absence, not just the presence of
  * behaviour. Not part of the module's contract.
  */
-export const __testing = { runDispatch, dispatchCycle };
+export const __testing = { runDispatch, dispatchCycle, scheduleCron, cronName };
