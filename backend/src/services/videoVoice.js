@@ -47,10 +47,13 @@ const BACKEND_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname
 // documentary read can be dialled in from `.env` and restarted, rather than
 // through a deploy.
 //
-// ⚠️ ALL FOUR ARE IN THE CACHE KEY (see cacheKeyFor). Changing any one of them
+// ⚠️ ALL FIVE ARE IN THE CACHE KEY (see cacheKeyFor). Changing any one of them
 // invalidates every cached clip at once — by design, so a tuning change can
 // never be served stale audio, but it means the first run after the change
-// re-synthesises every caption at full price.
+// re-synthesises every caption at full price. VIDEO_VOICE_MODEL is the
+// expensive one to change twice over: the model also carries its own
+// per-character rate, so switching tiers re-buys the whole corpus at the NEW
+// price. VIDEO_VOICE_GAP_MS is deliberately outside the key — see below.
 
 /**
  * A number from the environment, in which ZERO MEANS ZERO.
@@ -89,7 +92,24 @@ export function envNumber(name, fallback, { min, max } = {}) {
 export const VOICE_ID  = process.env.VIDEO_VOICE_ID
   || process.env.ELEVENLABS_VOICE_ID
   || "21m00Tcm4TlvDq8ikWAM";  // Rachel
-export const MODEL_ID  = process.env.ELEVENLABS_MODEL_ID || "eleven_turbo_v2";
+// Same precedence shape as the voice id: the new name wins, the old one is
+// still honoured beneath it. Without this knob the stage-1 model comparison
+// could be listened to but not acted on — choosing the winner would need a code
+// change, which is the thing every other setting on this page avoids.
+//
+// NOT VALIDATED against a list. ElevenLabs adds and retires models faster than
+// this file gets edited, and an allowlist would reject the next good one while
+// claiming to protect you. A bad id fails loudly at the first synthesis with a
+// 4xx that names it, and §6.2 turns that into a skipped article rather than a
+// bad video.
+//
+// ⚠️ MEASURED 2026-08-11: `eleven_v3` accepts `speed` and IGNORES it (0.7 and
+// 1.2 produced 7.00s both times on the same caption). Slide duration IS audio
+// duration (§5), so on that model VIDEO_VOICE_SPEED silently stops steering
+// anything. turbo_v2, multilingual_v2, turbo_v2_5 and flash_v2_5 all honour it.
+export const MODEL_ID  = process.env.VIDEO_VOICE_MODEL
+  || process.env.ELEVENLABS_MODEL_ID
+  || "eleven_turbo_v2";
 
 // Mirrors ttsService's tuning, which is what the channel already sounds like.
 //

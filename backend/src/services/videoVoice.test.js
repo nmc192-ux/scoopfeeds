@@ -47,11 +47,15 @@ test("voice, model and settings are all in the key", () => {
   // A voice-tuning change must invalidate the cache without a manual purge.
   const caption = "A caption.";
   const base = cacheKeyFor(caption);
-  const saved = process.env.ELEVENLABS_VOICE_ID;
-  process.env.ELEVENLABS_VOICE_ID = "some-other-voice";
   // The module read VOICE_ID at import, so assert on the INPUTS being folded in
   // rather than on a re-import: all three appear in the digest material.
-  process.env.ELEVENLABS_VOICE_ID = saved;
+  //
+  // This used to save/restore ELEVENLABS_VOICE_ID around a no-op mutation, and
+  // the restore was `process.env.X = saved` with `saved === undefined` — which
+  // assigns the STRING "undefined" and leaks a truthy var into every test after
+  // it. Harmless here only because VOICE_ID is captured at import; it was caught
+  // by the digest test's environment precondition. The mutation proved nothing,
+  // so it is gone rather than repaired.
   assert.match(SRC, /\.update\(VOICE_ID\)/);
   assert.match(SRC, /\.update\(MODEL_ID\)/);
   assert.match(SRC, /JSON\.stringify\(VOICE_SETTINGS\)/);
@@ -132,29 +136,76 @@ test("no `parseFloat(...) || default` survives in the module", () => {
     "0 must mean 0 for every voice setting; use envNumber");
 });
 
-test("the four voice knobs are read from VIDEO_VOICE_* ", () => {
+test("the five voice knobs are read from VIDEO_VOICE_*", () => {
   assert.match(SRC, /process\.env\.VIDEO_VOICE_ID/);
+  assert.match(SRC, /process\.env\.VIDEO_VOICE_MODEL/);
   for (const name of ["VIDEO_VOICE_STABILITY", "VIDEO_VOICE_SIMILARITY", "VIDEO_VOICE_SPEED"]) {
     assert.match(SRC, new RegExp(`envNumber\\("${name}"`));
   }
 });
 
-test("the older ELEVENLABS_VOICE_ID still works underneath the new name", () => {
-  // ttsService reads it too. Dropping it would repoint the voice as a side
-  // effect of adding a knob — the opposite of an inert merge.
+test("the older ELEVENLABS_* names still work underneath the new ones", () => {
+  // ttsService reads both. Dropping either would repoint the voice or the model
+  // as a side effect of adding a knob — the opposite of an inert merge.
   assert.match(SRC, /VIDEO_VOICE_ID\s*\|\|\s*process\.env\.ELEVENLABS_VOICE_ID/);
+  assert.match(SRC, /VIDEO_VOICE_MODEL\s*\|\|\s*process\.env\.ELEVENLABS_MODEL_ID/);
 });
 
+// ─── The pinned digest ──────────────────────────────────────────────────────
+//
+// Every one of the five knobs feeds cacheKeyFor, so every one of them can move
+// this hash. The digest is pinned against the PRE-CHANGE code: if it still
+// matches, prod's TTS cache survives the merge untouched, which is the whole
+// claim this branch makes.
+//
+// The inputs are asserted individually FIRST, and the environment is checked
+// before that. All three layers pin the same property, but they fail with very
+// different sentences — and a bare "expected 2d080f... got 9a41bc..." is the
+// least useful of the three, especially now that VIDEO_VOICE_MODEL is a var
+// somebody will plausibly have set in their own .env while auditioning models.
+
+const TUNING_VARS = [
+  "VIDEO_VOICE_ID", "ELEVENLABS_VOICE_ID",
+  "VIDEO_VOICE_MODEL", "ELEVENLABS_MODEL_ID",
+  "VIDEO_VOICE_SPEED", "VIDEO_VOICE_STABILITY", "VIDEO_VOICE_SIMILARITY",
+];
+
 test("THE CACHE DIGEST IS UNCHANGED — this merge re-synthesises nothing", () => {
-  // Pinned against the pre-change code. Reordering VOICE_SETTINGS' keys, or
-  // changing any default, silently invalidates every cached clip in prod while
-  // changing nothing audible; JSON.stringify preserves insertion order, so the
-  // order of those three lines is as load-bearing as their values.
-  assert.equal(cacheKeyFor("A caption."), "2d080f8769185c3e5a6bc7ea");
+  const tuned = TUNING_VARS.filter((n) => process.env[n]);
+  assert.deepEqual(
+    tuned, [],
+    `${tuned.join(", ")} set in this environment. The pinned digest below describes the ` +
+    "DEFAULTS, so it cannot be checked while the defaults are overridden — this is your " +
+    "shell talking, not a regression. Unset them and re-run.",
+  );
+
+  // Each input, named, so a changed default says WHICH default changed.
+  assert.equal(VOICE_ID, "21m00Tcm4TlvDq8ikWAM");
+  assert.equal(MODEL_ID, "eleven_turbo_v2");
+  // JSON.stringify preserves insertion order, so the ORDER of these three lines
+  // in the source is as load-bearing as their values: reordering them would
+  // invalidate every cached clip in prod while changing nothing audible.
   assert.equal(
     JSON.stringify(VOICE_SETTINGS),
     '{"stability":0.5,"similarity_boost":0.75,"speed":1.05}',
   );
+
+  assert.equal(
+    cacheKeyFor("A caption."), "2d080f8769185c3e5a6bc7ea",
+    "the cache key moved even though every input above matches its default — " +
+    "cacheKeyFor's digest material itself changed, and every cached clip in prod is orphaned.",
+  );
+});
+
+test("the model is in the digest, so switching tiers cannot serve stale audio", () => {
+  // MODEL_ID is captured at import, so this asserts on the digest MATERIAL
+  // rather than re-deriving the key under a different env. Losing this line
+  // would let a turbo_v2 clip be served for a multilingual_v2 caption — same
+  // text, same voice, audibly different read, indistinguishable by key.
+  assert.match(SRC, /\.update\(MODEL_ID\)/);
+  // The converse — that the gap stays OUT of the key — is proved behaviourally
+  // by "the gap is NOT in the cache key" above, which is a stronger check than
+  // anything a regex over this file could assert.
 });
 
 // ─── The editorial gap ──────────────────────────────────────────────────────

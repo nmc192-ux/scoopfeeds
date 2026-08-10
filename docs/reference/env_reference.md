@@ -161,7 +161,7 @@ the **worker**. See `docs/video-pipeline.md` for why the rules are what they are
 Narration pacing and timbre (`videoVoice.js`). **Every default is the value the channel
 already shipped on**, so an unset environment is byte-identical to the pre-flag code.
 
-> ⚠️ **The first four invalidate the entire TTS cache.** `cacheKeyFor` digests
+> ⚠️ **The first five invalidate the entire TTS cache.** `cacheKeyFor` digests
 > caption + voice + model + settings, so changing any one of them re-synthesises **every
 > caption** on the next run at full ElevenLabs price. That is the design — it is what makes a
 > tuning change impossible to serve stale — not a regression. `VIDEO_VOICE_GAP_MS` is
@@ -170,11 +170,18 @@ already shipped on**, so an unset environment is byte-identical to the pre-flag 
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
 | `VIDEO_VOICE_ID` | `21m00Tcm4TlvDq8ikWAM` (Rachel) | default | restart | Takes precedence over the older `ELEVENLABS_VOICE_ID`, which is still honoured beneath it. |
+| `VIDEO_VOICE_MODEL` | `eleven_turbo_v2` | default | restart | The TTS tier. Not validated against a list — ElevenLabs adds and retires models faster than this file changes, and an allowlist would reject the next good one. ⚠️ **`eleven_v3` accepts `speed` and ignores it** (measured 2026-08-11: 0.7 and 1.2 both produced 7.00s), which silently disables `VIDEO_VOICE_SPEED` — slide duration *is* audio duration. Takes precedence over `ELEVENLABS_MODEL_ID`. |
 | `VIDEO_VOICE_SPEED` | `1.05` | default | restart | ElevenLabs range 0.7–1.2. Out-of-range warns and falls back rather than 422-ing mid-render. |
 | `VIDEO_VOICE_STABILITY` | `0.5` | default | restart | Range 0–1. **`0` means zero** — it is ElevenLabs' most expressive setting, not "unset". |
 | `VIDEO_VOICE_SIMILARITY` | `0.75` | default | restart | `similarity_boost`. Range 0–1, `0` means zero. |
 | `VIDEO_VOICE_GAP_MS` | `0` (**inert**) | default | restart | Trailing silence per caption — the pause *between ideas* that separates documentary pacing from podcast pacing. Extends slide duration by exactly itself; capped at 5000. Measured clean at 400ms against both the drift gate and the state-collapse rule (`docs/video-pipeline.md` §2). |
 | `ELEVENLABS_VOICE_ID` | — | unverified | restart | Pre-existing, undocumented, also read by `ttsService`. Kept as a fallback so adding `VIDEO_VOICE_ID` cannot repoint the voice as a side effect. |
+| `ELEVENLABS_MODEL_ID` | — | unverified | restart | Same: kept beneath `VIDEO_VOICE_MODEL`. Both names produce an **identical** cache key for the same value, so they are interchangeable rather than two caches. |
+
+**Changing the model costs more than changing a setting.** It rolls the cache like the others,
+but the model also carries its own per-character rate — so switching tiers re-buys the entire
+corpus at the *new* price. Verified 2026-08-11: with everything at defaults the key is
+`2d080f87…`; setting `VIDEO_VOICE_MODEL=eleven_multilingual_v2` moves it to `c281f131…`.
 
 `SLIDE_TAIL_SECS` (`VIDEO_SLIDE_TAIL`, `0.3`) is **not** the same knob: it is the mechanical
 margin that stops the last consonant being clipped by the cut. Shortening the editorial gap
