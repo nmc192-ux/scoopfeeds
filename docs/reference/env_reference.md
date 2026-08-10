@@ -138,8 +138,8 @@ conclude no floor is the honest answer.
 
 ## Video autopost (§6.1) — gates, retention, cross-post
 
-The loop is `videoAutopost.runVideoRenderCycle`, enqueued hourly by the scheduler and run in
-the **worker**. See `docs/video-pipeline.md` for why the rules are what they are.
+The loop is `videoAutopost.runVideoRenderCycle`, enqueued hourly at **`:12`** by the scheduler
+and run in the **worker**. See `docs/video-pipeline.md` for why the rules are what they are.
 
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
@@ -230,9 +230,21 @@ monitor is visible in the boot log rather than indistinguishable from a healthy 
 
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
-| `SOCIAL_HEARTBEAT_PING_URL` | unset (**no switch**) | *unverified* | restart | Social posting cycle (`*/30`, as a tail of ingestion). |
-| `VIDEO_HEARTBEAT_PING_URL` | unset (**no switch**) | *set at ship* | restart | Video render/publish cycle (hourly at `:07`). |
-| `INGESTION_HEARTBEAT_PING_URL` | unset (**no switch**) | *set at ship* | restart | RSS ingestion (`*/30`) — the **root** cycle; social and breaking-push hang off it. |
+| `SOCIAL_HEARTBEAT_PING_URL` | unset (**no switch**) | **set** | restart | Social posting cycle. Runs `*/30` **from a host crontab**, not node-cron — see the social note below. |
+| `VIDEO_HEARTBEAT_PING_URL` | unset (**no switch**) | **set** | restart | Video render/publish cycle (`videoAutopost`), hourly at **`:12`**. |
+| `INGESTION_HEARTBEAT_PING_URL` | unset (**no switch**) | **set** | restart | RSS ingestion, **`2,32`** — the **root** cycle; breaking-push hangs off it. |
+
+> ⚠️ **These minutes have moved once and will move again.** The 2026-08-09 collision fix
+> restaggered every dispatch cron (ingestion `*/30`→`2,32`, video autopost `:07`→`:12`, video
+> ingestion `:00`→`:09`) and this table was not updated with it — which sent a later
+> investigation looking for a fault in code that had none. **If you move a cron in
+> `scheduler.js`, update these rows and re-check the monitor's expected period in the same
+> change.** `scheduler.cronCollision.test.js` now parses this table and fails on drift.
+
+**Verified against the monitor 2026-08-11**: all three checks green. Ingestion period 30m /
+grace 1h, social period 30m / grace 1h, video period 2h / grace 3h. Note the grace windows are
+far wider than the cycles they cover (ingestion runs ~57s), so these checks catch a runner
+that *stops*, not one that runs slowly.
 
 > **No alert state, cooldowns or dedupe table exists in this repo, deliberately.** The
 > external monitor already does edge-triggering, dedupe and the re-arm ceiling, and does
@@ -317,18 +329,49 @@ blocking reads across reconnects and would throw on ordinary blips.
 **Social is decoupled from ingestion.** It was a tail step inside `runIngestionCycle`, which
 coupled them both ways: a wedged social cycle held ingestion's `isRunning` flag, and — the
 one that kept recurring — any ingestion fault took all six platforms down with it. It now has
-its own queue (`social`), its own singleton job (`social.post.all`), its own worker consumer,
-and its own cron at `15,45` — offset a quarter-hour after ingestion so fresh articles are
-available, but unaffected if that tick failed, hung, or never dispatched.
+its own queue (`social`), its own singleton job (`social.post.all`) and its own worker
+consumer. `scheduler.js` registers a `15,45` cron for it — offset a quarter-hour after
+ingestion so fresh articles are available, but unaffected if that tick failed, hung, or never
+dispatched.
+
+> ⚠️ **That `15,45` cron does not run in prod.** `ENABLE_AUTO_SOCIAL=false` on the server, so
+> the node-cron registration is skipped entirely (the scheduler logs `📣 Social posting cron
+> NOT registered`). The live schedule is **`*/30` from a host crontab** invoking
+> `runSocialCycleWithTimeout`. Both paths reach the same cycle and the same heartbeat check,
+> so the monitor cannot tell them apart — but `15,45` is the *code default*, not what fires.
+> Read `crontab -l` on the host before reasoning about social timing.
 
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
-| `ENABLE_AUTO_SOCIAL` | `true` | default | restart | Now gates **cron registration**, not a step inside ingestion. |
+| `ENABLE_AUTO_SOCIAL` | `true` | **`false`** | restart | Gates **cron registration**, not a step inside ingestion. Off in prod because social is driven from the host crontab instead. |
 | `SOCIAL_TAIL_TIMEOUT_MS` | `600000` (10m) | default | yes | Still bounds the cycle. Kept: it no longer protects ingestion, but it stops one wedged run holding the worker's social slot. |
 
 ## Scheduler cron offsets — why the minutes are what they are
 
 ⚠️ **Minute offsets in `scheduler.js` are load-bearing. Do not "tidy" them back to `*/30`.**
+
+### The live schedule of the monitored cycles
+
+These four are the ones an external check watches, and therefore the ones whose documented
+timing has to be true. The 2026-08-09 restagger moved three of them and this file was not
+updated with it; the table below is **parsed and asserted** by
+`backend/src/services/scheduler.cronCollision.test.js`, so it can no longer drift silently.
+
+<!-- cron-map:start — machine-read by scheduler.cronCollision.test.js. Keys are dispatch function names. -->
+
+| Dispatch | Live schedule | Registered by |
+|---|---|---|
+| `dispatchIngestionCycle` | `2,32 * * * *` | `scheduler.js` |
+| `dispatchVideoCycle` | `9 * * * *` | `scheduler.js` |
+| `dispatchVideoRenderCycle` | `12 * * * *` | `scheduler.js` |
+| `dispatchSocialCycle` | `*/30` | host crontab — `ENABLE_AUTO_SOCIAL=false` skips the `15,45` node-cron |
+
+<!-- cron-map:end -->
+
+The social row is the one that cannot be checked against source, and it is marked so
+deliberately rather than omitted: `scheduler.js` really does contain a `15,45` registration,
+it simply never runs in prod. A reader who finds `15,45` in the code and stops there gets the
+wrong answer, which is exactly the trap this row exists to spring.
 
 `node-cron@3.0.3` re-arms every task with a fixed `setTimeout(matchTime, 1000)` **after** the
 callback returns, and matches on an exact **one-second window** (`time-matcher.js` compares
