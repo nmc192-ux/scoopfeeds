@@ -56,6 +56,45 @@ coordinates are integers (and yuv420p forces them even), so ~0.3px/frame of
 intended motion becomes a 2px snap — visible as shake. 2× was measured and
 still fails; 4× passes at ≤0.33px/frame.
 
+### Narration pacing — documentary, not podcast
+
+Voice direction is four env vars (`VIDEO_VOICE_ID` / `_SPEED` / `_STABILITY` /
+`_SIMILARITY`) plus `VIDEO_VOICE_GAP_MS`. All five default to today's values, so
+they are inert until someone sets one. See `docs/reference/env_reference.md`
+§Voice direction for ranges and the cache consequence.
+
+**`VIDEO_VOICE_GAP_MS` is the pacing knob.** It appends trailing silence to each
+caption — the pause *between ideas*. It is applied where `SLIDE_TAIL_SECS`
+already is (the slide's timing, and the `apad` on its audio stream), not baked
+into the cached MP3, so re-pacing the whole channel costs nothing at ElevenLabs.
+The two tails stay separate numbers on purpose: `SLIDE_TAIL_SECS` is the
+mechanical margin that stops the last consonant being clipped by the cut, and
+folding the editorial pause into it means the first person to shorten the pause
+clips every slide.
+
+Slide duration is audio duration (§5), so the gap extends the video. Both gates
+that depend on slide duration were measured across every card type, 1–5 states,
+and captions from 1.5s to 12.0s in 0.25s steps (`backend/_voiceGapGround.mjs`;
+the assertions live in `videoAssembler.test.js`):
+
+| gap | worst drift | verdict | collapse decisions changed | 7-slide runtime |
+|---|---|---|---|---|
+| 0ms (default) | 0.2426 px/frame | pass | — (baseline) | 38.40s |
+| 200ms | 0.2419 px/frame | pass | 0 of 1,290 | 39.80s |
+| **400ms** | **0.2412 px/frame** | **pass** | **0 of 1,290** | **41.20s** |
+| 800ms | 0.2407 px/frame | pass | 0 of 1,290 | 44.00s |
+
+The drift gate holds *structurally*, not coincidentally: the rate is pinned at
+6px/s and the overscan caps total travel, so a longer slide can only ever drift
+**slower**. Per-frame displacement sits at ~0.24px against the 0.5px criterion
+(0.33px as stated above) for any gap anyone types.
+
+The state-collapse rule is unaffected because `fitStatesToDuration` is fed the
+**raw** audio duration — the gap is silence *after* the narration, not room to
+pace states across. That is a decision, and it has a price: folding the gap into
+the fit instead would have changed 110 collapse decisions over the same sweep,
+i.e. it would quietly start keeping states the rule had decided to drop.
+
 ---
 
 ## 3. Rule 0 — no Pakistan-related video, ever

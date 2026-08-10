@@ -20,7 +20,7 @@ mkdirSync(process.env.VIDEO_TTS_CACHE_DIR, { recursive: true });
 
 const {
   cacheKeyFor, voiceCaption, sweepTtsCache, probeDurationSecs, durationMethod,
-  getFFprobePath, isVoiceConfigured, VoiceError,
+  getFFprobePath, isVoiceConfigured, VoiceError, envNumber, voiceGapSecs,
   TTS_CACHE_DIR, TTS_RETENTION_MS, VOICE_ID, MODEL_ID, VOICE_SETTINGS,
 } = await import("./videoVoice.js");
 
@@ -100,6 +100,86 @@ test("the ElevenLabs tuning matches what the channel already sounds like", () =>
   assert.equal(MODEL_ID, "eleven_turbo_v2");
   assert.deepEqual({ ...VOICE_SETTINGS }, { stability: 0.5, similarity_boost: 0.75, speed: 1.05 });
   assert.ok(VOICE_ID.length > 8);
+});
+
+// ─── Voice direction is tunable, and the defaults are inert ─────────────────
+
+test("ZERO MEANS ZERO — the whole reason envNumber exists", () => {
+  // `Number.parseFloat(x) || fallback` returns the fallback here. Stability 0
+  // is ElevenLabs' most expressive setting and the likeliest edit anyone makes
+  // to this file, so that idiom would silently refuse it.
+  process.env.__VOICE_TEST_N = "0";
+  try {
+    assert.equal(envNumber("__VOICE_TEST_N", 0.5, { min: 0, max: 1 }), 0);
+  } finally { delete process.env.__VOICE_TEST_N; }
+});
+
+test("unset and empty fall back; garbage and out-of-range fall back too", () => {
+  assert.equal(envNumber("__VOICE_TEST_ABSENT", 0.75), 0.75);
+  const cases = [["", 0.75], ["   ", 0.75], ["abc", 0.75], ["1.5", 0.75], ["-0.1", 0.75], ["0.9", 0.9]];
+  for (const [raw, want] of cases) {
+    process.env.__VOICE_TEST_N = raw;
+    try {
+      assert.equal(envNumber("__VOICE_TEST_N", 0.75, { min: 0, max: 1 }), want, `raw=${JSON.stringify(raw)}`);
+    } finally { delete process.env.__VOICE_TEST_N; }
+  }
+});
+
+test("no `parseFloat(...) || default` survives in the module", () => {
+  // The source check is the one that catches a future edit reintroducing it in
+  // a place these unit tests do not reach.
+  assert.ok(!/parse(Float|Int)\([^)]*\)\s*\|\|/.test(SRC),
+    "0 must mean 0 for every voice setting; use envNumber");
+});
+
+test("the four voice knobs are read from VIDEO_VOICE_* ", () => {
+  assert.match(SRC, /process\.env\.VIDEO_VOICE_ID/);
+  for (const name of ["VIDEO_VOICE_STABILITY", "VIDEO_VOICE_SIMILARITY", "VIDEO_VOICE_SPEED"]) {
+    assert.match(SRC, new RegExp(`envNumber\\("${name}"`));
+  }
+});
+
+test("the older ELEVENLABS_VOICE_ID still works underneath the new name", () => {
+  // ttsService reads it too. Dropping it would repoint the voice as a side
+  // effect of adding a knob — the opposite of an inert merge.
+  assert.match(SRC, /VIDEO_VOICE_ID\s*\|\|\s*process\.env\.ELEVENLABS_VOICE_ID/);
+});
+
+test("THE CACHE DIGEST IS UNCHANGED — this merge re-synthesises nothing", () => {
+  // Pinned against the pre-change code. Reordering VOICE_SETTINGS' keys, or
+  // changing any default, silently invalidates every cached clip in prod while
+  // changing nothing audible; JSON.stringify preserves insertion order, so the
+  // order of those three lines is as load-bearing as their values.
+  assert.equal(cacheKeyFor("A caption."), "2d080f8769185c3e5a6bc7ea");
+  assert.equal(
+    JSON.stringify(VOICE_SETTINGS),
+    '{"stability":0.5,"similarity_boost":0.75,"speed":1.05}',
+  );
+});
+
+// ─── The editorial gap ──────────────────────────────────────────────────────
+
+test("VIDEO_VOICE_GAP_MS defaults to 0 — the gap ships inert", () => {
+  assert.equal(voiceGapSecs(), 0);
+});
+
+test("the gap is read in milliseconds, at call time, and is bounded", () => {
+  const cases = [["400", 0.4], ["0", 0], ["5000", 5], ["5001", 0], ["-1", 0], ["nonsense", 0], ["", 0]];
+  for (const [raw, want] of cases) {
+    process.env.VIDEO_VOICE_GAP_MS = raw;
+    try {
+      assert.equal(voiceGapSecs(), want, `raw=${JSON.stringify(raw)}`);
+    } finally { delete process.env.VIDEO_VOICE_GAP_MS; }
+  }
+});
+
+test("the gap is NOT in the cache key — re-pacing costs nothing at ElevenLabs", () => {
+  const before = cacheKeyFor("A caption.");
+  process.env.VIDEO_VOICE_GAP_MS = "400";
+  try {
+    assert.equal(cacheKeyFor("A caption."), before,
+      "the gap is silence added at assembly, not audio in the MP3");
+  } finally { delete process.env.VIDEO_VOICE_GAP_MS; }
 });
 
 // ─── Duration ───────────────────────────────────────────────────────────────
