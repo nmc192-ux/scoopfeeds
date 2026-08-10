@@ -31,8 +31,14 @@
  * staleness warning became something to ignore.
  *
  * STRICTLY TELEMETRY. Unset → complete no-op. Never awaited, never throws,
- * every error swallowed, short timeout, and the timer unref'd. It must never
+ * every error CONTAINED, short timeout, and the timer unref'd. It must never
  * block, delay or break a cycle.
+ *
+ * Contained is not the same as invisible, and that distinction cost an evening
+ * on 2026-08-11: the outcome of every ping used to vanish into `.catch(() => {})`,
+ * so a delivered ping and a refused one logged identically — nothing. The
+ * outcome is now reported (debug on success, warn on failure) while remaining
+ * just as incapable of reaching the cycle. See pingHeartbeat.
  */
 
 import axios from "axios";
@@ -53,8 +59,50 @@ export const HEARTBEAT_PING_URLS = {
 // var per process, at first use, so the boot logs answer "is this armed?".
 const announcedUnset = new Set();
 
+/** The three states, as a word. Used in logs — the URL never is. */
+function pingKind(suffix) {
+  if (suffix === "/start") return "start";
+  if (suffix === "/fail")  return "fail";
+  return "success";
+}
+
+/**
+ * Describe a ping failure WITHOUT the URL.
+ *
+ * `err.message` is deliberately excluded. The ping URL is a BEARER TOKEN —
+ * anyone holding it can send fake pings and hold a check green through an
+ * outage — and axios embeds the request URL in the message on several error
+ * paths (redirects and some transport errors). A log line is the wrong place
+ * for a credential, and once one is in a log file it is in every log sink.
+ *
+ * The status code and the error code carry the whole diagnosis anyway:
+ *   HTTP 404          — wrong or revoked check UUID
+ *   ECONNABORTED      — no response inside PING_TIMEOUT_MS
+ *   ENOTFOUND/EAI_*   — DNS
+ *   ECONNREFUSED      — nothing listening
+ */
+function describePingFailure(err) {
+  const status = err?.response?.status;
+  if (status) return `HTTP ${status}`;
+  if (err?.code) return String(err.code);
+  return err?.name || "unknown error";
+}
+
 /**
  * Fire one ping. Returns nothing and never rejects.
+ *
+ * THE OUTCOME IS LOGGED, which it was not until 2026-08-11. Every result —
+ * delivered, refused, timed out — was swallowed by a bare `.catch(() => {})`,
+ * so a working switch and a broken one produced byte-identical logs: nothing at
+ * all. An evening was spent proving from the outside that a ping which had been
+ * arriving correctly all along was arriving correctly, because from the inside
+ * there was no way to tell. Silence is not evidence, and telemetry that cannot
+ * report on itself is not telemetry.
+ *
+ * SUCCESS AT `debug`, FAILURE AT `warn`. Two pings per cycle per check at info
+ * would be noise in the one log people actually read, and the healthy case is
+ * not what anyone is looking for. A failure is, and it is the line that would
+ * have ended this in one grep. Set `LOG_LEVEL=debug` to watch the healthy ones.
  *
  * @param {string} envVar  name of the env var holding the base URL
  * @param {""|"/start"|"/fail"} suffix
@@ -73,7 +121,9 @@ export function pingHeartbeat(envVar, suffix = "", body = null) {
   }
   try {
     const url = `${String(base).replace(/\/+$/, "")}${suffix}`;
-    // Fire-and-forget. Not awaited, rejection swallowed at the call so it can
+    const kind = pingKind(suffix);
+    const t0 = Date.now();
+    // Fire-and-forget. Not awaited, settlement handled at the call so it can
     // never surface as an unhandled rejection or add latency to the cycle.
     const req = body
       ? axios.post(url, String(body).slice(0, 10_000), {
@@ -81,7 +131,18 @@ export function pingHeartbeat(envVar, suffix = "", body = null) {
           headers: { "Content-Type": "text/plain" },
         })
       : axios.get(url, { timeout: PING_TIMEOUT_MS });
-    req.catch(() => {});
+    const settled = req.then(
+      (res) => logger.debug(`🫀 ${envVar} ${kind} → ${res.status} in ${Date.now() - t0}ms`),
+      (err) => logger.warn(
+        `🫀 ${envVar} ${kind} NOT DELIVERED after ${Date.now() - t0}ms — ${describePingFailure(err)}. ` +
+        `The cycle is unaffected; the monitor did not receive this ping.`
+      ),
+    );
+    // Load-bearing, not decoration. `then(ok, err)` returns a NEW promise, and a
+    // throw inside either handler — a logger transport failing mid-write is the
+    // realistic one — would land as an unhandled rejection. That is exactly the
+    // "telemetry broke a cycle" class this module exists to be incapable of.
+    settled.catch(() => {});
   } catch {
     /* never let telemetry break a cycle */
   }
