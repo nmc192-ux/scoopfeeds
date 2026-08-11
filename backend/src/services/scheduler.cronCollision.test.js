@@ -162,3 +162,88 @@ test("the scheduler's own dispatch crons all use distinct-enough offsets to be a
     assert.ok(labels.length <= 4, `minute :${minute} carries ${labels.length} dispatches: ${labels.join(", ")}`);
   }
 });
+
+// ─── The docs cannot drift from the crons ───────────────────────────────────
+//
+// EARNED 2026-08-11. The 2026-08-09 restagger moved ingestion (*/30 → 2,32),
+// video autopost (:07 → :12) and video ingestion (:00 → :09), and
+// env_reference.md was not updated with it. Nothing broke — but a later
+// investigation into a monitor believed to be red spent hours treating the
+// stale rows as fact, hunting a code fault in a path that had none.
+//
+// A doc that is only nearly true about timing is worse than one that says
+// nothing, because it is trusted. The table it parses is delimited by
+// <!-- cron-map:start --> / <!-- cron-map:end --> and keyed on dispatch
+// FUNCTION NAMES rather than prose, so this asserts on identifiers instead of
+// sentences and does not rot the moment someone rewrites a Purpose column.
+
+const DOC = readFileSync(path.join(HERE, "../../../docs/reference/env_reference.md"), "utf8");
+
+function parseCronMap(md) {
+  const block = md.match(/<!--\s*cron-map:start[\s\S]*?-->([\s\S]*?)<!--\s*cron-map:end\s*-->/);
+  assert.ok(block, "the cron-map block is missing from docs/reference/env_reference.md");
+  const rows = [];
+  for (const line of block[1].split("\n")) {
+    // | `dispatchX` | `expr` | where |
+    const m = line.match(/^\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|\s*(.+?)\s*\|\s*$/);
+    if (m) rows.push({ dispatch: m[1], expr: m[2], registeredBy: m[3] });
+  }
+  return rows;
+}
+
+test("every documented schedule matches the cron actually registered in scheduler.js", () => {
+  const rows = parseCronMap(DOC);
+  assert.ok(rows.length >= 4, `the cron-map parsed ${rows.length} rows; expected at least 4`);
+
+  for (const row of rows.filter((r) => /scheduler\.js/.test(r.registeredBy))) {
+    const found = CRONS.filter((c) => c.label === row.dispatch);
+    assert.equal(
+      found.length, 1,
+      `env_reference.md documents \`${row.dispatch}\` but scheduler.js registers it ` +
+      `${found.length} time(s). The doc names a dispatch that no longer exists, or exists twice.`
+    );
+    assert.equal(
+      found[0].expr, row.expr,
+      `SCHEDULE DRIFT: scheduler.js runs \`${row.dispatch}\` on "${found[0].expr}", ` +
+      `env_reference.md says "${row.expr}".\n` +
+      "Moving a cron without updating the doc is what sent the 2026-08-11 investigation " +
+      "after a fault that did not exist. Update the cron-map table, and re-check the " +
+      "external monitor's expected period while you are there."
+    );
+  }
+});
+
+test("a cycle driven from outside scheduler.js is marked as such, not silently wrong", () => {
+  // Social is the live example: scheduler.js really does carry a `15,45`
+  // registration, ENABLE_AUTO_SOCIAL=false skips it, and the host crontab runs
+  // it */30. A reader who finds 15,45 in the source and stops gets the wrong
+  // answer, so the row must say where it actually comes from.
+  const rows = parseCronMap(DOC);
+  const external = rows.filter((r) => !/scheduler\.js/.test(r.registeredBy));
+  for (const row of external) {
+    assert.match(
+      row.registeredBy, /crontab|host|external/i,
+      `\`${row.dispatch}\` is not registered by scheduler.js, so its row must say what does ` +
+      `drive it. Got: "${row.registeredBy}"`
+    );
+    // The in-source registration must still EXIST — if it were deleted, the row
+    // would be describing a cycle nothing can dispatch and the note would be
+    // documenting a ghost.
+    assert.ok(
+      CRONS.some((c) => c.label === row.dispatch),
+      `\`${row.dispatch}\` is documented as externally driven, but scheduler.js has no ` +
+      "registration for it at all — the fallback path it describes is gone."
+    );
+  }
+});
+
+test("all four monitored cycles are in the cron-map", () => {
+  // The set that an external check watches. Ingestion, both video cycles and
+  // social are the ones whose documented timing someone will act on at 2am.
+  const documented = new Set(parseCronMap(DOC).map((r) => r.dispatch));
+  for (const required of [
+    "dispatchIngestionCycle", "dispatchVideoCycle", "dispatchVideoRenderCycle", "dispatchSocialCycle",
+  ]) {
+    assert.ok(documented.has(required), `${required} is monitored but absent from the cron-map table`);
+  }
+});
