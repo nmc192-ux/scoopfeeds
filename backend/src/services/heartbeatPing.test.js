@@ -12,6 +12,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { pingHeartbeat, pingStart, pingSuccess, pingFail, uniformFailure, HEARTBEAT_PING_URLS } from "./heartbeatPing.js";
+import { logger } from "./logger.js";
 
 // ─── The ping ───────────────────────────────────────────────────────────────
 
@@ -92,6 +93,131 @@ test("an unreachable endpoint cannot throw or reject into the cycle", async () =
     process.removeListener("unhandledRejection", onUnhandled);
     delete process.env.TEST_DEAD_PING_URL;
   }
+});
+
+// ─── The outcome is observable ──────────────────────────────────────────────
+//
+// Until 2026-08-11 a delivered ping and a refused one logged identically —
+// nothing at all — and an evening went into proving from the outside that a
+// healthy switch was healthy. These tests pin the three properties that fix
+// costs nothing to keep: the outcome is reported, the URL never is, and the
+// reporting cannot reach the cycle.
+
+/** Capture what the logger was asked to write, at every level. */
+async function captureLogs(fn) {
+  const seen = [];
+  const levels = ["debug", "info", "warn", "error"];
+  const saved = {};
+  for (const lvl of levels) {
+    saved[lvl] = logger[lvl];
+    logger[lvl] = (msg) => { seen.push({ level: lvl, msg: String(msg) }); };
+  }
+  // AWAIT, not `return fn(...)`. A bare return hands back the promise and the
+  // `finally` restores the logger before the ping has settled — which silently
+  // captures nothing and makes every assertion below vacuous.
+  try { return await fn(seen); }
+  finally { for (const lvl of levels) logger[lvl] = saved[lvl]; }
+}
+
+test("a DELIVERED ping is reported at debug, with its status", async () => {
+  const seen = [];
+  await capture(async () => {
+    await captureLogs(async (log) => {
+      pingStart("TEST_PING_URL");
+      await new Promise((r) => setTimeout(r, 250));
+      seen.push(...log);
+    });
+  });
+  const line = seen.find((l) => l.level === "debug" && l.msg.includes("TEST_PING_URL"));
+  assert.ok(line, `expected a debug line; got ${JSON.stringify(seen)}`);
+  assert.match(line.msg, /start/);
+  assert.match(line.msg, /200/);
+});
+
+test("a REFUSED ping is reported at warn, with the error code", async () => {
+  process.env.TEST_DEAD_PING_URL = "http://127.0.0.1:1/hc/dead-token";
+  try {
+    const seen = await captureLogs(async (log) => {
+      pingSuccess("TEST_DEAD_PING_URL");
+      await new Promise((r) => setTimeout(r, 500));
+      return log;
+    });
+    const line = seen.find((l) => l.level === "warn" && l.msg.includes("TEST_DEAD_PING_URL"));
+    assert.ok(line, `expected a warn line; got ${JSON.stringify(seen)}`);
+    assert.match(line.msg, /NOT DELIVERED/);
+    assert.match(line.msg, /ECONNREFUSED|ECONNABORTED|EADDRNOTAVAIL/);
+  } finally { delete process.env.TEST_DEAD_PING_URL; }
+});
+
+test("THE PING URL IS NEVER LOGGED — it is a bearer token", async () => {
+  // Anyone holding the URL can send fake pings and hold a check green through
+  // an outage. A log line is the wrong place for a credential, and once one is
+  // in a log file it is in every log sink downstream.
+  const seen = [];
+  await capture(async () => {
+    const url = process.env.TEST_PING_URL;      // http://127.0.0.1:PORT/hc/abc
+    await captureLogs(async (log) => {
+      pingStart("TEST_PING_URL");
+      await new Promise((r) => setTimeout(r, 250));
+      seen.push(...log.map((l) => ({ ...l, url })));
+    });
+  });
+  assert.ok(seen.length > 0, "nothing was logged, so the assertion below would be vacuous");
+  for (const l of seen) {
+    assert.ok(!l.msg.includes(l.url), `the full URL leaked: ${l.msg}`);
+    assert.ok(!l.msg.includes("/hc/abc"), `the token path leaked: ${l.msg}`);
+  }
+});
+
+test("the failure path is reported without the URL either", async () => {
+  process.env.TEST_DEAD_PING_URL = "http://127.0.0.1:1/hc/secret-uuid";
+  try {
+    const seen = await captureLogs(async (log) => {
+      pingFail("TEST_DEAD_PING_URL", "a reason");
+      await new Promise((r) => setTimeout(r, 500));
+      return log;
+    });
+    for (const l of seen) {
+      assert.ok(!l.msg.includes("secret-uuid"), `the token leaked on the failure path: ${l.msg}`);
+      assert.ok(!l.msg.includes("127.0.0.1:1"), `the host leaked on the failure path: ${l.msg}`);
+    }
+  } finally { delete process.env.TEST_DEAD_PING_URL; }
+});
+
+test("a logger that throws still cannot reach the cycle", async () => {
+  // The reporting must be as incapable of breaking a cycle as the silence was.
+  // `then(ok, err)` returns a NEW promise, so a throw in either handler becomes
+  // an unhandled rejection unless it is caught — which is what the trailing
+  // .catch is for.
+  const saved = logger.debug;
+  let unhandled = null;
+  const onUnhandled = (err) => { unhandled = err; };
+  process.on("unhandledRejection", onUnhandled);
+  logger.debug = () => { throw new Error("log transport died"); };
+  try {
+    await capture(async () => {
+      assert.doesNotThrow(() => pingStart("TEST_PING_URL"));
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    assert.equal(unhandled, null, "a throwing logger must not surface as an unhandled rejection");
+  } finally {
+    logger.debug = saved;
+    process.removeListener("unhandledRejection", onUnhandled);
+  }
+});
+
+test("the once-per-process unset warning is unchanged", async () => {
+  delete process.env.NEVER_SET_PING_URL;
+  const seen = await captureLogs(async (log) => {
+    pingStart("NEVER_SET_PING_URL");
+    pingSuccess("NEVER_SET_PING_URL");
+    pingFail("NEVER_SET_PING_URL", "x");
+    return log;
+  });
+  const unsetLines = seen.filter((l) => l.msg.includes("NEVER_SET_PING_URL"));
+  assert.equal(unsetLines.length, 1, "the unset notice is once per var per process, not per ping");
+  assert.equal(unsetLines[0].level, "info");
+  assert.match(unsetLines[0].msg, /NO external dead-man switch/);
 });
 
 test("the three cycles have three INDEPENDENT check vars", () => {
