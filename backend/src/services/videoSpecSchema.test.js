@@ -17,6 +17,7 @@ import {
   CARD_TYPES,
   MODEL_EMITTABLE,
   MIN_SLIDES,
+  repeatedOpeningStems,
 } from "./videoSpecSchema.js";
 
 const SOURCES = ["Reuters", "BBC News", "Associated Press"];
@@ -811,4 +812,219 @@ test("flat captions WARN and never reject", () => {
   const v = validateSpec(s2, { allowedSources: ["Reuters"] });
   assert.ok(v.warnings.some(w => /captions read flat/.test(w)), JSON.stringify(v.warnings));
   assert.ok(!v.errors.some(e => /flat/.test(e)), "bridging must never be a reject");
+});
+
+// ─── ARC: the cold open (B1) ────────────────────────────────────────────────
+//
+// The opening caption used to restate the headline, which spends the ten
+// seconds where retention is decided telling the viewer something the thumbnail
+// already told them. These tests pin the gate AND its two abstentions — a gate
+// that fires when it cannot actually judge is worse than no gate, because it
+// costs a whole video on a caption nobody can see the fault in.
+
+const HEADLINE = "Undersea cable damage disrupts internet across West Africa";
+
+const arcSpec = (caption) => {
+  const slides = [
+    { ...titleCard(), caption },
+    plainFiller(0), plainFiller(1), plainFiller(2),
+    kickerCard(),
+  ];
+  return withBeats(slides);
+};
+const arcOpts = (over = {}) => ({
+  allowedSources: SOURCES, sourceText: TEXT, headline: HEADLINE, ...over,
+});
+
+test("a title caption that restates the headline is REJECTED, not dropped", () => {
+  const v = validateSpec(arcSpec("Undersea cable damage has disrupted internet across West Africa."), arcOpts());
+  assert.equal(v.ok, false);
+  assert.ok(v.errors.some(e => e.includes("hook_restates_headline")), v.errors.join(" | "));
+  // A DROP would break the beats equality and be reported as a missing opener,
+  // which is the wrong cause and unactionable in the retry note.
+  assert.equal(v.dropped.filter(d => d.t === "title").length, 0);
+});
+
+test("a hook that asks the question, names the stake, or states the anomaly passes", () => {
+  for (const caption of [
+    "Thirteen countries lost the internet on the same afternoon. One ship did it.",
+    "What happens when a continent's bandwidth rests on a single strand?",
+    "Nobody planned for the moment one anchor could unplug a nation.",
+  ]) {
+    const v = validateSpec(arcSpec(caption), arcOpts());
+    assert.equal(v.ok, true, `expected pass for "${caption}": ${v.errors.join(" | ")}`);
+  }
+});
+
+test("the gate ABSTAINS when it has no headline to measure against", () => {
+  // Callers without a headline get no arc gate rather than a guess. The schema's
+  // own older fixtures rely on this, and so would any future caller.
+  const v = validateSpec(arcSpec("Undersea cable damage has disrupted internet across West Africa."), arcOpts({ headline: "" }));
+  assert.equal(v.ok, true, v.errors.join(" | "));
+});
+
+test("the gate ABSTAINS on a caption with no content words — the measure cannot judge", () => {
+  // tooSimilar returns TRUE for an empty content-word set, which is the safe
+  // direction for candidate selection and exactly wrong here: a short punchy
+  // hook shares nothing with the headline and must not be read as restating it.
+  const v = validateSpec(arcSpec("So who pays now?"), arcOpts());
+  assert.equal(v.ok, true, v.errors.join(" | "));
+});
+
+test("the rejection names the fault in terms the model can act on", () => {
+  const v = validateSpec(arcSpec("Undersea cable damage has disrupted internet across West Africa."), arcOpts());
+  const err = v.errors.find(e => e.includes("hook_restates_headline"));
+  assert.match(err, /question, a stake, or a concrete anomaly/);
+  assert.match(err, /headline/);
+});
+
+test("the arc gate cannot fire on a spec whose first card is not the title", () => {
+  // Ordering failures have their own error. Two errors for one fault would send
+  // a confused correction note into the single retry.
+  const slides = [plainFiller(0), plainFiller(1), plainFiller(2), kickerCard()];
+  const v = validateSpec(withBeats(slides), arcOpts());
+  assert.equal(v.ok, false);
+  assert.ok(!v.errors.some(e => e.includes("hook_restates_headline")), v.errors.join(" | "));
+});
+
+// ─── ARC: connective tissue (B2) ────────────────────────────────────────────
+//
+// A WARNING, never a gate. The thing being watched for is five captions that
+// all open the same way; the thing being avoided is rejecting a video because
+// three captions legitimately begin with the subject's name.
+
+test("repeatedOpeningStems finds a stem carried by more than two captions", () => {
+  const hits = repeatedOpeningStems([
+    "But here's the catch, the cable had no backup.",
+    "But here's the catch, repairs take a month.",
+    "But here's the catch, there are sixty ships.",
+    "Anchors cause most of the damage.",
+  ]);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].stem, "but here s");   // punctuation is stripped, not kept
+  assert.equal(hits[0].count, 3);
+});
+
+test("exactly two shared stems is NOT flagged — two is the permitted repeat", () => {
+  const hits = repeatedOpeningStems([
+    "The cable carries most of the traffic.",
+    "The cable was laid in 2012.",
+    "Anchors cause most of the damage.",
+  ]);
+  assert.deepEqual(hits, []);
+});
+
+test("captions shorter than the stem length are skipped, not padded", () => {
+  // A two-word caption has no three-word opening; inventing one would create a
+  // stem that is not there and could push a real stem over the threshold.
+  const hits = repeatedOpeningStems(["Who pays?", "Who pays?", "Who pays?", "Who pays?"]);
+  assert.deepEqual(hits, []);
+});
+
+test("stems are compared case- and punctuation-insensitively", () => {
+  const hits = repeatedOpeningStems([
+    "So, what happens next is the real question.",
+    "So what happens — nobody has said.",
+    "So what happens now that the money is gone?",
+  ]);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].count, 3);
+});
+
+test("a monotonous spec WARNS and still validates — B2 is never a gate", () => {
+  const slides = [
+    { ...titleCard(), caption: "Thirteen countries lost the internet on one afternoon." },
+    { ...plainFiller(0), caption: "But here is the catch, the route had no backup." },
+    { ...plainFiller(1), caption: "But here is the catch, repairs take a month." },
+    { ...plainFiller(2), caption: "But here is the catch, the fleet is ageing." },
+    kickerCard(),
+  ];
+  const v = validateSpec(withBeats(slides), arcOpts());
+  assert.equal(v.ok, true, v.errors.join(" | "));
+  const warn = v.warnings.find(w => w.includes("open with the same three words"));
+  assert.ok(warn, v.warnings.join(" | "));
+  assert.match(warn, /but here is/);
+  assert.match(warn, /^3 captions/);
+  assert.match(warn, /nothing was refused on it/);
+});
+
+test("a varied spec produces no repetition warning", () => {
+  const slides = [
+    { ...titleCard(), caption: "Thirteen countries lost the internet on one afternoon." },
+    { ...plainFiller(0), caption: "One anchor, dragged across a shallow shelf, did all of it." },
+    { ...plainFiller(1), caption: "Repairs need a specialist ship, and the nearest was busy." },
+    { ...plainFiller(2), caption: "Thirty days later the region was still running on what was left." },
+    kickerCard(),
+  ];
+  const v = validateSpec(withBeats(slides), arcOpts());
+  assert.equal(v.ok, true, v.errors.join(" | "));
+  assert.equal(v.warnings.filter(w => w.includes("open with the same three words")).length, 0);
+});
+
+// ─── ARC: the closer (B3) ───────────────────────────────────────────────────
+//
+// KICKER_BANNED_PHRASES catches a closer that ANNOUNCES it is summarising.
+// These cover the one that simply does it — restating the headline, or circling
+// back to the video's own cold open.
+
+const closerSpec = (kickerCaption, openCaption = "Thirteen countries lost the internet on one afternoon.") =>
+  withBeats([
+    { ...titleCard(), caption: openCaption },
+    plainFiller(0), plainFiller(1), plainFiller(2),
+    { ...kickerCard(), caption: kickerCaption },
+  ]);
+
+test("a kicker that restates the HEADLINE is rejected as closer_restates", () => {
+  const v = validateSpec(closerSpec("Undersea cable damage has disrupted internet across West Africa."), arcOpts());
+  assert.equal(v.ok, false);
+  const err = v.errors.find(e => e.includes("closer_restates"));
+  assert.ok(err, v.errors.join(" | "));
+  assert.match(err, /the article headline/);
+});
+
+test("a kicker that circles back to its OWN OPENING CAPTION is rejected too", () => {
+  // The video ending where it began is the same editorial failure as restating
+  // the headline, so it shares the error code — but the message must name which.
+  const v = validateSpec(
+    closerSpec("Thirteen countries lost their internet in a single afternoon."),
+    arcOpts(),
+  );
+  assert.equal(v.ok, false);
+  const err = v.errors.find(e => e.includes("closer_restates"));
+  assert.ok(err, v.errors.join(" | "));
+  assert.match(err, /its own opening caption/);
+});
+
+test("a forward-looking closer passes", () => {
+  for (const caption of [
+    "The next repair ship is three weeks out, and nobody has said who pays for the wait.",
+    "Whether anyone buries the replacement deeper is a decision still unmade.",
+  ]) {
+    const v = validateSpec(closerSpec(caption), arcOpts());
+    assert.equal(v.ok, true, `expected pass for "${caption}": ${v.errors.join(" | ")}`);
+  }
+});
+
+test("the register check and the restatement check never both fire", () => {
+  // Two errors for one fault would send a confused correction note into the
+  // single regeneration retry.
+  const v = validateSpec(
+    closerSpec("In conclusion, undersea cable damage has disrupted internet across West Africa."),
+    arcOpts(),
+  );
+  assert.equal(v.ok, false);
+  assert.equal(v.errors.filter(e => e.includes("summary register")).length, 1);
+  assert.equal(v.errors.filter(e => e.includes("closer_restates")).length, 0);
+});
+
+test("the closer gate abstains with no headline, but still checks the opening caption", () => {
+  const restatesOpen = closerSpec("Thirteen countries lost their internet in a single afternoon.");
+  const v = validateSpec(restatesOpen, arcOpts({ headline: "" }));
+  assert.equal(v.ok, false, "the opening-caption arm does not need a headline");
+  assert.match(v.errors.find(e => e.includes("closer_restates")), /its own opening caption/);
+});
+
+test("a short closer with no content words is not read as a restatement", () => {
+  const v = validateSpec(closerSpec("So who pays now?"), arcOpts());
+  assert.equal(v.ok, true, v.errors.join(" | "));
 });

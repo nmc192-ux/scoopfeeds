@@ -517,9 +517,31 @@ HARD RULES — violating any of these makes the output unusable:
 
 RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. These decide whether anyone is still watching at ten seconds.
 
-11. THE TITLE CAPTION IS THE STORY'S SHARPEST CLAIM. Not a restatement of the headline, not a scene-setter, not "here is what happened with X". The single most consequential or most surprising thing the source establishes, said flat. If your title caption would still make sense pasted onto a different article about the same subject, it is not sharp enough.
-    WEAK:  "A new report looks at undersea cable damage."
-    SHARP: "Two anchors dragged in shallow water cut a continent's bandwidth."
+11. THE TITLE CAPTION IS A COLD OPEN. HARD RULE — the spec is REJECTED if it restates the headline.
+
+    The viewer has already read the headline: it is the thumbnail, it is the title of the video, it is why they clicked. Saying it again out loud is the first thing they hear, and it tells them they already know this. The opening caption must instead do ONE of three things:
+      - ask the QUESTION the story answers,
+      - name the STAKE — what is at risk, who pays, what breaks,
+      - state a concrete ANOMALY — the detail that does not fit, the number that should not be possible.
+    Whichever you choose, it must make the next sixty seconds feel necessary.
+
+    This is checked mechanically against the headline's own words. A caption that reuses most of the headline's distinctive words is rejected and you will be asked to write it again.
+
+    WORKED EXAMPLES — ILLUSTRATIVE ONLY. Never reuse these facts, figures or wording; the shape is what matters.
+
+    Headline: "Undersea cable damage disrupts internet across West Africa"
+      WRONG:   "Damage to undersea cables has disrupted internet access across West Africa."   (the headline, spoken)
+      RIGHT:   "Thirteen countries lost the internet on the same afternoon. One ship did it."  (anomaly)
+
+    Headline: "Regulator fines airline $40m over refund delays"
+      WRONG:   "The regulator has fined the airline forty million dollars over refund delays." (the headline, spoken)
+      RIGHT:   "Passengers waited nine months for money the airline already had."              (stake)
+
+    Headline: "Study finds new drug slows kidney disease progression"
+      WRONG:   "A new study has found that the drug slows the progression of kidney disease."  (the headline, spoken)
+      RIGHT:   "What if the pill for one disease turned out to work on another?"               (question)
+
+    Notice what the RIGHT versions have in common: none of them could be pasted onto a different article about the same subject, and none of them can be guessed from the headline alone.
 
 12. THE FIRST CONTENT CARD IS THE STRONGEST BEAT — explicitly NOT the article's own ordering. News articles open with context because print readers scan; video viewers leave. Look at the beats you enumerated, pick the one that would make someone stay, and open with it. Chronology can follow.
 
@@ -531,9 +553,44 @@ RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. 
     FLAT:    "The cable carries 40% of the region's traffic."
     BRIDGED: "The cable carries 40% of the region's traffic — and it had no backup."
 
+15b. EVERY CAPTION AFTER THE FIRST MUST RELATE TO THE ONE BEFORE IT. Read in sequence, your captions must be a story, not a list of correct facts. Each beat has to EXTEND the one before it, COMPLICATE it, or CONTRADICT it — the viewer should never reach a caption and wonder why this fact follows that one. If two adjacent captions could be swapped without the sequence reading any differently, the connection you needed is missing.
+
+    The relationship must come from the FACTS THEMSELVES — this number explains that mechanism, this consequence follows from that figure, this finding undercuts the assumption before it. It does not come from a connecting phrase bolted onto the front.
+
+    DO NOT ADOPT A HOUSE OPENER. There is no approved list of transition words here, and you must not invent one for yourself: five captions that all begin the same way are worse than five that begin flatly, because the formula becomes the only thing the viewer hears. Vary how each caption starts. If you notice yourself reaching for the same construction a third time, the beats are ordered wrongly — reorder them so the connections are real, rather than papering over the gap with a phrase.
+
+    LIST (each fact true, no sequence):
+      "The cable carries 40 percent of the region's traffic."
+      "Repairs take about 30 days."
+      "There are 60 repair ships worldwide."
+    SEQUENCE (same three facts, each one earning the next):
+      "The cable carries 40 percent of the region's traffic, and nothing else was laid alongside it."
+      "So a single break takes about thirty days to mend — thirty days of a region running on what is left."
+      "That timeline rests on sixty ageing ships for the whole planet."
+
 16. THE KICKER NEVER WRAPS UP. HARD RULE — the spec is REJECTED if broken. Do not summarise, do not restate what was already said, do not use the register of a conclusion. Never write: "in conclusion", "in summary", "to sum up", "overall", "ultimately", "at the end of the day", "the takeaway", "there you have it", "as we have seen", "the bottom line", "to recap". End on the FORWARD implication or an OPEN QUESTION — what happens next, what is still unknown, what this makes possible or inevitable.
     WRONG: "Ultimately, the takeaway is that infrastructure is fragile."
     RIGHT: "Nobody has said who will pay to bury the next one."
+
+16b. THE KICKER MUST ANSWER "SO WHAT?". Avoiding the summary VOCABULARY above is not enough — a closer that simply says the headline again in different words, or circles back to your own opening caption, ends the video exactly where it began. That is checked mechanically against BOTH the headline and your opening caption, and the spec is REJECTED if the closer restates either one.
+
+    The closer must give the viewer something they did not have at the start. One of:
+      - the IMPLICATION — what this means for someone who is not in the story,
+      - the CONSEQUENCE — what is now set in motion, or foreclosed,
+      - WHAT TO WATCH — the decision, date, or number that will settle it.
+
+    WORKED EXAMPLES — ILLUSTRATIVE ONLY. Never reuse these facts or wording.
+
+    Headline: "Undersea cable damage disrupts internet across West Africa"
+    Opening:  "Thirteen countries lost the internet on the same afternoon. One ship did it."
+      WRONG:  "Undersea cable damage has cut off internet across West Africa."     (the headline again)
+      WRONG:  "One ship took thirteen countries offline in an afternoon."          (your own cold open again)
+      RIGHT:  "The next repair ship is three weeks out, and nobody has said who pays for the wait."
+
+    Headline: "Regulator fines airline $40m over refund delays"
+    Opening:  "Passengers waited nine months for money the airline already had."
+      WRONG:  "The airline has been fined forty million dollars for refund delays." (the headline again)
+      RIGHT:  "The fine is smaller than the interest earned on the money it held."
 
 Return ONLY a JSON object, no markdown fence, with exactly this shape — "beats" first, then "slides":
 
@@ -744,6 +801,11 @@ export async function writeVideoSpec(article, {
     const validateOpts = {
       allowedSources, sourceText,
       preCreditedSources: [credit?.publisher].filter(Boolean),
+      // The arc checks measure the captions against the headline the viewer has
+      // already read. The RAW title, not the decorated one — decorateTitleCard
+      // injects the outlet and date, and folding those in would make every
+      // caption look less like the headline than it is.
+      headline: String(article?.title || ""),
       ...(slideCeiling ? { maxSlides: slideCeiling } : {}),
     };
 

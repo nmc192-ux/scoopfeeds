@@ -432,3 +432,58 @@ test("caption length is NOT enforced anywhere — no reject, no drop", () => {
   assert.ok(!/throw|return null|dropped\.push/.test(warnBlock),
     "the wrap warning must refuse nothing");
 });
+
+// ─── ARC prompt rules (B1, B2) ──────────────────────────────────────────────
+
+test("B1: the cold-open rule teaches by CORRECT/WRONG example, not by assertion", () => {
+  // Abstract instructions have failed repeatedly on this model; the worked-pair
+  // technique is what fixed the stat `lines` defect outright. Three pairs from
+  // three different story shapes, so the SHAPE generalises rather than the
+  // subject — and marked illustrative, like the beats example, so none of it is
+  // ever reused as fact.
+  const p = promptFor();
+  assert.match(p, /THE TITLE CAPTION IS A COLD OPEN/);
+  assert.match(p, /ILLUSTRATIVE ONLY/);
+  assert.equal((p.match(/WRONG:/g) || []).length >= 3, true, "expected three worked WRONG lines");
+  assert.equal((p.match(/RIGHT:/g) || []).length >= 3, true, "expected three worked RIGHT lines");
+  // The three permitted moves are named explicitly rather than implied.
+  assert.match(p, /QUESTION the story answers/);
+  assert.match(p, /name the STAKE/);
+  assert.match(p, /concrete ANOMALY/);
+});
+
+test("B2: the prompt PRESCRIBES NO OPENERS — a list is what causes the monotony", () => {
+  // Given an approved list the model picks one and reuses it; ban a phrase and
+  // it finds a synonym and reuses that. Rule 15b states a RELATIONSHIP and names
+  // no opener at all. This test is what stops a later edit "helpfully" adding
+  // one back, which would recreate the exact defect B2 exists to remove.
+  const p = promptFor();
+  assert.match(p, /EXTEND the one before it, COMPLICATE it, or CONTRADICT it/);
+  assert.match(p, /DO NOT ADOPT A HOUSE OPENER/);
+  assert.ok(
+    !/approved (openers|transitions)|use one of these openers|begin each caption with/i.test(p),
+    "the prompt must not hand the model a transition vocabulary",
+  );
+});
+
+test("B2: the LIST-vs-SEQUENCE example shows the connection coming from the facts", () => {
+  // The failure mode is a connecting phrase bolted onto an unchanged list. The
+  // example carries the SAME three facts both times so the difference can only
+  // be the ordering and the earning, not extra content.
+  const p = promptFor();
+  assert.match(p, /LIST \(each fact true, no sequence\)/);
+  assert.match(p, /SEQUENCE \(same three facts, each one earning the next\)/);
+});
+
+test("B3: the closer rule names the three permitted moves and both wrong shapes", () => {
+  const p = promptFor();
+  assert.match(p, /THE KICKER MUST ANSWER "SO WHAT\?"/);
+  assert.match(p, /the IMPLICATION/);
+  assert.match(p, /the CONSEQUENCE/);
+  assert.match(p, /WHAT TO WATCH/);
+  // Both restatement shapes are shown, because the model reaches for the second
+  // one — circling back to its own cold open — far more often than the first.
+  assert.match(p, /\(the headline again\)/);
+  assert.match(p, /\(your own cold open again\)/);
+  assert.match(p, /ILLUSTRATIVE ONLY/);
+});

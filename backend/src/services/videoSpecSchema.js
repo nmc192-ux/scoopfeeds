@@ -54,6 +54,7 @@
 // The ONLY import here, and it stays that way: this module is otherwise pure.
 // videoAttribution imports nothing, so there is no cycle.
 import { resolveAttribution } from "./videoAttribution.js";
+import { restatesAny } from "./textSimilarity.js";
 
 // ─── The closed set ─────────────────────────────────────────────────────────
 
@@ -138,6 +139,80 @@ export const KICKER_BANNED_PHRASES = Object.freeze([
   "there you have it", "the takeaway", "key takeaway", "to recap", "recapping",
   "in essence", "essentially then", "the bottom line",
 ]);
+
+// ─── ARC: the cold open (B1) ────────────────────────────────────────────────
+//
+// The title caption used to restate the headline. Read aloud, that makes the
+// first ten seconds redundant with the thumbnail a viewer has already read —
+// and ten seconds is where the retention decision is made.
+//
+// A REJECTION, NOT A DROP, and that distinction is load-bearing. Content cards
+// must equal beats.length exactly (see the beats pass), so dropping the title
+// card to punish its caption would trip "first surviving card must be title"
+// one check later and report the wrong cause. Arc violations are spec-level:
+// they consume the EXISTING single regeneration retry and add no second budget.
+//
+// Measured with the SAME similarity function the selector uses to answer "is
+// this the same story I already published?" — restatement is restatement, and a
+// second, differently-computed overlap measure is how the event graph's
+// create-merge-split treadmill started. See textSimilarity.js.
+export const HOOK_RESTATES_ERROR = "hook_restates_headline";
+
+// ─── ARC: the closer (B3) ───────────────────────────────────────────────────
+//
+// KICKER_BANNED_PHRASES already catches summary REGISTER ("in conclusion", "the
+// takeaway"). It cannot catch a closer that summarises without announcing it —
+// one that simply says the headline again in different words, or circles back
+// to the opening caption. That closes the loop at the exact moment the video
+// should be opening one, and it is the commonest shape the model reaches for.
+//
+// Checked against BOTH the headline and the opening caption, and either match
+// rejects. Restating the headline and restating your own cold open are the same
+// editorial failure — the video ends where it began — so they share an error
+// code, and `restatesAny` reports WHICH one matched so the retry note can say.
+export const CLOSER_RESTATES_ERROR = "closer_restates";
+
+// ─── ARC: opening-stem repetition (B2) ──────────────────────────────────────
+//
+// A WARNING, NEVER A REJECT — deliberately the opposite of B1.
+//
+// The failure this makes visible is five captions all opening "But here's the
+// catch". The obvious fix is what CAUSES it: give the model a list of approved
+// openers and it picks one and reuses it; ban a phrase and it finds one
+// synonym and reuses that. So the prompt prescribes NO openers at all and
+// states the requirement as a relationship between adjacent beats, and this
+// check exists only so the monotony shows up in the harness when it happens.
+//
+// It cannot be a gate. There is no threshold separating "monotonous" from
+// "three captions legitimately begin with the subject's name", and a false
+// rejection costs a whole video — while a false warning costs a log line.
+export const MAX_SHARED_STEM = 2;
+export const STEM_WORDS = 3;
+
+/**
+ * Opening stems carried by more than `max` captions, commonest first.
+ *
+ * Captions shorter than the stem length are skipped rather than padded — a
+ * two-word caption has no three-word opening, and padding one would invent a
+ * stem that isn't there.
+ *
+ * @returns {Array<{stem: string, count: number}>}
+ */
+export function repeatedOpeningStems(captions, { stemWords = STEM_WORDS, max = MAX_SHARED_STEM } = {}) {
+  const counts = new Map();
+  for (const c of captions) {
+    const words = String(c || "")
+      .toLowerCase().replace(/[^a-z0-9 ]+/g, " ").trim()
+      .split(/\s+/).filter(Boolean);
+    if (words.length < stemWords) continue;
+    const stem = words.slice(0, stemWords).join(" ");
+    counts.set(stem, (counts.get(stem) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, n]) => n > max)
+    .sort((a, b) => b[1] - a[1])
+    .map(([stem, count]) => ({ stem, count }));
+}
 
 // CAPTION BRIDGING — a STYLE SIGNAL, never a reject.
 //
@@ -445,6 +520,11 @@ export function validateSpec(spec, {
   // absorbed into the title, the claim is VERIFIED against the title caption
   // instead of assumed, and only counts as pre-credited once it checks out.
   preCreditedSources = [],
+  // The article headline, for the arc checks. Optional: when it is absent the
+  // cold-open gate cannot run and says nothing, rather than guessing. Callers
+  // that have it (writeVideoSpec always does) get the gate; the schema's own
+  // fixtures mostly do not, and must stay valid without it.
+  headline = "",
   minSlides = MIN_SLIDES,
   maxSlides = MAX_SLIDES,
   maxDropRatio = MAX_DROP_RATIO,
@@ -671,6 +751,57 @@ export function validateSpec(spec, {
           `forward implication or an open question, never restate what was said`
         );
       }
+
+      // ARC / THE CLOSER (B3). The register check above catches a closer that
+      // ANNOUNCES it is summarising. This catches one that simply does it —
+      // saying the headline again in other words, or circling back to the cold
+      // open. Both end the video where it began.
+      //
+      // Only when the register check did not already fire: two errors for one
+      // fault would send a confused correction note into the single retry.
+      if (!hit) {
+        const r = restatesAny(last.caption, [
+          { label: "the article headline", text: headline },
+          // kept[0] is the title card — guaranteed by the ordering check above,
+          // and skipped entirely on a one-card spec where opener IS closer.
+          ...(kept.length > 1 ? [{ label: "its own opening caption", text: kept[0].caption }] : []),
+        ]);
+        if (r.restates) {
+          errors.push(
+            `${CLOSER_RESTATES_ERROR}: the kicker restates ${r.matched} — the closer must ` +
+            `answer "so what?" with an implication, a consequence, or what to watch next, ` +
+            `not return to where the video started`
+          );
+        }
+      }
+    }
+
+    // ARC / COLD OPEN (B1). The opening caption must create the question the
+    // next sixty seconds answer, not repeat the thumbnail. Spec-level so it
+    // routes into the single regeneration retry with a reason the model can act
+    // on; never a drop, because dropping the title breaks the beats equality
+    // and misreports the cause as a missing opener.
+    if (kept[0].t === "title" && headline) {
+      const r = restatesAny(kept[0].caption, [{ label: "the article headline", text: headline }]);
+      if (r.restates) {
+        errors.push(
+          `${HOOK_RESTATES_ERROR}: the opening caption restates ${r.matched} — open on a ` +
+          `question, a stake, or a concrete anomaly that makes the next sixty seconds ` +
+          `feel necessary, not on the headline the viewer has already read`
+        );
+      }
+    }
+
+    // ARC / OPENING-STEM REPETITION (B2). Style only — see MAX_SHARED_STEM for
+    // why this can never become a gate. Measured across EVERY caption including
+    // the title and kicker: a video whose opener and closer share the stem of
+    // three middle captions is exactly the monotony being watched for.
+    for (const { stem, count } of repeatedOpeningStems(kept.map(c => c.caption))) {
+      warnings.push(
+        `${count} captions open with the same three words ("${stem}") — the beats are ` +
+        `being joined by a formula instead of by their own relationship. Style signal ` +
+        `only; nothing was refused on it.`
+      );
     }
 
     // CAPTION BRIDGING — style only, never a reject. See MIN_BRIDGE_SHARE.
