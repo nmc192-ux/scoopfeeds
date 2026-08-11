@@ -209,6 +209,7 @@ test("DRIFT IS APPLIED AFTER CROSSFADE, never per state", () => {
 });
 
 test("the UPSCALE sits between the last xfade and the crop", () => {
+  return withDrift(() => {
   // Measured 2026-08-02: with the crop at output resolution the drift advanced
   // in 2px snaps at irregular frames, x and y on different frames. Integer,
   // chroma-even crop coordinates against ~0.3px/frame of intended motion.
@@ -224,8 +225,10 @@ test("the UPSCALE sits between the last xfade and the crop", () => {
   assert.match(tail, /scale=\d+:\d+:flags=lanczos[\s\S]*crop=[\s\S]*scale=1920:1080:flags=lanczos/,
     "both rescales must be lanczos — bilinear softens Anton at 340px visibly");
 });
+});
 
 test("the supersampled crop domain is an integer multiple of the output", () => {
+  return withDrift(() => {
   const { filter } = buildSlideFilter({ stateCount: 2, hold: 1.5 });
   const m = filter.match(/crop=(\d+):(\d+):/);
   assert.ok(m, "expected a crop in the graph");
@@ -234,13 +237,16 @@ test("the supersampled crop domain is an integer multiple of the output", () => 
   assert.equal(h % 1080, 0, `crop height ${h} must be a whole multiple of 1080`);
   assert.ok(w / 1920 >= 4, "2x was MEASURED insufficient — median returned to 0.000px with snap ratio 3759");
 });
+});
 
 test("a single-state slide still gets drift and a valid graph", () => {
+  return withDrift(() => {
   const { filter, totalDuration } = buildSlideFilter({ stateCount: 1, hold: 2 });
   assert.ok(!filter.includes("xfade="));
   assert.match(filter, /crop=\d+:\d+:x=/, "the drift crop must still be present with one state");
   assert.match(filter, /scale=1920:1080:flags=lanczos,setsar=1\[out\]$/, "and must still land back at output size");
   assert.equal(totalDuration, 2);
+});
 });
 
 test("xfade offsets accumulate on the combined timeline", () => {
@@ -282,6 +288,27 @@ test("concat re-muxes rather than re-encoding", async () => {
 
 // ─── Constant-rate drift (ruling 2026-08-02) ────────────────────────────────
 
+// ─── Drift is OFF by default (DrJ, 2026-08-12) ──────────────────────────────
+//
+// The tests below exercise the drift MECHANISM, which still has to work if the
+// flag is ever turned back on — so each one enables it explicitly. The static
+// default has its own tests, further down, which assert EXACTLY zero motion
+// rather than "under the criterion": at zero the old <=0.5px assertion passes
+// vacuously and would keep passing if the pan came back at 0.4px/frame.
+// ASYNC, and every caller returns it. A synchronous version hands the promise
+// back and restores the flag in `finally` before the body has run — the drift
+// is then already off by the time the assertions execute, which fails as a null
+// regex match rather than as anything that names the real cause.
+async function withDrift(fn) {
+  const saved = process.env.VIDEO_SLIDE_DRIFT_ENABLED;
+  process.env.VIDEO_SLIDE_DRIFT_ENABLED = "1";
+  try { return await fn(); }
+  finally {
+    if (saved === undefined) delete process.env.VIDEO_SLIDE_DRIFT_ENABLED;
+    else process.env.VIDEO_SLIDE_DRIFT_ENABLED = saved;
+  }
+}
+
 const travelOf = (filter) => {
   const x = filter.match(/crop=\d+:\d+:x='(\d+)\+(\d+)\*/);
   const y = filter.match(/:y='(\d+)\+(\d+)\*/);
@@ -289,6 +316,7 @@ const travelOf = (filter) => {
 };
 
 test("per-frame displacement is INVARIANT to slide duration", async () => {
+  return withDrift(async () => {
   // Fixed amplitude made this a function of duration — 0.24px/frame at 6.1s
   // but past 0.5px below ~3.5s. Section 5 derives durations from audio, so
   // short captions would have pushed the drift back over the criterion that
@@ -309,8 +337,10 @@ test("per-frame displacement is INVARIANT to slide duration", async () => {
     assert.ok(v <= 0.5, `${v.toFixed(3)} px/frame exceeds the 0.5px criterion`);
   }
 });
+});
 
 test("a long slide drifts SLOWER than the rate, never faster", async () => {
+  return withDrift(async () => {
   // Past the overscan cap the travel stops growing, so px/frame can only fall.
   // The criterion is a ceiling; this must sit under it from both directions.
   const { FPS, SUPERSAMPLE } = await import("./videoAssembler.js");
@@ -319,8 +349,10 @@ test("a long slide drifts SLOWER than the rate, never faster", async () => {
   const perFrame = Math.hypot(dx, dy) / SUPERSAMPLE() / (totalDuration * FPS);
   assert.ok(perFrame < 0.24, `expected the cap to slow a long slide, got ${perFrame.toFixed(3)} px/frame`);
 });
+});
 
 test("travel never exceeds the overscan, so the crop stays inside the frame", () => {
+  return withDrift(() => {
   for (const hold of [0.8, 2, 5, 20]) {
     const { filter } = buildSlideFilter({ stateCount: 3, hold });
     const { dx, dy, padX, padY } = travelOf(filter);
@@ -329,10 +361,12 @@ test("travel never exceeds the overscan, so the crop stays inside the frame", ()
     assert.ok(dy + padY <= 22 * 4 + 1, `y travel ${dy} + pad ${padY} overruns the overscan`);
   }
 });
+});
 
 // ─── Captions (§5) ──────────────────────────────────────────────────────────
 
 test("captions burn AFTER the drift, so they never move under the eye", async () => {
+  return withDrift(async () => {
   const { buildSlideFilter } = await import("./videoAssembler.js");
   const { filter } = buildSlideFilter({ stateCount: 3, hold: 1.5, caption: "drawtext=fontfile='/f':textfile='/t'" });
   const crop = filter.lastIndexOf("crop=");
@@ -340,6 +374,7 @@ test("captions burn AFTER the drift, so they never move under the eye", async ()
   assert.ok(draw > crop, "a caption drawn before the crop would drift with the composition");
   assert.match(filter, /scale=1920:1080:flags=lanczos,setsar=1,drawtext=/,
     "and must come after the downscale so it is not resampled");
+});
 });
 
 test("caption wrapping is MEASURED, not predicted from character count", async () => {

@@ -11,8 +11,11 @@
  *
  * Requires ffmpeg >= 4.3 for `xfade`. Verified on the VPS 2026-08-02:
  * 5.1.9-0+deb12u1 with xfade present, installed via the Dockerfile's apt step.
- * getFFmpegPath() prefers system ffmpeg over the bundled 4.1 binary, which
- * lacks xfade and would silently degrade every transition to a hard cut.
+ * getFFmpegPath() prefers system ffmpeg over the bundled @ffmpeg-installer
+ * binary. That bundle was recorded here as "4.1, lacks xfade"; measured
+ * 2026-08-12 on darwin-arm64 it is **4.4 and DOES carry xfade**, so a dev Mac
+ * with no system ffmpeg can render after all. The stale note had already
+ * talked one session out of attempting a local render.
  */
 
 import { spawn } from "child_process";
@@ -61,6 +64,33 @@ const DRIFT_SUPERSAMPLE = Number.parseInt(process.env.VIDEO_DRIFT_SUPERSAMPLE ||
 // overscan — so a long slide drifts SLOWER than 6px/s once it hits the cap,
 // never faster. The criterion is a ceiling, and this can only sit under it.
 const DRIFT_RATE_PX_PER_SEC = Number.parseFloat(process.env.VIDEO_DRIFT_RATE || "6");
+
+/**
+ * THE SLIDE PAN IS OFF (DrJ, 2026-08-12). Static shipped, not static behind a
+ * flag someone has to remember to flip — so this defaults to FALSE and the
+ * whole drift block below is skipped unless it is explicitly turned back on.
+ *
+ * The pan was eye-straining: a whole frame of text and figures sliding
+ * continuously under a line the viewer is trying to read. Everything measured
+ * about it — the 4x supersample, the pinned 6px/s rate, the 0.5px/frame
+ * criterion — was work to make the motion TOLERABLE, and the verdict is that
+ * tolerable was still the wrong target.
+ *
+ * WHAT IS *NOT* AFFECTED, deliberately, because "static" is easy to over-apply:
+ *   - The progressive state reveal (xfade between keyframe states) STAYS. That
+ *     is content appearing, not the frame moving, and it is the entire motion
+ *     design of the format.
+ *   - The 2% overscan (DRIFT_SCALE) STAYS. With no drift it is a harmless
+ *     slight crop; removing it is a layout change with its own risk and is a
+ *     separate pass.
+ *   - DRIFT_SAFE_Y in videoSlideRenderer STAYS. It reserves the bottom band
+ *     that the burned captions and the progress line already live in.
+ *
+ * The 4x SUPERSAMPLE, on the other hand, is skipped when drift is off — it
+ * exists ONLY to give an animated crop sub-pixel precision, and there is
+ * nothing to be sub-pixel about in a still frame. See buildSlideFilter.
+ */
+export const driftEnabled = () => process.env.VIDEO_SLIDE_DRIFT_ENABLED === "1";
 
 // ENCODE, pinned rather than inherited. The demo came out at 129 kbps, which
 // is fine for static dark frames — but that number is a CONSEQUENCE of this
@@ -188,6 +218,36 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
     }
   }
 
+  // Captions come LAST in the chain in both branches below — after any crop and
+  // any downscale — so they neither move nor get resampled.
+  const captionChain = caption ? `,${caption}` : "";
+
+  // ── STATIC (the default): the same 2% overscan, cropped dead centre ──
+  //
+  // The centre is not an arbitrary choice — it is the MIDPOINT of the pan this
+  // replaces. The animated crop ran from (maxX-dx)/2 to (maxX+dx)/2, so maxX/2
+  // is exactly where the old motion averaged out. Framing is therefore
+  // unchanged; only the movement is gone.
+  //
+  // NO SUPERSAMPLE HERE. The 4x round trip exists solely to make an animated
+  // integer crop advance smoothly (see DRIFT_SUPERSAMPLE); a still crop lands
+  // on one integer coordinate and stays there, so scaling to 4x and back would
+  // buy nothing and cost two lanczos passes at sixteen times the pixel count.
+  // Dropping it also removes the slight softening that round trip caused, which
+  // is why static output is fractionally CRISPER than the panned output was.
+  if (!driftEnabled()) {
+    const w2s = Math.round(CANVAS.w * DRIFT_SCALE);
+    const h2s = Math.round(CANVAS.h * DRIFT_SCALE);
+    const offX = Math.round((w2s - CANVAS.w) / 2);
+    const offY = Math.round((h2s - CANVAS.h) / 2);
+    parts.push(
+      `[${last}]scale=${w2s}:${h2s}:flags=lanczos,` +
+      `crop=${CANVAS.w}:${CANVAS.h}:x=${offX}:y=${offY},` +
+      `setsar=1${captionChain}[out]`
+    );
+    return { filter: parts.join("; "), totalDuration: total };
+  }
+
   // ── Drift, applied to the ASSEMBLED stream, in a supersampled domain ──
   //
   // Order is load-bearing three times over:
@@ -219,9 +279,6 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
   // The crop window has to sit inside the scaled frame at every t, so the
   // start offset moves with the travel rather than the (larger) overscan.
   const padX = Math.max(0, maxX - dx), padY = Math.max(0, maxY - dy);
-  // Captions come LAST in the chain — after the crop and the downscale — so
-  // they neither drift nor get resampled.
-  const captionChain = caption ? `,${caption}` : "";
   parts.push(
     `[${last}]scale=${w2}:${h2}:flags=lanczos,` +
     `crop=${cw}:${ch}:x='${Math.round(padX / 2)}+${xExpr}':y='${Math.round(padY / 2)}+${yExpr}',` +

@@ -39,8 +39,8 @@ There is **no attribution card** — it was removed because a credit slide at
 position 2 is a dead beat where retention is decided.
 
 **Motion is keyframes, not frames.** Each card renders 4 *states* — 5 for
-`stat` — (empty → line 1 → line 2 → complete); ffmpeg crossfades between them and applies a slow
-drift over the whole slide.
+`stat` — (empty → line 1 → line 2 → complete); ffmpeg crossfades between them.
+It used to also pan the whole slide; that is off — see below.
 
 A true 30fps sequence is 1,800 renders for a 60s video — that figure is frames
 per second times duration and does not depend on card count. Keyframes are
@@ -51,9 +51,35 @@ cards by the mix rule (2 of 6, 3 of 10), plus 3 thumbnail variants. The earlier
 measured against that assumption and scale roughly with render count, so the
 real cost is well under them.
 
-**The drift must be supersampled 4×.** At output resolution the crop
-coordinates are integers (and yuv420p forces them even), so ~0.3px/frame of
-intended motion becomes a 2px snap — visible as shake. 2× was measured and
+**The slide pan is OFF (DrJ, 2026-08-12).** Slides are static. `xfade` between
+keyframe states stays — content appearing is the format's motion design; the
+*frame moving* was the problem. A slow whole-frame pan under text someone is
+reading is eye-straining, and every measured refinement below was work to make
+that motion tolerable rather than to establish it was wanted.
+
+`VIDEO_SLIDE_DRIFT_ENABLED=1` restores it. Default off, so static ships without
+anyone having to remember a flag. Measured on the same article, same fixture:
+
+| | frames | duplicate of previous frame | file |
+|---|---|---|---|
+| static (default) | 735 | **587 (80%)** | 1.5 MB |
+| pan (`=1`) | 735 | 157 (21%) | 2.3 MB |
+
+The surviving 148 non-duplicate frames in the static build are the crossfades
+and state reveals — exactly what should remain. Identical frame counts confirm
+slide duration is untouched. The 35% smaller file is a side effect of a still
+frame compressing better, not a quality change.
+
+The 2% overscan is KEPT (with no pan it is a harmless slight crop; removing it
+is a layout change with its own risk). The **4× supersample is skipped** when
+the pan is off — it existed solely to give an *animated* integer crop sub-pixel
+precision, and a still crop lands on one coordinate and stays there. Dropping
+the round trip also removes its slight softening, so static output is
+fractionally crisper.
+
+**When the pan is enabled, it must be supersampled 4×.** At output resolution
+the crop coordinates are integers (and yuv420p forces them even), so ~0.3px/frame
+of intended motion becomes a 2px snap — visible as shake. 2× was measured and
 still fails; 4× passes at ≤0.33px/frame.
 
 ### Narration pacing — documentary, not podcast
