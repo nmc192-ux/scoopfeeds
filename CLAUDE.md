@@ -47,6 +47,8 @@ cd backend && node scripts/pull-prod-db.mjs --dry-run   # subset pull of prod db
 # Ops helpers
 cd backend && npm run signal:http     # signal read-layer HTTP server
 cd backend && npm run signal:mcp      # same, as an MCP server
+cd backend && npm run source:triage   # ingestion source health triage (read-only)
+cd backend && npm run source:triage -- --probe   # + live-fetch every source
 ```
 
 CI (`.github/workflows/node.js.yml`) only installs, builds the frontend, and runs
@@ -195,6 +197,13 @@ post, credential use. Agents never deploy to prod. Build, verify, and present; d
 - **Machine events** (USGS/NOAA) carry no articles and have caused two production failures by
   consuming selection windows. Any query that picks "the freshest N events" needs
   `AND EXISTS (SELECT 1 FROM event_articles …)`.
+- **`source_health` is never reconciled against config.** It upserts on `source_name` and
+  nothing deletes, so removing an entry from `config/sources.js` leaves its health row
+  behind with frozen counters — indistinguishable on `/api/news/stats` from a source
+  failing right now (162 rows vs 154 configured sources). Renaming a source strands the old
+  row the same way. `npm run source:triage` separates the populations; see
+  `docs/ops/source_health_triage.md`. Related: the same source is keyed `yt:<name>` in
+  `source_health` but `YouTube:<name>` in `ingestion_logs`.
 - **`event_articles` has no `ON DELETE CASCADE`.** The 7-day article prune must sweep orphan
   links itself (`pruneOldArticles`), or the graph rots into dangling-link inflation.
 - **Migrations are a hand-maintained array** in `src/db/migrate.js` — a new file must be

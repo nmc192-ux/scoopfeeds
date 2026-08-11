@@ -17,6 +17,7 @@
     "db:backup": "node scripts/db-backup.mjs",
     "db:migrate": "node src/db/migrate.js",
     "scoring:flagged": "node scripts/scoring-flagged.mjs",
+    "source:triage": "node scripts/source-triage.mjs",
     "signal:http": "node src/signal/httpServer.js",
     "signal:mcp": "node src/signal/mcpServer.js"
   },

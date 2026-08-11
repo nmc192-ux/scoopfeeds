@@ -108,6 +108,11 @@ function tableSpecs({ withContent }) {
     // First-class: the primary evidence for ingestion continuity (per-source
     // fetch success/error/duration). 44 MB unbounded, so it MUST be bounded.
     { name: "ingestion_logs", cols: null, where: "fetched_at >= :cutoff" },
+    // The per-source counters ingestion_logs is the history for. One row per
+    // source (162 on prod), so it is never worth bounding — and without it a
+    // snapshot cannot answer "which sources are failing", which is what
+    // `npm run source:triage -- --db <snapshot>` exists to do.
+    { name: "source_health", cols: null, where: null },
     { name: "sources", cols: null, where: null },
     // May not exist yet on prod (ships with the heartbeat branch) — the remote
     // script skips absent tables rather than aborting the transaction.
