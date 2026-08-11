@@ -158,6 +158,20 @@ export const KICKER_BANNED_PHRASES = Object.freeze([
 // create-merge-split treadmill started. See textSimilarity.js.
 export const HOOK_RESTATES_ERROR = "hook_restates_headline";
 
+// ─── ARC: the closer (B3) ───────────────────────────────────────────────────
+//
+// KICKER_BANNED_PHRASES already catches summary REGISTER ("in conclusion", "the
+// takeaway"). It cannot catch a closer that summarises without announcing it —
+// one that simply says the headline again in different words, or circles back
+// to the opening caption. That closes the loop at the exact moment the video
+// should be opening one, and it is the commonest shape the model reaches for.
+//
+// Checked against BOTH the headline and the opening caption, and either match
+// rejects. Restating the headline and restating your own cold open are the same
+// editorial failure — the video ends where it began — so they share an error
+// code, and `restatesAny` reports WHICH one matched so the retry note can say.
+export const CLOSER_RESTATES_ERROR = "closer_restates";
+
 // ─── ARC: opening-stem repetition (B2) ──────────────────────────────────────
 //
 // A WARNING, NEVER A REJECT — deliberately the opposite of B1.
@@ -736,6 +750,29 @@ export function validateSpec(spec, {
           `kicker is in summary register ("${hit}") — the closer must end on the ` +
           `forward implication or an open question, never restate what was said`
         );
+      }
+
+      // ARC / THE CLOSER (B3). The register check above catches a closer that
+      // ANNOUNCES it is summarising. This catches one that simply does it —
+      // saying the headline again in other words, or circling back to the cold
+      // open. Both end the video where it began.
+      //
+      // Only when the register check did not already fire: two errors for one
+      // fault would send a confused correction note into the single retry.
+      if (!hit) {
+        const r = restatesAny(last.caption, [
+          { label: "the article headline", text: headline },
+          // kept[0] is the title card — guaranteed by the ordering check above,
+          // and skipped entirely on a one-card spec where opener IS closer.
+          ...(kept.length > 1 ? [{ label: "its own opening caption", text: kept[0].caption }] : []),
+        ]);
+        if (r.restates) {
+          errors.push(
+            `${CLOSER_RESTATES_ERROR}: the kicker restates ${r.matched} — the closer must ` +
+            `answer "so what?" with an implication, a consequence, or what to watch next, ` +
+            `not return to where the video started`
+          );
+        }
       }
     }
 

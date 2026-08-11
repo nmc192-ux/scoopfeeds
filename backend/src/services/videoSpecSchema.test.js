@@ -960,3 +960,71 @@ test("a varied spec produces no repetition warning", () => {
   assert.equal(v.ok, true, v.errors.join(" | "));
   assert.equal(v.warnings.filter(w => w.includes("open with the same three words")).length, 0);
 });
+
+// ─── ARC: the closer (B3) ───────────────────────────────────────────────────
+//
+// KICKER_BANNED_PHRASES catches a closer that ANNOUNCES it is summarising.
+// These cover the one that simply does it — restating the headline, or circling
+// back to the video's own cold open.
+
+const closerSpec = (kickerCaption, openCaption = "Thirteen countries lost the internet on one afternoon.") =>
+  withBeats([
+    { ...titleCard(), caption: openCaption },
+    plainFiller(0), plainFiller(1), plainFiller(2),
+    { ...kickerCard(), caption: kickerCaption },
+  ]);
+
+test("a kicker that restates the HEADLINE is rejected as closer_restates", () => {
+  const v = validateSpec(closerSpec("Undersea cable damage has disrupted internet across West Africa."), arcOpts());
+  assert.equal(v.ok, false);
+  const err = v.errors.find(e => e.includes("closer_restates"));
+  assert.ok(err, v.errors.join(" | "));
+  assert.match(err, /the article headline/);
+});
+
+test("a kicker that circles back to its OWN OPENING CAPTION is rejected too", () => {
+  // The video ending where it began is the same editorial failure as restating
+  // the headline, so it shares the error code — but the message must name which.
+  const v = validateSpec(
+    closerSpec("Thirteen countries lost their internet in a single afternoon."),
+    arcOpts(),
+  );
+  assert.equal(v.ok, false);
+  const err = v.errors.find(e => e.includes("closer_restates"));
+  assert.ok(err, v.errors.join(" | "));
+  assert.match(err, /its own opening caption/);
+});
+
+test("a forward-looking closer passes", () => {
+  for (const caption of [
+    "The next repair ship is three weeks out, and nobody has said who pays for the wait.",
+    "Whether anyone buries the replacement deeper is a decision still unmade.",
+  ]) {
+    const v = validateSpec(closerSpec(caption), arcOpts());
+    assert.equal(v.ok, true, `expected pass for "${caption}": ${v.errors.join(" | ")}`);
+  }
+});
+
+test("the register check and the restatement check never both fire", () => {
+  // Two errors for one fault would send a confused correction note into the
+  // single regeneration retry.
+  const v = validateSpec(
+    closerSpec("In conclusion, undersea cable damage has disrupted internet across West Africa."),
+    arcOpts(),
+  );
+  assert.equal(v.ok, false);
+  assert.equal(v.errors.filter(e => e.includes("summary register")).length, 1);
+  assert.equal(v.errors.filter(e => e.includes("closer_restates")).length, 0);
+});
+
+test("the closer gate abstains with no headline, but still checks the opening caption", () => {
+  const restatesOpen = closerSpec("Thirteen countries lost their internet in a single afternoon.");
+  const v = validateSpec(restatesOpen, arcOpts({ headline: "" }));
+  assert.equal(v.ok, false, "the opening-caption arm does not need a headline");
+  assert.match(v.errors.find(e => e.includes("closer_restates")), /its own opening caption/);
+});
+
+test("a short closer with no content words is not read as a restatement", () => {
+  const v = validateSpec(closerSpec("So who pays now?"), arcOpts());
+  assert.equal(v.ok, true, v.errors.join(" | "));
+});

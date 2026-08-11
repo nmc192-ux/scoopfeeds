@@ -572,6 +572,26 @@ RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. 
     WRONG: "Ultimately, the takeaway is that infrastructure is fragile."
     RIGHT: "Nobody has said who will pay to bury the next one."
 
+16b. THE KICKER MUST ANSWER "SO WHAT?". Avoiding the summary VOCABULARY above is not enough — a closer that simply says the headline again in different words, or circles back to your own opening caption, ends the video exactly where it began. That is checked mechanically against BOTH the headline and your opening caption, and the spec is REJECTED if the closer restates either one.
+
+    The closer must give the viewer something they did not have at the start. One of:
+      - the IMPLICATION — what this means for someone who is not in the story,
+      - the CONSEQUENCE — what is now set in motion, or foreclosed,
+      - WHAT TO WATCH — the decision, date, or number that will settle it.
+
+    WORKED EXAMPLES — ILLUSTRATIVE ONLY. Never reuse these facts or wording.
+
+    Headline: "Undersea cable damage disrupts internet across West Africa"
+    Opening:  "Thirteen countries lost the internet on the same afternoon. One ship did it."
+      WRONG:  "Undersea cable damage has cut off internet across West Africa."     (the headline again)
+      WRONG:  "One ship took thirteen countries offline in an afternoon."          (your own cold open again)
+      RIGHT:  "The next repair ship is three weeks out, and nobody has said who pays for the wait."
+
+    Headline: "Regulator fines airline $40m over refund delays"
+    Opening:  "Passengers waited nine months for money the airline already had."
+      WRONG:  "The airline has been fined forty million dollars for refund delays." (the headline again)
+      RIGHT:  "The fine is smaller than the interest earned on the money it held."
+
 Return ONLY a JSON object, no markdown fence, with exactly this shape — "beats" first, then "slides":
 
 {

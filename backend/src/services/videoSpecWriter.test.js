@@ -474,3 +474,16 @@ test("B2: the LIST-vs-SEQUENCE example shows the connection coming from the fact
   assert.match(p, /LIST \(each fact true, no sequence\)/);
   assert.match(p, /SEQUENCE \(same three facts, each one earning the next\)/);
 });
+
+test("B3: the closer rule names the three permitted moves and both wrong shapes", () => {
+  const p = promptFor();
+  assert.match(p, /THE KICKER MUST ANSWER "SO WHAT\?"/);
+  assert.match(p, /the IMPLICATION/);
+  assert.match(p, /the CONSEQUENCE/);
+  assert.match(p, /WHAT TO WATCH/);
+  // Both restatement shapes are shown, because the model reaches for the second
+  // one — circling back to its own cold open — far more often than the first.
+  assert.match(p, /\(the headline again\)/);
+  assert.match(p, /\(your own cold open again\)/);
+  assert.match(p, /ILLUSTRATIVE ONLY/);
+});
