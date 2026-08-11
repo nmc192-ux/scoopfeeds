@@ -21,6 +21,7 @@ import path from "path";
 import { logger } from "./logger.js";
 import { getFFmpegPath } from "./videoGenerator.js";
 import { CANVAS, MARGIN_X, DRIFT_SAFE_Y, COLORS } from "./videoSlideRenderer.js";
+import { voiceGapSecs } from "./videoVoice.js";
 import { writeFileSync as writeFileSync_ } from "fs";
 
 export const CROSSFADE_SECS = Number.parseFloat(process.env.VIDEO_CROSSFADE_SECS || "0.35");
@@ -238,12 +239,24 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
  *
  * A short tail of silence is added so the last word is not clipped by the hard
  * cut into the next slide.
+ *
+ * TWO TAILS, TWO JOBS. SLIDE_TAIL_SECS is mechanical — it exists so the final
+ * consonant survives the cut, and 0.3s is the smallest value that does that.
+ * VIDEO_VOICE_GAP_MS (voiceGapSecs) is editorial — it is the pause BETWEEN
+ * IDEAS that separates documentary narration from podcast narration, and it is
+ * the knob a reader of this file is meant to turn. Collapsing them into one
+ * number would mean re-deriving the clipping margin every time the pacing
+ * changes, and the first person to shorten the pause would clip every slide.
  */
 export const SLIDE_TAIL_SECS = Number.parseFloat(process.env.VIDEO_SLIDE_TAIL || "0.3");
 
+/** Audio + the mechanical tail + the editorial gap. The slide's true length. */
+export function slideTotalSecs(audioSecs) {
+  return audioSecs + SLIDE_TAIL_SECS + voiceGapSecs();
+}
+
 export function holdForAudio(audioSecs, stateCount, crossfade = CROSSFADE_SECS) {
-  const total = audioSecs + SLIDE_TAIL_SECS;
-  return (total + (stateCount - 1) * crossfade) / stateCount;
+  return (slideTotalSecs(audioSecs) + (stateCount - 1) * crossfade) / stateCount;
 }
 
 /**
@@ -283,9 +296,13 @@ export async function assembleSlide({
   );
   if (audioPath) {
     // Pad rather than -shortest: the tail of silence is deliberate, and
-    // -shortest would trim the video back to the audio and remove it.
+    // -shortest would trim the video back to the audio and remove it. The
+    // editorial gap is padded here too — it is real trailing silence on this
+    // slide's audio, just not baked into the cached MP3, so re-pacing the
+    // channel costs nothing at ElevenLabs. The +0.5 stays a margin over the
+    // longest thing the video can be, not a third tail.
     args.push("-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
-              "-af", `apad=pad_dur=${SLIDE_TAIL_SECS + 0.5}`);
+              "-af", `apad=pad_dur=${(SLIDE_TAIL_SECS + voiceGapSecs() + 0.5).toFixed(3)}`);
   } else {
     args.push("-an");
   }

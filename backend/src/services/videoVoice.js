@@ -39,10 +39,110 @@ import { getFFmpegPath } from "./videoGenerator.js";
 
 const BACKEND_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 
-export const VOICE_ID  = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";  // Rachel
-export const MODEL_ID  = process.env.ELEVENLABS_MODEL_ID || "eleven_turbo_v2";
+// ─── Voice direction ────────────────────────────────────────────────────────
+//
+// EVERY DEFAULT BELOW IS TODAY'S VALUE. An unset environment produces
+// byte-identical audio to the pre-change code, which is the whole point: this
+// merges inert and the TTS cache survives it untouched. The knobs exist so a
+// documentary read can be dialled in from `.env` and restarted, rather than
+// through a deploy.
+//
+// ⚠️ ALL FIVE ARE IN THE CACHE KEY (see cacheKeyFor). Changing any one of them
+// invalidates every cached clip at once — by design, so a tuning change can
+// never be served stale audio, but it means the first run after the change
+// re-synthesises every caption at full price. VIDEO_VOICE_MODEL is the
+// expensive one to change twice over: the model also carries its own
+// per-character rate, so switching tiers re-buys the whole corpus at the NEW
+// price. VIDEO_VOICE_GAP_MS is deliberately outside the key — see below.
+
+/**
+ * A number from the environment, in which ZERO MEANS ZERO.
+ *
+ * `Number.parseFloat(x) || fallback` is wrong for every setting here: it reads
+ * a deliberate `0` as "unset" and quietly serves the default instead. Stability
+ * 0 is a legitimate choice — it is ElevenLabs' most expressive setting and the
+ * one a documentary read is most likely to reach for — so that idiom would
+ * silently refuse the single most likely edit to this file.
+ *
+ * Unset and empty fall through to the default. Unparseable or out-of-range
+ * falls back LOUDLY: ElevenLabs answers an out-of-range setting with a 422 at
+ * synthesis time, one caption into a render, and §6.2 makes that a lost article.
+ * A warned fallback at import is the cheaper failure.
+ */
+export function envNumber(name, fallback, { min, max } = {}) {
+  const raw = process.env[name];
+  // Number("") is 0, so the empty case has to be caught before the parse.
+  if (raw === undefined || String(raw).trim() === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    logger.warn(`🔊 ${name}="${raw}" is not a number — falling back to ${fallback}`);
+    return fallback;
+  }
+  if ((min !== undefined && n < min) || (max !== undefined && n > max)) {
+    logger.warn(`🔊 ${name}=${n} is outside the accepted range [${min}, ${max}] — falling back to ${fallback}`);
+    return fallback;
+  }
+  return n;
+}
+
+// VIDEO_VOICE_ID takes precedence, ELEVENLABS_VOICE_ID stays honoured beneath
+// it. The older name is read by ttsService too and may be set somewhere this
+// branch cannot see; silently dropping it would repoint the voice as a side
+// effect of adding a knob.
+export const VOICE_ID  = process.env.VIDEO_VOICE_ID
+  || process.env.ELEVENLABS_VOICE_ID
+  || "21m00Tcm4TlvDq8ikWAM";  // Rachel
+// Same precedence shape as the voice id: the new name wins, the old one is
+// still honoured beneath it. Without this knob the stage-1 model comparison
+// could be listened to but not acted on — choosing the winner would need a code
+// change, which is the thing every other setting on this page avoids.
+//
+// NOT VALIDATED against a list. ElevenLabs adds and retires models faster than
+// this file gets edited, and an allowlist would reject the next good one while
+// claiming to protect you. A bad id fails loudly at the first synthesis with a
+// 4xx that names it, and §6.2 turns that into a skipped article rather than a
+// bad video.
+//
+// ⚠️ MEASURED 2026-08-11: `eleven_v3` accepts `speed` and IGNORES it (0.7 and
+// 1.2 produced 7.00s both times on the same caption). Slide duration IS audio
+// duration (§5), so on that model VIDEO_VOICE_SPEED silently stops steering
+// anything. turbo_v2, multilingual_v2, turbo_v2_5 and flash_v2_5 all honour it.
+export const MODEL_ID  = process.env.VIDEO_VOICE_MODEL
+  || process.env.ELEVENLABS_MODEL_ID
+  || "eleven_turbo_v2";
+
 // Mirrors ttsService's tuning, which is what the channel already sounds like.
-export const VOICE_SETTINGS = Object.freeze({ stability: 0.5, similarity_boost: 0.75, speed: 1.05 });
+//
+// KEY ORDER IS LOAD-BEARING. cacheKeyFor digests JSON.stringify(VOICE_SETTINGS),
+// and JSON.stringify preserves insertion order — so reordering these three
+// lines would invalidate the entire cache while changing nothing audible.
+// Ranges are ElevenLabs': stability and similarity 0–1, speed 0.7–1.2.
+export const VOICE_SETTINGS = Object.freeze({
+  stability:        envNumber("VIDEO_VOICE_STABILITY",  0.5,  { min: 0, max: 1 }),
+  similarity_boost: envNumber("VIDEO_VOICE_SIMILARITY", 0.75, { min: 0, max: 1 }),
+  speed:            envNumber("VIDEO_VOICE_SPEED",      1.05, { min: 0.7, max: 1.2 }),
+});
+
+/**
+ * Trailing silence after each caption, in seconds. Default 0 — inert.
+ *
+ * DELIBERATELY NOT IN THE CACHE KEY, because it is not in the MP3. The gap is
+ * added where SLIDE_TAIL_SECS already is — in the slide's timing and in the
+ * `apad` that pads the audio stream to match — so re-pacing the channel is free
+ * rather than a full re-synthesis of every caption. The result on screen is
+ * identical either way: the slide holds, in silence, for this long after the
+ * narration ends.
+ *
+ * Read at CALL TIME, not at import, so it is runtime-flippable on a restart
+ * like the other pacing levers in videoAutopost.
+ *
+ * Capped at 5s. Slide duration is audio duration (§5) and every millisecond
+ * here is multiplied by the slide count — 400ms across 8 slides is 3.2s of
+ * video, and a fat-fingered `4000` would be 32s of silence in a 90s film.
+ */
+export function voiceGapSecs() {
+  return envNumber("VIDEO_VOICE_GAP_MS", 0, { min: 0, max: 5000 }) / 1000;
+}
 
 export const TTS_CACHE_DIR = process.env.VIDEO_TTS_CACHE_DIR
   ? path.resolve(process.env.VIDEO_TTS_CACHE_DIR)
