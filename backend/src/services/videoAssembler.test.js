@@ -39,10 +39,25 @@ function withGap(ms, fn) {
  *  change to the graph is visible here instead of only in a rendered file. */
 function driftPerFrame(stateCount, hold) {
   const { filter, totalDuration } = buildSlideFilter({ stateCount, hold, driftDir: 0 });
+  // A STATIC crop has constant coordinates and no `t` at all. That is zero
+  // motion, measured — not an unparseable filter, and not an excuse to skip the
+  // assertion. Returning 0 here is what lets the same helper prove both states.
+  if (!/crop=\d+:\d+:x='/.test(filter)) return 0;
   const m = filter.match(/crop=\d+:\d+:x='\d+\+([\d.]+)\*\(t\/[\d.]+\)':y='\d+\+([\d.]+)\*/);
   assert.ok(m, `could not read the crop expression out of the filter:\n${filter}`);
   const travelPx = Math.hypot(Number(m[1]), Number(m[2])) / SUPERSAMPLE();
   return travelPx / (totalDuration * FPS);
+}
+
+/** Run a body with the pan turned back on. Async — see videoSlideRenderer.test.js. */
+async function withDrift(fn) {
+  const saved = process.env.VIDEO_SLIDE_DRIFT_ENABLED;
+  process.env.VIDEO_SLIDE_DRIFT_ENABLED = "1";
+  try { return await fn(); }
+  finally {
+    if (saved === undefined) delete process.env.VIDEO_SLIDE_DRIFT_ENABLED;
+    else process.env.VIDEO_SLIDE_DRIFT_ENABLED = saved;
+  }
 }
 
 // A caption is one or two spoken sentences (§5), which lands between about 1.5s
@@ -77,7 +92,8 @@ test("the mechanical tail and the editorial gap stay separate numbers", () => {
 
 // ─── Gate 1: the drift criterion ────────────────────────────────────────────
 
-test("the drift stays under 0.5px/frame at every gap, for every slide length", () => {
+test("the drift stays under 0.5px/frame at every gap, for every slide length", async () => {
+  return withDrift(() => {
   for (const gapMs of [0, 100, 200, 400, 800]) {
     withGap(gapMs, () => {
       for (const stateCount of [1, 2, 3, 4, 5]) {
@@ -91,9 +107,11 @@ test("the drift stays under 0.5px/frame at every gap, for every slide length", (
       }
     });
   }
+  });
 });
 
-test("a longer slide cannot drift FASTER — the rate is pinned, the cap only slows it", () => {
+test("a longer slide cannot drift FASTER — the rate is pinned, the cap only slows it", async () => {
+  return withDrift(() => {
   // This is the property that makes the gate hold for any gap anyone types:
   // per-frame displacement is DRIFT_RATE/FPS until the overscan caps the
   // travel, and capped means slower. Duration can only ever reduce it.
@@ -108,6 +126,7 @@ test("a longer slide cannot drift FASTER — the rate is pinned, the cap only sl
       }
     });
   }
+  });
 });
 
 // ─── Gate 2: the state-collapse rule is untouched ───────────────────────────
@@ -145,4 +164,104 @@ test("the gap only ever ADDS to the hold a surviving state gets", async () => {
     const at400 = withGap(400, () => holdForAudio(audioSecs, kept));
     assert.ok(at400 > at0, `audio=${audioSecs}s: ${at400} !> ${at0}`);
   }
+});
+
+// ─── STATIC SLIDES — the default (DrJ, 2026-08-12) ──────────────────────────
+//
+// These assert EXACTLY ZERO, not "under the criterion". At zero motion the
+// <=0.5px/frame gate above passes vacuously and would keep passing if the pan
+// came back at 0.4px/frame — which is precisely the eye-strain being removed.
+// Zero is the only assertion that still means something here.
+
+test("BY DEFAULT there is no drift: per-frame displacement is EXACTLY zero", () => {
+  delete process.env.VIDEO_SLIDE_DRIFT_ENABLED;
+  for (const stateCount of [1, 2, 3, 4, 5]) {
+    for (const audioSecs of DURATIONS) {
+      const px = driftPerFrame(stateCount, holdForAudio(audioSecs, stateCount));
+      assert.strictEqual(
+        px, 0,
+        `states=${stateCount} audio=${audioSecs}s produced ${px} px/frame — the pan is back`,
+      );
+    }
+  }
+});
+
+test("the static filter contains NO time-dependent term anywhere", () => {
+  // The stronger form of the assertion above: not "the motion is small" but
+  // "the graph cannot express motion". Any `t` in a crop/scale expression is a
+  // whole-frame animation by definition.
+  delete process.env.VIDEO_SLIDE_DRIFT_ENABLED;
+  for (const stateCount of [1, 3, 5]) {
+    const { filter } = buildSlideFilter({ stateCount, hold: 3, driftDir: 0 });
+    assert.ok(!/crop=[^,]*\bt\b/.test(filter), `crop is animated:\n${filter}`);
+    assert.ok(!/scale=[^,]*\bt\b/.test(filter), `scale is animated:\n${filter}`);
+    assert.match(filter, /crop=\d+:\d+:x=\d+:y=\d+/, "expected a constant-coordinate crop");
+  }
+});
+
+test("the direction alternation cannot reintroduce motion when drift is off", () => {
+  // driftDir alternates the pan per slide. With drift off it must be inert for
+  // every value, not merely for the even ones a spot-check would cover.
+  delete process.env.VIDEO_SLIDE_DRIFT_ENABLED;
+  const filters = new Set();
+  for (let driftDir = 0; driftDir < 8; driftDir++) {
+    const { filter } = buildSlideFilter({ stateCount: 3, hold: 3, driftDir });
+    assert.ok(!/\bt\b/.test(filter.split("crop=")[1] || ""), `driftDir=${driftDir} animated the crop`);
+    filters.add(filter);
+  }
+  assert.equal(filters.size, 1, "every slide must produce the identical static graph");
+});
+
+test("the 2% overscan is KEPT, and the crop sits at the pan's midpoint", () => {
+  // The overscan stays (removing it is a separate layout change). Cropping dead
+  // centre is not arbitrary: the old pan ran from (maxX-dx)/2 to (maxX+dx)/2,
+  // so maxX/2 is exactly where that motion averaged out. Framing is unchanged;
+  // only the movement is gone.
+  delete process.env.VIDEO_SLIDE_DRIFT_ENABLED;
+  const { filter } = buildSlideFilter({ stateCount: 3, hold: 3, driftDir: 0 });
+  const scale = filter.match(/\[xf2\]scale=(\d+):(\d+):flags=lanczos/);
+  assert.ok(scale, `expected an overscan scale:\n${filter}`);
+  const w2 = Number(scale[1]), h2 = Number(scale[2]);
+  assert.ok(w2 > 1920 && w2 <= Math.round(1920 * 1.03), `overscan width ${w2} is not ~2%`);
+  const crop = filter.match(/crop=(\d+):(\d+):x=(\d+):y=(\d+)/);
+  assert.equal(Number(crop[1]), 1920);
+  assert.equal(Number(crop[2]), 1080);
+  assert.equal(Number(crop[3]), Math.round((w2 - 1920) / 2), "crop x is not the midpoint");
+  assert.equal(Number(crop[4]), Math.round((h2 - 1080) / 2), "crop y is not the midpoint");
+});
+
+test("the 4x supersample is SKIPPED when there is nothing to be sub-pixel about", () => {
+  // It exists solely to make an animated integer crop advance smoothly. A still
+  // crop lands on one coordinate and stays there, so the round trip would cost
+  // two lanczos passes at 16x the pixel count and buy nothing.
+  delete process.env.VIDEO_SLIDE_DRIFT_ENABLED;
+  const { filter } = buildSlideFilter({ stateCount: 3, hold: 3, driftDir: 0 });
+  const scales = [...filter.matchAll(/scale=(\d+):(\d+)/g)].map(m => Number(m[1]));
+  assert.ok(Math.max(...scales) < 1920 * 2, `a supersampled scale survived: ${scales.join(", ")}`);
+});
+
+test("the progressive state reveal SURVIVES — content appearing is not the pan", () => {
+  // The whole point of the scope: xfade between keyframe states is the format's
+  // motion design and must be untouched. Only the frame moving is removed.
+  delete process.env.VIDEO_SLIDE_DRIFT_ENABLED;
+  const { filter } = buildSlideFilter({ stateCount: 4, hold: 2, driftDir: 0 });
+  assert.equal((filter.match(/xfade=transition=fade/g) || []).length, 3);
+});
+
+test("captions still come LAST, after the crop", () => {
+  delete process.env.VIDEO_SLIDE_DRIFT_ENABLED;
+  const { filter } = buildSlideFilter({ stateCount: 2, hold: 2, driftDir: 0, caption: "drawtext=FAKE" });
+  assert.ok(filter.indexOf("drawtext=FAKE") > filter.indexOf("crop="), "caption must burn after the crop");
+});
+
+test("the flag turns the pan back on, so the mechanism is not dead code", () => {
+  delete process.env.VIDEO_SLIDE_DRIFT_ENABLED;
+  const off = buildSlideFilter({ stateCount: 3, hold: 3, driftDir: 0 }).filter;
+  process.env.VIDEO_SLIDE_DRIFT_ENABLED = "1";
+  try {
+    const on = buildSlideFilter({ stateCount: 3, hold: 3, driftDir: 0 }).filter;
+    assert.notEqual(on, off);
+    assert.match(on, /crop=\d+:\d+:x='\d+\+\d+\*\(t\//);
+    assert.ok(driftPerFrame(3, 3) > 0);
+  } finally { delete process.env.VIDEO_SLIDE_DRIFT_ENABLED; }
 });

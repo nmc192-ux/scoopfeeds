@@ -187,6 +187,12 @@ corpus at the *new* price. Verified 2026-08-11: with everything at defaults the 
 margin that stops the last consonant being clipped by the cut. Shortening the editorial gap
 must never be able to clip a slide, so the two stay separate numbers.
 
+### Slide motion
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `VIDEO_SLIDE_DRIFT_ENABLED` | `0` (**static**) | default | restart | The slow whole-frame pan across each slide. **Off** — DrJ, 2026-08-12: eye-straining under text. `1` restores it. Progressive state reveals (`xfade`) are unaffected either way. With the pan off the 4× supersample is skipped too; the 2% overscan is kept and cropped dead centre, which is the midpoint the pan used to average out to. |
+
 ### Artifact retention
 
 All three are swept at **worker startup** (`workerProcess.js` → `sweepAtStartup()`), not on a
