@@ -54,6 +54,7 @@
 // The ONLY import here, and it stays that way: this module is otherwise pure.
 // videoAttribution imports nothing, so there is no cycle.
 import { resolveAttribution } from "./videoAttribution.js";
+import { restatesAny } from "./textSimilarity.js";
 
 // ─── The closed set ─────────────────────────────────────────────────────────
 
@@ -138,6 +139,24 @@ export const KICKER_BANNED_PHRASES = Object.freeze([
   "there you have it", "the takeaway", "key takeaway", "to recap", "recapping",
   "in essence", "essentially then", "the bottom line",
 ]);
+
+// ─── ARC: the cold open (B1) ────────────────────────────────────────────────
+//
+// The title caption used to restate the headline. Read aloud, that makes the
+// first ten seconds redundant with the thumbnail a viewer has already read —
+// and ten seconds is where the retention decision is made.
+//
+// A REJECTION, NOT A DROP, and that distinction is load-bearing. Content cards
+// must equal beats.length exactly (see the beats pass), so dropping the title
+// card to punish its caption would trip "first surviving card must be title"
+// one check later and report the wrong cause. Arc violations are spec-level:
+// they consume the EXISTING single regeneration retry and add no second budget.
+//
+// Measured with the SAME similarity function the selector uses to answer "is
+// this the same story I already published?" — restatement is restatement, and a
+// second, differently-computed overlap measure is how the event graph's
+// create-merge-split treadmill started. See textSimilarity.js.
+export const HOOK_RESTATES_ERROR = "hook_restates_headline";
 
 // CAPTION BRIDGING — a STYLE SIGNAL, never a reject.
 //
@@ -445,6 +464,11 @@ export function validateSpec(spec, {
   // absorbed into the title, the claim is VERIFIED against the title caption
   // instead of assumed, and only counts as pre-credited once it checks out.
   preCreditedSources = [],
+  // The article headline, for the arc checks. Optional: when it is absent the
+  // cold-open gate cannot run and says nothing, rather than guessing. Callers
+  // that have it (writeVideoSpec always does) get the gate; the schema's own
+  // fixtures mostly do not, and must stay valid without it.
+  headline = "",
   minSlides = MIN_SLIDES,
   maxSlides = MAX_SLIDES,
   maxDropRatio = MAX_DROP_RATIO,
@@ -669,6 +693,22 @@ export function validateSpec(spec, {
         errors.push(
           `kicker is in summary register ("${hit}") — the closer must end on the ` +
           `forward implication or an open question, never restate what was said`
+        );
+      }
+    }
+
+    // ARC / COLD OPEN (B1). The opening caption must create the question the
+    // next sixty seconds answer, not repeat the thumbnail. Spec-level so it
+    // routes into the single regeneration retry with a reason the model can act
+    // on; never a drop, because dropping the title breaks the beats equality
+    // and misreports the cause as a missing opener.
+    if (kept[0].t === "title" && headline) {
+      const r = restatesAny(kept[0].caption, [{ label: "the article headline", text: headline }]);
+      if (r.restates) {
+        errors.push(
+          `${HOOK_RESTATES_ERROR}: the opening caption restates ${r.matched} — open on a ` +
+          `question, a stake, or a concrete anomaly that makes the next sixty seconds ` +
+          `feel necessary, not on the headline the viewer has already read`
         );
       }
     }

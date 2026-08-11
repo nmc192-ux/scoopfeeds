@@ -812,3 +812,76 @@ test("flat captions WARN and never reject", () => {
   assert.ok(v.warnings.some(w => /captions read flat/.test(w)), JSON.stringify(v.warnings));
   assert.ok(!v.errors.some(e => /flat/.test(e)), "bridging must never be a reject");
 });
+
+// ─── ARC: the cold open (B1) ────────────────────────────────────────────────
+//
+// The opening caption used to restate the headline, which spends the ten
+// seconds where retention is decided telling the viewer something the thumbnail
+// already told them. These tests pin the gate AND its two abstentions — a gate
+// that fires when it cannot actually judge is worse than no gate, because it
+// costs a whole video on a caption nobody can see the fault in.
+
+const HEADLINE = "Undersea cable damage disrupts internet across West Africa";
+
+const arcSpec = (caption) => {
+  const slides = [
+    { ...titleCard(), caption },
+    plainFiller(0), plainFiller(1), plainFiller(2),
+    kickerCard(),
+  ];
+  return withBeats(slides);
+};
+const arcOpts = (over = {}) => ({
+  allowedSources: SOURCES, sourceText: TEXT, headline: HEADLINE, ...over,
+});
+
+test("a title caption that restates the headline is REJECTED, not dropped", () => {
+  const v = validateSpec(arcSpec("Undersea cable damage has disrupted internet across West Africa."), arcOpts());
+  assert.equal(v.ok, false);
+  assert.ok(v.errors.some(e => e.includes("hook_restates_headline")), v.errors.join(" | "));
+  // A DROP would break the beats equality and be reported as a missing opener,
+  // which is the wrong cause and unactionable in the retry note.
+  assert.equal(v.dropped.filter(d => d.t === "title").length, 0);
+});
+
+test("a hook that asks the question, names the stake, or states the anomaly passes", () => {
+  for (const caption of [
+    "Thirteen countries lost the internet on the same afternoon. One ship did it.",
+    "What happens when a continent's bandwidth rests on a single strand?",
+    "Nobody planned for the moment one anchor could unplug a nation.",
+  ]) {
+    const v = validateSpec(arcSpec(caption), arcOpts());
+    assert.equal(v.ok, true, `expected pass for "${caption}": ${v.errors.join(" | ")}`);
+  }
+});
+
+test("the gate ABSTAINS when it has no headline to measure against", () => {
+  // Callers without a headline get no arc gate rather than a guess. The schema's
+  // own older fixtures rely on this, and so would any future caller.
+  const v = validateSpec(arcSpec("Undersea cable damage has disrupted internet across West Africa."), arcOpts({ headline: "" }));
+  assert.equal(v.ok, true, v.errors.join(" | "));
+});
+
+test("the gate ABSTAINS on a caption with no content words — the measure cannot judge", () => {
+  // tooSimilar returns TRUE for an empty content-word set, which is the safe
+  // direction for candidate selection and exactly wrong here: a short punchy
+  // hook shares nothing with the headline and must not be read as restating it.
+  const v = validateSpec(arcSpec("So who pays now?"), arcOpts());
+  assert.equal(v.ok, true, v.errors.join(" | "));
+});
+
+test("the rejection names the fault in terms the model can act on", () => {
+  const v = validateSpec(arcSpec("Undersea cable damage has disrupted internet across West Africa."), arcOpts());
+  const err = v.errors.find(e => e.includes("hook_restates_headline"));
+  assert.match(err, /question, a stake, or a concrete anomaly/);
+  assert.match(err, /headline/);
+});
+
+test("the arc gate cannot fire on a spec whose first card is not the title", () => {
+  // Ordering failures have their own error. Two errors for one fault would send
+  // a confused correction note into the single retry.
+  const slides = [plainFiller(0), plainFiller(1), plainFiller(2), kickerCard()];
+  const v = validateSpec(withBeats(slides), arcOpts());
+  assert.equal(v.ok, false);
+  assert.ok(!v.errors.some(e => e.includes("hook_restates_headline")), v.errors.join(" | "));
+});

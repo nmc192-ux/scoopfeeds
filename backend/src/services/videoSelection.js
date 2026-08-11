@@ -255,25 +255,20 @@ export function diversifyByPublisher(articles, { max = MAX_PER_PUBLISHER } = {})
   return { kept, dropped };
 }
 
-const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
-
 /**
  * Near-duplicate check, RECOVERED VERBATIM from videoSourceBundle (01638c7)
  * rather than rewritten. It was built and tested for exactly this question —
  * "is this the same story I already have?" — and a second, subtly different
  * similarity measure is how the create-merge-split treadmill started on the
  * event graph. One measure, reused.
+ *
+ * MOVED to textSimilarity.js (unchanged) so videoSpecSchema's arc checks can
+ * share it: that module is pure by contract, and this one reaches into
+ * eventsDao. Re-exported here because this is where every existing caller and
+ * `videoSelection.test.js` look for it — the move must not become a rename.
  */
-export function tooSimilar(candidate, seenWordSets) {
-  const words = new Set(norm(candidate).split(" ").filter(w => w.length > 4));
-  if (words.size === 0) return true;
-  for (const seen of seenWordSets) {
-    let overlap = 0;
-    for (const w of words) if (seen.has(w)) overlap++;
-    if (overlap >= Math.min(words.size, seen.size) * 0.6) return true;
-  }
-  return false;
-}
+export { tooSimilar, normText as norm } from "./textSimilarity.js";
+import { normText as norm } from "./textSimilarity.js";
 
 /** Cheap, deterministic, no database. Runs first. */
 export function staticGate(article) {

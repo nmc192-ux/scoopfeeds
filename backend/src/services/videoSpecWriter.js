@@ -517,9 +517,31 @@ HARD RULES — violating any of these makes the output unusable:
 
 RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. These decide whether anyone is still watching at ten seconds.
 
-11. THE TITLE CAPTION IS THE STORY'S SHARPEST CLAIM. Not a restatement of the headline, not a scene-setter, not "here is what happened with X". The single most consequential or most surprising thing the source establishes, said flat. If your title caption would still make sense pasted onto a different article about the same subject, it is not sharp enough.
-    WEAK:  "A new report looks at undersea cable damage."
-    SHARP: "Two anchors dragged in shallow water cut a continent's bandwidth."
+11. THE TITLE CAPTION IS A COLD OPEN. HARD RULE — the spec is REJECTED if it restates the headline.
+
+    The viewer has already read the headline: it is the thumbnail, it is the title of the video, it is why they clicked. Saying it again out loud is the first thing they hear, and it tells them they already know this. The opening caption must instead do ONE of three things:
+      - ask the QUESTION the story answers,
+      - name the STAKE — what is at risk, who pays, what breaks,
+      - state a concrete ANOMALY — the detail that does not fit, the number that should not be possible.
+    Whichever you choose, it must make the next sixty seconds feel necessary.
+
+    This is checked mechanically against the headline's own words. A caption that reuses most of the headline's distinctive words is rejected and you will be asked to write it again.
+
+    WORKED EXAMPLES — ILLUSTRATIVE ONLY. Never reuse these facts, figures or wording; the shape is what matters.
+
+    Headline: "Undersea cable damage disrupts internet across West Africa"
+      WRONG:   "Damage to undersea cables has disrupted internet access across West Africa."   (the headline, spoken)
+      RIGHT:   "Thirteen countries lost the internet on the same afternoon. One ship did it."  (anomaly)
+
+    Headline: "Regulator fines airline $40m over refund delays"
+      WRONG:   "The regulator has fined the airline forty million dollars over refund delays." (the headline, spoken)
+      RIGHT:   "Passengers waited nine months for money the airline already had."              (stake)
+
+    Headline: "Study finds new drug slows kidney disease progression"
+      WRONG:   "A new study has found that the drug slows the progression of kidney disease."  (the headline, spoken)
+      RIGHT:   "What if the pill for one disease turned out to work on another?"               (question)
+
+    Notice what the RIGHT versions have in common: none of them could be pasted onto a different article about the same subject, and none of them can be guessed from the headline alone.
 
 12. THE FIRST CONTENT CARD IS THE STRONGEST BEAT — explicitly NOT the article's own ordering. News articles open with context because print readers scan; video viewers leave. Look at the beats you enumerated, pick the one that would make someone stay, and open with it. Chronology can follow.
 
@@ -744,6 +766,11 @@ export async function writeVideoSpec(article, {
     const validateOpts = {
       allowedSources, sourceText,
       preCreditedSources: [credit?.publisher].filter(Boolean),
+      // The arc checks measure the captions against the headline the viewer has
+      // already read. The RAW title, not the decorated one — decorateTitleCard
+      // injects the outlet and date, and folding those in would make every
+      // caption look less like the headline than it is.
+      headline: String(article?.title || ""),
       ...(slideCeiling ? { maxSlides: slideCeiling } : {}),
     };
 
