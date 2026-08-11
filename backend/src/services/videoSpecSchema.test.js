@@ -17,6 +17,7 @@ import {
   CARD_TYPES,
   MODEL_EMITTABLE,
   MIN_SLIDES,
+  repeatedOpeningStems,
 } from "./videoSpecSchema.js";
 
 const SOURCES = ["Reuters", "BBC News", "Associated Press"];
@@ -884,4 +885,78 @@ test("the arc gate cannot fire on a spec whose first card is not the title", () 
   const v = validateSpec(withBeats(slides), arcOpts());
   assert.equal(v.ok, false);
   assert.ok(!v.errors.some(e => e.includes("hook_restates_headline")), v.errors.join(" | "));
+});
+
+// ─── ARC: connective tissue (B2) ────────────────────────────────────────────
+//
+// A WARNING, never a gate. The thing being watched for is five captions that
+// all open the same way; the thing being avoided is rejecting a video because
+// three captions legitimately begin with the subject's name.
+
+test("repeatedOpeningStems finds a stem carried by more than two captions", () => {
+  const hits = repeatedOpeningStems([
+    "But here's the catch, the cable had no backup.",
+    "But here's the catch, repairs take a month.",
+    "But here's the catch, there are sixty ships.",
+    "Anchors cause most of the damage.",
+  ]);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].stem, "but here s");   // punctuation is stripped, not kept
+  assert.equal(hits[0].count, 3);
+});
+
+test("exactly two shared stems is NOT flagged — two is the permitted repeat", () => {
+  const hits = repeatedOpeningStems([
+    "The cable carries most of the traffic.",
+    "The cable was laid in 2012.",
+    "Anchors cause most of the damage.",
+  ]);
+  assert.deepEqual(hits, []);
+});
+
+test("captions shorter than the stem length are skipped, not padded", () => {
+  // A two-word caption has no three-word opening; inventing one would create a
+  // stem that is not there and could push a real stem over the threshold.
+  const hits = repeatedOpeningStems(["Who pays?", "Who pays?", "Who pays?", "Who pays?"]);
+  assert.deepEqual(hits, []);
+});
+
+test("stems are compared case- and punctuation-insensitively", () => {
+  const hits = repeatedOpeningStems([
+    "So, what happens next is the real question.",
+    "So what happens — nobody has said.",
+    "So what happens now that the money is gone?",
+  ]);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].count, 3);
+});
+
+test("a monotonous spec WARNS and still validates — B2 is never a gate", () => {
+  const slides = [
+    { ...titleCard(), caption: "Thirteen countries lost the internet on one afternoon." },
+    { ...plainFiller(0), caption: "But here is the catch, the route had no backup." },
+    { ...plainFiller(1), caption: "But here is the catch, repairs take a month." },
+    { ...plainFiller(2), caption: "But here is the catch, the fleet is ageing." },
+    kickerCard(),
+  ];
+  const v = validateSpec(withBeats(slides), arcOpts());
+  assert.equal(v.ok, true, v.errors.join(" | "));
+  const warn = v.warnings.find(w => w.includes("open with the same three words"));
+  assert.ok(warn, v.warnings.join(" | "));
+  assert.match(warn, /but here is/);
+  assert.match(warn, /^3 captions/);
+  assert.match(warn, /nothing was refused on it/);
+});
+
+test("a varied spec produces no repetition warning", () => {
+  const slides = [
+    { ...titleCard(), caption: "Thirteen countries lost the internet on one afternoon." },
+    { ...plainFiller(0), caption: "One anchor, dragged across a shallow shelf, did all of it." },
+    { ...plainFiller(1), caption: "Repairs need a specialist ship, and the nearest was busy." },
+    { ...plainFiller(2), caption: "Thirty days later the region was still running on what was left." },
+    kickerCard(),
+  ];
+  const v = validateSpec(withBeats(slides), arcOpts());
+  assert.equal(v.ok, true, v.errors.join(" | "));
+  assert.equal(v.warnings.filter(w => w.includes("open with the same three words")).length, 0);
 });

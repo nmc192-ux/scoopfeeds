@@ -553,6 +553,21 @@ RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. 
     FLAT:    "The cable carries 40% of the region's traffic."
     BRIDGED: "The cable carries 40% of the region's traffic — and it had no backup."
 
+15b. EVERY CAPTION AFTER THE FIRST MUST RELATE TO THE ONE BEFORE IT. Read in sequence, your captions must be a story, not a list of correct facts. Each beat has to EXTEND the one before it, COMPLICATE it, or CONTRADICT it — the viewer should never reach a caption and wonder why this fact follows that one. If two adjacent captions could be swapped without the sequence reading any differently, the connection you needed is missing.
+
+    The relationship must come from the FACTS THEMSELVES — this number explains that mechanism, this consequence follows from that figure, this finding undercuts the assumption before it. It does not come from a connecting phrase bolted onto the front.
+
+    DO NOT ADOPT A HOUSE OPENER. There is no approved list of transition words here, and you must not invent one for yourself: five captions that all begin the same way are worse than five that begin flatly, because the formula becomes the only thing the viewer hears. Vary how each caption starts. If you notice yourself reaching for the same construction a third time, the beats are ordered wrongly — reorder them so the connections are real, rather than papering over the gap with a phrase.
+
+    LIST (each fact true, no sequence):
+      "The cable carries 40 percent of the region's traffic."
+      "Repairs take about 30 days."
+      "There are 60 repair ships worldwide."
+    SEQUENCE (same three facts, each one earning the next):
+      "The cable carries 40 percent of the region's traffic, and nothing else was laid alongside it."
+      "So a single break takes about thirty days to mend — thirty days of a region running on what is left."
+      "That timeline rests on sixty ageing ships for the whole planet."
+
 16. THE KICKER NEVER WRAPS UP. HARD RULE — the spec is REJECTED if broken. Do not summarise, do not restate what was already said, do not use the register of a conclusion. Never write: "in conclusion", "in summary", "to sum up", "overall", "ultimately", "at the end of the day", "the takeaway", "there you have it", "as we have seen", "the bottom line", "to recap". End on the FORWARD implication or an OPEN QUESTION — what happens next, what is still unknown, what this makes possible or inevitable.
     WRONG: "Ultimately, the takeaway is that infrastructure is fragile."
     RIGHT: "Nobody has said who will pay to bury the next one."

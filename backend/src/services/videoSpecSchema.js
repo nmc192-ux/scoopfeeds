@@ -158,6 +158,48 @@ export const KICKER_BANNED_PHRASES = Object.freeze([
 // create-merge-split treadmill started. See textSimilarity.js.
 export const HOOK_RESTATES_ERROR = "hook_restates_headline";
 
+// ─── ARC: opening-stem repetition (B2) ──────────────────────────────────────
+//
+// A WARNING, NEVER A REJECT — deliberately the opposite of B1.
+//
+// The failure this makes visible is five captions all opening "But here's the
+// catch". The obvious fix is what CAUSES it: give the model a list of approved
+// openers and it picks one and reuses it; ban a phrase and it finds one
+// synonym and reuses that. So the prompt prescribes NO openers at all and
+// states the requirement as a relationship between adjacent beats, and this
+// check exists only so the monotony shows up in the harness when it happens.
+//
+// It cannot be a gate. There is no threshold separating "monotonous" from
+// "three captions legitimately begin with the subject's name", and a false
+// rejection costs a whole video — while a false warning costs a log line.
+export const MAX_SHARED_STEM = 2;
+export const STEM_WORDS = 3;
+
+/**
+ * Opening stems carried by more than `max` captions, commonest first.
+ *
+ * Captions shorter than the stem length are skipped rather than padded — a
+ * two-word caption has no three-word opening, and padding one would invent a
+ * stem that isn't there.
+ *
+ * @returns {Array<{stem: string, count: number}>}
+ */
+export function repeatedOpeningStems(captions, { stemWords = STEM_WORDS, max = MAX_SHARED_STEM } = {}) {
+  const counts = new Map();
+  for (const c of captions) {
+    const words = String(c || "")
+      .toLowerCase().replace(/[^a-z0-9 ]+/g, " ").trim()
+      .split(/\s+/).filter(Boolean);
+    if (words.length < stemWords) continue;
+    const stem = words.slice(0, stemWords).join(" ");
+    counts.set(stem, (counts.get(stem) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, n]) => n > max)
+    .sort((a, b) => b[1] - a[1])
+    .map(([stem, count]) => ({ stem, count }));
+}
+
 // CAPTION BRIDGING — a STYLE SIGNAL, never a reject.
 //
 // Each caption should end with a pull into the next beat. This cannot be
@@ -711,6 +753,18 @@ export function validateSpec(spec, {
           `feel necessary, not on the headline the viewer has already read`
         );
       }
+    }
+
+    // ARC / OPENING-STEM REPETITION (B2). Style only — see MAX_SHARED_STEM for
+    // why this can never become a gate. Measured across EVERY caption including
+    // the title and kicker: a video whose opener and closer share the stem of
+    // three middle captions is exactly the monotony being watched for.
+    for (const { stem, count } of repeatedOpeningStems(kept.map(c => c.caption))) {
+      warnings.push(
+        `${count} captions open with the same three words ("${stem}") — the beats are ` +
+        `being joined by a formula instead of by their own relationship. Style signal ` +
+        `only; nothing was refused on it.`
+      );
     }
 
     // CAPTION BRIDGING — style only, never a reject. See MIN_BRIDGE_SHARE.
