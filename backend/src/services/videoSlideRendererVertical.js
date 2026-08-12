@@ -1,0 +1,279 @@
+/**
+ * videoSlideRendererVertical.js — the 9:16 layouts.
+ *
+ * FORKED COMPOSITIONS, NOT SCALED ONES, and the diagram is the proof: at 1920
+ * wide it is a horizontal ticked rail; at 1080 wide, six nodes would sit 156px
+ * apart carrying 300px labels, so it becomes a DOWNWARD rail. No parameter
+ * sweep gets you from one to the other, which is why the layouts fork here
+ * rather than the 16:9 ones growing a width switch.
+ *
+ * What does NOT fork is the chrome and the brand primitives — they come from
+ * videoSlideChrome.js bound to the vertical geometry. See videoGeometry.js for
+ * why, and for the safe-area margins and what each is protecting against.
+ *
+ * SAME STATE CONTRACT AS 16:9. Every card returns 3-6 cumulative keyframe
+ * states that ffmpeg crossfades; nothing animates, and the final state is the
+ * complete composition. fitStatesToDuration collapses from the second-to-last
+ * backwards, so the LAST state must remain the whole card — a vertical layout
+ * that only looks right once every state has landed would lose content on any
+ * short caption.
+ *
+ * ⚠️ THIS FILE FEEDS THE CACHE KEY (videoSlideRenderer.VIDEO_BUILDER_FINGERPRINT).
+ */
+
+import { VERTICAL } from "./videoGeometry.js";
+import { makePrimitives, COLORS as C, FONTS as F } from "./videoSlideChrome.js";
+import { truncateLoudly } from "./videoSlideRenderer.js";
+
+const G = VERTICAL;
+const { root, chrome, eyebrow, hairline, sourceCredit, sourceBadge, antonLine, box, text, abs } = makePrimitives(G);
+
+/**
+ * Vertical Y table.
+ *
+ * Vertical buys height and spends width, so each of these is a TALLER STACK OF
+ * SHORTER LINES than its 16:9 equivalent rather than the same stack scaled.
+ * Where a 16:9 slot assumed one line, the vertical slot budgets two — a 46-char
+ * stat label at 42px over a 936px measure wraps, and the first draft put the
+ * source hairline straight through it.
+ */
+export const VY = Object.freeze({
+  eyebrow:    260,
+  titleLine1: 360,
+  titleLine2: 588,
+  titleSub:   980,
+  titleDate:  1140,
+
+  statValue:  330,
+  statLine1:  860,
+  statLine2:  1000,
+  statRule:   1150,
+  statCredit: 1184,
+
+  barsFirst:  360,
+  barsRow:    190,
+  diagramFirst: 380,
+  diagramRow: 178,
+
+  kickTop:    420,
+  kickBottom: 660,
+  kickSub:    980,
+});
+
+const eyebrowV = (s) => eyebrow(s, VY.eyebrow);
+const base = (card, ctx) => [...chrome(ctx), eyebrowV(card.eyebrow || "")];
+
+// ─── title ──────────────────────────────────────────────────────────────────
+
+function titleStatesV(card, ctx) {
+  const [l1, l2] = (card.lines || []).slice(0, 2);
+  const limeIdx = (card.lines || []).findIndex(l => l[1] === "lime");
+  const line = (pair, top) => pair
+    ? antonLine(pair[0], { top, size: 104, color: pair[1] === "lime" ? C.lime : C.white })
+    : null;
+  const b = () => base(card, ctx);
+  return [
+    { key: "s1", lime: false, tree: root([...b()]) },
+    { key: "s2", lime: limeIdx === 0, tree: root([...b(), line(l1, VY.titleLine1)].filter(Boolean)) },
+    { key: "s3", lime: limeIdx >= 0, tree: root([...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2)].filter(Boolean)) },
+    { key: "s4", lime: limeIdx >= 0, tree: root([
+        ...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2),
+        card.sub ? text(card.sub, {
+          position: "absolute", left: G.marginX, top: VY.titleSub, maxWidth: G.contentW,
+          fontSize: 38, fontWeight: 600, color: C.sub, lineHeight: 1.3,
+        }) : null,
+        // The badge cannot sit top-right here: at 1080 wide it would collide
+        // with the slide counter, which the 1920 frame has room to separate.
+        // It moves under the sub-line, above the date, as a provenance pair.
+        ctx.outlet ? text(String(ctx.outlet).toUpperCase(), {
+          position: "absolute", left: G.marginX, top: VY.titleDate,
+          fontSize: 24, fontWeight: 600, letterSpacing: 5, color: C.dim,
+        }) : null,
+        card.date ? text(card.date, {
+          position: "absolute", left: G.marginX, top: VY.titleDate + 40,
+          fontSize: 24, fontWeight: 600, letterSpacing: 3, color: C.dim,
+        }) : null,
+      ].filter(Boolean)) },
+  ];
+}
+
+// ─── stat ───────────────────────────────────────────────────────────────────
+
+function statStatesV(card, ctx) {
+  const b = () => base(card, ctx);
+  const hi = Number.isInteger(card.hi) ? card.hi : -1;
+  const value = box({
+    position: "absolute", left: G.marginX, top: VY.statValue, alignItems: "flex-end",
+  }, [
+    text(card.value, { fontFamily: F.anton, fontSize: 400, lineHeight: 1.0, letterSpacing: -4, color: C.white }),
+    card.unit ? text(card.unit, { fontFamily: F.anton, fontSize: 150, lineHeight: 1.0, color: C.white, marginLeft: 12, marginBottom: 52 }) : null,
+  ].filter(Boolean));
+  const supportLine = (i, top) => {
+    const s = (card.lines || [])[i];
+    if (!s) return null;
+    return text(s, {
+      position: "absolute", left: G.marginX, top, maxWidth: G.contentW,
+      fontSize: 42, fontWeight: 600, color: i === hi ? C.lime : C.sub, lineHeight: 1.25,
+    });
+  };
+  const limeAfterLines = hi >= 0 && Boolean((card.lines || [])[hi]);
+  return [
+    { key: "s1", lime: false, tree: root([...b()]) },
+    { key: "s2", lime: false, tree: root([...b(), value]) },
+    { key: "s3", lime: hi === 0, tree: root([...b(), value, supportLine(0, VY.statLine1)].filter(Boolean)) },
+    { key: "s4", lime: limeAfterLines, tree: root([...b(), value, supportLine(0, VY.statLine1), supportLine(1, VY.statLine2)].filter(Boolean)) },
+    { key: "credit", lime: limeAfterLines, credit: true, tree: root([
+        ...b(), value, supportLine(0, VY.statLine1), supportLine(1, VY.statLine2),
+        hairline(VY.statRule, 420), sourceCredit(card.source, VY.statCredit),
+      ].filter(Boolean)) },
+  ];
+}
+
+// ─── bars ───────────────────────────────────────────────────────────────────
+
+function barsStatesV(card, ctx) {
+  const bars = truncateLoudly(card.bars || [], 5, { what: "bars", card, ctx });
+  const max = Math.max(...bars.map(b => Number(b[1]) || 0), 1);
+  const leadIdx = bars.reduce((best, b, i) => (Number(b[1]) > Number(bars[best][1]) ? i : best), 0);
+  const BAR_H = 46;
+  // LABEL ABOVE THE BAR, not beside it. A side-by-side label costs ~40% of a
+  // 936px measure and leaves a stub of a bar; stacked, the bar keeps the full
+  // rail-safe width and the label gets a whole line.
+  const trackW = G.contentWRail;
+
+  const oneBar = (bar, i) => {
+    const top = VY.barsFirst + i * VY.barsRow;
+    const w = Math.max(10, Math.round((Number(bar[1]) / max) * trackW));
+    return [
+      text(bar[0], { position: "absolute", left: G.marginX, top, maxWidth: trackW - 150, fontSize: 34, fontWeight: 600, color: C.sub }),
+      // Values right-align to the RAIL inset, not the margin — at the margin
+      // they sit under the like/comment column.
+      text(bar[1], { position: "absolute", right: G.safeRight, top: top - 12, fontFamily: F.anton, fontSize: 62, color: i === leadIdx ? C.lime : C.white }),
+      abs({ left: G.marginX, top: top + 62, width: trackW, height: BAR_H, background: "#151310" }),
+      abs({ left: G.marginX, top: top + 62, width: w, height: BAR_H, background: i === leadIdx ? C.lime : C.track }),
+    ];
+  };
+
+  const b = () => base(card, ctx);
+  const states = [{ key: "s1", lime: false, tree: root([...b()]) }];
+  const groups = bars.length <= 4 ? bars.map((_, i) => [i]) : [[0], [1], [2], [3, 4]];
+  let shown = [];
+  groups.forEach((g, gi) => {
+    shown = [...shown, ...g];
+    states.push({
+      key: `bar${gi + 1}`,
+      lime: shown.includes(leadIdx),
+      tree: root([...b(), ...shown.flatMap(i => oneBar(bars[i], i))]),
+    });
+  });
+
+  const creditTop = Math.min(VY.barsFirst + bars.length * VY.barsRow + 10, G.contentBottom - 120);
+  states.push({
+    key: "credit", lime: true, credit: true,
+    tree: root([
+      ...b(), ...bars.flatMap((bar, i) => oneBar(bar, i)),
+      hairline(creditTop, 420), sourceCredit(card.source, creditTop + 26),
+    ]),
+  });
+  return states;
+}
+
+// ─── diagram ────────────────────────────────────────────────────────────────
+
+function diagramStatesV(card, ctx) {
+  const nodes = truncateLoudly(card.nodes || [], 6, { what: "nodes", card, ctx });
+  const n = nodes.length;
+  const b = () => base(card, ctx);
+  const RAIL_X = G.marginX + 26;
+  const markerOn = Number.isInteger(card.marker?.on) ? card.marker.on : -1;
+
+  const rowsFor = (upto, withMarker) => nodes.slice(0, upto).flatMap((nd, i) => {
+    const top = VY.diagramFirst + i * VY.diagramRow;
+    const marked = withMarker && i === markerOn;
+    return [
+      abs({ left: RAIL_X - 9, top: top + 6, width: 18, height: 18, background: marked ? C.lime : C.track, borderRadius: 9 }),
+      ...(i < n - 1 ? [
+        abs({ left: RAIL_X - 1, top: top + 26, width: 2, height: VY.diagramRow - 26, background: C.rule }),
+        // The same two-rotated-bars chevron as 16:9 — the CSS border-triangle
+        // idiom renders as a solid square in satori and destroys the direction.
+        abs({ left: RAIL_X - 8, top: top + VY.diagramRow - 14, width: 16, height: 2, background: C.track, transform: "rotate(45deg)" }),
+        abs({ left: RAIL_X + 1, top: top + VY.diagramRow - 14, width: 16, height: 2, background: C.track, transform: "rotate(-45deg)" }),
+      ] : []),
+      text(nd[0], { position: "absolute", left: RAIL_X + 44, top, maxWidth: G.contentWRail - 70, fontFamily: F.anton, fontSize: 54, color: marked ? C.lime : C.white }),
+      nd[1] ? text(nd[1], { position: "absolute", left: RAIL_X + 44, top: top + 64, maxWidth: G.contentWRail - 70, fontSize: 30, fontWeight: 600, color: C.dim, lineHeight: 1.25 }) : null,
+      ...(marked && card.marker?.label ? [text(String(card.marker.label).toUpperCase(), {
+        position: "absolute", right: G.safeRight, top: top + 8,
+        fontSize: 26, fontWeight: 600, letterSpacing: 4, color: C.lime,
+      })] : []),
+    ].filter(Boolean);
+  });
+
+  const states = [{ key: "s1", lime: false, tree: root([...b()]) }];
+  const groups = n <= 4 ? nodes.map((_, i) => i + 1) : [1, 2, 3, n];
+  groups.forEach((upto, gi) => {
+    states.push({ key: `node${gi + 1}`, lime: false, tree: root([...b(), ...rowsFor(upto, false)]) });
+  });
+  // The marker lands LAST and is the card's single lime element, matching 16:9.
+  states.push({ key: "marker", lime: markerOn >= 0, tree: root([...b(), ...rowsFor(n, true)]) });
+  return states;
+}
+
+// ─── turn / kicker ──────────────────────────────────────────────────────────
+
+function turnStatesV(card, ctx) {
+  const [l1, l2] = (card.lines || []).slice(0, 2);
+  const limeIdx = (card.lines || []).findIndex(l => l[1] === "lime");
+  const line = (pair, top) => pair
+    ? antonLine(pair[0], { top, size: 104, color: pair[1] === "lime" ? C.lime : C.white })
+    : null;
+  const b = () => base(card, ctx);
+  return [
+    { key: "s1", lime: false, tree: root([...b()]) },
+    { key: "s2", lime: limeIdx === 0, tree: root([...b(), line(l1, VY.titleLine1)].filter(Boolean)) },
+    { key: "s3", lime: limeIdx >= 0, tree: root([...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2)].filter(Boolean)) },
+    { key: "s4", lime: limeIdx >= 0, tree: root([
+        ...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2),
+        card.sub ? text(card.sub, {
+          position: "absolute", left: G.marginX, top: VY.titleSub, maxWidth: G.contentW,
+          fontSize: 38, fontWeight: 600, color: C.sub, lineHeight: 1.3,
+        }) : null,
+      ].filter(Boolean)) },
+  ];
+}
+
+function kickerStatesV(card, ctx) {
+  const b = () => [...chrome(ctx), eyebrowV("WHAT NOW")];
+  return [
+    { key: "s1", lime: false, tree: root([...b()]) },
+    { key: "s2", lime: false, tree: root([...b(), antonLine(card.top, { top: VY.kickTop, size: 96, color: C.white })]) },
+    { key: "s3", lime: true, tree: root([
+        ...b(),
+        antonLine(card.top, { top: VY.kickTop, size: 96, color: C.white }),
+        antonLine(card.bottom, { top: VY.kickBottom, size: 96, color: C.lime }),
+      ]) },
+    { key: "s4", lime: true, tree: root([
+        ...b(),
+        antonLine(card.top, { top: VY.kickTop, size: 96, color: C.white }),
+        antonLine(card.bottom, { top: VY.kickBottom, size: 96, color: C.lime }),
+        card.sub ? text(card.sub, {
+          position: "absolute", left: G.marginX, top: VY.kickSub, maxWidth: G.contentW,
+          fontSize: 38, fontWeight: 600, color: C.sub, lineHeight: 1.3,
+        }) : null,
+      ].filter(Boolean)) },
+  ];
+}
+
+const BUILDERS_V = {
+  title: titleStatesV, stat: statStatesV, bars: barsStatesV,
+  diagram: diagramStatesV, turn: turnStatesV, kicker: kickerStatesV,
+};
+
+/** Every keyframe state for one card, at 9:16. Throws on an unknown type — the
+ *  closed set is closed in both orientations. */
+export function verticalStatesForCard(card, ctx = {}) {
+  const build = BUILDERS_V[card?.t];
+  if (!build) throw new Error(`videoSlideRendererVertical: no layout for card type "${card?.t}"`);
+  return build(card, ctx);
+}
+
+export const _verticalInternals = { G, VY, BUILDERS_V };
