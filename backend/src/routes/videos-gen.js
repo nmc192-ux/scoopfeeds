@@ -622,7 +622,6 @@ router.post("/publish", express.json({ limit: "8kb" }), async (req, res) => {
     if (igConfigured) {
       try {
         const { id: igId, url: igUrl } = await postReelToInstagram({
-          videoUrl: publicVideoUrl,
           caption:  `${title}\n\n#Scoop #News #Reels #Shorts\n\nFull story → https://scoopfeeds.com/article/${job.article_id}`.slice(0, 2200),
         });
         platforms.push("instagram_reels");
@@ -646,7 +645,6 @@ router.post("/publish", express.json({ limit: "8kb" }), async (req, res) => {
       try {
         const { id: fbId, url: fbUrl } = await postReelToFacebook({
           filePath: job.output_path,
-          videoUrl: publicVideoUrl,
           caption:  `${title}\n\n#Scoop #News #Reels\n\nFull story → https://scoopfeeds.com/article/${job.article_id}`.slice(0, 2200),
         });
         platforms.push("facebook_reels");

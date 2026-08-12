@@ -227,6 +227,7 @@ upload. Best-effort: a Facebook failure is logged loudly and recorded in
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
 | `VIDEO_FACEBOOK_ENABLED` | `0` (**dark**) | *set at ship* | yes | Kill switch. Off = nothing attempted and nothing recorded (`facebook_status` stays NULL). |
+| `VIDEO_FACEBOOK_REELS_ENABLED` | `0` (**dark**) | default | yes | **Separate** kill switch for the Facebook **Reels** surface, independent of the feed cross-post above. Two surfaces, two failure modes: one flag would enable the unproven one as a side effect of the proven one. Requires `VIDEO_ORIENTATION=vertical` to be meaningful — a 1920×1080 MP4 on `/video_reels` is the wrong shape for the surface. |
 | `VIDEO_FACEBOOK_MAX_PER_DAY` | falls through to `VIDEO_MAX_PER_DAY` (so `12`) | default | yes | Independent rolling-24h cap. **`0` means zero**, not unset — throttling to nothing is one env line. |
 | `FACEBOOK_PAGE_ID` | — | set | restart | Numeric page id, not the username. |
 | `FACEBOOK_PAGE_TOKEN` | — | set | restart | Page token. Needs `pages_manage_posts` + `pages_read_engagement` + **`pages_show_list`** — the third is required by `/videos` and its absence appears only at upload time. |

@@ -365,28 +365,40 @@ export async function postVideoToFacebook({ filePath, title = "", description = 
 // Required: same FACEBOOK_PAGE_TOKEN + FACEBOOK_PAGE_ID as image posts.
 // The video must be H.264 MP4 (9:16 preferred), ≤ 90s.
 //
-// If the upload_phase API is unavailable (requires business verification in some
-// regions), we fall back to posting via `link` (sharing the public video URL as
-// a standard feed post) rather than throwing.
-export async function postReelToFacebook({ filePath, videoUrl, caption = "" }) {
+// NO FALLBACK. THIS THREW AWAY THE ONLY SIGNAL ANYONE HAD (DrJ, 2026-08-13).
+//
+// This used to drop to a plain `link` post whenever the three-phase upload
+// failed — a missing token scope, a region where business verification is not
+// available, a 500 from Meta, an unreadable file. The result was a SUCCESS
+// return carrying a post id and a URL, indistinguishable at the call site from
+// a published Reel, for something that is a link share in the feed.
+//
+// That is precisely the failure that cannot be detected from outside: the
+// cycle logs a success, `facebook_status` records `posted`, and the only way
+// to learn the truth is for a human to open the page and notice the post is
+// the wrong kind. It is also the exact thing postVideoToFacebook exists to
+// avoid — Facebook demotes posts whose payload is a link — so the fallback
+// degraded INTO the failure mode its sibling was written to prevent.
+//
+// Every path now either publishes a Reel or throws with the reason. No Reel
+// and a loud error beats a link post believed to be a Reel.
+export async function postReelToFacebook({ filePath, caption = "" }) {
   const t = _loadToken();
   if (!t) throw new Error("facebook not configured");
 
-  // We need raw bytes to do a server-side upload. If the caller passes only
-  // a videoUrl (public link) and no filePath, fall back to a plain link post.
+  // RAW BYTES ARE REQUIRED. `videoUrl` is gone from the signature rather than
+  // ignored: it only ever fed the link fallback, and a parameter that silently
+  // does nothing is how the next caller reintroduces the same behaviour.
   const { readFileSync, existsSync } = await import("fs");
-  let bytes = null;
-  if (filePath) {
-    try {
-      if (!existsSync(filePath)) throw new Error(`file not found: ${filePath}`);
-      bytes = readFileSync(filePath);
-    } catch (err) {
-      logger.warn(`facebookClient: could not read reel file (${err.message}), will use link fallback`);
-    }
+  if (!filePath) throw new Error("facebook Reel: filePath is required — there is no URL-based path");
+  if (!existsSync(filePath)) throw new Error(`facebook Reel: file not found: ${filePath}`);
+  const bytes = readFileSync(filePath);
+  if (bytes.length < 10_000) {
+    throw new Error(`facebook Reel: ${filePath} is ${bytes.length} bytes — implausibly small for a video`);
   }
 
-  if (bytes) {
-    try {
+  try {
+    {
       // Step 1: initialise the upload session.
       const init = await _call(`/${t.pageId}/video_reels`, {
         method: "POST",
@@ -426,18 +438,25 @@ export async function postReelToFacebook({ filePath, videoUrl, caption = "" }) {
         },
       });
 
+      // THE FINISH RESPONSE IS CHECKED, not assumed. Meta answers phase 3 with
+      // {"success": true}; anything else means the bytes landed but the Reel
+      // did not publish, which without this check returns a video_id for a
+      // post nobody can see.
+      if (finish && finish.success === false) {
+        throw new Error(`FB reels finish returned success=false: ${JSON.stringify(finish).slice(0, 200)}`);
+      }
+
       const postUrl = `https://www.facebook.com/reel/${init.video_id}`;
       logger.info(`📘 Facebook Reel published: ${init.video_id}`);
       return { id: init.video_id, url: postUrl };
-
-    } catch (err) {
-      logger.warn(`facebookClient: Reel binary upload failed (${err.message}), falling back to link post`);
     }
+  } catch (err) {
+    // Rethrown, never swallowed. The message keeps whatever Meta said, because
+    // "which phase failed and why" is the whole diagnosis — business
+    // verification unavailable, a missing scope and a transient 500 are three
+    // different problems that used to look identical from here (a link post).
+    throw new Error(`facebook Reel publish FAILED (no fallback, nothing was posted): ${err.message}`);
   }
-
-  // Fallback: plain link post with the video URL.
-  const msg = caption + (videoUrl ? `\n\n${videoUrl}` : "");
-  return await _postLink({ message: msg, link: videoUrl || "" });
 }
 
 // Update the stored page token (call after a manual token refresh).

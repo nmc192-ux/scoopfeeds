@@ -742,3 +742,140 @@ test("event breadth is SECONDARY — a thin linked story does not outrank a dens
     "a dense article with no event must still outrank a 200-char one on a 10-outlet event");
   db.exec("DELETE FROM event_articles");
 });
+
+// ─── Facebook Reels — a NEW PUBLISH SURFACE, so Rule 0 gates it itself ──────
+//
+// The cycle's single assertPublishAllowed sits ahead of the YouTube upload, and
+// both Facebook surfaces run after it — so Pakistan content could not reach
+// Meta even before this. But only by ORDERING. Rule 0 is three independent
+// layers precisely so that no publish path is safe by accident of sequence, and
+// these tests pin that each surface refuses on its own.
+
+const GEO_BILAWAL_JAAC = {
+  id: "fixture-geo-bilawal-jaac-2026-08-02",
+  source_name: "Geo News",
+  category: "pakistan",
+  title: "Bilawal says PPP will resist JAAC in its current form",
+  description: "PPP Chairman Bilawal Bhutto-Zardari addressed party workers on the proposed judicial appointments framework.",
+  content: "Speaking in Karachi, Bilawal Bhutto-Zardari said the party would oppose the JAAC legislation in the National Assembly...",
+  tags: "pakistan,politics,ppp",
+};
+const CLEAN_ARTICLE = {
+  id: "fixture-benign-eu-ai-act",
+  source_name: "Reuters",
+  category: "technology",
+  title: "EU agrees final text of the AI Act",
+  description: "Negotiators settled the remaining articles on general-purpose models.",
+  content: "The European Parliament and Council reached agreement on the final text...",
+  tags: "eu,ai,regulation",
+};
+
+function withReelsFlag(value, fn) {
+  const saved = process.env.VIDEO_FACEBOOK_REELS_ENABLED;
+  const savedFb = process.env.VIDEO_FACEBOOK_ENABLED;
+  if (value === undefined) delete process.env.VIDEO_FACEBOOK_REELS_ENABLED;
+  else process.env.VIDEO_FACEBOOK_REELS_ENABLED = value;
+  process.env.VIDEO_FACEBOOK_ENABLED = "1";
+  try { return fn(); }
+  finally {
+    if (saved === undefined) delete process.env.VIDEO_FACEBOOK_REELS_ENABLED;
+    else process.env.VIDEO_FACEBOOK_REELS_ENABLED = saved;
+    if (savedFb === undefined) delete process.env.VIDEO_FACEBOOK_ENABLED;
+    else process.env.VIDEO_FACEBOOK_ENABLED = savedFb;
+  }
+}
+
+test("RULE 0 REFUSES the Facebook Reel — nothing reaches Meta", async () => {
+  const { reelToFacebook } = await import("./videoAutopost.js");
+  const r = await withReelsFlag("1", () => reelToFacebook(GEO_BILAWAL_JAAC, {
+    filePath: "/nonexistent/should-never-be-read.mp4",
+    title: "T", attribution: { publisher: "Geo News" },
+  }));
+  assert.equal(r.status, "refused");
+  assert.equal(r.reason, "rule0");
+  // The filePath is deliberately nonexistent: if the refusal did NOT come
+  // first, the function would fail on the missing file instead and this test
+  // would pass for the wrong reason.
+});
+
+test("RULE 0 refuses even when the block is only in the GENERATED spec", async () => {
+  // Layer 3 checks the article AND everything generated. A clean article whose
+  // narration names a blocked subject must still be refused.
+  const { reelToFacebook } = await import("./videoAutopost.js");
+  const r = await withReelsFlag("1", () => reelToFacebook(CLEAN_ARTICLE, {
+    filePath: "/nonexistent/should-never-be-read.mp4",
+    title: "T", attribution: { publisher: "Reuters" },
+    slides: [{ caption: "As Bilawal told reporters in Karachi this week..." }],
+  }));
+  assert.equal(r.status, "refused");
+  assert.equal(r.reason, "rule0");
+});
+
+test("a CLEAN article gets past Rule 0 and attempts the publish", async () => {
+  // The refusal test above is only meaningful if a clean article is NOT
+  // refused. This one reaches the publish attempt and fails on the missing
+  // file, which is exactly how far it should get without real credentials.
+  const { reelToFacebook } = await import("./videoAutopost.js");
+  const r = await withReelsFlag("1", () => reelToFacebook(CLEAN_ARTICLE, {
+    filePath: "/nonexistent/deliberately-missing.mp4",
+    title: "EU agrees final text of the AI Act",
+    attribution: { publisher: "Reuters" },
+    slides: [{ caption: "The final text settles the general-purpose model rules." }],
+  }));
+  assert.notEqual(r.status, "refused");
+  assert.ok(["failed", "skipped"].includes(r.status), `got ${JSON.stringify(r)}`);
+});
+
+test("the Reels flag is OFF by default — nothing is attempted", async () => {
+  const { reelToFacebook, facebookReelsEnabled } = await import("./videoAutopost.js");
+  delete process.env.VIDEO_FACEBOOK_REELS_ENABLED;
+  assert.equal(facebookReelsEnabled(), false);
+  const r = await reelToFacebook(CLEAN_ARTICLE, { filePath: "/x.mp4", title: "T", attribution: {} });
+  assert.equal(r.status, "off");
+});
+
+test("the Reels flag is SEPARATE from the feed cross-post flag", async () => {
+  // One flag would mean enabling the unproven surface as a side effect of the
+  // proven one, and disabling the proven one to switch the unproven one off.
+  const { facebookReelsEnabled, facebookCrossPostEnabled } = await import("./videoAutopost.js");
+  const saved = { r: process.env.VIDEO_FACEBOOK_REELS_ENABLED, f: process.env.VIDEO_FACEBOOK_ENABLED };
+  try {
+    process.env.VIDEO_FACEBOOK_ENABLED = "1";
+    delete process.env.VIDEO_FACEBOOK_REELS_ENABLED;
+    assert.equal(facebookCrossPostEnabled(), true);
+    assert.equal(facebookReelsEnabled(), false);
+  } finally {
+    if (saved.r === undefined) delete process.env.VIDEO_FACEBOOK_REELS_ENABLED; else process.env.VIDEO_FACEBOOK_REELS_ENABLED = saved.r;
+    if (saved.f === undefined) delete process.env.VIDEO_FACEBOOK_ENABLED; else process.env.VIDEO_FACEBOOK_ENABLED = saved.f;
+  }
+});
+
+test("RULE 0 also refuses the FEED cross-post — the gap that was closed", async () => {
+  const { crossPostToFacebook } = await import("./videoAutopost.js");
+  const saved = process.env.VIDEO_FACEBOOK_ENABLED;
+  process.env.VIDEO_FACEBOOK_ENABLED = "1";
+  try {
+    const r = await crossPostToFacebook(GEO_BILAWAL_JAAC, {
+      filePath: "/nonexistent/should-never-be-read.mp4",
+      title: "T", attribution: { publisher: "Geo News" },
+    });
+    assert.equal(r.status, "refused");
+    assert.equal(r.reason, "rule0");
+  } finally {
+    if (saved === undefined) delete process.env.VIDEO_FACEBOOK_ENABLED;
+    else process.env.VIDEO_FACEBOOK_ENABLED = saved;
+  }
+});
+
+test("NEITHER Facebook surface can throw into the cycle", async () => {
+  // Both are called inside the upload try-block; a throw would reach the outer
+  // catch, call markVideoFailed on an article whose YouTube video is LIVE, and
+  // the stale-pending rule would re-upload it.
+  const { reelToFacebook, crossPostToFacebook } = await import("./videoAutopost.js");
+  await withReelsFlag("1", async () => {
+    for (const fn of [reelToFacebook, crossPostToFacebook]) {
+      await assert.doesNotReject(() => fn(GEO_BILAWAL_JAAC, { filePath: null, title: null, attribution: null }));
+      await assert.doesNotReject(() => fn(CLEAN_ARTICLE, {}));
+    }
+  });
+});

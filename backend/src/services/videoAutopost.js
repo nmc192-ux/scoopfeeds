@@ -49,7 +49,7 @@ import { assembleSlide, concatSlides, holdForAudio } from "./videoAssembler.js";
 import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.js";
 import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
 import { uploadToYouTube, isYouTubeConfigured } from "./youtubeClient.js";
-import { postVideoToFacebook, isFacebookConfigured } from "./facebookClient.js";
+import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from "./facebookClient.js";
 import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
@@ -125,6 +125,23 @@ export const autopostEnabled = () => process.env.VIDEO_AUTOPOST_ENABLED === "1";
 
 /** The Facebook cross-post's kill switch. Ships dark; flip to "1" to enable. */
 export const facebookCrossPostEnabled = () => process.env.VIDEO_FACEBOOK_ENABLED === "1";
+
+/**
+ * The Facebook REELS kill switch — separate from the feed cross-post above,
+ * and default OFF (DrJ, 2026-08-13: "turn this on deliberately after seeing the
+ * first one, not discover it live").
+ *
+ * SEPARATE FROM VIDEO_FACEBOOK_ENABLED on purpose. They are different surfaces
+ * with different failure modes: the feed post is a native video on the page,
+ * the Reel enters the short-form feed. One flag would mean enabling the
+ * unproven surface as a side effect of the proven one, and turning the proven
+ * one off to disable the unproven one.
+ *
+ * REQUIRES A VERTICAL RENDER. A 1920x1080 MP4 posted to /video_reels is the
+ * wrong shape for the surface — which is exactly why this was written and never
+ * wired up until the 9:16 path existed.
+ */
+export const facebookReelsEnabled = () => process.env.VIDEO_FACEBOOK_REELS_ENABLED === "1";
 
 /**
  * Facebook's own rolling-24h cap. Unset it and Facebook tracks YouTube, so
@@ -261,7 +278,7 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
 //
 // So every path below is caught here and reported as a value.
 export async function crossPostToFacebook(article, {
-  filePath, title, attribution, now = Date.now(),
+  filePath, title, attribution, spec = null, slides = null, now = Date.now(),
 } = {}) {
   // Flag off: write NOTHING. NULL in facebook_status means "never attempted",
   // and that is exactly true of a dark period — recording 'skipped' for every
@@ -270,6 +287,25 @@ export async function crossPostToFacebook(article, {
   if (!facebookCrossPostEnabled()) return { status: "off" };
 
   try {
+    // RULE 0, FOR THIS SURFACE. Added 2026-08-13. It was NOT here: the cycle's
+    // single assertPublishAllowed sits ahead of the YouTube upload, and this
+    // function runs after it, so Pakistan content could not reach Meta — but
+    // only because of ORDERING. Rule 0 is three independent layers precisely so
+    // that no publish path is safe merely by accident of sequence; a reorder or
+    // an early return would have opened this one silently. Not a live escape,
+    // and now not reliant on one.
+    try {
+      assertPublishAllowed(article, [spec, slides].filter(Boolean));
+    } catch (blockErr) {
+      logger.error(
+        `🛑 RULE 0 REFUSED the Facebook cross-post for ${article.id} — ${blockErr.message}. ` +
+        `Nothing was sent to Meta.`
+      );
+      try { markVideoFacebook(article.id, { status: "skipped", error: `rule0: ${blockErr.message}` }); }
+      catch { /* bookkeeping is best-effort */ }
+      return { status: "refused", reason: "rule0" };
+    }
+
     if (!isFacebookConfigured()) {
       // A missing credential with the flag ON is a config problem, not an
       // editorial one — the same distinction the spec/voice gates draw above.
@@ -321,6 +357,92 @@ export async function crossPostToFacebook(article, {
   }
 }
 
+/**
+ * Publish the SAME rendered MP4 as a Facebook REEL.
+ *
+ * A SECOND SURFACE, not a second attempt at the first. The feed cross-post above
+ * puts a native video on the page; this enters the short-form Reels feed, which
+ * is one of the few surfaces that shows video to people who have never heard of
+ * the channel. Both can run; neither depends on the other.
+ *
+ * RULE 0 IS ASSERTED HERE, INDEPENDENTLY. The cycle already calls
+ * assertPublishAllowed before the YouTube upload, and because that call sits
+ * ahead of every publish it currently protects this one too — TRANSITIVELY, by
+ * ordering. That is not how Rule 0 is designed: it is three INDEPENDENT layers
+ * precisely so that no surface is protected only because something else
+ * happened to run first. A reorder, an early return, or someone moving the
+ * cross-post ahead of the gate would silently open a publish path to Meta. So
+ * this surface asserts for itself, and the assertion is the first thing it does.
+ *
+ * IT STILL NEVER THROWS, for the same three reasons crossPostToFacebook does
+ * not (see its header): markVideoFailed would flip a row whose YouTube video is
+ * live, isQuotaExceeded would match Meta's 403s, and a throw escaping the cycle
+ * re-runs the BullMQ job. A Rule 0 refusal is therefore caught and returned as
+ * a value — REFUSED, loudly, but never as an exception.
+ */
+export async function reelToFacebook(article, {
+  filePath, title, attribution, spec = null, slides = null, now = Date.now(),
+} = {}) {
+  if (!facebookReelsEnabled()) return { status: "off" };
+
+  try {
+    // ── Rule 0, layer 3, for THIS surface ──
+    // Checked against the article AND everything generated, exactly as the
+    // pre-upload gate does. Throws; caught immediately below and converted.
+    try {
+      assertPublishAllowed(article, [spec, slides].filter(Boolean));
+    } catch (blockErr) {
+      logger.error(
+        `🛑 RULE 0 REFUSED the Facebook Reel for ${article.id} — ${blockErr.message}. ` +
+        `Nothing was sent to Meta.`
+      );
+      try { markVideoFacebook(article.id, { status: "skipped", error: `rule0: ${blockErr.message}` }); }
+      catch { /* bookkeeping is best-effort */ }
+      return { status: "refused", reason: "rule0" };
+    }
+
+    if (!isFacebookConfigured()) {
+      logger.error(
+        "🚨 VIDEO_FACEBOOK_REELS_ENABLED=1 but Facebook is not configured " +
+        "(FACEBOOK_PAGE_ID / FACEBOOK_PAGE_TOKEN). The Reel is skipped."
+      );
+      return { status: "skipped", reason: "not-configured" };
+    }
+
+    // The Reels cap is the FEED cap's sibling, deliberately reusing the same
+    // rolling-24h counter: both land on the same page, and Meta rate-limits the
+    // page, not the surface.
+    const max = VIDEO_FACEBOOK_MAX_PER_DAY();
+    const posted24h = countFacebookPostsSince(now - 24 * 60 * 60 * 1000);
+    if (posted24h >= max) {
+      logger.info(`🎞️ facebook REEL skipped — cap ${posted24h}/${max} in the last 24h`);
+      return { status: "skipped", reason: "daily-cap" };
+    }
+
+    // §3b/4 — the original is credited and linked, same as every other surface.
+    const caption = [
+      title,
+      buildDescriptionCredit(article, attribution),
+      `Full story → ${SITE_ORIGIN}/article/${encodeURIComponent(article.id)}` +
+        `?utm_source=social_facebook_reel&utm_medium=social&utm_campaign=scoop_video`,
+    ].filter(Boolean).join("\n\n").slice(0, 2200);
+
+    const fb = await postReelToFacebook({ filePath, caption });
+    logger.info(`🎞️ FACEBOOK REEL PUBLISHED ${fb.id} — ${fb.url}`);
+    return { status: "posted", id: fb.id, url: fb.url };
+
+  } catch (err) {
+    // LOUD. postReelToFacebook no longer degrades to a link post, so an error
+    // here means NOTHING was published — which is the outcome we asked for, and
+    // is worth a line every time.
+    logger.error(
+      `🚨 FACEBOOK REEL FAILED for ${article.id} — nothing was posted to the Reels feed. ` +
+      `The YouTube video IS published and unaffected. ${err.message}`
+    );
+    return { status: "failed", error: err.message };
+  }
+}
+
 // ─── The cycle ──────────────────────────────────────────────────────────────
 
 /**
@@ -353,6 +475,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     // assert the YouTube publish is untouched. That property is the whole
     // design constraint, and it is not observable any other way.
     crossPostToFacebook: _crossPostToFacebook = crossPostToFacebook,
+    reelToFacebook: _reelToFacebook = reelToFacebook,
   } = deps;
 
   if (!autopostEnabled()) {
@@ -588,9 +711,19 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
         // markVideoPublished.
         try {
           const fb = await _crossPostToFacebook(article, {
-            filePath: video.path, title, attribution, now,
+            filePath: video.path, title, attribution, spec: r.spec, slides: video.slides, now,
           });
           if (fb && fb.status !== "off") produced.facebook = fb;
+
+          // ─── Facebook REEL ───────────────────────────────────────────────
+          // A second, independent surface on the same MP4. Same guarded scope
+          // and the same never-throws contract as the feed cross-post above,
+          // for the same three reasons. Default OFF.
+          const reel = await _reelToFacebook(article, {
+            filePath: video.path, title, attribution,
+            spec: r.spec, slides: video.slides, now,
+          });
+          if (reel && reel.status !== "off") produced.facebookReel = reel;
         } catch (fbErr) {
           logger.error(
             `🚨 facebook cross-post threw past its own guard for ${article.id} — this is a code ` +

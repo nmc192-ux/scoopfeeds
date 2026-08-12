@@ -1,10 +1,12 @@
 /**
- * facebookClient.test.js — the page-feed video upload, and the fallback it refuses.
+ * facebookClient.test.js — the two video uploads, and the fallback they refuse.
  *
  * Every other function in this client degrades: photo → photo-by-URL → link
- * post. postReelToFacebook does the same, which is why a "success" from it may
- * be the suppressed link share it was supposed to replace, and why a prod
- * snapshot showed no evidence it ever uploaded a video at all.
+ * post. postReelToFacebook USED to do the same — which is why a "success" from
+ * it may have been the suppressed link share it was supposed to replace, and
+ * why a prod snapshot showed no evidence it ever uploaded a video at all. That
+ * fallback was removed on 2026-08-13 (DrJ): every path now either publishes a
+ * Reel or throws with the reason.
  *
  * postVideoToFacebook must not do that. The cross-post exists because Facebook
  * demotes YouTube links; silently posting one on failure would defeat the
