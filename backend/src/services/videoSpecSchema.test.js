@@ -17,6 +17,8 @@ import {
   CARD_TYPES,
   MODEL_EMITTABLE,
   MIN_SLIDES,
+  MAX_BARS,
+  MAX_NODES,
   repeatedOpeningStems,
 } from "./videoSpecSchema.js";
 
@@ -1027,4 +1029,77 @@ test("the closer gate abstains with no headline, but still checks the opening ca
 test("a short closer with no content words is not read as a restatement", () => {
   const v = validateSpec(closerSpec("So who pays now?"), arcOpts());
   assert.equal(v.ok, true, v.errors.join(" | "));
+});
+
+// ─── Series bounds — the silent-truncation defect (2026-08-12) ──────────────
+//
+// The schema said "2 or more" and stopped; the renderer did slice(0,5) and
+// slice(0,6). Eight bars became five with no error, no dropped[] entry and
+// nothing in the log — and the caption, written against the whole beat, could
+// name a figure that was never drawn. Found while drafting the 9:16 layouts,
+// but it has been true of the shipped 16:9 renderer the whole time.
+
+test("a bars card with more entries than the renderer can draw is DROPPED", () => {
+  const over = barsCard({ bars: [["a", 9], ["b", 8], ["c", 7], ["d", 6], ["e", 5], ["f", 4]] });
+  assert.equal(over.bars.length, MAX_BARS + 1);
+  const slides = [titleCard(), over, plainFiller(0), plainFiller(1), plainFiller(2), kickerCard()];
+  const v = validateSpec(withBeats(slides), { allowedSources: SOURCES, sourceText: TEXT });
+  const drop = v.dropped.find(d => d.t === "bars");
+  assert.ok(drop, `expected a bars drop; got ${JSON.stringify(v.dropped)}`);
+  assert.equal(drop.kind, "structural");
+  assert.match(drop.reason, new RegExp(`exceeds the ${MAX_BARS}`));
+});
+
+test("a diagram card with too many nodes is DROPPED", () => {
+  const nodes = Array.from({ length: MAX_NODES + 1 }, (_, i) => [`N${i}`, `sub ${i}`]);
+  const over = { t: "diagram", eyebrow: "HOW", nodes, caption: "A caption about the chain." };
+  const slides = [titleCard(), over, plainFiller(0), plainFiller(1), plainFiller(2), kickerCard()];
+  const v = validateSpec(withBeats(slides), { allowedSources: SOURCES, sourceText: TEXT });
+  const drop = v.dropped.find(d => d.t === "diagram");
+  assert.ok(drop, `expected a diagram drop; got ${JSON.stringify(v.dropped)}`);
+  assert.equal(drop.kind, "structural");
+  assert.match(drop.reason, new RegExp(`exceeds the ${MAX_NODES}`));
+});
+
+test("exactly at the cap is VALID — the bound is inclusive", () => {
+  // An off-by-one here would quietly cost every five-bar comparison card.
+  const atCap = barsCard({ bars: [["a", 9], ["b", 8], ["c", 7], ["d", 6], ["e", 5]] });
+  const nodes = Array.from({ length: MAX_NODES }, (_, i) => [`N${i}`, `sub ${i}`]);
+  const slides = [
+    titleCard(), atCap,
+    { t: "diagram", eyebrow: "HOW", nodes, caption: "A caption about the chain." },
+    plainFiller(0), plainFiller(1), kickerCard(),
+  ];
+  const v = validateSpec(withBeats(slides), { allowedSources: SOURCES, sourceText: TEXT });
+  assert.equal(v.dropped.length, 0, JSON.stringify(v.dropped));
+  assert.equal(v.ok, true, v.errors.join(" | "));
+});
+
+test("the drop is per-card — the rest of the spec survives", () => {
+  // Rule 1's split. An over-long bars card must not take a good spec with it.
+  const over = barsCard({ bars: [["a", 9], ["b", 8], ["c", 7], ["d", 6], ["e", 5], ["f", 4]] });
+  const slides = [titleCard(), over, plainFiller(0), plainFiller(1), plainFiller(2), plainFiller(3), kickerCard()];
+  const v = validateSpec(withBeats(slides), { allowedSources: SOURCES, sourceText: TEXT });
+  assert.equal(v.ok, true, v.errors.join(" | "));
+  assert.ok(!v.spec.slides.some(c => c.t === "bars" && c.bars.length > MAX_BARS));
+});
+
+test("the renderer NEVER truncates silently", async () => {
+  // The validator drops over-long cards, so this path should be unreachable in
+  // production — but the renderer is called directly by harnesses and fixtures,
+  // and the failure being fixed was precisely that it said nothing.
+  const { statesForCard } = await import("./videoSlideRenderer.js");
+  const { logger } = await import("./logger.js");
+  const saved = logger.warn;
+  const warns = [];
+  logger.warn = (m) => warns.push(String(m));
+  try {
+    statesForCard(
+      { t: "bars", eyebrow: "X", bars: [["a", 9], ["b", 8], ["c", 7], ["d", 6], ["e", 5], ["f", 4]], source: "Reuters", caption: "c" },
+      { outlet: "Reuters", slideIndex: 2, slideCount: 7 },
+    );
+  } finally { logger.warn = saved; }
+  assert.equal(warns.length, 1, `expected one warning, got ${JSON.stringify(warns)}`);
+  assert.match(warns[0], /DISCARDING 1/);
+  assert.match(warns[0], /bypassed validation/);
 });

@@ -105,6 +105,24 @@ const root = (children) => box({
   position: "relative", overflow: "hidden", flexDirection: "column",
 }, children);
 
+/**
+ * Cap a series at what the renderer can draw, LOUDLY.
+ *
+ * The validator drops over-long cards before they get here, so a warning from
+ * this function means something bypassed validation — a harness, a fixture, or
+ * a regression in the drop path. Either way it is worth a line, because the
+ * failure it replaces was invisible: the extra entries simply were not drawn.
+ */
+function truncateLoudly(series, max, { what, card, ctx }) {
+  if (series.length <= max) return series;
+  logger.warn(
+    `🎬 slide ${ctx?.slideIndex ?? "?"} (${card?.t}): ${series.length} ${what} exceeds the ${max} this ` +
+    `renderer can draw — drawing ${max} and DISCARDING ${series.length - max}. validateSpec should ` +
+    `have dropped this card; it reached the renderer, so something bypassed validation.`
+  );
+  return series.slice(0, max);
+}
+
 const eyebrow = (s, top = 176) => text(String(s || "").toUpperCase(), {
   position: "absolute", left: MARGIN_X, top,
   fontSize: 30, fontWeight: 600, letterSpacing: 5, color: C.dim,
@@ -219,7 +237,13 @@ function statStates(card, ctx) {
 }
 
 function barsStates(card, ctx) {
-  const bars = (card.bars || []).slice(0, 5);
+  // BELT AND BRACES, AND IT SHOULD NEVER FIRE. validateSpec now DROPS a card
+  // carrying more than MAX_BARS, so nothing that reaches here can be over-long.
+  // The slice stays because this function is also called directly by harnesses
+  // that never went through the validator — but it is no longer allowed to be
+  // quiet about it. Silent truncation is what let three bars vanish from a
+  // published video with no error, no dropped[] entry and nothing in the log.
+  const bars = truncateLoudly(card.bars || [], 5, { what: "bars", card, ctx });
   const max = Math.max(...bars.map(b => Number(b[1]) || 0), 1);
   const leadIdx = bars.reduce((best, b, i) => (Number(b[1]) > Number(bars[best][1]) ? i : best), 0);
   const H = 72, GAP = 40;
@@ -266,7 +290,8 @@ function barsStates(card, ctx) {
 }
 
 function diagramStates(card, ctx) {
-  const nodes = (card.nodes || []).slice(0, 6);
+  // See barsStates — same contract, same reason it must not be silent.
+  const nodes = truncateLoudly(card.nodes || [], 6, { what: "nodes", card, ctx });
   const n = nodes.length;
   const base = () => [...chrome(ctx), eyebrow(card.eyebrow || "", Y.eyebrow)];
   // Node labels are 300px boxes CENTRED on their tick, so the rail has to be
