@@ -32,102 +32,64 @@
 
 import { renderTreeToPng, sourceFingerprint, fontsReady } from "./renderCore.js";
 import { logger } from "./logger.js";
+import { HORIZONTAL, geometryFor, DEFAULT_ORIENTATION } from "./videoGeometry.js";
+import { makePrimitives, COLORS as C, FONTS as F } from "./videoSlideChrome.js";
+import { verticalStatesForCard } from "./videoSlideRendererVertical.js";
 
 export const VIDEO_DESIGN_VER = "vid-v1";
-export const VIDEO_BUILDER_FINGERPRINT = sourceFingerprint([import.meta.url]);
+// EVERY MODULE WHOSE CODE DETERMINES A RENDERED PIXEL. This used to hash only
+// this file, which was correct when this file WAS the renderer. It no longer
+// is: geometry, the shared primitives and the vertical layouts each decide what
+// comes out, and a change in any of them with an unchanged key means prod keeps
+// serving the frames it already cached. That is the v12 lesson made structural,
+// and splitting the renderer across files is exactly how it would have been
+// quietly undone.
+export const VIDEO_BUILDER_FINGERPRINT = sourceFingerprint([
+  import.meta.url,
+  new URL("./videoGeometry.js", import.meta.url).href,
+  new URL("./videoSlideChrome.js", import.meta.url).href,
+  new URL("./videoSlideRendererVertical.js", import.meta.url).href,
+]);
 export const videoDesignKey = () => `${VIDEO_DESIGN_VER}-${VIDEO_BUILDER_FINGERPRINT}`;
 
-// ─── Canvas, safe areas, brand ──────────────────────────────────────────────
+// ─── Geometry — 16:9, moved to videoGeometry.js and re-exported ─────────────
+//
+// These names are the module's long-standing public surface (videoAssembler and
+// three test files import them), so they stay exactly as they were. The VALUES
+// now come from the geometry object rather than from literals here.
+const G = HORIZONTAL;
+export const CANVAS = G.canvas;
+export const MARGIN_X = G.marginX;
+export const CONTENT_W = G.contentW;
+export const CHROME_TOP_Y = G.chromeTopY;
+export const RESERVED_BOTTOM_Y = G.reservedBottomY;
+export const DRIFT_SAFE_X = G.driftSafeX;
+export const DRIFT_SAFE_Y = G.driftSafeY;
+export { COLORS } from "./videoSlideChrome.js";
 
-export const CANVAS = Object.freeze({ w: 1920, h: 1080 });
-export const MARGIN_X = 96;
-export const CONTENT_W = CANVAS.w - MARGIN_X * 2;      // 1728
-export const CHROME_TOP_Y = 72;
-// Nothing but chrome renders below this line. YouTube's control bar and end
-// screens land in the bottom band, and the source credit was originally placed
-// inside it — the stat stack is tightened upward so the credit clears it.
-export const RESERVED_BOTTOM_Y = 960;
-// DRIFT-SAFE INSET. The drift is a crop across a 2%-overscanned frame, so at
-// any instant one edge is outside the window: 38px horizontally, 22px
-// vertically. Anything closer to an edge than that is periodically cropped
-// away. Found by rendering — the progress line sat at y=1072 and was simply
-// ABSENT from the assembled video, and the outer diagram nodes were sliced in
-// half. Every element must live inside this inset.
-export const DRIFT_SAFE_X = 44;
-export const DRIFT_SAFE_Y = 28;
-const PROGRESS_Y = CANVAS.h - DRIFT_SAFE_Y - 6;   // 1046
+// The primitives, bound to 16:9. Same functions the vertical module binds to
+// its own geometry — one definition, two bindings.
+const { root, chrome, eyebrow, hairline, sourceCredit, sourceBadge, antonLine, box, text, abs } = makePrimitives(G);
 
-const C = Object.freeze({
-  base:        "#090706",
-  lime:        "#dde706",
-  limeChrome:  "rgba(221,231,6,0.35)",
-  white:       "#f5f2ea",
-  sub:         "#cfcabd",
-  dim:         "#8a8578",
-  faint:       "#6b675e",
-  rule:        "#2a2721",
-  track:       "#4a473f",
-});
-export const COLORS = C;
-
-const F = { inter: "Inter", anton: "Anton" };
-
-// ─── Tiny tree helpers ──────────────────────────────────────────────────────
-
-const box = (style, children = []) => ({ type: "div", props: { style: { display: "flex", ...style }, children } });
-const text = (content, style) => ({
-  type: "div",
-  props: { style: { display: "flex", fontFamily: F.inter, ...style }, children: [{ type: "span", props: { children: String(content ?? "") } }] },
-});
-const abs = (style, children = []) => box({ position: "absolute", ...style }, children);
-
-// ─── Chrome — byte-identical in every state of every card ───────────────────
-
-function chrome({ slideIndex = 0, slideCount = 1 }) {
-  const frac = slideCount > 1 ? (slideIndex + 1) / slideCount : 1;
-  return [
-    text("SCOOPFEEDS", {
-      position: "absolute", left: MARGIN_X, top: CHROME_TOP_Y,
-      fontSize: 26, fontWeight: 600, letterSpacing: 6, color: C.faint,
-    }),
-    text(`${slideIndex + 1} / ${slideCount}`, {
-      position: "absolute", right: MARGIN_X, top: CANVAS.h - 72,
-      fontSize: 22, fontWeight: 600, letterSpacing: 2, color: "#3a3830",
-    }),
-    // Progress line: full-width track, lime fill to this slide's fraction.
-    abs({ left: 0, top: PROGRESS_Y, width: CANVAS.w, height: 4, background: "#1a1814" }),
-    abs({ left: 0, top: PROGRESS_Y, width: Math.round(CANVAS.w * frac), height: 4, background: C.limeChrome }),
-  ];
+/**
+ * Cap a series at what the renderer can draw, LOUDLY.
+ *
+ * The validator drops over-long cards before they get here, so a warning from
+ * this function means something bypassed validation — a harness, a fixture, or
+ * a regression in the drop path. Either way it is worth a line, because the
+ * failure it replaces was invisible: the extra entries simply were not drawn.
+ */
+export function truncateLoudly(series, max, { what, card, ctx }) {
+  if (series.length <= max) return series;
+  logger.warn(
+    `🎬 slide ${ctx?.slideIndex ?? "?"} (${card?.t}): ${series.length} ${what} exceeds the ${max} this ` +
+    `renderer can draw — drawing ${max} and DISCARDING ${series.length - max}. validateSpec should ` +
+    `have dropped this card; it reached the renderer, so something bypassed validation.`
+  );
+  return series.slice(0, max);
 }
 
-const root = (children) => box({
-  width: CANVAS.w, height: CANVAS.h, background: C.base,
-  position: "relative", overflow: "hidden", flexDirection: "column",
-}, children);
 
-const eyebrow = (s, top = 176) => text(String(s || "").toUpperCase(), {
-  position: "absolute", left: MARGIN_X, top,
-  fontSize: 30, fontWeight: 600, letterSpacing: 5, color: C.dim,
-});
-
-const hairline = (top, width = 520) => abs({ left: MARGIN_X, top, width, height: 1, background: C.rule });
-
-/** §3b/3's on-screen receipt. Never lime, never large, always in the footnote slot. */
-const sourceCredit = (source, top) => text(`SOURCE: ${String(source || "").toUpperCase()}`, {
-  position: "absolute", left: MARGIN_X, top,
-  fontSize: 26, fontWeight: 600, letterSpacing: 4, color: C.dim, opacity: 0.7,
-});
-
-/** Code-injected on the title card — the model never writes an outlet name. */
-const sourceBadge = (outlet) => text(String(outlet || "").toUpperCase(), {
-  position: "absolute", right: MARGIN_X, top: CHROME_TOP_Y,
-  fontSize: 26, fontWeight: 600, letterSpacing: 5, color: C.dim,
-});
-
-const antonLine = (s, { top, size = 118, color = C.white }) => text(s, {
-  position: "absolute", left: MARGIN_X, top, maxWidth: CONTENT_W,
-  fontFamily: F.anton, fontSize: size, lineHeight: 1.02, color,
-});
 
 // ─── Per-card layouts ───────────────────────────────────────────────────────
 //
@@ -219,7 +181,13 @@ function statStates(card, ctx) {
 }
 
 function barsStates(card, ctx) {
-  const bars = (card.bars || []).slice(0, 5);
+  // BELT AND BRACES, AND IT SHOULD NEVER FIRE. validateSpec now DROPS a card
+  // carrying more than MAX_BARS, so nothing that reaches here can be over-long.
+  // The slice stays because this function is also called directly by harnesses
+  // that never went through the validator — but it is no longer allowed to be
+  // quiet about it. Silent truncation is what let three bars vanish from a
+  // published video with no error, no dropped[] entry and nothing in the log.
+  const bars = truncateLoudly(card.bars || [], 5, { what: "bars", card, ctx });
   const max = Math.max(...bars.map(b => Number(b[1]) || 0), 1);
   const leadIdx = bars.reduce((best, b, i) => (Number(b[1]) > Number(bars[best][1]) ? i : best), 0);
   const H = 72, GAP = 40;
@@ -266,7 +234,8 @@ function barsStates(card, ctx) {
 }
 
 function diagramStates(card, ctx) {
-  const nodes = (card.nodes || []).slice(0, 6);
+  // See barsStates — same contract, same reason it must not be silent.
+  const nodes = truncateLoudly(card.nodes || [], 6, { what: "nodes", card, ctx });
   const n = nodes.length;
   const base = () => [...chrome(ctx), eyebrow(card.eyebrow || "", Y.eyebrow)];
   // Node labels are 300px boxes CENTRED on their tick, so the rail has to be
@@ -380,8 +349,19 @@ const BUILDERS = {
   bars: barsStates, diagram: diagramStates, turn: turnStates, kicker: kickerStates,
 };
 
-/** Every keyframe state for one card. Throws on an unknown type — the closed set is closed. */
+/**
+ * Every keyframe state for one card, in the requested orientation.
+ *
+ * ORIENTATION COMES FROM ctx, and defaults to the 16:9 builders when absent so
+ * every existing caller and fixture is unaffected. The daily loop passes
+ * `orientation` explicitly — see DEFAULT_ORIENTATION in videoGeometry.js.
+ *
+ * Throws on an unknown card type in BOTH orientations: the closed set is
+ * closed, and a vertical layout quietly missing a type would surface as a
+ * missing slide rather than as an error.
+ */
 export function statesForCard(card, ctx = {}) {
+  if ((ctx.orientation || "horizontal") === "vertical") return verticalStatesForCard(card, ctx);
   const build = BUILDERS[card?.t];
   if (!build) throw new Error(`videoSlideRenderer: no layout for card type "${card?.t}"`);
   return build(card, ctx);
@@ -440,10 +420,20 @@ export function fitStatesToDuration(states, durationSecs, { minHold = 0.6, cross
   return kept;
 }
 
-/** Render one state to a PNG buffer. */
-export async function renderState(state) {
+/**
+ * Render one state to a PNG buffer.
+ *
+ * The dimensions come from the STATE'S OWN tree, not from the module's canvas
+ * constant — a vertical tree rendered at 1920x1080 would compose correctly and
+ * then be cropped to a letterboxed stripe, which is exactly the failure mode a
+ * hardcoded canvas produces once there are two of them.
+ */
+export async function renderState(state, { orientation } = {}) {
   if (!fontsReady({ requireAnton: true })) throw new Error("videoSlideRenderer: Anton required for video display type");
-  return renderTreeToPng(state.tree, { width: CANVAS.w, height: CANVAS.h, background: C.base });
+  const g = orientation ? geometryFor(orientation) : null;
+  const w = g?.canvas.w ?? state.tree?.props?.style?.width ?? CANVAS.w;
+  const h = g?.canvas.h ?? state.tree?.props?.style?.height ?? CANVAS.h;
+  return renderTreeToPng(state.tree, { width: w, height: h, background: C.base });
 }
 
 export const _internals = { chrome, Y, C, BUILDERS };

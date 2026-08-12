@@ -90,6 +90,29 @@ export const THUMBNAIL_ANGLES = Object.freeze([
 // it. Lowered 6 -> 5 on 2026-08-03 when the attribution card was absorbed into
 // the title: the floor counted that code-injected card, so keeping 6 would
 // have quietly raised the bar on the MODEL by one card overnight.
+// ─── Series bounds — what the RENDERER can actually draw ────────────────────
+//
+// These were unbounded until 2026-08-12: the schema said "an array of 2 or
+// more" and stopped there, while videoSlideRenderer did `bars.slice(0, 5)` and
+// `nodes.slice(0, 6)`. A model emitting eight bars therefore got five drawn and
+// three silently discarded — no error, no `dropped[]` entry, nothing in the
+// log. The caption is written against the beat, so it could name a figure that
+// is not on screen, and nobody would find out from anything but watching.
+//
+// Found while drafting the 9:16 layouts, but it is NOT a vertical problem: it
+// has been true of the shipped 16:9 renderer since the card types existed.
+// Vertical carries the same counts comfortably (measured: bars at a 190px row
+// pitch, diagram as a downward rail), so these are the RENDERER's limits, not
+// an aspect-ratio compromise.
+//
+// The upper bound is enforced as a per-card DROP rather than a spec rejection,
+// which is rule 1's existing split: a malformed card is refused, the rest of
+// the spec survives. Silent truncation is the one thing it must not be.
+export const MIN_BARS = 2;
+export const MAX_BARS = 5;
+export const MIN_NODES = 2;
+export const MAX_NODES = 6;
+
 export const MIN_SLIDES = 5;
 export const MAX_SLIDES = 34;
 
@@ -428,8 +451,14 @@ function validateCardShape(card, idx) {
     }
     case "diagram": {
       if (card.nodes !== undefined) {
-        if (!isArr(card.nodes) || card.nodes.length < 2) {
-          e.push(`${at} (diagram): "nodes" must be an array of 2 or more`);
+        if (!isArr(card.nodes) || card.nodes.length < MIN_NODES) {
+          e.push(`${at} (diagram): "nodes" must be an array of ${MIN_NODES} or more`);
+        } else if (card.nodes.length > MAX_NODES) {
+          // DROPPED, not trimmed. The renderer draws MAX_NODES and used to
+          // discard the rest without a word; the caption is written against the
+          // whole chain, so a quietly shortened one can describe a step the
+          // viewer never sees.
+          e.push(`${at} (diagram): ${card.nodes.length} nodes exceeds the ${MAX_NODES} the renderer can draw — split the mechanism across two cards rather than losing steps`);
         } else {
           card.nodes.forEach((nd, i) => {
             if (!isArr(nd) || nd.length !== 2 || !isStr(nd[0])) {
@@ -453,8 +482,10 @@ function validateCardShape(card, idx) {
     }
     case "bars": {
       if (card.bars !== undefined) {
-        if (!isArr(card.bars) || card.bars.length < 2) {
-          e.push(`${at} (bars): "bars" must be an array of 2 or more`);
+        if (!isArr(card.bars) || card.bars.length < MIN_BARS) {
+          e.push(`${at} (bars): "bars" must be an array of ${MIN_BARS} or more`);
+        } else if (card.bars.length > MAX_BARS) {
+          e.push(`${at} (bars): ${card.bars.length} bars exceeds the ${MAX_BARS} the renderer can draw — keep the ${MAX_BARS} that carry the comparison rather than losing the tail silently`);
         } else {
           card.bars.forEach((b, i) => {
             if (!isArr(b) || b.length !== 2 || !isStr(b[0]) || !isNum(b[1])) {

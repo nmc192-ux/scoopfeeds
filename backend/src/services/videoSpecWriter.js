@@ -394,8 +394,17 @@ const CARD_GRAMMAR = `
             WRONG:     "lines":[["of all faults","white"], ["are caused by anchors","lime"]]
 "diagram" — a chain or flow of 2-6 nodes. { "t":"diagram", "eyebrow":"...", "nodes":[["LABEL","sub"],["LABEL","sub"]], "marker":{"on":1,"label":"...","sub":"..."}, "caption":"..." }
             "marker.on" is the index of the node it points at.
+            !! 2 to 6 nodes is a HARD LIMIT, not a guideline. The renderer draws six; a card
+               with seven or more is DROPPED FROM THE VIDEO ENTIRELY. If a mechanism genuinely
+               has more steps, split it across two "diagram" cards — do not compress it into
+               one and do not let the tail run past six, because the caption describes the
+               whole chain and a lost step becomes a caption about something not on screen.
 "bars"    — a COMPARISON of 2 to 5 labelled quantities. { "t":"bars", "eyebrow":"...", "bars":[["label",70],["label",30]], "source":"OUTLET NAME", "caption":"..." }
             "bars" MUST contain AT LEAST 2 entries — a single number is never a "bars" card; use "stat" for a single number.
+            !! AND AT MOST 5. This is a HARD LIMIT, not a guideline: the renderer draws five,
+               and a card with six or more is DROPPED FROM THE VIDEO ENTIRELY. Choose the five
+               entries that actually carry the comparison; a long tail of small values is not
+               what makes the point anyway.
 "turn"    — the pivot beat, where the obvious reading gives way to the real one.
             { "t":"turn", "eyebrow":"...", "lines":[["TEXT","white"],["TEXT","lime"]], "sub":"one line", "caption":"..." }
 "kicker"  — the closer. { "t":"kicker", "top":"...", "bottom":"...", "sub":"...", "caption":"..." }
