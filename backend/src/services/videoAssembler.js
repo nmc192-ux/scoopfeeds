@@ -24,6 +24,7 @@ import path from "path";
 import { logger } from "./logger.js";
 import { getFFmpegPath } from "./videoGenerator.js";
 import { CANVAS, MARGIN_X, DRIFT_SAFE_Y, COLORS } from "./videoSlideRenderer.js";
+import { geometryFor, DEFAULT_ORIENTATION } from "./videoGeometry.js";
 import { voiceGapSecs } from "./videoVoice.js";
 import { writeFileSync as writeFileSync_ } from "fs";
 
@@ -136,18 +137,49 @@ function runFFmpeg(args, ffmpegPath) {
 // under a line being read is exactly where it becomes noticeable. Burning
 // post-crop also means they are rasterised at final resolution rather than
 // resampled by the downscale.
-export const CAPTION = Object.freeze({
-  fontSize: 34,
-  lineHeight: 44,
-  // Inside the bottom band, above the progress line, and clear of the drift
-  // margin. Nothing a card draws reaches here — the band exists for exactly
-  // this and for YouTube's auto-hiding controls.
-  bottomY: CANVAS.h - DRIFT_SAFE_Y - 18,
-  // Measured, not guessed. The box padding is 14px a side, so the text itself
-  // has to fit inside the content measure less that padding.
-  maxWidth: CANVAS.w - 2 * (MARGIN_X + 60),
-  maxLines: 2,
-});
+/**
+ * Caption geometry, per orientation.
+ *
+ * 16:9 — inside the bottom band, above the progress line, clear of the drift
+ * margin. Nothing a card draws reaches there; the band exists for exactly this
+ * and for YouTube's auto-hiding controls.
+ *
+ * 9:16 — THE CAPTION MOVES UP, and this is a vertical-only finding. Placed the
+ * 16:9 way it lands in the band where Shorts and Reels draw the video title,
+ * the channel handle, their own caption and the progress bar: it renders
+ * perfectly and is then covered on the viewer's screen. So it sits ABOVE
+ * contentBottom, inside our own area.
+ *
+ * maxLines is 2 in 16:9 and 3 in 9:16, and that is a DELIBERATE ASYMMETRY. A
+ * 160-char caption over a 1080 measure wraps to three lines; the alternative
+ * was cutting the caption budget to ~110 chars, which would have silently
+ * shortened the SPOKEN script — the caption is the narration — and undone part
+ * of the arc work. A layout constraint must not become an editorial one
+ * (DrJ, 2026-08-12).
+ */
+export function captionGeometry(orientation = "horizontal") {
+  const g = geometryFor(orientation);
+  if (orientation === "vertical") {
+    return Object.freeze({
+      fontSize: 30, lineHeight: 40,
+      bottomY: g.contentBottom - 44,
+      maxWidth: g.canvas.w - 2 * (g.marginX + 20),
+      maxLines: 3,
+    });
+  }
+  return Object.freeze({
+    fontSize: 34, lineHeight: 44,
+    bottomY: g.canvas.h - g.driftSafeY - 18,
+    // Measured, not guessed. The box padding is 14px a side, so the text itself
+    // has to fit inside the content measure less that padding.
+    maxWidth: g.canvas.w - 2 * (g.marginX + 60),
+    maxLines: 2,
+  });
+}
+
+/** The 16:9 caption box, unchanged. Kept as a named export — three call sites
+ *  and a test import it. */
+export const CAPTION = captionGeometry("horizontal");
 
 /**
  * Wrap a caption by MEASURED width, not by a character estimate.
@@ -171,11 +203,12 @@ export async function wrapCaption(text, maxWidth = CAPTION.maxWidth) {
  * and `'` as syntax, and a caption is prose written by a model — it will
  * eventually contain every one of them. `textfile=` sidesteps the whole class.
  */
-export async function buildCaptionFilter({ text, workDir, slideIndex, fontFile }) {
-  const lines = await wrapCaption(text);
-  if (lines.length > CAPTION.maxLines) {
+export async function buildCaptionFilter({ text, workDir, slideIndex, fontFile, orientation = "horizontal" }) {
+  const CAP = captionGeometry(orientation);
+  const lines = await wrapCaption(text, CAP.maxWidth);
+  if (lines.length > CAP.maxLines) {
     logger.warn(
-      `🎬 slide ${slideIndex}: caption wraps to ${lines.length} lines (max ${CAPTION.maxLines}) — ` +
+      `🎬 slide ${slideIndex}: caption wraps to ${lines.length} lines (max ${CAP.maxLines}) — ` +
       `it will sit higher than the band intends: "${String(text).slice(0, 60)}"`
     );
   }
@@ -183,8 +216,8 @@ export async function buildCaptionFilter({ text, workDir, slideIndex, fontFile }
   // left-aligns the lines inside it, so a short second line hangs off to the
   // left of a long first one — visible immediately in the first render.
   // Per-line filters let each line centre on its own width.
-  const blockH = lines.length * CAPTION.lineHeight;
-  const top = CAPTION.bottomY - blockH;
+  const blockH = lines.length * CAP.lineHeight;
+  const top = CAP.bottomY - blockH;
   const esc = (v) => String(v).replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
 
   return lines.map((line, i) => {
@@ -192,17 +225,18 @@ export async function buildCaptionFilter({ text, workDir, slideIndex, fontFile }
     writeFileSync_(file, line, "utf8");
     return (
       `drawtext=fontfile='${esc(fontFile)}':textfile='${esc(file)}':` +
-      `fontsize=${CAPTION.fontSize}:fontcolor=0xf5f2ea:` +
-      `x=(w-text_w)/2:y=${Math.round(top + i * CAPTION.lineHeight)}:` +
+      `fontsize=${CAP.fontSize}:fontcolor=0xf5f2ea:` +
+      `x=(w-text_w)/2:y=${Math.round(top + i * CAP.lineHeight)}:` +
       `box=1:boxcolor=0x090706@0.72:boxborderw=14`
     );
   }).join(",");
 }
 
-export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0, caption = null }) {
+export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0, caption = null, orientation = "horizontal" }) {
+  const CV = geometryFor(orientation).canvas;
   const parts = [];
   for (let i = 0; i < stateCount; i++) {
-    parts.push(`[${i}:v]scale=${CANVAS.w}:${CANVAS.h},setsar=1,format=yuv420p,fps=${FPS}[s${i}]`);
+    parts.push(`[${i}:v]scale=${CV.w}:${CV.h},setsar=1,format=yuv420p,fps=${FPS}[s${i}]`);
   }
 
   let last = "s0";
@@ -236,13 +270,13 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
   // Dropping it also removes the slight softening that round trip caused, which
   // is why static output is fractionally CRISPER than the panned output was.
   if (!driftEnabled()) {
-    const w2s = Math.round(CANVAS.w * DRIFT_SCALE);
-    const h2s = Math.round(CANVAS.h * DRIFT_SCALE);
-    const offX = Math.round((w2s - CANVAS.w) / 2);
-    const offY = Math.round((h2s - CANVAS.h) / 2);
+    const w2s = Math.round(CV.w * DRIFT_SCALE);
+    const h2s = Math.round(CV.h * DRIFT_SCALE);
+    const offX = Math.round((w2s - CV.w) / 2);
+    const offY = Math.round((h2s - CV.h) / 2);
     parts.push(
       `[${last}]scale=${w2s}:${h2s}:flags=lanczos,` +
-      `crop=${CANVAS.w}:${CANVAS.h}:x=${offX}:y=${offY},` +
+      `crop=${CV.w}:${CV.h}:x=${offX}:y=${offY},` +
       `setsar=1${captionChain}[out]`
     );
     return { filter: parts.join("; "), totalDuration: total };
@@ -259,9 +293,9 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
   //   3. DOWNSCALE AFTER THE CROP, back to output. lanczos both ways: bilinear
   //      would soften the display type enough to see at Anton 340.
   const SS = Math.max(1, DRIFT_SUPERSAMPLE);
-  const w2 = Math.round(CANVAS.w * DRIFT_SCALE) * SS;
-  const h2 = Math.round(CANVAS.h * DRIFT_SCALE) * SS;
-  const cw = CANVAS.w * SS, ch = CANVAS.h * SS;
+  const w2 = Math.round(CV.w * DRIFT_SCALE) * SS;
+  const h2 = Math.round(CV.h * DRIFT_SCALE) * SS;
+  const cw = CV.w * SS, ch = CV.h * SS;
   const maxX = w2 - cw, maxY = h2 - ch;      // the overscan cap, in SS units
 
   // Travel at a constant RATE along the overscan's own diagonal, so the
@@ -282,7 +316,7 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
   parts.push(
     `[${last}]scale=${w2}:${h2}:flags=lanczos,` +
     `crop=${cw}:${ch}:x='${Math.round(padX / 2)}+${xExpr}':y='${Math.round(padY / 2)}+${yExpr}',` +
-    `scale=${CANVAS.w}:${CANVAS.h}:flags=lanczos,setsar=1${captionChain}[out]`
+    `scale=${CV.w}:${CV.h}:flags=lanczos,setsar=1${captionChain}[out]`
   );
 
   return { filter: parts.join("; "), totalDuration: total };
@@ -325,6 +359,7 @@ export function holdForAudio(audioSecs, stateCount, crossfade = CROSSFADE_SECS) 
 export async function assembleSlide({
   statePaths, hold, outputPath, driftDir = 0, ffmpegPath = null,
   audioPath = null, captionText = null, workDir = null, fontFile = null,
+  orientation = "horizontal",
 }) {
   const ff = ffmpegPath || getFFmpegPath();
   if (!ff) throw new Error("videoAssembler: ffmpeg not available");
@@ -336,11 +371,11 @@ export async function assembleSlide({
   if (audioPath) args.push("-i", audioPath);
 
   const caption = (captionText && workDir && fontFile)
-    ? await buildCaptionFilter({ text: captionText, workDir, slideIndex: driftDir, fontFile })
+    ? await buildCaptionFilter({ text: captionText, workDir, slideIndex: driftDir, fontFile, orientation })
     : null;
 
   const { filter, totalDuration } = buildSlideFilter({
-    stateCount: statePaths.length, hold, driftDir, caption,
+    stateCount: statePaths.length, hold, driftDir, caption, orientation,
   });
 
   args.push("-filter_complex", filter, "-map", "[out]");

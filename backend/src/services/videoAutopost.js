@@ -44,6 +44,7 @@ import { selectionGate, diversifyByPublisher, MAX_PER_PUBLISHER } from "./videoS
 import { resolveAttribution, buildDescriptionCredit } from "./videoAttribution.js";
 import { writeVideoSpec, writePackaging, isVideoSpecEnabled } from "./videoSpecWriter.js";
 import { statesForCard, renderState, fitStatesToDuration, videoDesignKey } from "./videoSlideRenderer.js";
+import { DEFAULT_ORIENTATION } from "./videoGeometry.js";
 import { assembleSlide, concatSlides, holdForAudio } from "./videoAssembler.js";
 import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.js";
 import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
@@ -184,6 +185,12 @@ export function rateGate({ now = Date.now() } = {}) {
 // ─── Produce one video ──────────────────────────────────────────────────────
 
 async function produceVideo(article, spec, attribution = resolveAttribution(article)) {
+  // ORIENTATION. Vertical by default — Shorts and Reels are the only surfaces
+  // that push video to people who have not heard of the channel, and a vertical
+  // MP4 under the length limit uploaded through the existing YouTube API IS a
+  // Short. No new upload path is needed; this is layout, not distribution.
+  // VIDEO_ORIENTATION=horizontal is the one-line revert.
+  const orientation = DEFAULT_ORIENTATION;
   // The spec arrives ALREADY DECORATED. writeVideoSpec injects the title's
   // badge, date and verbal credit BEFORE it validates, because §3b/3 checks the
   // title caption for that credit — decorating here instead is what dropped
@@ -199,7 +206,7 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
     for (let i = 0; i < slides.length; i++) {
       const card = slides[i];
       const audioSecs = audio[i].durationSecs;
-      let states = statesForCard(card, { outlet: attribution.publisher, slideIndex: i, slideCount: slides.length });
+      let states = statesForCard(card, { outlet: attribution.publisher, slideIndex: i, slideCount: slides.length, orientation });
       states = fitStatesToDuration(states, audioSecs, { cardType: card.t, slideIndex: i });
       const hold = holdForAudio(audioSecs, states.length);
 
@@ -207,12 +214,12 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
       for (const st of states) {
         const p = path.join(work, `s${String(i).padStart(2, "0")}-${st.key}.png`);
         const { writeFileSync } = await import("fs");
-        writeFileSync(p, await renderState(st));
+        writeFileSync(p, await renderState(st, { orientation }));
         paths.push(p);
       }
       const seg = path.join(work, `slide${String(i).padStart(2, "0")}.mp4`);
       await assembleSlide({
-        statePaths: paths, hold, outputPath: seg, driftDir: i,
+        statePaths: paths, hold, outputPath: seg, driftDir: i, orientation,
         audioPath: audio[i].path, captionText: card.caption, workDir: work, fontFile: FONT_FILE,
       });
       segments.push(seg);
