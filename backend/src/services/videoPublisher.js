@@ -241,7 +241,6 @@ async function publishOneJob(job, { dryRun = false } = {}) {
   if (isInstagramConfigured()) {
     try {
       const { id: igId, url: igUrl } = await postReelToInstagram({
-        videoUrl: publicUrl,
         caption:  reelCaption,
       });
       result.instagram = { id: igId, url: igUrl };
@@ -259,7 +258,6 @@ async function publishOneJob(job, { dryRun = false } = {}) {
     try {
       const { id: fbId, url: fbUrl } = await postReelToFacebook({
         filePath: job.output_path,
-        videoUrl: publicUrl,
         caption:  reelCaption,
       });
       result.facebook = { id: fbId, url: fbUrl };
