@@ -187,6 +187,17 @@ corpus at the *new* price. Verified 2026-08-11: with everything at defaults the 
 margin that stops the last consonant being clipped by the cut. Shortening the editorial gap
 must never be able to clip a slide, so the two stay separate numbers.
 
+### Orientation
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `VIDEO_ORIENTATION` | `vertical` | default | restart | `vertical` (1080×1920) or `horizontal` (1920×1080). **The daily loop now renders vertical** — Shorts and Reels are the only surfaces that push video to people who have not heard of the channel, and a vertical MP4 under the length limit uploaded through the existing YouTube API *is* a Short. No new upload path. `VIDEO_ORIENTATION=horizontal` is the one-line revert. An unrecognised value **throws** rather than defaulting, because a typo silently rendering 16:9 into a vertical pipeline produces a letterboxed stripe that looks deliberate. |
+
+The 16:9 layouts are frozen, not deleted — `backend/_stateHashes.mjs` proves it by sha256 over
+every state of every card type. Safe-area margins for 9:16 live in
+`backend/src/services/videoGeometry.js` with a comment naming what each is protecting against;
+they are **unverified against real platform chrome** as of 2026-08-12.
+
 ### Slide motion
 
 | Var | Default | Prod | Runtime-flip | Purpose |
