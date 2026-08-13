@@ -879,3 +879,158 @@ test("NEITHER Facebook surface can throw into the cycle", async () => {
     }
   });
 });
+
+// ─── Instagram + Threads: Rule 0 per publish point ─────────────────────────
+//
+// Two more publish surfaces, so two more independent gates. Same reasoning as
+// the Facebook pair: the cycle's single assertPublishAllowed protects these by
+// ORDERING alone, and Rule 0 is three independent layers precisely so that no
+// path is safe by accident of sequence.
+//
+// Both are URL-FETCH surfaces, which adds a second thing worth pinning: a
+// refusal must leave nothing pending, or the sweep would hold an MP4 for a
+// publish that was never attempted.
+
+function withChannel(envVar, value, fn) {
+  const saved = process.env[envVar];
+  if (value === undefined) delete process.env[envVar];
+  else process.env[envVar] = value;
+  try { return fn(); }
+  finally {
+    if (saved === undefined) delete process.env[envVar];
+    else process.env[envVar] = saved;
+  }
+}
+
+for (const [channel, envVar, fnName] of [
+  ["Instagram", "VIDEO_INSTAGRAM_REELS_ENABLED", "reelToInstagram"],
+  ["Threads",   "VIDEO_THREADS_ENABLED",         "videoToThreads"],
+]) {
+  test(`RULE 0 REFUSES the ${channel} publish — nothing reaches Meta`, async () => {
+    const mod = await import("./videoAutopost.js");
+    const r = await withChannel(envVar, "1", () => mod[fnName](GEO_BILAWAL_JAAC, {
+      filePath: "/nonexistent/should-never-be-read.mp4",
+      title: "T", attribution: { publisher: "Geo News" },
+    }));
+    assert.equal(r.status, "refused");
+    assert.equal(r.reason, "rule0");
+    // The filePath is deliberately nonexistent: if the refusal did not come
+    // FIRST, this would fail on the missing file and pass for the wrong reason.
+  });
+
+  test(`RULE 0 refuses the ${channel} publish on a blocked GENERATED spec too`, async () => {
+    const mod = await import("./videoAutopost.js");
+    const r = await withChannel(envVar, "1", () => mod[fnName](CLEAN_ARTICLE, {
+      filePath: "/nonexistent/should-never-be-read.mp4",
+      title: "T", attribution: { publisher: "Reuters" },
+      slides: [{ caption: "As Bilawal told reporters in Karachi this week..." }],
+    }));
+    assert.equal(r.status, "refused");
+    assert.equal(r.reason, "rule0");
+  });
+
+  test(`a CLEAN article gets past Rule 0 on ${channel}`, async () => {
+    // Only meaningful because the refusals above are not vacuous.
+    const mod = await import("./videoAutopost.js");
+    const r = await withChannel(envVar, "1", () => mod[fnName](CLEAN_ARTICLE, {
+      filePath: "/nonexistent/deliberately-missing.mp4",
+      title: "EU agrees final text of the AI Act",
+      attribution: { publisher: "Reuters" },
+      slides: [{ caption: "The final text settles the general-purpose model rules." }],
+    }));
+    assert.notEqual(r.status, "refused");
+    assert.ok(["failed", "skipped"].includes(r.status), `got ${JSON.stringify(r)}`);
+  });
+
+  test(`${channel} is OFF by default`, async () => {
+    const mod = await import("./videoAutopost.js");
+    const r = await withChannel(envVar, undefined, () =>
+      mod[fnName](CLEAN_ARTICLE, { filePath: "/x.mp4", title: "T", attribution: {} }));
+    assert.equal(r.status, "off");
+  });
+
+  test(`${channel} cannot throw into the cycle`, async () => {
+    const mod = await import("./videoAutopost.js");
+    await withChannel(envVar, "1", async () => {
+      await assert.doesNotReject(() => mod[fnName](GEO_BILAWAL_JAAC, { filePath: null, title: null, attribution: null }));
+      await assert.doesNotReject(() => mod[fnName](CLEAN_ARTICLE, {}));
+    });
+  });
+}
+
+test("the four channel flags are INDEPENDENT of each other", async () => {
+  // One combined flag would enable an unproven surface as a side effect of a
+  // proven one, and disabling the proven one would be the only way off.
+  const {
+    facebookCrossPostEnabled, facebookReelsEnabled,
+    instagramReelsEnabled, threadsVideoEnabled,
+  } = await import("./videoAutopost.js");
+  const vars = [
+    ["VIDEO_FACEBOOK_ENABLED", facebookCrossPostEnabled],
+    ["VIDEO_FACEBOOK_REELS_ENABLED", facebookReelsEnabled],
+    ["VIDEO_INSTAGRAM_REELS_ENABLED", instagramReelsEnabled],
+    ["VIDEO_THREADS_ENABLED", threadsVideoEnabled],
+  ];
+  const saved = Object.fromEntries(vars.map(([v]) => [v, process.env[v]]));
+  try {
+    for (const [v] of vars) delete process.env[v];
+    for (const [, fn] of vars) assert.equal(fn(), false, "all must be dark by default");
+    for (const [v, fn] of vars) {
+      process.env[v] = "1";
+      assert.equal(fn(), true, `${v} must enable only itself`);
+      const others = vars.filter(([x]) => x !== v);
+      for (const [, otherFn] of others) assert.equal(otherFn(), false, `${v} must not enable a sibling`);
+      delete process.env[v];
+    }
+  } finally {
+    for (const [v] of vars) {
+      if (saved[v] === undefined) delete process.env[v];
+      else process.env[v] = saved[v];
+    }
+  }
+});
+
+test("every channel cap tracks VIDEO_MAX_PER_DAY, and 0 means zero", async () => {
+  // Prod runs VIDEO_MAX_PER_DAY=12 (read live 2026-08-13), NOT the code default
+  // of 4 — so an unset channel cap must be 12 there, not 4.
+  const mod = await import("./videoAutopost.js");
+  const caps = [
+    ["VIDEO_FACEBOOK_MAX_PER_DAY", mod.VIDEO_FACEBOOK_MAX_PER_DAY],
+    ["VIDEO_INSTAGRAM_MAX_PER_DAY", mod.VIDEO_INSTAGRAM_MAX_PER_DAY],
+    ["VIDEO_THREADS_MAX_PER_DAY", mod.VIDEO_THREADS_MAX_PER_DAY],
+  ];
+  const savedMax = process.env.VIDEO_MAX_PER_DAY;
+  try {
+    process.env.VIDEO_MAX_PER_DAY = "12";
+    for (const [v, fn] of caps) {
+      delete process.env[v];
+      assert.equal(fn(), 12, `${v} unset must track VIDEO_MAX_PER_DAY`);
+      process.env[v] = "0";
+      assert.equal(fn(), 0, `${v}=0 must mean ZERO, not unset`);
+      process.env[v] = "3";
+      assert.equal(fn(), 3);
+      delete process.env[v];
+    }
+  } finally {
+    if (savedMax === undefined) delete process.env.VIDEO_MAX_PER_DAY;
+    else process.env.VIDEO_MAX_PER_DAY = savedMax;
+  }
+});
+
+test("the Instagram duration ceiling is an EDGE the format reaches", async () => {
+  const { INSTAGRAM_REEL_MAX_SECS } = await import("./videoAutopost.js");
+  assert.equal(INSTAGRAM_REEL_MAX_SECS(), 90);
+  // §5: the format runs 60-100s. If the ceiling sat above the format's own
+  // range the guard could never fire, which reads as protection and gives none.
+  assert.ok(INSTAGRAM_REEL_MAX_SECS() < 100, "the ceiling must sit inside the observed range");
+});
+
+test("the public URL is built from the ARTICLE ID, not the filename", async () => {
+  // The route resolves the design-key suffix itself, so a re-render between
+  // publish attempts cannot invalidate a URL already handed to Meta.
+  const { publicVideoUrl } = await import("./videoAutopost.js");
+  const u = publicVideoUrl("abc-123");
+  assert.match(u, /\/scoop-ops\/videos-gen\/file\/abc-123$/);
+  assert.ok(!u.includes("vid-v"), "the design key must not appear in the URL");
+  assert.match(publicVideoUrl("a b/c"), /a%20b%2Fc$/, "the id must be encoded");
+});

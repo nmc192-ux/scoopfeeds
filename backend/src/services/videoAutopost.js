@@ -38,6 +38,8 @@ import {
   findFreshUnvideoedArticles, claimVideoPost, markVideoPublished, markVideoFailed,
   countVideosPublishedSince, lastVideoPublishedAt, recordHeartbeat, getHeartbeatRow,
   markVideoFacebook, countFacebookPostsSince,
+  markVideoInstagram, countInstagramPostsSince,
+  markVideoThreads, countThreadsPostsSince,
 } from "../models/database.js";
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
 import { selectionGate, diversifyByPublisher, MAX_PER_PUBLISHER } from "./videoSelection.js";
@@ -50,6 +52,8 @@ import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.j
 import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
 import { uploadToYouTube, isYouTubeConfigured } from "./youtubeClient.js";
 import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from "./facebookClient.js";
+import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js";
+import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
 import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
@@ -142,6 +146,57 @@ export const facebookCrossPostEnabled = () => process.env.VIDEO_FACEBOOK_ENABLED
  * wired up until the 9:16 path existed.
  */
 export const facebookReelsEnabled = () => process.env.VIDEO_FACEBOOK_REELS_ENABLED === "1";
+
+/** Instagram Reels. Its own switch, dark by default, same reasoning as above. */
+export const instagramReelsEnabled = () => process.env.VIDEO_INSTAGRAM_REELS_ENABLED === "1";
+
+/**
+ * Instagram's own rolling-24h cap, mirroring VIDEO_FACEBOOK_MAX_PER_DAY exactly:
+ * unset tracks VIDEO_MAX_PER_DAY (12 in prod, read live 2026-08-13 — NOT the
+ * code default of 4), set throttles independently, and 0 is honoured as ZERO
+ * rather than treated as unset. Someone throttling during an incident types 0
+ * before they type 1.
+ */
+export const VIDEO_INSTAGRAM_MAX_PER_DAY = () => {
+  const raw = process.env.VIDEO_INSTAGRAM_MAX_PER_DAY;
+  if (raw === undefined || raw === "") return VIDEO_MAX_PER_DAY();
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : VIDEO_MAX_PER_DAY();
+};
+
+/**
+ * Instagram's Reels duration ceiling, in seconds. Default 90.
+ *
+ * AN EDGE, NOT A MARGIN (DrJ, 2026-08-13). §5 says the format runs 60-100s and
+ * observed output is 60-100s, so our own renders REACH and can exceed this. It
+ * is therefore checked explicitly against the measured file rather than assumed
+ * from the format's intent — a video one second over is rejected by Meta at
+ * PUBLISH time, after the container has been created and the URL fetched, which
+ * is the most expensive place to discover it.
+ */
+export const INSTAGRAM_REEL_MAX_SECS = () =>
+  Number.parseFloat(process.env.VIDEO_INSTAGRAM_MAX_SECS || "") || 90;
+
+/**
+ * The public URL Meta fetches. Our own server, the one adminAuth-exempt prefix.
+ *
+ * Deliberately built from the ARTICLE ID rather than the filename: the route
+ * resolves the design-key suffix itself, so a re-render between publish attempts
+ * does not invalidate a URL already handed to Meta.
+ */
+/** Threads video. Its own switch, dark by default. */
+export const threadsVideoEnabled = () => process.env.VIDEO_THREADS_ENABLED === "1";
+
+/** Threads' rolling-24h cap. Same shape as the other two; 0 means zero. */
+export const VIDEO_THREADS_MAX_PER_DAY = () => {
+  const raw = process.env.VIDEO_THREADS_MAX_PER_DAY;
+  if (raw === undefined || raw === "") return VIDEO_MAX_PER_DAY();
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : VIDEO_MAX_PER_DAY();
+};
+
+export const publicVideoUrl = (articleId) =>
+  `${SITE_ORIGIN}/scoop-ops/videos-gen/file/${encodeURIComponent(articleId)}`;
 
 /**
  * Facebook's own rolling-24h cap. Unset it and Facebook tracks YouTube, so
@@ -443,6 +498,188 @@ export async function reelToFacebook(article, {
   }
 }
 
+/**
+ * Publish the SAME rendered MP4 as an INSTAGRAM REEL.
+ *
+ * A URL-FETCH SURFACE, which is what makes it different in kind from the two
+ * Facebook ones. Meta does not receive bytes: it is handed a public URL to our
+ * own server and fetches it asynchronously, after the container is created. Two
+ * consequences the code has to carry rather than assume:
+ *
+ *   1. `instagram_status` is set to 'pending' BEFORE the container exists and
+ *      only moved off it on a terminal outcome. sweepVideos reads that to hold
+ *      the MP4 past retention — otherwise the 48h sweep, which runs at WORKER
+ *      STARTUP rather than on a clock, can delete the file Meta is still
+ *      fetching and the publish fails long after we logged success.
+ *   2. The duration ceiling is checked against the MEASURED file, not against
+ *      the format's intent. See INSTAGRAM_REEL_MAX_SECS.
+ *
+ * RULE 0 IS ASSERTED HERE, INDEPENDENTLY, for the same reason as the Facebook
+ * surfaces: three independent layers, no publish path protected only by its
+ * position in the cycle.
+ *
+ * NEVER THROWS, same contract as its siblings — markVideoFailed would flip a row
+ * whose YouTube video is live, isQuotaExceeded matches Meta's 403s, and a throw
+ * escaping the cycle re-runs the BullMQ job.
+ */
+export async function reelToInstagram(article, {
+  filePath, title, attribution, spec = null, slides = null, now = Date.now(),
+} = {}) {
+  if (!instagramReelsEnabled()) return { status: "off" };
+
+  try {
+    try {
+      assertPublishAllowed(article, [spec, slides].filter(Boolean));
+    } catch (blockErr) {
+      logger.error(
+        `🛑 RULE 0 REFUSED the Instagram Reel for ${article.id} — ${blockErr.message}. ` +
+        `Nothing was sent to Meta and no URL was published.`
+      );
+      try { markVideoInstagram(article.id, { status: "skipped", error: `rule0: ${blockErr.message}` }); }
+      catch { /* bookkeeping is best-effort */ }
+      return { status: "refused", reason: "rule0" };
+    }
+
+    if (!isInstagramConfigured()) {
+      logger.error(
+        "🚨 VIDEO_INSTAGRAM_REELS_ENABLED=1 but Instagram is not configured — the Reel is skipped."
+      );
+      try { markVideoInstagram(article.id, { status: "skipped", error: "instagram not configured" }); } catch {}
+      return { status: "skipped", reason: "not-configured" };
+    }
+
+    const max = VIDEO_INSTAGRAM_MAX_PER_DAY();
+    const posted24h = countInstagramPostsSince(now - 24 * 60 * 60 * 1000);
+    if (posted24h >= max) {
+      logger.info(`📸 instagram REEL skipped — cap ${posted24h}/${max} in the last 24h`);
+      try { markVideoInstagram(article.id, { status: "skipped", error: `daily cap ${posted24h}/${max}` }); } catch {}
+      return { status: "skipped", reason: "daily-cap" };
+    }
+
+    // ── The duration ceiling, measured ──
+    const limit = INSTAGRAM_REEL_MAX_SECS();
+    let secs = null;
+    try {
+      const { probeDurationSecs } = await import("./videoVoice.js");
+      secs = probeDurationSecs(filePath);
+    } catch (err) {
+      // Cannot measure => cannot promise it is under the cap. Refuse rather than
+      // hand Meta a URL and find out at publish time.
+      logger.error(`🚨 instagram REEL skipped — could not measure ${filePath}: ${err.message}`);
+      try { markVideoInstagram(article.id, { status: "skipped", error: `unmeasurable: ${err.message}` }); } catch {}
+      return { status: "skipped", reason: "unmeasurable" };
+    }
+    if (secs > limit) {
+      logger.error(
+        `🚨 instagram REEL skipped — ${secs.toFixed(1)}s exceeds the ${limit}s ceiling. The format ` +
+        `runs 60-100s (§5), so this is an EDGE the pipeline reaches, not a margin. Nothing was sent.`
+      );
+      try { markVideoInstagram(article.id, { status: "skipped", error: `${secs.toFixed(1)}s > ${limit}s` }); } catch {}
+      return { status: "skipped", reason: "too-long", seconds: secs };
+    }
+
+    const caption = [
+      title,
+      buildDescriptionCredit(article, attribution),
+      `Full story → ${SITE_ORIGIN}/article/${encodeURIComponent(article.id)}` +
+        `?utm_source=social_instagram_reel&utm_medium=social&utm_campaign=scoop_video`,
+    ].filter(Boolean).join("\n\n").slice(0, 2200);
+
+    // PENDING BEFORE THE CONTAINER. The window that needs protecting opens the
+    // moment Meta is told about the URL, so the marker must precede the call.
+    markVideoInstagram(article.id, { status: "pending" });
+
+    const ig = await postReelToInstagram({ videoUrl: publicVideoUrl(article.id), caption });
+    markVideoInstagram(article.id, { status: "posted", postId: ig.id });
+    logger.info(`📸 INSTAGRAM REEL PUBLISHED ${ig.id} (${posted24h + 1}/${max} today) — ${ig.url}`);
+    return { status: "posted", id: ig.id, url: ig.url, seconds: secs };
+
+  } catch (err) {
+    logger.error(
+      `🚨 INSTAGRAM REEL FAILED for ${article.id} — nothing was published. The YouTube video IS ` +
+      `published and unaffected. ${err.message}`
+    );
+    // OFF 'pending' ON EVERY TERMINAL PATH. A row left pending would hold its
+    // MP4 for the full 24h hold and then warn — which is correct behaviour for
+    // a genuine in-flight publish and pure noise for a failed one.
+    try { markVideoInstagram(article.id, { status: "failed", error: err.message }); }
+    catch (dbErr) { logger.error(`🚨 instagram: could not record the failure either: ${dbErr.message}`); }
+    return { status: "failed", error: err.message };
+  }
+}
+
+/**
+ * Publish the SAME rendered MP4 to THREADS.
+ *
+ * The second URL-fetch surface, and the slowest: on top of the container poll,
+ * Threads wants an unconditional ~30s wait before publish (see
+ * THREADS_VIDEO_WAIT_MS). That half-minute of deliberate sleep inside the render
+ * job is exactly why the BullMQ lock had to be fixed before this channel could
+ * exist — it was losing a 30s lock before anything slept in it at all.
+ *
+ * Rule 0 asserted independently; 'pending' set before the container so the sweep
+ * cannot delete the file mid-fetch; never throws. Same contract as its siblings.
+ */
+export async function videoToThreads(article, {
+  filePath, title, attribution, spec = null, slides = null, now = Date.now(),
+} = {}) {
+  if (!threadsVideoEnabled()) return { status: "off" };
+
+  try {
+    try {
+      assertPublishAllowed(article, [spec, slides].filter(Boolean));
+    } catch (blockErr) {
+      logger.error(
+        `🛑 RULE 0 REFUSED the Threads video for ${article.id} — ${blockErr.message}. ` +
+        `Nothing was sent to Meta and no URL was published.`
+      );
+      try { markVideoThreads(article.id, { status: "skipped", error: `rule0: ${blockErr.message}` }); } catch {}
+      return { status: "refused", reason: "rule0" };
+    }
+
+    if (!isThreadsConfigured()) {
+      logger.error("🚨 VIDEO_THREADS_ENABLED=1 but Threads is not configured — the video is skipped.");
+      try { markVideoThreads(article.id, { status: "skipped", error: "threads not configured" }); } catch {}
+      return { status: "skipped", reason: "not-configured" };
+    }
+
+    const max = VIDEO_THREADS_MAX_PER_DAY();
+    const posted24h = countThreadsPostsSince(now - 24 * 60 * 60 * 1000);
+    if (posted24h >= max) {
+      logger.info(`🧵 threads video skipped — cap ${posted24h}/${max} in the last 24h`);
+      try { markVideoThreads(article.id, { status: "skipped", error: `daily cap ${posted24h}/${max}` }); } catch {}
+      return { status: "skipped", reason: "daily-cap" };
+    }
+
+    // Threads' documented ceiling is 5 minutes, far above the 60-100s format, so
+    // there is no duration edge here as there is on Instagram. Not checked
+    // rather than checked-and-always-passing: a guard that cannot fire reads as
+    // protection and provides none.
+    const text = [
+      title,
+      buildDescriptionCredit(article, attribution),
+      `Full story → ${SITE_ORIGIN}/article/${encodeURIComponent(article.id)}` +
+        `?utm_source=social_threads_video&utm_medium=social&utm_campaign=scoop_video`,
+    ].filter(Boolean).join("\n\n").slice(0, 500);
+
+    markVideoThreads(article.id, { status: "pending" });
+
+    const th = await postVideoToThreads({ text, videoUrl: publicVideoUrl(article.id) });
+    markVideoThreads(article.id, { status: "posted", postId: th.id });
+    logger.info(`🧵 THREADS VIDEO PUBLISHED ${th.id} (${posted24h + 1}/${max} today) — ${th.url}`);
+    return { status: "posted", id: th.id, url: th.url };
+
+  } catch (err) {
+    logger.error(
+      `🚨 THREADS VIDEO FAILED for ${article.id} — nothing was published. The YouTube video IS ` +
+      `published and unaffected. ${err.message}`
+    );
+    try { markVideoThreads(article.id, { status: "failed", error: err.message }); }
+    catch (dbErr) { logger.error(`🚨 threads: could not record the failure either: ${dbErr.message}`); }
+    return { status: "failed", error: err.message };
+  }
+}
+
 // ─── The cycle ──────────────────────────────────────────────────────────────
 
 /**
@@ -476,6 +713,8 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     // design constraint, and it is not observable any other way.
     crossPostToFacebook: _crossPostToFacebook = crossPostToFacebook,
     reelToFacebook: _reelToFacebook = reelToFacebook,
+    reelToInstagram: _reelToInstagram = reelToInstagram,
+    videoToThreads: _videoToThreads = videoToThreads,
   } = deps;
 
   if (!autopostEnabled()) {
@@ -724,6 +963,25 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             spec: r.spec, slides: video.slides, now,
           });
           if (reel && reel.status !== "off") produced.facebookReel = reel;
+
+          // ─── Instagram Reel ──────────────────────────────────────────────
+          // URL-fetch surface: Meta pulls the MP4 from our own server. Same
+          // guarded scope and never-throws contract as the two above.
+          const igReel = await _reelToInstagram(article, {
+            filePath: video.path, title, attribution,
+            spec: r.spec, slides: video.slides, now,
+          });
+          if (igReel && igReel.status !== "off") produced.instagramReel = igReel;
+
+          // ─── Threads ─────────────────────────────────────────────────────
+          // LAST, deliberately: its mandatory ~30s wait makes it the longest of
+          // the four, and everything ahead of it should already be published
+          // before this job spends half a minute asleep.
+          const th = await _videoToThreads(article, {
+            filePath: video.path, title, attribution,
+            spec: r.spec, slides: video.slides, now,
+          });
+          if (th && th.status !== "off") produced.threads = th;
         } catch (fbErr) {
           logger.error(
             `🚨 facebook cross-post threw past its own guard for ${article.id} — this is a code ` +
