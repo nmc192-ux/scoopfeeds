@@ -2,10 +2,33 @@
 // satori (JSX tree → SVG) + @resvg/resvg-js (SVG → PNG). Output is cached on
 // disk keyed by article id + preset + a short content hash so edits invalidate.
 //
-// The card is intentionally typographic — no source image. Many publishers'
-// hero images are licensed, so reusing them on our own cards is a copyright
-// hazard. Clean headline + category badge + Scoop mark reads well on every
-// platform and sidesteps the licensing problem.
+// ── Card imagery: one ordered cascade, no stock ───────────────────────────
+//
+// Every photo-capable preset resolves its background the same way, in this
+// order, stopping at the first step that yields usable bytes:
+//
+//   1. article.image_url, upscaled  (upscaleKnownThumbnailUrl — BBC ships a
+//      240px thumbnail in RSS; the 976px variant is the same photo)
+//   2. article.image_url, verbatim  (in case the upscale 404s)
+//   3. candidates mined from the article body (extractImageCandidatesFromHtml)
+//   4. TYPOGRAPHIC — no photo at all
+//
+// There is deliberately NO stock-photo step. Pexels used to sit at the end of
+// this chain for og/story and it was the source of the problem it was meant to
+// solve: a generic query keyed on category returned the same globe photo for an
+// 800m final and a cyber-attack story, and a stock bar chart for a West Bank
+// displacement story. A stock photo is never *relevant*, and on hard news it is
+// sometimes offensive. The typographic card is on-brand and never wrong, so it
+// is the floor.
+//
+// Licensing: we use the publisher's own image only as the illustration for a
+// card that credits that publisher by name and links to their article — the
+// same basis on which every social platform renders their og:image. The
+// previous "no source image" stance was what forced stock in the first place.
+//
+// Sensitive headlines skip steps 1-3 entirely and render typographic — see
+// editorialSensitivity.js. A real publisher photo can still be the wrong thing
+// to put beside a headline.
 
 import { satoriFonts, fontsReady, renderTreeToPng } from "./renderCore.js";
 import { createHash } from "crypto";
@@ -13,7 +36,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "fs
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
-import { getStockPhotoForArticle, stockPhotoAsDataUri, isStockPhotoEnabled } from "./stockPhoto.js";
+import { isSensitiveHeadline } from "./editorialSensitivity.js";
 import axios from "axios";
 
 // ── Article-image fetcher ─────────────────────────────────────────────────────
@@ -74,6 +97,51 @@ function detectImageMime(buf) {
   return null;
 }
 
+// Pixel dimensions straight from the file header — no image library, no decode.
+// We need these because byte-size is a poor proxy for "big enough to use as a
+// full-bleed background": the Guardian ships a signed `?width=140` thumbnail
+// that is a perfectly valid 3KB JPEG and looks like mush stretched across a
+// 1200px card. Returns { width, height } or null if the header can't be read.
+export function readImageDimensions(buf) {
+  if (!buf || buf.length < 24) return null;
+  // PNG: IHDR is always the first chunk — width/height at bytes 16..24.
+  if (buf[0] === 0x89 && buf[1] === 0x50) {
+    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+  // JPEG: walk the marker chain to the first Start-Of-Frame (SOF0/1/2/…),
+  // whose payload carries height then width. Skips APPn/COM segments, and
+  // never trusts a length that would run past the buffer.
+  if (buf[0] === 0xFF && buf[1] === 0xD8) {
+    let off = 2;
+    while (off + 9 < buf.length) {
+      if (buf[off] !== 0xFF) { off++; continue; }        // resync on padding
+      const marker = buf[off + 1];
+      if (marker === 0xD8 || marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)) { off += 2; continue; }
+      const len = buf.readUInt16BE(off + 2);
+      if (len < 2 || off + 2 + len > buf.length) return null;
+      // SOF0-SOF15 except the non-frame markers DHT(C4), JPG(C8), DAC(CC).
+      if (marker >= 0xC0 && marker <= 0xCF && marker !== 0xC4 && marker !== 0xC8 && marker !== 0xCC) {
+        return { height: buf.readUInt16BE(off + 5), width: buf.readUInt16BE(off + 7) };
+      }
+      off += 2 + len;
+    }
+  }
+  return null;
+}
+
+// Smallest photo we'll put behind a headline. Below this, upscaling to the card
+// canvas (1080-1200px wide) reads as visibly blurry — worse than the clean
+// typographic card, which is the whole reason the fallback exists. Publishers
+// routinely advertise 140-300px thumbnails in RSS, so this rejects a real
+// class of input rather than being theoretical.
+export const MIN_PHOTO_WIDTH = 600;
+export const MIN_PHOTO_HEIGHT = 320;
+
+// Exported so a test can assert the negative: this header must never advertise
+// webp or avif. See the comment at its use site — that one token halves the
+// photo rate silently, with no error to trace.
+export const IMAGE_FETCH_ACCEPT = "image/jpeg,image/png,image/*;q=0.8";
+
 // Try fetching one URL — returns { buf, mime } or null. Uses axios because
 // the native fetch shipped with Node 18 on Hostinger's container wasn't
 // reliably reaching external CDNs (axios works through the same routing as
@@ -88,7 +156,15 @@ async function tryFetchImage(urlToFetch, refererHint) {
       validateStatus: (s) => s >= 200 && s < 400,
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        // Deliberately does NOT advertise webp/avif. satori can only embed JPEG
+        // and PNG, and the major news CDNs content-negotiate on this header:
+        // Guardian (i.guim.co.uk), The Hill and ARY all return WebP for a URL
+        // that literally ends in `.jpg` when webp is offered. Measured on 68
+        // live prod articles: advertising webp made 50% of ALL fetches
+        // unusable — the single largest cause of a card falling back to
+        // typographic, and entirely self-inflicted. Asking only for what we can
+        // actually use makes those same CDNs return JPEG.
+        "Accept": IMAGE_FETCH_ACCEPT,
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": referer,
       },
@@ -214,7 +290,17 @@ async function fetchArticlePhotoDataUri(article, imgCacheDir) {
     const result = await tryFetchImage(url, referer);
     if (!result) continue;
     // Satori only handles JPEG / PNG. Skip WebP/GIF/AVIF — try next candidate.
+    // With the Accept header no longer advertising webp this is rare, but a CDN
+    // is still free to ignore us, so the guard stays.
     if (result.mime !== "image/jpeg" && result.mime !== "image/png") continue;
+    // Too small to use as a background — keep going. A later candidate (the
+    // body-mined hero, typically) is usually much larger, so this is a
+    // `continue`, not a bail-out.
+    const dims = readImageDimensions(result.buf);
+    if (dims && (dims.width < MIN_PHOTO_WIDTH || dims.height < MIN_PHOTO_HEIGHT)) {
+      logger.info(`card renderer: skipping ${dims.width}x${dims.height} thumbnail for ${article.id} (below ${MIN_PHOTO_WIDTH}x${MIN_PHOTO_HEIGHT})`);
+      continue;
+    }
     const ext = result.mime === "image/png" ? ".png" : ".jpg";
     const cachePath = path.join(imgCacheDir, `${urlHash}${ext}`);
     try { writeFileSync(cachePath, result.buf); } catch {}
@@ -667,7 +753,13 @@ function buildCarouselTree(article, slide) {
 // serving the headline-twice slide that already shipped to the account.
 // Cost: one cold re-render per cached card. Unavoidable this time; the
 // byte-identity argument that skipped the v11 bump does not apply.
-const CARD_DESIGN_VER = "v12";
+// v13: card imagery changed from Pexels stock to the article's own photo, and
+// sensitive headlines now force the typographic path. The BACKGROUND changed
+// for essentially every og/story card in the cache, and the cache key does not
+// cover renderer policy — without this bump prod would keep serving the stock
+// globe cards forever, since their hash inputs (headline, category, source,
+// description) are all unchanged. This bump is the whole ship mechanism.
+const CARD_DESIGN_VER = "v13";
 
 function contentHash(article, preset) {
   const h = createHash("sha1");
@@ -687,9 +779,12 @@ function contentHash(article, preset) {
   // Include first 80 chars of description so the teaser re-renders when
   // the description is corrected/enriched after first ingest.
   h.update(String(article.description || "").slice(0, 80));
-  // For the magazine square card, also hash the image URL so the card
-  // invalidates when the article's image changes (e.g. after enrichment).
-  if (preset === "square" || preset === "carousel1") {
+  // Hash the image URL for every preset that can render a photo — og and story
+  // joined square/carousel1 when the stock step was dropped and they started
+  // reading article.image_url. Enrichment routinely fills in image_url AFTER
+  // first ingest, and without this the card would stay typographic forever on
+  // a cache hit even though a photo had since become available.
+  if (preset === "square" || preset === "carousel1" || preset === "og" || preset === "story") {
     h.update("|");
     h.update(String(article.image_url || ""));
     // Tags drive the selective word-highlighting on the typographic path
@@ -1860,15 +1955,15 @@ async function renderPng(article, preset, opts = {}) {
 
 // Public API: returns { path, buffer, contentType } — caches on disk.
 //
-// Photo-backed mode:
-//   - square preset: always tries to fetch article.image_url as the background
-//     (magazine layout). Falls back to dark typographic card on failure.
-//   - og / story presets: uses PEXELS_API_KEY stock photo when configured.
+// Photo policy (see the cascade at the top of this file):
+//   - og / square / story: run the cascade — the article's OWN photo, upscaled,
+//     then body-mined candidates, then typographic. No stock, ever.
 //   - carousel: always typographic-only (three slides look better with a
-//     unified dark background instead of three different photos).
+//     unified dark background than with three different photos).
+//   - sensitive headlines: typographic regardless of preset.
 //
-// `opts.usePhoto = false` forces the typographic-only fallback for any preset
-// (useful for admin preview "before" comparison).
+// `opts.usePhoto = false` forces the typographic-only path for any preset
+// (used by the admin preview's "before" comparison, and by the tests).
 export async function ensureCard(article, preset = "og", opts = {}) {
   if (!isCardRendererReady()) throw new Error("card renderer not ready (missing fonts)");
   if (!PRESETS[preset]) throw new Error(`unknown preset: ${preset}`);
@@ -1877,43 +1972,22 @@ export async function ensureCard(article, preset = "og", opts = {}) {
   const isHero = !preset.startsWith("carousel");
   const wantsPhoto = opts.usePhoto !== undefined ? Boolean(opts.usePhoto) : isHero;
 
-  let bgDataUri = null;
+  // Editorial guard, evaluated BEFORE any network work: a sensitive headline
+  // renders typographic, so there is no photo to fetch. Logged at info because
+  // "why is this card typographic when the article has an image?" is otherwise
+  // an unanswerable question from the outside.
+  const sensitive = wantsPhoto && isSensitiveHeadline(article.title);
+  if (sensitive) {
+    logger.info(`card renderer: sensitive headline — typographic card for ${article.id} ("${String(article.title).slice(0, 60)}")`);
+  }
 
-  if (wantsPhoto) {
-    if (preset === "square" || preset === "carousel1") {
-      // Magazine square / carousel cover. Photo embedding is opt-in via
-      // CARD_USE_ARTICLE_PHOTO=1 because the @resvg/resvg-js v2.6.x linux-x64
-      // build silently drops embedded JPEG images (data URIs make it through
-      // satori but rasterise as transparent on Hostinger's Node 18 container,
-      // while macOS arm64 renders them perfectly). The typographic-only path
-      // looks great on its own — vibrant category gradient + word-highlighted
-      // headline — so we default to it until resvg-js is fixed/upgraded.
-      const photoBgEnabled = process.env.CARD_USE_ARTICLE_PHOTO === "1";
-      if (photoBgEnabled) {
-        const imgCacheDir = path.join(CARDS_DIR, "img-cache");
-        try {
-          bgDataUri = await fetchArticlePhotoDataUri(article, imgCacheDir);
-        } catch (e) {
-          logger.warn(`card renderer: article photo fetch failed for ${article.id}: ${e.message}`);
-        }
-        if (!bgDataUri && isStockPhotoEnabled()) {
-          try {
-            const stock = await getStockPhotoForArticle(article, { orientation: "square" });
-            if (stock) bgDataUri = stockPhotoAsDataUri(stock.path);
-          } catch (e) {
-            logger.warn(`card renderer: stock photo fallback failed for ${article.id}: ${e.message}`);
-          }
-        }
-      }
-    } else if (isStockPhotoEnabled()) {
-      // OG / story: use Pexels stock photo when configured.
-      let stockPhoto = null;
-      try {
-        stockPhoto = await getStockPhotoForArticle(article);
-      } catch (e) {
-        logger.warn(`card renderer: stock photo lookup failed for ${article.id}: ${e.message}`);
-      }
-      bgDataUri = stockPhoto ? stockPhotoAsDataUri(stockPhoto.path) : null;
+  let bgDataUri = null;
+  if (wantsPhoto && !sensitive) {
+    const imgCacheDir = path.join(CARDS_DIR, "img-cache");
+    try {
+      bgDataUri = await fetchArticlePhotoDataUri(article, imgCacheDir);
+    } catch (e) {
+      logger.warn(`card renderer: article photo fetch failed for ${article.id}: ${e.message}`);
     }
   }
 

@@ -13,6 +13,7 @@
 // the import or DB read fails — caption falls back to the original layout.
 
 import { realityIndexCallout as _riCallout } from "../realityIndex/generation/socialCaptionEnricher.js";
+import { TRAGEDY_KEYWORDS } from "./editorialSensitivity.js";
 
 function safeRiCallout(articleId) {
   try { return _riCallout(articleId); } catch { return null; }
@@ -247,16 +248,71 @@ function composeX(article) {
 }
 
 function composeThreads(article) {
-  // Threads: 500 char limit. Similar shape to X but a bit more room for color.
+  // Threads: 500 char limit.
+  //
+  // This used to be the odd one out: it interpolated the RAW headline (so
+  // "BBC Sport: ..." prefixes and " - BBC News" suffixes that every other
+  // platform strips went out verbatim), truncated on character count rather
+  // than sentence boundaries, carried no source attribution, and re-stated the
+  // headline whenever the description opened with it. It now follows the same
+  // discipline as composeBluesky and composeFacebook — cleaned headline,
+  // quote-led body where one exists, sentence-aware trimming, overlap guard.
+  //
+  // The URL STAYS in the body, unlike Bluesky. This is not an oversight: the
+  // Threads adapter posts `media_type: IMAGE`, and an image post renders no
+  // link preview, so this URL is the only click path off the post. Bluesky can
+  // omit it because its external embed carries the link itself.
+  //
+  //   [🚨 BREAKING]
+  //   [emoji] [cleaned headline]
+  //
+  //   [body]
+  //
+  //   📍 Source
+  //
+  //   [url]
+  //   #tags
   const url = utmUrl(article.id, "threads");
   const emoji = CATEGORY_EMOJI[article.category] || "📰";
   const hashtags = [...(CATEGORY_HASHTAGS[article.category] || []), BRAND_HASHTAG].slice(0, 4);
-  const lead = `${emoji} ${article.title}`;
-  const preview = truncate(article.description || "", 260);
-  const body = preview ? `${lead}\n\n${preview}` : lead;
+  const cleanTitle = cleanHeadline(article.title) || article.title || "";
+  const desc = String(article.description || "").trim();
+
+  const breakingPrefix = isBreaking(article) ? "🚨 BREAKING\n" : "";
+  const head = `${breakingPrefix}${emoji} ${cleanTitle}`;
+  const srcLine = article.source_name ? `📍 ${article.source_name}` : null;
+
+  // The URL and hashtags are fixed cost; everything else competes for what's
+  // left. Computed from the real strings rather than a guessed constant.
   const tail = `\n\n${url}\n${hashtags.join(" ")}`;
-  const headroom = 500 - tail.length;
-  const caption = `${truncate(body, headroom)}${tail}`;
+  const SAFETY = 6;
+  const bodyBudget = 500 - head.length - tail.length - (srcLine ? srcLine.length + 2 : 0) - 2 - SAFETY;
+
+  let bodyText = "";
+  if (desc && bodyBudget >= 50) {
+    // Same precedence as Bluesky: a lead quote is the most engaging opener; a
+    // description that merely restates the headline is worth nothing and gets
+    // dropped entirely rather than padded in.
+    const lead = extractLeadQuote(desc);
+    if (lead && lead.quote.length >= 20) {
+      const restTrim = lead.rest.replace(/^[\s,]*/, "");
+      const attribution = firstSentence(restTrim, 100);
+      bodyText = attribution ? `“${lead.quote}” ${attribution}` : `“${lead.quote}”`;
+    } else if (!desc.toLowerCase().startsWith(cleanTitle.toLowerCase().slice(0, 30))) {
+      bodyText = desc;
+    }
+  }
+
+  const parts = [
+    head,
+    bodyText ? truncateBySentence(bodyText, bodyBudget) : null,
+    srcLine,
+  ].filter(Boolean);
+
+  let caption = `${parts.join("\n\n")}${tail}`;
+  // Belt-and-braces: the budget arithmetic above should make this unreachable,
+  // but a hard platform cap is not a place to trust arithmetic.
+  if (caption.length > 500) caption = `${truncateBySentence(head, 500 - tail.length)}${tail}`;
   return { caption, url, characterCount: caption.length };
 }
 
@@ -282,7 +338,10 @@ const FB_QUESTIONS = {
 
 // Headlines / categories where a question is inappropriate (deaths,
 // tragedies, sensitive crime). Detected on the cleaned headline.
-const TRAGEDY_KEYWORDS = /\b(dies?|killed|death|murdered|fatal|tragedy|massacre|crash|attack|shooting|terror|disaster|funeral|mourns?|stabbed|drowned)\b/i;
+//
+// The regex now lives in editorialSensitivity.js so the card renderer's photo
+// guard and this caption guard can never drift apart — they are answering the
+// same editorial question about the same headline.
 
 function pickFbQuestion(article, cleanTitle) {
   if (!cleanTitle || TRAGEDY_KEYWORDS.test(cleanTitle)) return null;
