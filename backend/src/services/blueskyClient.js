@@ -11,7 +11,7 @@
 //   - accessJwt expires ~2h, refreshJwt ~90d. Refresh is cheap and
 //     rate-limited far more leniently than createSession.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
@@ -136,8 +136,17 @@ function _dropSession(reason) {
   logger.warn(`blueskyClient: session dropped (${reason}) — next call will createSession fresh`);
 }
 
-async function call(path, { method = "POST", body, headers = {}, blob = null } = {}) {
-  const url = `${getPDS()}/xrpc/${path}`;
+/**
+ * `baseUrl` and `query` were added for the VIDEO service (see the video section
+ * at the bottom): uploads go to video.bsky.app rather than the PDS, and both
+ * uploadVideo and getJobStatus take query parameters. Optional and defaulted, so
+ * every existing caller is unchanged — the alternative was a second fetch
+ * wrapper that would not share this one's error shaping, and `statusCode` /
+ * `body.error` are exactly what the ExpiredToken recovery reads.
+ */
+async function call(path, { method = "POST", body, headers = {}, blob = null, query = null, baseUrl = null } = {}) {
+  const qs = query ? `?${new URLSearchParams(query).toString()}` : "";
+  const url = `${baseUrl || getPDS()}/xrpc/${path}${qs}`;
   const init = { method, headers: { ...headers } };
   if (blob) {
     init.headers["Content-Type"] = blob.contentType || "application/octet-stream";
@@ -463,4 +472,221 @@ export async function postToBluesky({ text, externalUrl, externalTitle, external
   const rkey = String(out.uri || "").split("/").pop();
   const publicUrl = rkey ? `https://bsky.app/profile/${getHandle()}/post/${rkey}` : "";
   return { uri: out.uri, cid: out.cid, url: publicUrl };
+}
+
+// ─── Video ──────────────────────────────────────────────────────────────────
+//
+// Bluesky video is a THREE-STEP flow against a DIFFERENT host, and none of the
+// three looks like the link-card path above.
+//
+//   1. getServiceAuth on the PDS — a short-lived token scoped to one method
+//      (lxm=com.atproto.repo.uploadBlob) and one audience (the video service).
+//      The session accessJwt is NOT accepted by video.bsky.app.
+//   2. uploadVideo to the video service — RAW BYTES, in-band. This is the
+//      important difference from Instagram and Threads: nothing fetches a public
+//      URL from us, so no MP4 on disk needs protecting after the call returns,
+//      and migration 026 deliberately has no 'pending' state.
+//   3. getJobStatus, polled, until the transcode produces a blob — which is then
+//      embedded in an ordinary app.bsky.feed.post record.
+//
+// THE POLL IS BOUNDED BY WALL CLOCK, NOT BY ITERATIONS (DrJ, 2026-08-14: "I
+// don't want a cycle hanging on a stuck transcode"). A count-based bound is not
+// a timeout: N slow responses take N x however-long-the-server-feels. The
+// deadline is fixed before the first request and every sleep is clamped to it.
+//
+// On timeout we throw and DO NOT post. The transcode may well finish afterwards
+// server-side, leaving an orphan blob — which is the safe direction: an orphan
+// blob is invisible, whereas retrying into a completed job risks a duplicate
+// post. The jobId is named in the error so a manual check is possible.
+
+const VIDEO_SERVICE_URL = () => (process.env.BLUESKY_VIDEO_SERVICE_URL || "https://video.bsky.app").trim();
+const VIDEO_SERVICE_DID = () => (process.env.BLUESKY_VIDEO_SERVICE_DID || "did:web:video.bsky.app").trim();
+
+/**
+ * Strict integer env read. Deliberately NOT `parseInt(x) || default` — that
+ * idiom is banned in this codebase because it cannot distinguish 0 from
+ * unparseable, and it is not reused from videoVoice.js's `envNumber` because
+ * importing that here would drag the whole TTS module into the social client for
+ * six lines of arithmetic.
+ *
+ * Falls back LOUDLY: a mistyped byte ceiling that silently reverts to the
+ * default is how a guard stops guarding without anyone noticing.
+ */
+function envInt(name, def, { min = 1 } = {}) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return def;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < min) {
+    logger.warn(`blueskyClient: ${name}="${raw}" is not an integer >= ${min} — using the default ${def}`);
+    return def;
+  }
+  return n;
+}
+
+// The two hard platform limits, asserted rather than assumed. Our own format
+// runs 60-100s and a few MB, so NEITHER of these is close to binding today —
+// they exist because the format is the thing most likely to change underneath
+// this code, and finding out from a 400 mid-cycle is worse than finding out
+// from a refusal that names the number.
+export const BLUESKY_VIDEO_MAX_BYTES = () => envInt("BLUESKY_VIDEO_MAX_BYTES", 100 * 1024 * 1024);
+export const BLUESKY_VIDEO_MAX_SECS  = () => envInt("BLUESKY_VIDEO_MAX_SECS", 180);
+export const BLUESKY_VIDEO_POLL_TIMEOUT_MS  = () => envInt("BLUESKY_VIDEO_POLL_TIMEOUT_MS", 120_000);
+export const BLUESKY_VIDEO_POLL_INTERVAL_MS = () => envInt("BLUESKY_VIDEO_POLL_INTERVAL_MS", 3_000);
+
+// A file this small is not a video. Same floor and same reasoning as the
+// Facebook Reels path: it catches a truncated or zero-byte render before it
+// becomes a platform error.
+const MIN_PLAUSIBLE_BYTES = 10 * 1024;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Poll getJobStatus until the transcode completes, fails, or the deadline
+ * passes. Returns the blob ref for the embed.
+ */
+async function _awaitVideoJob(jobId, serviceToken) {
+  const timeoutMs = BLUESKY_VIDEO_POLL_TIMEOUT_MS();
+  const intervalMs = BLUESKY_VIDEO_POLL_INTERVAL_MS();
+  const deadline = Date.now() + timeoutMs;
+  let lastState = "(none)", polls = 0;
+
+  while (Date.now() < deadline) {
+    polls += 1;
+    const out = await call("app.bsky.video.getJobStatus", {
+      method: "GET",
+      baseUrl: VIDEO_SERVICE_URL(),
+      query: { jobId },
+      headers: { Authorization: `Bearer ${serviceToken}` },
+    });
+    const js = out?.jobStatus || {};
+    if (js.state) lastState = js.state;
+
+    if (js.state === "JOB_STATE_COMPLETED") {
+      if (!js.blob) {
+        throw new Error(`bluesky video job ${jobId} reported COMPLETED with no blob — nothing was posted`);
+      }
+      logger.info(`🦋 bluesky video job ${jobId} completed after ${polls} poll(s)`);
+      return js.blob;
+    }
+    if (js.state === "JOB_STATE_FAILED") {
+      throw new Error(
+        `bluesky video job ${jobId} FAILED: ${js.error || "unknown"}${js.message ? ` — ${js.message}` : ""}`
+      );
+    }
+    // Clamp the sleep to the deadline so the bound is the bound.
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await sleep(Math.min(intervalMs, remaining));
+  }
+
+  throw new Error(
+    `bluesky video job ${jobId} did not finish within ${timeoutMs}ms (${polls} poll(s), last state ` +
+    `${lastState}) — NOTHING WAS POSTED. The transcode may still complete server-side; that blob is ` +
+    `orphaned rather than published, which is the safe direction.`
+  );
+}
+
+/**
+ * Post a video to Bluesky. Throws on every failure path — there is no degrade
+ * to a text-only or link post, for the same reason the Facebook Reels fallback
+ * was removed: a caller cannot tell a silent downgrade from a success, and the
+ * row would record `posted` for something nobody can watch.
+ *
+ * @param {object} o
+ * @param {string} o.text        post text (Bluesky's limit is 300 graphemes)
+ * @param {string} o.filePath    the rendered MP4 — read as bytes, never a URL
+ * @param {{width:number,height:number}} [o.aspectRatio]
+ * @param {number} [o.durationSecs] measured upstream; skips the probe when given
+ */
+export async function postVideoToBluesky({ text, filePath, aspectRatio = null, durationSecs = null, langs = ["en"] }) {
+  if (!isBlueskyConfigured()) throw new Error("bluesky not configured");
+  if (!filePath) throw new Error("bluesky video: no filePath given");
+
+  // ── The two platform ceilings, checked BEFORE the bytes are read ──
+  // statSync throws ENOENT on a missing file, which is what the Rule 0 fixtures
+  // rely on to prove the refusal happened first.
+  const stat = statSync(filePath);
+  if (!stat.isFile()) throw new Error(`bluesky video: ${filePath} is not a file`);
+
+  const maxBytes = BLUESKY_VIDEO_MAX_BYTES();
+  if (stat.size > maxBytes) {
+    throw new Error(
+      `bluesky video: ${filePath} is ${(stat.size / 1048576).toFixed(1)}MB, over the ` +
+      `${(maxBytes / 1048576).toFixed(0)}MB ceiling — nothing was uploaded`
+    );
+  }
+  if (stat.size < MIN_PLAUSIBLE_BYTES) {
+    throw new Error(`bluesky video: ${filePath} is ${stat.size} bytes — implausible for a video`);
+  }
+
+  const maxSecs = BLUESKY_VIDEO_MAX_SECS();
+  let secs = durationSecs;
+  if (secs === null) {
+    const { probeDurationSecs } = await import("./videoVoice.js");
+    secs = probeDurationSecs(filePath);
+  }
+  if (Number.isFinite(secs) && secs > maxSecs) {
+    throw new Error(
+      `bluesky video: ${secs.toFixed(1)}s is over the ${maxSecs}s ceiling — nothing was uploaded`
+    );
+  }
+
+  const s = await ensureSession();
+
+  // ── 1. Service auth, scoped to one method and one audience ──
+  // Through authed() so an ExpiredToken here gets the same recovery as any
+  // other PDS call — this is the first request of the cycle for this client and
+  // therefore the most likely one to meet a two-hour-old accessJwt.
+  const auth = await authed("com.atproto.server.getServiceAuth", {
+    method: "GET",
+    query: {
+      aud: VIDEO_SERVICE_DID(),
+      lxm: "com.atproto.repo.uploadBlob",
+      exp: String(Math.floor(Date.now() / 1000) + 30 * 60),
+    },
+  });
+  if (!auth?.token) throw new Error("bluesky video: getServiceAuth returned no token");
+
+  // ── 2. Raw bytes to the video service ──
+  const bytes = readFileSync(filePath);
+  const up = await call("app.bsky.video.uploadVideo", {
+    baseUrl: VIDEO_SERVICE_URL(),
+    query: { did: s.did, name: path.basename(filePath) },
+    headers: { Authorization: `Bearer ${auth.token}` },
+    blob: { data: bytes, contentType: "video/mp4" },
+  });
+
+  const job = up?.jobStatus || {};
+  if (!job.jobId) throw new Error(`bluesky video: uploadVideo returned no jobId (${JSON.stringify(up).slice(0, 200)})`);
+
+  // An already-complete job comes back immediately when the same bytes were
+  // uploaded before — handled by the poll rather than special-cased, since its
+  // first iteration sees COMPLETED and returns without sleeping.
+  const blob = await _awaitVideoJob(job.jobId, auth.token);
+
+  // ── 3. The post record ──
+  const record = {
+    $type: "app.bsky.feed.post",
+    text,
+    createdAt: new Date().toISOString(),
+    langs,
+    embed: {
+      $type: "app.bsky.embed.video",
+      video: blob,
+      ...(aspectRatio ? { aspectRatio } : {}),
+    },
+  };
+  const out = await authed("com.atproto.repo.createRecord", {
+    body: { repo: s.did, collection: "app.bsky.feed.post", record },
+  });
+
+  const rkey = String(out.uri || "").split("/").pop();
+  return {
+    uri: out.uri,                 // at://<did>/app.bsky.feed.post/<rkey> — stored
+    cid: out.cid,
+    url: rkey ? `https://bsky.app/profile/${getHandle()}/post/${rkey}` : "",
+    jobId: job.jobId,
+    bytes: stat.size,
+    seconds: secs,
+  };
 }
