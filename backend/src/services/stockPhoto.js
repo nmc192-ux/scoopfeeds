@@ -1,3 +1,20 @@
+// ⚠️ UNREFERENCED as of 2026-08-14. Nothing imports this module.
+//
+// The card renderer used to end its background cascade here, and that was the
+// bug: a query keyed on category/tags returned the SAME globe photo for an 800m
+// final and a story about state-sanctioned cyber-attacks, and a stock bar chart
+// for a story about families being forced from their homes in the West Bank. A
+// stock photo is never *relevant*, and on hard news it is sometimes offensive.
+// The cascade now ends at the typographic card, which is on-brand and never
+// wrong. See the cascade comment at the top of cardRenderer.js.
+//
+// Kept rather than deleted so the Pexels integration (query building, caching,
+// attribution notes) is recoverable if a genuinely image-led surface ever wants
+// it — a decorative background for a topic page, say, where "evocative" is the
+// requirement and "accurate" is not. Do NOT wire it back into cardRenderer.
+//
+// Everything below is the original module, unchanged.
+//
 // Pexels stock-photo lookup for branded card backgrounds.
 //
 // The card renderer's typographic-only design reads as "lightweight" on

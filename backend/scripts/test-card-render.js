@@ -1,19 +1,19 @@
-// Render-test script — generates a few sample cards (with and without
-// stock-photo backgrounds) so we can eyeball the new design before pushing.
+// Render-test script — generates a few sample cards so we can eyeball the
+// design before pushing.
 //
 // Usage:
 //   cd backend && node --require ./load-env.cjs scripts/test-card-render.js
 //
 // Output drops into backend/data/cards-test/ — open them in Preview.
 //
-// If PEXELS_API_KEY is set in backend/.env, you'll get the photo-backed
-// variants too. Otherwise only the typographic ones.
+// These samples carry no image_url, so they exercise the TYPOGRAPHIC end of the
+// cascade. For the photo end (and the resvg embedded-JPEG check that gates
+// shipping on a new host) use scripts/test-card-render-photo.js.
 
 import path from "path";
 import { fileURLToPath } from "url";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { ensureCard, isCardRendererReady } from "../src/services/cardRenderer.js";
-import { isStockPhotoEnabled } from "../src/services/stockPhoto.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, "..", "data", "cards-test");
@@ -72,7 +72,7 @@ const SAMPLES = [
     console.error("Card renderer not ready (fonts missing)");
     process.exit(1);
   }
-  console.log(`Stock photos: ${isStockPhotoEnabled() ? "ENABLED (Pexels)" : "DISABLED (no PEXELS_API_KEY)"}`);
+  console.log(`Card style: ${process.env.CARD_STYLE || "legacy"}`);
   console.log(`Output dir: ${OUT_DIR}\n`);
 
   for (const article of SAMPLES) {

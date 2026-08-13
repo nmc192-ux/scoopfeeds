@@ -538,6 +538,41 @@ holding the event loop** — never on suspicion:
 > the earlier 103% scheduler reading was a transient snapshot. Weighting is aimed at a
 > contender that is not contending. See the comment in `docker-compose.production.yml`.
 
+## Social cards (`cardRenderer`)
+
+These three were live in prod and documented nowhere. Prod values below were established
+**empirically** on 2026-08-14 by fetching `/api/cards/*` from scoopfeeds.com and reading the
+returned PNG headers — not from the server `.env`. Re-confirm against the host before relying
+on them for anything irreversible.
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `CARD_STYLE` | `legacy` | **`scoopfeeds`** | yes | Selects the carousel visual identity. `scoopfeeds` = 4:5 (1080×1350) near-black + lime Anton headlines; anything else = legacy 1080×1080. **Only `carousel1-7` change size**; `og`/`square`/`story` are identical under both. Proven set in prod because `/api/cards/carousel1/*.png` returns 1080×1350. Requires the bundled Anton font — flipping it on without Anton correctly 503s the card routes rather than shipping fontless headlines. The 7-slide event carousel **refuses to render** under any other value. |
+| `PEXELS_API_KEY` | unset | *(was set — now unread)* | n/a | **No longer read by any code path.** Until 2026-08-14 this enabled Pexels stock backgrounds on `og`/`story`. That step has been removed from the cascade entirely: a category-keyed stock query is never *relevant* and on hard news is sometimes offensive (observed: the same globe photo on an 800m final and a cyber-attack story; a stock bar chart on a West Bank displacement story). `src/services/stockPhoto.js` is retained but has no importers. Clearing the key from prod `.env` is safe and is the recommended cleanup. |
+| `CARD_USE_ARTICLE_PHOTO` | — | — | — | **Retired 2026-08-14.** Gated article photos on `square`/`carousel1` because resvg-js v2.6.x on Hostinger's shared linux-x64 container rasterised embedded JPEGs as transparent. The project has since moved to a KVM VPS and the bug does not reproduce there (verified: live prod `og` cards embed a `data:image/jpeg`). The flag no longer exists; the article-photo cascade is unconditional for `og`/`square`/`story`. |
+
+**Card imagery is now one ordered cascade** with no env switch: `image_url` upscaled →
+`image_url` verbatim → candidates mined from the article body → typographic. Sensitive
+headlines (`editorialSensitivity.js`) skip straight to typographic.
+
+Two measured caveats, both from a 100-article live-prod sample:
+
+- **The body-mining rung is inert today.** `articles.content` is stored as plain text — 0% of
+  sampled prod articles contain any HTML — so `extractImageCandidatesFromHtml` can never
+  match. The code is kept because it costs nothing and works the moment `content` holds
+  markup, but it contributes **0%** right now. Do not count it as a working fallback.
+- **Photo rate is ~50%**, not the ~75% `image_url` population would suggest. The gap is 29%
+  of articles carrying no `image_url` at all (ABC Australia and The Hindu are the bulk) and
+  ~14% whose URL is a signed thumbnail too small to use (the Guardian's `?width=140`, which
+  cannot be upscaled because the `s=` signature covers the query).
+
+> ⚠️ **The `Accept` header is load-bearing.** `tryFetchImage` deliberately does **not**
+> advertise `image/webp` or `image/avif`. Satori can embed only JPEG and PNG, and the
+> Guardian, The Hill and ARY all content-negotiate — they return WebP for a URL ending in
+> `.jpg` when webp is offered. Measured: advertising webp made **50% of all fetches**
+> unusable and was the single largest cause of a typographic fallback. Re-adding those
+> tokens silently halves the photo rate with no error anywhere.
+
 ## Undocumented-var audit
 
 `262` distinct `process.env.*` reads in `backend/`; `backend/.env.example` covered `77`.
