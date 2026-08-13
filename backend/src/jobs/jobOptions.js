@@ -121,7 +121,41 @@ export const queueLockDuration = {
   [QUEUE_NAMES.videoRender]:  parseIntEnv("QUEUE_LOCK_MS_VIDEO_RENDER", 10 * 60_000),
   [QUEUE_NAMES.social]:       parseIntEnv("QUEUE_LOCK_MS_SOCIAL", 2 * 60_000),
   [QUEUE_NAMES.analysis]:     parseIntEnv("QUEUE_LOCK_MS_ANALYSIS", 2 * 60_000),
-  [QUEUE_NAMES.realityIndex]: parseIntEnv("QUEUE_LOCK_MS_REALITY_INDEX", 2 * 60_000),
+  // 10 MIN, RAISED FROM 2 (2026-08-13). events-promote-singleton kept logging
+  // "Missing lock … moveToFinished" after the first pass of this fix.
+  //
+  // THE JOB ID NAMES THE JOB, NOT THE QUEUE. "events-promote-singleton" runs on
+  // the "reality-index" queue — there is no "events" queue — and it shares that
+  // queue with four other jobs (events.refresh, markets.polymarket.sync,
+  // geo.usgs.sync, reality-index.compose). Checked before editing this line,
+  // because getting it wrong here fails silently: the promoter would keep its
+  // 2-minute lock and nothing would say so.
+  //
+  // DIFFERENT SHAPE FROM THE RENDER, and the difference matters. The render
+  // yields constantly (spawn is async), so its lock died to a NEIGHBOUR's block.
+  // eventPromoter.js contains ZERO awaits and eventBreaker.js is synchronous
+  // throughout — with EVENT_BREAKER_ENABLED true in prod, promoter + a
+  // six-pass breaker sweep is ONE uninterrupted synchronous block. The renewal
+  // timer is a macrotask on that loop, so it cannot fire at all while the job
+  // runs: for this job, runtime IS block time.
+  //
+  // So this is INTERIM and treats the symptom, unlike the render's fix. It stops
+  // the bookkeeping corruption now; it does not stop the job holding the loop —
+  // which also starves every other queue in the worker for its full duration.
+  // The real fix is yielding inside the promoter's outer loops, deliberately NOT
+  // done here: those decision paths and their 🧭 log lines are the calibration
+  // corpus, and changing their interleaving mid-verification is the wrong moment.
+  //
+  // MEASURE BEFORE GOING FURTHER. The number that decides it is already being
+  // recorded — background_job_runs.duration_ms, written by withJobRunLogging for
+  // every run:
+  //   SELECT job_id, COUNT(*) n, MAX(duration_ms) worst, AVG(duration_ms) avg
+  //   FROM background_job_runs
+  //   WHERE queue = 'reality-index' AND created_at > (unixepoch()*1000 - 86400000)
+  //   GROUP BY job_id ORDER BY worst DESC;
+  // If the worst case is tens of seconds, 10 minutes is ample. If it approaches
+  // minutes, the block itself is the problem and a bigger lock only defers it.
+  [QUEUE_NAMES.realityIndex]: parseIntEnv("QUEUE_LOCK_MS_REALITY_INDEX", 10 * 60_000),
 };
 
 /** Fallback for a queue not named above — never BullMQ's 30s. */

@@ -273,6 +273,29 @@ test("every queue the worker consumes has an explicit lock duration", async () =
   }
 });
 
+test("events-promote-singleton is on the reality-index queue, not an 'events' one", async () => {
+  // The prod log line names the JOB, not the queue, and there is no "events"
+  // queue at all — five jobs share "reality-index". Editing the wrong lock
+  // constant here would fail SILENTLY: the promoter would keep its old lock and
+  // nothing would say so. Same key-vs-value trap as videoRender/"video_render".
+  const { QUEUE_NAMES, JOB_NAMES, JOB_IDS, queueLockDuration } = await import("../jobs/jobOptions.js");
+  assert.equal(JOB_IDS[JOB_NAMES.eventsPromote], "events-promote-singleton");
+  assert.ok(!Object.values(QUEUE_NAMES).includes("events"), "there is no 'events' queue");
+
+  const src = readFileSync(new URL("./scheduler.js", import.meta.url), "utf8");
+  const dispatch = src.slice(src.indexOf("const dispatchEventPromoterCycle"));
+  assert.match(dispatch.slice(0, 220), /queue:\s*QUEUE_NAMES\.realityIndex/);
+
+  const worker = readFileSync(new URL("../jobs/workerProcess.js", import.meta.url), "utf8");
+  assert.match(worker, /case JOB_NAMES\.eventsPromote:\s*return runEventPromoterCronCycle\(\)/);
+
+  // And that queue's lock must be the raised one, not the 2-minute default.
+  assert.ok(
+    queueLockDuration[QUEUE_NAMES.realityIndex] >= 10 * 60_000,
+    "reality-index carries a fully synchronous promoter + breaker sweep; 2 minutes is not enough",
+  );
+});
+
 test("the render lock is sized for a render, not for a round number", async () => {
   const { queueLockDuration, QUEUE_NAMES } = await import("../jobs/jobOptions.js");
   const render = queueLockDuration[QUEUE_NAMES.videoRender];

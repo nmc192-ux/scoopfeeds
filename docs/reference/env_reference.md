@@ -210,7 +210,7 @@ the outage that once froze three queues.
 | `QUEUE_LOCK_MS_ENRICHMENT` | `120000` | default | restart | |
 | `QUEUE_LOCK_MS_SOCIAL` | `120000` | default | restart | |
 | `QUEUE_LOCK_MS_ANALYSIS` | `120000` | default | restart | |
-| `QUEUE_LOCK_MS_REALITY_INDEX` | `120000` | default | restart | |
+| `QUEUE_LOCK_MS_REALITY_INDEX` | `600000` (10 min) | default | restart | Raised from 2 min on 2026-08-13: `events-promote-singleton` kept losing its lock. ⚠️ **That job id names the JOB, not the queue** — there is no `events` queue; five jobs share `reality-index`. **INTERIM, and unlike the render fix it treats the symptom**: `eventPromoter.js` has zero `await`s and `eventBreaker.js` is synchronous throughout, so promoter + a six-pass breaker sweep is ONE uninterrupted block and the renewal timer cannot fire at all while it runs. Measure `background_job_runs.duration_ms` before going further. |
 
 ⚠️ **`queueLockDuration` is keyed by the queue NAME STRING, not the `QUEUE_NAMES` key.** They
 differ for the two that matter most — `videoRender` is `"video_render"`, `realityIndex` is
