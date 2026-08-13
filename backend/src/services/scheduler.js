@@ -633,7 +633,23 @@ export function startScheduler() {
   // missed at 14:00 is simply retried at 15:00 rather than lost for the day.
   // QUEUE_NAMES.videoRender, never QUEUE_NAMES.video — that one is YouTube
   // ingestion and a job on it would run fetchAllYouTube instead.
-  scheduleCron("12 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "video autopost")); // moved off :07 (shared with runMarketMatcherCronCycle)
+  // :39 — MOVED FROM :12 (2026-08-13). :12 carried dispatchUsgsCycle in the same
+// minute, and :13 fires dispatchEventPromoterCycle, whose cycle blocks the
+// worker's event loop for a MEASURED 10,245ms. A render starting at :12 was
+// therefore mid-flight, holding a 30s lock renewed every 15s, when a 10.2s
+// block landed — which is what produced "could not renew lock" every cycle.
+//
+// :39 chosen from the full 60-minute occupancy map, not by eye:
+//   - nothing at all is registered on :39, so it also satisfies the
+//     no-dispatch-shares-a-minute-with-an-in-process-cron invariant
+//   - :37-:41 is the longest run carrying NO worker-bound dispatch, so a
+//     one-to-three-minute render has the worker's loop largely to itself
+//   - 4 minutes clear of the :43 promoter block, and its tail lands on
+//     polymarket/usgs rather than on ingestion, which is the heaviest worker job
+// Candidates rejected: :10 and :40 (1-2 free minutes), :31 (:32 is ingestion),
+// :58 (3 free minutes and further from the promoter, but its tail runs into
+// ingestion at :02 and :00 carries ten daily crons).
+scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "video autopost"));
   logger.info(`🎬 Video autopost cron registered (hourly; gates decide) — enabled=${process.env.VIDEO_AUTOPOST_ENABLED === "1"}`);
 
   const inProcessVideoEnabled = String(process.env.ENABLE_INPROCESS_VIDEO_CRON || "").toLowerCase() === "true";

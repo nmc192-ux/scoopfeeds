@@ -247,3 +247,60 @@ test("all four monitored cycles are in the cron-map", () => {
     assert.ok(documented.has(required), `${required} is monitored but absent from the cron-map table`);
   }
 });
+
+// ─── Lock duration is set for every consumed queue ──────────────────────────
+//
+// EARNED 2026-08-13. lockDuration was never passed, so every worker took
+// BullMQ's 30s default and renewed at 15s — for a render that takes minutes.
+// Prod logged "could not renew lock" then "Missing lock … moveToFinished" on
+// every cycle, and a job stuck `active` with a dead lock makes the next
+// dispatch log "already active — dedup held" and not run.
+
+test("every queue the worker consumes has an explicit lock duration", async () => {
+  const { queueLockDuration, QUEUE_NAMES } = await import("../jobs/jobOptions.js");
+  const { readFileSync } = await import("node:fs");
+  const worker = readFileSync(new URL("../jobs/workerProcess.js", import.meta.url), "utf8");
+  // The queues registerWorker is actually called for.
+  const consumed = [...worker.matchAll(/registerWorker\(\s*QUEUE_NAMES\.(\w+)/g)].map(m => m[1]);
+  assert.ok(consumed.length >= 5, `expected several registered queues, found ${consumed.length}`);
+  for (const key of consumed) {
+    const name = QUEUE_NAMES[key];
+    assert.ok(
+      queueLockDuration[name],
+      `queue "${key}" ("${name}") is consumed but has no lock duration — it would take ` +
+      `BullMQ's 30s default. NOTE the key/value mismatch: videoRender is "video_render".`
+    );
+  }
+});
+
+test("the render lock is sized for a render, not for a round number", async () => {
+  const { queueLockDuration, QUEUE_NAMES } = await import("../jobs/jobOptions.js");
+  const render = queueLockDuration[QUEUE_NAMES.videoRender];
+  // A render is 1-3 minutes today and three more channels with polls plus a
+  // mandatory 30s Threads wait will extend it. The renewal window is half the
+  // lock, so this must leave room for a multi-second block inside it.
+  assert.ok(render >= 10 * 60_000, `render lock is ${render}ms — too short for a multi-minute job`);
+  for (const key of ["ingestion", "social", "analysis"]) {
+    assert.ok(queueLockDuration[QUEUE_NAMES[key]] >= 2 * 60_000, `${key} lock is under 2 min`);
+  }
+});
+
+test("the render dispatch sits in a worker-quiet minute, away from the promoter", async () => {
+  // :12 shared a minute with usgs and sat one minute from the :13 promoter,
+  // whose cycle blocks the worker loop for a measured 10,245ms.
+  const render = CRONS.find(c => c.label === "dispatchVideoRenderCycle");
+  assert.ok(render, "no video render cron registered");
+  const minute = [...render.minutes][0];
+  assert.equal(render.minutes.size, 1, "the render should fire once an hour");
+
+  // Nothing else may share its minute, in either process.
+  const sharers = CRONS.filter(c => c !== render && c.minutes.has(minute)).map(c => c.label);
+  assert.deepEqual(sharers, [], `minute :${minute} is shared with ${sharers.join(", ")}`);
+
+  // And it must not be adjacent to the measured 10.2s promoter block.
+  const promoter = CRONS.find(c => c.label === "dispatchEventPromoterCycle");
+  for (const p of promoter.minutes) {
+    const gap = Math.min((p - minute + 60) % 60, (minute - p + 60) % 60);
+    assert.ok(gap >= 3, `render at :${minute} is only ${gap} min from the promoter at :${p}`);
+  }
+});

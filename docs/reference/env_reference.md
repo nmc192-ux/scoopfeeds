@@ -187,6 +187,38 @@ corpus at the *new* price. Verified 2026-08-11: with everything at defaults the 
 margin that stops the last consonant being clipped by the cut. Shortening the editorial gap
 must never be able to clip a slide, so the two stay separate numbers.
 
+### Queue lock durations
+
+BullMQ's default `lockDuration` is **30s**, renewed at half that. A video render takes one to
+three minutes, so it relied on ~12 consecutive renewals landing on a shared event loop that
+carries measured multi-second blocks. It did not: prod logged *"could not renew lock"* then
+*"Missing lock … moveToFinished"* every cycle.
+
+The damage was subtler than it looks. Duplicate renders were already prevented by
+`videoAutopost`'s process-local `cycleInFlight` guard — **unless the worker restarted**, which
+removes the guard and gives a genuine duplicate render and duplicate Gemini + ElevenLabs
+spend. Routinely it corrupted bookkeeping: the job DID publish, then failed `moveToFinished`,
+so BullMQ recorded a failure for a cycle that succeeded. And a job stuck `active` with a dead
+lock makes the next dispatch log *"already active — dedup held"* and **not run** — the shape of
+the outage that once froze three queues.
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `QUEUE_LOCK_MS_VIDEO_RENDER` | `600000` (10 min) | default | restart | The render cycle. Sized for minutes of work plus the polls and the mandatory 30s Threads wait the channel work adds. |
+| `QUEUE_LOCK_MS_INGESTION` | `120000` (2 min) | default | restart | |
+| `QUEUE_LOCK_MS_VIDEO` | `120000` | default | restart | |
+| `QUEUE_LOCK_MS_ENRICHMENT` | `120000` | default | restart | |
+| `QUEUE_LOCK_MS_SOCIAL` | `120000` | default | restart | |
+| `QUEUE_LOCK_MS_ANALYSIS` | `120000` | default | restart | |
+| `QUEUE_LOCK_MS_REALITY_INDEX` | `120000` | default | restart | |
+
+⚠️ **`queueLockDuration` is keyed by the queue NAME STRING, not the `QUEUE_NAMES` key.** They
+differ for the two that matter most — `videoRender` is `"video_render"`, `realityIndex` is
+`"reality-index"`. Keying it the other way looks correct and silently gives the render queue
+the 2-minute fallback. A test asserts every consumed queue resolves.
+
+`maxStalledCount` stays at BullMQ's default **1** — one retry, not a loop.
+
 ### Orientation
 
 | Var | Default | Prod | Runtime-flip | Purpose |
@@ -414,10 +446,17 @@ updated with it; the table below is **parsed and asserted** by
 |---|---|---|
 | `dispatchIngestionCycle` | `2,32 * * * *` | `scheduler.js` |
 | `dispatchVideoCycle` | `9 * * * *` | `scheduler.js` |
-| `dispatchVideoRenderCycle` | `12 * * * *` | `scheduler.js` |
+| `dispatchVideoRenderCycle` | `39 * * * *` | `scheduler.js` |
 | `dispatchSocialCycle` | `*/30` | host crontab — `ENABLE_AUTO_SOCIAL=false` skips the `15,45` node-cron |
 
 <!-- cron-map:end -->
+
+⚠️ **`dispatchVideoRenderCycle` moved :12 → :39 on 2026-08-13.** :12 shared a minute with
+`dispatchUsgsCycle`, and :13 fires `dispatchEventPromoterCycle`, whose cycle blocks the
+worker's event loop for a **measured 10,245ms** — inside the 15s BullMQ lock-renewal window a
+render was relying on. :39 is the only fully-free minute that also opens the longest
+worker-quiet run (:37–:41) and keeps 4 minutes' clearance from the promoter. Paired with
+`QUEUE_LOCK_MS_VIDEO_RENDER` (10 min), see below.
 
 The social row is the one that cannot be checked against source, and it is marked so
 deliberately rather than omitted: `scheduler.js` really does contain a `15,45` registration,
