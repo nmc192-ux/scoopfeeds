@@ -27,9 +27,12 @@ import * as migration020 from "./migrations/020_event_carousel.js";
 import * as migration021 from "./migrations/021_event_post_retries.js";
 import * as migration022 from "./migrations/022_video_posts.js";
 import * as migration023 from "./migrations/023_video_posts_facebook.js";
+import * as migration024 from "./migrations/024_video_posts_social_channels.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021, migration022, migration023];
+const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations");
+
+const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021, migration022, migration023, migration024];
 
 function ensureSchemaMigrationsTable(db) {
   db.exec(`
@@ -73,7 +76,84 @@ function assertBaseSchema(db) {
   );
 }
 
+/**
+ * THE REGISTRY IS HAND-MAINTAINED, SO CHECK IT AT BOOT.
+ *
+ * MIGRATIONS is an array someone has to remember to append to. On 2026-08-13
+ * migration 024 shipped, was merged, deployed — and never ran, because the edit
+ * that was supposed to add it to that array silently did not apply. Nothing
+ * failed: schema_migrations simply had 23 rows instead of 24, the columns did
+ * not exist, and the first thing to notice was a query erroring in production.
+ *
+ * Three ways the registry can be wrong, all of them silent without this:
+ *
+ *   MISSING FILE   — a migration file exists on disk but is not in the array,
+ *                    so it never runs. That is what happened.
+ *   DUPLICATE ID   — two entries share an id. The second is skipped by the
+ *                    appliedIds check and its `up()` never executes, which
+ *                    CLAUDE.md records as having cost real time before.
+ *   OUT OF ORDER   — ids that do not ascend mean the array's order and the
+ *                    numbering disagree, so what actually ran is not what the
+ *                    filenames imply.
+ *
+ * THROWS rather than warns. A migration that did not run is a schema that does
+ * not match the code, and every consequence of that is worse and later than a
+ * refusal to boot. It is one readdir and two loops, once per process.
+ */
+function assertRegistryIntact() {
+  const ids = MIGRATIONS.map((m) => m?.id);
+
+  const nameless = ids.filter((id) => typeof id !== "string" || !id.trim());
+  if (nameless.length) {
+    throw new Error(`runMigrations: ${nameless.length} entr(ies) in MIGRATIONS export no \`id\``);
+  }
+
+  const seen = new Set();
+  for (const id of ids) {
+    if (seen.has(id)) {
+      throw new Error(
+        `runMigrations: DUPLICATE migration id "${id}" in MIGRATIONS. ` +
+        `The second is silently skipped — its up() would never run.`
+      );
+    }
+    seen.add(id);
+  }
+
+  for (let i = 1; i < ids.length; i++) {
+    if (!(ids[i] > ids[i - 1])) {
+      throw new Error(
+        `runMigrations: MIGRATIONS is not in ascending id order — "${ids[i - 1]}" is followed by "${ids[i]}". ` +
+        `Array order is execution order, so this means what runs is not what the numbering implies.`
+      );
+    }
+  }
+
+  // Every migration FILE on disk must be registered. This is the check that
+  // would have caught 024: the file existed and the array did not know.
+  let files;
+  try {
+    files = fs.readdirSync(MIGRATIONS_DIR)
+      .filter((f) => f.endsWith(".js") && !f.endsWith(".test.js"))
+      .sort();
+  } catch {
+    return;   // packaged builds may not ship the directory; the checks above still ran
+  }
+  const registered = new Set(ids);
+  const orphans = files.filter((f) => {
+    const stem = f.replace(/\.js$/, "");
+    return !registered.has(stem);
+  });
+  if (orphans.length) {
+    throw new Error(
+      `runMigrations: ${orphans.length} migration file(s) on disk are NOT in the MIGRATIONS array ` +
+      `and would never run: ${orphans.join(", ")}. ` +
+      `Import each and append it in src/db/migrate.js — the array is hand-maintained.`
+    );
+  }
+}
+
 export function runMigrations(db) {
+  assertRegistryIntact();
   assertBaseSchema(db);
   ensureSchemaMigrationsTable(db);
 
