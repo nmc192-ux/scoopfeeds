@@ -29,11 +29,12 @@ import * as migration022 from "./migrations/022_video_posts.js";
 import * as migration023 from "./migrations/023_video_posts_facebook.js";
 import * as migration024 from "./migrations/024_video_posts_social_channels.js";
 import * as migration025 from "./migrations/025_prune_stale_source_health.js";
+import * as migration026 from "./migrations/026_video_posts_bluesky.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations");
 
-const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021, migration022, migration023, migration024, migration025];
+const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021, migration022, migration023, migration024, migration025, migration026];
 
 function ensureSchemaMigrationsTable(db) {
   db.exec(`
