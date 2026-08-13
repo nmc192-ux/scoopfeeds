@@ -57,6 +57,27 @@ export const MP4_RETENTION_MS =
   Number.parseInt(process.env.VIDEO_MP4_RETENTION_HOURS || "48", 10) * 60 * 60 * 1000;
 
 /**
+ * How long a PENDING URL-fetch publish may pin its MP4 past the retention
+ * window. Default 24h.
+ *
+ * Instagram and Threads do not receive bytes — Meta FETCHES a public URL from
+ * our own server, asynchronously, after the container is created. Sweeping the
+ * file inside that window breaks a publish that has already been accepted, and
+ * the failure surfaces at PUBLISH time rather than at upload time, long after
+ * the log line that said "posted".
+ *
+ * The sweep runs at WORKER STARTUP rather than on a clock, so a deploy at the
+ * wrong moment triggers it regardless of how much of the window has elapsed.
+ * That is the realistic trigger, not the 48h boundary.
+ *
+ * BOUNDED, because a crash mid-publish would otherwise pin a file forever: past
+ * this hold the file is swept anyway and the pin is reported, since a row stuck
+ * `pending` for a day is itself worth seeing.
+ */
+export const PENDING_FETCH_HOLD_MS =
+  Number.parseInt(process.env.VIDEO_PENDING_FETCH_HOLD_MS || "", 10) || 24 * 60 * 60 * 1000;
+
+/**
  * A per-render scratch directory. Caller owns it and should releaseFrameDir()
  * when done; the startup sweep is the backstop for the crash case, not the
  * primary cleanup.
@@ -100,37 +121,85 @@ export function sweepFrames() {
   return { removed, bytes };
 }
 
+/** The article id embedded in `{articleId}-{designKey}.mp4`. */
+export function articleIdFromVideoFile(filename) {
+  const m = String(filename).match(/^(.+)-vid-v\d+-[0-9a-f]{12}\.mp4$/);
+  return m ? m[1] : null;
+}
+
 /**
  * Delete MP4s older than the retention window.
  *
- * Deliberately mtime-based rather than DB-driven: a file with no row is
- * EXACTLY the orphan class that produced the cards problem, and a DB-driven
- * sweep would skip it forever. Age is the only property an orphan still has.
+ * STILL mtime-based, not DB-driven: a file with no row is EXACTLY the orphan
+ * class that produced the cards problem, and a DB-driven sweep would skip it
+ * forever. Age is the only property an orphan still has.
+ *
+ * THE ONE EXCEPTION IS A PUBLISH IN FLIGHT. Instagram and Threads are served by
+ * URL, so between "container created" and "published" the file on disk is still
+ * load-bearing. `pendingUrlFetch` is injected rather than queried here so this
+ * module stays free of the database — the caller supplies the predicate, and
+ * the default (no predicate) sweeps exactly as before.
  */
-export function sweepVideos({ retentionMs = MP4_RETENTION_MS, now = Date.now() } = {}) {
-  if (!existsSync(VIDEOS_DIR)) return { removed: 0, bytes: 0, kept: 0 };
-  let removed = 0, bytes = 0, kept = 0;
+export function sweepVideos({
+  retentionMs = MP4_RETENTION_MS,
+  now = Date.now(),
+  pendingUrlFetch = null,
+  pendingHoldMs = PENDING_FETCH_HOLD_MS,
+} = {}) {
+  if (!existsSync(VIDEOS_DIR)) return { removed: 0, bytes: 0, kept: 0, held: 0 };
+  let removed = 0, bytes = 0, kept = 0, held = 0;
   for (const entry of readdirSync(VIDEOS_DIR)) {
     if (!entry.endsWith(".mp4")) continue;
     const p = path.join(VIDEOS_DIR, entry);
     try {
       const st = statSync(p);
-      if (now - st.mtimeMs > retentionMs) {
-        bytes += st.size;
-        unlinkSync(p);
-        removed++;
-      } else kept++;
+      if (now - st.mtimeMs <= retentionMs) { kept++; continue; }
+
+      // Past retention. Is a URL-fetch publish still waiting on this file?
+      if (pendingUrlFetch) {
+        const articleId = articleIdFromVideoFile(entry);
+        const age = now - st.mtimeMs;
+        // MEASURED BEYOND RETENTION, not from the file's birth. The hold is
+        // extra time a pending publish may buy AFTER the file became sweepable;
+        // measuring it from mtime made it a no-op, because any file old enough
+        // to be swept (48h) was already past a 24h hold.
+        const holdUntil = retentionMs + pendingHoldMs;
+        if (articleId && age <= holdUntil && pendingUrlFetch(articleId)) {
+          held++;
+          logger.info(
+            `🎞️ videoArtifacts: HELD ${entry} past retention — an Instagram or Threads publish ` +
+            `is still pending and Meta fetches this file by URL. Age ${(age / 3600000).toFixed(1)}h ` +
+            `of ${(holdUntil / 3600000).toFixed(0)}h (${(retentionMs / 3600000).toFixed(0)}h retention ` +
+            `+ ${(pendingHoldMs / 3600000).toFixed(0)}h hold).`
+          );
+          continue;
+        }
+        if (articleId && age > holdUntil && pendingUrlFetch(articleId)) {
+          // The hold is bounded on purpose — a crash mid-publish would pin this
+          // file forever. Sweeping anyway, but a row stuck pending for this long
+          // is a fault worth seeing rather than a quiet deletion.
+          logger.warn(
+            `🎞️ videoArtifacts: sweeping ${entry} DESPITE a pending URL-fetch publish — the row has ` +
+            `been pending ${(age / 3600000).toFixed(1)}h, past the ${(holdUntil / 3600000).toFixed(0)}h ` +
+            `limit. That publish will now fail to fetch; the pending row is the thing to investigate.`
+          );
+        }
+      }
+
+      bytes += st.size;
+      unlinkSync(p);
+      removed++;
     } catch (err) {
       logger.warn(`🎞️ videoArtifacts: could not sweep ${p}: ${err.message}`);
     }
   }
-  if (removed > 0) {
+  if (removed > 0 || held > 0) {
     logger.info(
       `🎞️ videoArtifacts: deleted ${removed} MP4(s) older than ${(retentionMs / 3600000).toFixed(0)}h, ` +
-      `${(bytes / 1048576).toFixed(1)} MB reclaimed, ${kept} kept`
+      `${(bytes / 1048576).toFixed(1)} MB reclaimed, ${kept} kept, ${held} held for a pending publish`
     );
   }
-  return { removed, bytes, kept };
+  return { removed, bytes, kept, held };
 }
 
 /**
@@ -142,7 +211,11 @@ export function sweepVideos({ retentionMs = MP4_RETENTION_MS, now = Date.now() }
  */
 export async function sweepAtStartup() {
   const frames = sweepFrames();
-  const videos = sweepVideos();
+  // The predicate is wired HERE, at the one place that already knows about
+  // every artifact class, rather than inside sweepVideos — which stays
+  // database-free so its tests need no schema.
+  const { hasPendingUrlFetchPublish } = await import("../models/database.js");
+  const videos = sweepVideos({ pendingUrlFetch: hasPendingUrlFetchPublish });
   const { sweepTtsCache } = await import("./videoVoice.js");
   const tts = sweepTtsCache();
   return { frames, videos, tts };

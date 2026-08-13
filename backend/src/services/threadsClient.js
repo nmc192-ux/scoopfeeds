@@ -144,6 +144,74 @@ async function waitForFinished(creationId, { maxAttempts = 8, gapMs = 1500 } = {
 }
 
 // Public: post text + (optional) external image URL. Returns { id, url }.
+/**
+ * THREADS' MANDATORY WAIT BEFORE PUBLISH. Default 30s.
+ *
+ * Meta's guidance for the Threads publishing flow is to wait ~30 seconds after
+ * creating a container before calling threads_publish, so the server has time to
+ * fetch and process the media. This is NOT the same thing as polling status:
+ * the container can report a usable state and still fail to publish if called
+ * immediately, which is why the wait is unconditional rather than a fallback for
+ * a slow poll.
+ *
+ * It is also why the render cycle needed a 10-minute BullMQ lock before this
+ * channel could be added — 30 seconds of deliberate sleep inside a job that was
+ * losing a 30-second lock is the collision that fix removed.
+ */
+export const THREADS_VIDEO_WAIT_MS = () =>
+  Number.parseInt(process.env.THREADS_VIDEO_WAIT_MS || "", 10) || 30_000;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Post a VIDEO to Threads.
+ *
+ * A URL-FETCH SURFACE: Threads does not accept direct file uploads, so the MP4
+ * must already be reachable at a public HTTPS URL that survives long enough for
+ * Meta to fetch it. The caller owns that lifetime — see the sweep hold in
+ * videoArtifacts.
+ *
+ * NO FALLBACK TO A TEXT POST. The obvious degrade — drop to `media_type: TEXT`
+ * with the link in the body — would return an id and a URL indistinguishable at
+ * the call site from a published video, which is the same failure that was
+ * removed from postReelToFacebook on 2026-08-13. Every path here publishes a
+ * video or throws with the reason.
+ */
+export async function postVideoToThreads({ text, videoUrl }) {
+  const t = loadToken();
+  if (!t || !t.userId) throw new Error("threads not configured");
+  if (!videoUrl) throw new Error("postVideoToThreads requires a videoUrl — there is no upload path");
+
+  const create = await call(`/${t.userId}/threads`, {
+    method: "POST",
+    params: { media_type: "VIDEO", video_url: videoUrl, text },
+  });
+  if (!create?.id) {
+    throw new Error(`threads video container returned no id: ${JSON.stringify(create).slice(0, 200)}`);
+  }
+
+  // Poll first — cheap, and it surfaces a fetch failure with a real reason
+  // rather than as a bare publish error half a minute later.
+  await waitForFinished(create.id);
+
+  // THEN the mandatory wait, on top of the poll. See THREADS_VIDEO_WAIT_MS.
+  const waitMs = THREADS_VIDEO_WAIT_MS();
+  logger.info(`🧵 threads video container ${create.id} ready — waiting ${waitMs}ms before publish`);
+  await sleep(waitMs);
+
+  const publish = await call(`/${t.userId}/threads_publish`, {
+    method: "POST",
+    params: { creation_id: create.id },
+  });
+  if (!publish?.id) {
+    throw new Error(`threads video publish returned no id: ${JSON.stringify(publish).slice(0, 200)}`);
+  }
+
+  const url = `https://www.threads.net/@${process.env.THREADS_HANDLE || ""}/post/${publish.id}`;
+  logger.info(`🧵 Threads video published: ${publish.id} — ${url}`);
+  return { id: publish.id, url };
+}
+
 export async function postToThreads({ text, imageUrl }) {
   const t = loadToken();
   if (!t || !t.userId) throw new Error("threads not configured");

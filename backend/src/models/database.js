@@ -2355,6 +2355,69 @@ export function markVideoFacebook(articleId, { status, postId = null, error = nu
 }
 
 /**
+ * Per-channel status writers for the URL-fetch surfaces (migration 024).
+ *
+ * One function per channel rather than a generic `markVideoChannel(name, …)`:
+ * the column names would then be interpolated into SQL from a caller-supplied
+ * string, which is an injection surface for no benefit, and a typo would write
+ * to nothing rather than failing.
+ */
+export function markVideoInstagram(articleId, { status, postId = null, error = null }) {
+  getDb().prepare(`
+    UPDATE video_posts SET
+      instagram_status = ?, instagram_post_id = ?, instagram_error = ?, updated_at = ?
+    WHERE article_id = ?
+  `).run(status, postId, error ? String(error).slice(0, 500) : null, Date.now(), articleId);
+  return getVideoPost(articleId);
+}
+
+export function markVideoThreads(articleId, { status, postId = null, error = null }) {
+  getDb().prepare(`
+    UPDATE video_posts SET
+      threads_status = ?, threads_post_id = ?, threads_error = ?, updated_at = ?
+    WHERE article_id = ?
+  `).run(status, postId, error ? String(error).slice(0, 500) : null, Date.now(), articleId);
+  return getVideoPost(articleId);
+}
+
+/**
+ * Is a URL-fetch publish still in flight for this article?
+ *
+ * Read by sweepVideos so the 48h MP4 sweep cannot delete a file Meta has not
+ * finished fetching. Instagram and Threads only: Facebook Reels uploads raw
+ * bytes and stops caring about the file the moment the call returns.
+ *
+ * 'pending' ONLY. A NULL status means never attempted and must NOT hold a file
+ * — a dark channel would otherwise pin every MP4 forever.
+ */
+export function hasPendingUrlFetchPublish(articleId) {
+  const row = getDb().prepare(`
+    SELECT 1 FROM video_posts
+    WHERE article_id = ? AND (instagram_status = 'pending' OR threads_status = 'pending')
+    LIMIT 1
+  `).get(articleId);
+  return Boolean(row);
+}
+
+/**
+ * Rolling-24h counts per channel, for the per-channel caps.
+ *
+ * Sized against VIDEO_MAX_PER_DAY, which is 12 in prod (read live 2026-08-13),
+ * NOT the code default of 4 — see the callers.
+ */
+export function countInstagramPostsSince(sinceMs) {
+  return getDb().prepare(
+    `SELECT COUNT(*) AS n FROM video_posts WHERE instagram_status = 'posted' AND published_at > ?`
+  ).get(sinceMs).n;
+}
+
+export function countThreadsPostsSince(sinceMs) {
+  return getDb().prepare(
+    `SELECT COUNT(*) AS n FROM video_posts WHERE threads_status = 'posted' AND published_at > ?`
+  ).get(sinceMs).n;
+}
+
+/**
  * Facebook cross-posts in a ROLLING 24h, for VIDEO_FACEBOOK_MAX_PER_DAY.
  *
  * Counts `published_at` — the YouTube publish time — rather than a Facebook

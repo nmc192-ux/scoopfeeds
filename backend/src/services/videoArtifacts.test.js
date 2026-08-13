@@ -22,7 +22,7 @@ process.env.SCOOP_PERSISTENT_DATA_DIR = path.join(TMP, "persist");
 mkdirSync(path.join(TMP, "persist", "videos"), { recursive: true });
 
 const {
-  FRAMES_ROOT, VIDEOS_DIR, MP4_RETENTION_MS,
+  FRAMES_ROOT, VIDEOS_DIR, MP4_RETENTION_MS, PENDING_FETCH_HOLD_MS,
   acquireFrameDir, releaseFrameDir, sweepFrames, sweepVideos, sweepAtStartup,
 } = await import("./videoArtifacts.js");
 
@@ -202,4 +202,94 @@ test("the startup sweep is WIRED — reachable from a process entry point", () =
     "that starts. (If you added a fourth process, add its entry point to " +
     "PROCESS_ENTRY_POINTS above.)"
   );
+});
+
+// ─── The URL-fetch hold (2026-08-13) ────────────────────────────────────────
+//
+// The sweep stays AGE-based — an orphan with no row has nothing else to judge
+// it by, which is the CARDS_DIR lesson above. One exception, and only one:
+// Instagram and Threads do not receive bytes. Meta FETCHES the file from our
+// own server, asynchronously, after the container is created. Sweeping it
+// mid-fetch breaks a publish that has already been accepted, and the failure
+// surfaces at PUBLISH time — long after the line that said "posted".
+//
+// The predicate is INJECTED so videoArtifacts stays database-free; sweepAtStartup
+// wires the real one.
+
+const HOUR = 3600_000;
+function agedMp4(name, hours) {
+  const p = path.join(VIDEOS_DIR, name);
+  writeFileSync(p, "0".repeat(20_000));
+  ageFile(p, hours * HOUR);
+  return p;
+}
+const clearVideos = () => {
+  for (const f of readdirSync(VIDEOS_DIR)) rmSync(path.join(VIDEOS_DIR, f), { force: true });
+};
+
+test("the article id is recovered from an autopost filename, not a legacy one", async () => {
+  const { articleIdFromVideoFile } = await import("./videoArtifacts.js");
+  assert.equal(articleIdFromVideoFile("abc-123-vid-v1-ab033bc4b0ef.mp4"), "abc-123");
+  // Legacy deliberately does NOT match: it carries no design key, and treating
+  // it as one would recover the wrong id. It is also not a URL-fetch surface.
+  assert.equal(articleIdFromVideoFile("abc-shorts.mp4"), null);
+  assert.equal(articleIdFromVideoFile("notavideo.txt"), null);
+});
+
+test("with no predicate the sweep is byte-for-byte the old behaviour", () => {
+  clearVideos();
+  agedMp4("old-vid-v1-aaaaaaaaaaaa.mp4", 72);
+  agedMp4("fresh-vid-v1-aaaaaaaaaaaa.mp4", 1);
+  const r = sweepVideos();
+  assert.equal(r.removed, 1);
+  assert.equal(r.kept, 1);
+  assert.equal(r.held, 0);
+});
+
+test("a PENDING url-fetch publish HOLDS its MP4 past retention", () => {
+  // The hold is measured BEYOND retention — 48h + 24h = 72h. Measuring it from
+  // mtime made the guard a no-op, since anything old enough to sweep was
+  // already past a 24h window. That bug was caught by this test.
+  clearVideos();
+  agedMp4("held-vid-v1-aaaaaaaaaaaa.mp4", 60);
+  const r = sweepVideos({ pendingUrlFetch: (id) => id === "held" });
+  assert.equal(r.held, 1);
+  assert.equal(r.removed, 0);
+  assert.equal(r.kept, 0, "60h is past retention — HELD, not merely kept");
+  assert.ok(existsSync(path.join(VIDEOS_DIR, "held-vid-v1-aaaaaaaaaaaa.mp4")));
+});
+
+test("the hold is BOUNDED — a crash mid-publish cannot pin a file forever", () => {
+  clearVideos();
+  agedMp4("stuck-vid-v1-aaaaaaaaaaaa.mp4", 73);
+  const r = sweepVideos({ pendingUrlFetch: () => true });
+  assert.equal(r.removed, 1, "past retention + hold the file is swept regardless");
+  assert.equal(r.held, 0);
+});
+
+test("only the article with a pending publish is held", () => {
+  clearVideos();
+  agedMp4("keepme-vid-v1-aaaaaaaaaaaa.mp4", 60);
+  agedMp4("sweepme-vid-v1-aaaaaaaaaaaa.mp4", 60);
+  const r = sweepVideos({ pendingUrlFetch: (id) => id === "keepme" });
+  assert.equal(r.held, 1);
+  assert.equal(r.removed, 1);
+  assert.ok(existsSync(path.join(VIDEOS_DIR, "keepme-vid-v1-aaaaaaaaaaaa.mp4")));
+  assert.ok(!existsSync(path.join(VIDEOS_DIR, "sweepme-vid-v1-aaaaaaaaaaaa.mp4")));
+});
+
+test("a legacy-named MP4 is never held — it is not a URL-fetch surface", () => {
+  clearVideos();
+  agedMp4("legacy-shorts.mp4", 60);
+  const r = sweepVideos({ pendingUrlFetch: () => true });
+  assert.equal(r.removed, 1);
+  assert.equal(r.held, 0);
+});
+
+test("the hold window is configurable, and a short one cannot save an old file", () => {
+  assert.equal(PENDING_FETCH_HOLD_MS, 24 * HOUR);
+  clearVideos();
+  agedMp4("short-vid-v1-aaaaaaaaaaaa.mp4", 60);
+  const r = sweepVideos({ pendingUrlFetch: () => true, pendingHoldMs: 1 * HOUR });
+  assert.equal(r.removed, 1, "48h retention + a 1h hold cannot save a 60h file");
 });

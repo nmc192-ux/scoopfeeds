@@ -210,7 +210,7 @@ the outage that once froze three queues.
 | `QUEUE_LOCK_MS_ENRICHMENT` | `120000` | default | restart | |
 | `QUEUE_LOCK_MS_SOCIAL` | `120000` | default | restart | |
 | `QUEUE_LOCK_MS_ANALYSIS` | `120000` | default | restart | |
-| `QUEUE_LOCK_MS_REALITY_INDEX` | `120000` | default | restart | |
+| `QUEUE_LOCK_MS_REALITY_INDEX` | `600000` (10 min) | default | restart | Raised from 2 min on 2026-08-13: `events-promote-singleton` kept losing its lock. ⚠️ **That job id names the JOB, not the queue** — there is no `events` queue; five jobs share `reality-index`. **INTERIM, and unlike the render fix it treats the symptom**: `eventPromoter.js` has zero `await`s and `eventBreaker.js` is synchronous throughout, so promoter + a six-pass breaker sweep is ONE uninterrupted block and the renewal timer cannot fire at all while it runs. Measure `background_job_runs.duration_ms` before going further. |
 
 ⚠️ **`queueLockDuration` is keyed by the queue NAME STRING, not the `QUEUE_NAMES` key.** They
 differ for the two that matter most — `videoRender` is `"video_render"`, `realityIndex` is
@@ -260,6 +260,13 @@ upload. Best-effort: a Facebook failure is logged loudly and recorded in
 |---|---|---|---|---|
 | `VIDEO_FACEBOOK_ENABLED` | `0` (**dark**) | *set at ship* | yes | Kill switch. Off = nothing attempted and nothing recorded (`facebook_status` stays NULL). |
 | `VIDEO_FACEBOOK_REELS_ENABLED` | `0` (**dark**) | default | yes | **Separate** kill switch for the Facebook **Reels** surface, independent of the feed cross-post above. Two surfaces, two failure modes: one flag would enable the unproven one as a side effect of the proven one. Requires `VIDEO_ORIENTATION=vertical` to be meaningful — a 1920×1080 MP4 on `/video_reels` is the wrong shape for the surface. |
+| `VIDEO_INSTAGRAM_REELS_ENABLED` | `0` (**dark**) | default | yes | Instagram Reels. **URL-fetch surface** — Meta pulls the MP4 from `/scoop-ops/videos-gen/file/:articleId`, so it needs that route reachable and the sweep hold below. |
+| `VIDEO_INSTAGRAM_MAX_PER_DAY` | tracks `VIDEO_MAX_PER_DAY` (so **12** in prod) | default | yes | **`0` means zero**, not unset. |
+| `VIDEO_INSTAGRAM_MAX_SECS` | `90` | default | yes | Reels duration ceiling, checked against the **measured** file. The format runs 60–100s (§5), so this is an **edge the pipeline reaches**, not a margin — a video one second over is rejected by Meta at publish time, after the container exists and the URL has been fetched. |
+| `VIDEO_THREADS_ENABLED` | `0` (**dark**) | default | yes | Threads video. Also URL-fetch, and the slowest of the four. |
+| `VIDEO_THREADS_MAX_PER_DAY` | tracks `VIDEO_MAX_PER_DAY` (so **12** in prod) | default | yes | **`0` means zero**. |
+| `THREADS_VIDEO_WAIT_MS` | `30000` | default | yes | **Mandatory** wait between container creation and publish, on top of the status poll. Unconditional, not a fallback for a slow poll. This half-minute of deliberate sleep inside the render job is why `QUEUE_LOCK_MS_VIDEO_RENDER` had to be fixed first. |
+| `VIDEO_PENDING_FETCH_HOLD_MS` | `86400000` (24h) | default | restart | How long a **pending** Instagram/Threads publish may hold its MP4 **beyond** the 48h retention. Measured past retention, not from mtime — measuring it from mtime makes the guard a no-op, since anything old enough to sweep is already past a 24h window. Bounded so a crash mid-publish cannot pin a file forever. |
 | `VIDEO_FACEBOOK_MAX_PER_DAY` | falls through to `VIDEO_MAX_PER_DAY` (so `12`) | default | yes | Independent rolling-24h cap. **`0` means zero**, not unset — throttling to nothing is one env line. |
 | `FACEBOOK_PAGE_ID` | — | set | restart | Numeric page id, not the username. |
 | `FACEBOOK_PAGE_TOKEN` | — | set | restart | Page token. Needs `pages_manage_posts` + `pages_read_engagement` + **`pages_show_list`** — the third is required by `/videos` and its absence appears only at upload time. |
