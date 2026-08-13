@@ -17,7 +17,7 @@ import { sweepAtStartup } from "../services/videoArtifacts.js";
 import { runVideoRenderCycle } from "../services/videoAutopost.js";
 import { runSocialCycleWithTimeout } from "../services/socialPublisher.js";
 import { withJobRunLogging } from "./jobLogger.js";
-import { queueConcurrency, JOB_NAMES, QUEUE_NAMES, BULLMQ_PREFIX } from "./jobOptions.js";
+import { queueConcurrency, queueLockDuration, DEFAULT_LOCK_MS, JOB_NAMES, QUEUE_NAMES, BULLMQ_PREFIX } from "./jobOptions.js";
 import { assertRedisAvailable, assertRedisStartup, closeRedisConnections, createRedisConnection } from "./redis.js";
 
 const PROCESS_ROLE = "worker";
@@ -41,6 +41,10 @@ function registerWorker(queueName, name, concurrency, processor) {
     {
       prefix: BULLMQ_PREFIX,
       concurrency,
+      // See queueLockDuration. Without this BullMQ uses 30s, renews at 15s, and
+      // a multi-minute render loses its lock to any neighbouring cycle that
+      // blocks the shared event loop for longer than the renewal window.
+      lockDuration: queueLockDuration[queueName] ?? DEFAULT_LOCK_MS,
       connection: createRedisConnection(`worker:${queueName}`),
     }
   );
