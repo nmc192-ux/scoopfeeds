@@ -40,6 +40,7 @@ import {
   markVideoFacebook, countFacebookPostsSince,
   markVideoInstagram, countInstagramPostsSince,
   markVideoThreads, countThreadsPostsSince,
+  markVideoBluesky, countBlueskyPostsSince,
 } from "../models/database.js";
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
 import {
@@ -57,6 +58,7 @@ import { uploadToYouTube, isYouTubeConfigured } from "./youtubeClient.js";
 import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from "./facebookClient.js";
 import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js";
 import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
+import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
 import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
@@ -189,6 +191,26 @@ export const INSTAGRAM_REEL_MAX_SECS = () =>
  */
 /** Threads video. Its own switch, dark by default. */
 export const threadsVideoEnabled = () => process.env.VIDEO_THREADS_ENABLED === "1";
+
+/**
+ * The Bluesky kill switch. Ships dark, like every channel before it.
+ *
+ * Its own flag rather than a shared "social video" one, for the reason the
+ * Facebook pair established: two surfaces with different failure modes must be
+ * switchable independently, or turning off the broken one means turning off the
+ * working one too. Bluesky is the least like its siblings — a different protocol,
+ * a different host, and an account with a documented history of createSession
+ * rate-limiting — so it is the last channel that should share a switch.
+ */
+export const blueskyVideoEnabled = () => process.env.VIDEO_BLUESKY_ENABLED === "1";
+
+/** Sized against VIDEO_MAX_PER_DAY (12 in prod), like the other three. */
+export const VIDEO_BLUESKY_MAX_PER_DAY = () => {
+  const raw = process.env.VIDEO_BLUESKY_MAX_PER_DAY;
+  if (raw === undefined || raw === "") return VIDEO_MAX_PER_DAY();
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : VIDEO_MAX_PER_DAY();
+};
 
 /** Threads' rolling-24h cap. Same shape as the other two; 0 means zero. */
 export const VIDEO_THREADS_MAX_PER_DAY = () => {
@@ -738,6 +760,141 @@ export async function videoToThreads(article, {
   }
 }
 
+/**
+ * Truncate to N GRAPHEMES, cutting only on cluster boundaries.
+ *
+ * Bluesky's 300 limit is graphemes, not UTF-16 code units, and the two disagree
+ * in both directions: an emoji or a flag is one grapheme and several code units,
+ * so `.length` over-counts and truncates a legal post early; conversely a
+ * `.slice(0, 300)` can cut a family emoji or a combining mark in half and produce
+ * a replacement character in the middle of a published sentence.
+ *
+ * `socialComposer.composeBluesky` still slices by `.length` — noted, not changed
+ * here: it feeds the article social path, and altering what that publishes is a
+ * separate decision from adding a video channel.
+ *
+ * Exported for test.
+ */
+export function truncateGraphemes(text, max) {
+  const s = String(text ?? "");
+  // Intl.Segmenter is present on every Node the project supports (18+). The
+  // fallback is code points rather than code units — still wrong for combining
+  // marks, but wrong in the safe direction and never mid-surrogate.
+  const units = typeof Intl?.Segmenter === "function"
+    ? [...new Intl.Segmenter("en", { granularity: "grapheme" })
+        .segment(s)].map((seg) => seg.segment)
+    : Array.from(s);
+  if (units.length <= max) return s;
+  return units.slice(0, max).join("");
+}
+
+/**
+ * Publish the SAME rendered MP4 to BLUESKY.
+ *
+ * THE ONE THAT IS NOT LIKE THE OTHERS. Facebook Reels uploads bytes to Meta;
+ * Instagram and Threads hand Meta a URL to fetch. Bluesky uploads RAW BYTES to a
+ * separate video service, waits for a transcode job, and only then writes the
+ * post record. Consequences that matter here:
+ *
+ *   - No public URL is involved, so nothing needs protecting from the 48h sweep
+ *     and migration 026 has no 'pending' state. Adding one would pin every MP4
+ *     to guard a window that does not exist.
+ *   - The transcode can stall. The poll inside postVideoToBluesky is bounded by
+ *     wall clock and throws rather than hanging the render job, which is the
+ *     whole reason the BullMQ lock was raised to 10 minutes first.
+ *   - Size and duration are hard platform limits, asserted explicitly rather
+ *     than assumed from "our videos are small".
+ *
+ * Rule 0 asserted independently, first thing, before a file is read or a request
+ * is sent. Never throws — same contract and the same three reasons as its
+ * siblings (markVideoFailed would flip a row whose YouTube video is live,
+ * isQuotaExceeded matches foreign 403s, and a throw re-runs the BullMQ job).
+ */
+export async function videoToBluesky(article, {
+  filePath, title, attribution, spec = null, slides = null, now = Date.now(),
+} = {}) {
+  if (!blueskyVideoEnabled()) return { status: "off" };
+
+  try {
+    try {
+      assertPublishAllowed(article, [spec, slides].filter(Boolean));
+    } catch (blockErr) {
+      logger.error(
+        `🛑 RULE 0 REFUSED the Bluesky video for ${article.id} — ${blockErr.message}. ` +
+        `No bytes were uploaded and no record was created.`
+      );
+      try { markVideoBluesky(article.id, { status: "skipped", error: `rule0: ${blockErr.message}` }); }
+      catch { /* bookkeeping is best-effort */ }
+      return { status: "refused", reason: "rule0" };
+    }
+
+    if (!isBlueskyConfigured()) {
+      logger.error("🚨 VIDEO_BLUESKY_ENABLED=1 but Bluesky is not configured — the video is skipped.");
+      try { markVideoBluesky(article.id, { status: "skipped", error: "bluesky not configured" }); } catch {}
+      return { status: "skipped", reason: "not-configured" };
+    }
+
+    const max = VIDEO_BLUESKY_MAX_PER_DAY();
+    const posted24h = countBlueskyPostsSince(now - 24 * 60 * 60 * 1000);
+    if (posted24h >= max) {
+      logger.info(`🦋 bluesky video skipped — cap ${posted24h}/${max} in the last 24h`);
+      try { markVideoBluesky(article.id, { status: "skipped", error: `daily cap ${posted24h}/${max}` }); } catch {}
+      return { status: "skipped", reason: "daily-cap" };
+    }
+
+    // Measured here rather than left to the client so an unmeasurable file is a
+    // clean refusal with a reason, not a platform error mid-upload — the same
+    // posture as the Instagram ceiling.
+    let secs = null;
+    try {
+      const { probeDurationSecs } = await import("./videoVoice.js");
+      secs = probeDurationSecs(filePath);
+    } catch (err) {
+      logger.error(`🚨 bluesky video skipped — could not measure ${filePath}: ${err.message}`);
+      try { markVideoBluesky(article.id, { status: "skipped", error: `unmeasurable: ${err.message}` }); } catch {}
+      return { status: "skipped", reason: "unmeasurable" };
+    }
+
+    // 300 GRAPHEMES, not characters. Bluesky counts graphemes, and the credit
+    // line carries em-dashes and occasional non-Latin publisher names, so a
+    // char-based slice can overshoot. Intl.Segmenter is the only correct count
+    // available in-runtime; the slice is applied on segment boundaries so a
+    // truncation can never split a grapheme cluster.
+    const text = truncateGraphemes([
+      title,
+      buildDescriptionCredit(article, attribution),
+      `Full story → ${SITE_ORIGIN}/article/${encodeURIComponent(article.id)}` +
+        `?utm_source=social_bluesky_video&utm_medium=social&utm_campaign=scoop_video`,
+    ].filter(Boolean).join("\n\n"), 300);
+
+    const bs = await postVideoToBluesky({
+      text,
+      filePath,
+      // The vertical render is 1080x1920 (videoGeometry). Bluesky uses this to
+      // reserve the right box before the video loads; omitting it makes the
+      // post reflow on play.
+      aspectRatio: { width: 1080, height: 1920 },
+      durationSecs: secs,
+    });
+
+    markVideoBluesky(article.id, { status: "posted", postId: bs.uri });
+    logger.info(
+      `🦋 BLUESKY VIDEO PUBLISHED ${bs.uri} (${posted24h + 1}/${max} today, ` +
+      `${(bs.bytes / 1048576).toFixed(1)}MB, ${secs?.toFixed?.(1) ?? "?"}s) — ${bs.url}`
+    );
+    return { status: "posted", id: bs.uri, url: bs.url, seconds: secs, bytes: bs.bytes };
+
+  } catch (err) {
+    logger.error(
+      `🚨 BLUESKY VIDEO FAILED for ${article.id} — nothing was published. The YouTube video IS ` +
+      `published and unaffected. ${err.message}`
+    );
+    try { markVideoBluesky(article.id, { status: "failed", error: err.message }); }
+    catch (dbErr) { logger.error(`🚨 bluesky: could not record the failure either: ${dbErr.message}`); }
+    return { status: "failed", error: err.message };
+  }
+}
+
 // ─── The cycle ──────────────────────────────────────────────────────────────
 
 /**
@@ -773,6 +930,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     reelToFacebook: _reelToFacebook = reelToFacebook,
     reelToInstagram: _reelToInstagram = reelToInstagram,
     videoToThreads: _videoToThreads = videoToThreads,
+    videoToBluesky: _videoToBluesky = videoToBluesky,
   } = deps;
 
   if (!autopostEnabled()) {
@@ -1087,6 +1245,19 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             spec: r.spec, slides: video.slides, now,
           });
           if (th && th.status !== "off") produced.threads = th;
+
+          // ─── Bluesky ─────────────────────────────────────────────────────
+          // AFTER Threads, so the two slowest sit at the end: Threads sleeps
+          // ~30s unconditionally and this one waits on a transcode job. Both
+          // are bounded, and everything ahead of them is already published.
+          //
+          // Raw-bytes upload, so unlike Instagram and Threads this leaves no
+          // URL for the sweep to race — see migration 026.
+          const bs = await _videoToBluesky(article, {
+            filePath: video.path, title, attribution,
+            spec: r.spec, slides: video.slides, now,
+          });
+          if (bs && bs.status !== "off") produced.bluesky = bs;
         } catch (fbErr) {
           logger.error(
             `🚨 facebook cross-post threw past its own guard for ${article.id} — this is a code ` +

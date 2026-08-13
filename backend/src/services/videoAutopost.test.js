@@ -905,8 +905,13 @@ function withChannel(envVar, value, fn) {
 for (const [channel, envVar, fnName] of [
   ["Instagram", "VIDEO_INSTAGRAM_REELS_ENABLED", "reelToInstagram"],
   ["Threads",   "VIDEO_THREADS_ENABLED",         "videoToThreads"],
+  // Bluesky joins the same loop rather than getting its own copies: the five
+  // properties below are the CHANNEL CONTRACT, and a channel that needs its own
+  // version of them is a channel that has quietly broken it. Its protocol
+  // differences are covered separately further down.
+  ["Bluesky",   "VIDEO_BLUESKY_ENABLED",         "videoToBluesky"],
 ]) {
-  test(`RULE 0 REFUSES the ${channel} publish — nothing reaches Meta`, async () => {
+  test(`RULE 0 REFUSES the ${channel} publish — nothing reaches the platform`, async () => {
     const mod = await import("./videoAutopost.js");
     const r = await withChannel(envVar, "1", () => mod[fnName](GEO_BILAWAL_JAAC, {
       filePath: "/nonexistent/should-never-be-read.mp4",
@@ -1259,4 +1264,265 @@ test("MAX_SCAN defaults above the realistic eligible count but is not infinite",
   // must sit above that (so it is a backstop, not a policy) and below unbounded.
   assert.equal(MAX_SCAN(), 200);
   assert.ok(MAX_SCAN() >= CANDIDATE_POOL(), "a scan bound below the pool would silently cap selection");
+});
+
+// ─── Bluesky: the parts that are NOT like the other channels ────────────────
+//
+// The loop above proves Bluesky honours the shared channel contract. These prove
+// the three things that make it different: raw-bytes upload instead of a URL
+// fetch, two hard platform ceilings, and a transcode job that has to be waited
+// on without the cycle hanging on it.
+
+const { writeFileSync: wfs, mkdirSync: mkd } = await import("node:fs");
+const { truncateGraphemes, videoToBluesky, VIDEO_BLUESKY_MAX_PER_DAY } = await import("./videoAutopost.js");
+const bsky = await import("./blueskyClient.js");
+
+const BS_DIR = path.join(TMP, "bsky");
+mkd(BS_DIR, { recursive: true });
+/** A file of exactly `bytes` length that ffprobe will never be asked about. */
+function fakeMp4(name, bytes) {
+  const p = path.join(BS_DIR, name);
+  wfs(p, Buffer.alloc(bytes, 0x42));
+  return p;
+}
+
+function withBskyEnv(vars, fn) {
+  const keys = {
+    BLUESKY_HANDLE: "test.bsky.social",
+    BLUESKY_APP_PASSWORD: "test-app-password",
+    ...vars,
+  };
+  const saved = {};
+  for (const [k, v] of Object.entries(keys)) { saved[k] = process.env[k]; process.env[k] = String(v); }
+  const restore = () => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  };
+  return Promise.resolve(fn()).finally(restore);
+}
+
+/**
+ * Stand in for the whole AT Protocol surface. `jobStates` is consumed one per
+ * getJobStatus call, the last value repeating — which is how a stuck transcode
+ * is simulated without waiting on a real one.
+ */
+function stubBluesky({ jobStates = ["JOB_STATE_COMPLETED"], onUpload = null } = {}) {
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  let jobIdx = 0;
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url);
+    calls.push({ url: u, init });
+    const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (u.includes("createSession")) return json({ did: "did:plc:test", accessJwt: "acc", refreshJwt: "ref" });
+    if (u.includes("refreshSession")) return json({ did: "did:plc:test", accessJwt: "acc", refreshJwt: "ref" });
+    if (u.includes("getServiceAuth")) return json({ token: "svc-token" });
+    if (u.includes("uploadVideo")) { onUpload?.(u, init); return json({ jobStatus: { jobId: "job-1", state: "JOB_STATE_RUNNING" } }); }
+    if (u.includes("getJobStatus")) {
+      const state = jobStates[Math.min(jobIdx++, jobStates.length - 1)];
+      return json({ jobStatus: {
+        jobId: "job-1", state,
+        ...(state === "JOB_STATE_COMPLETED" ? { blob: { $type: "blob", ref: { $link: "bafy-video" }, mimeType: "video/mp4", size: 1234 } } : {}),
+        ...(state === "JOB_STATE_FAILED" ? { error: "transcode_failed", message: "bad codec" } : {}),
+      } });
+    }
+    if (u.includes("createRecord")) return json({ uri: "at://did:plc:test/app.bsky.feed.post/rkey1", cid: "cid-1" });
+    return json({});
+  };
+  return { calls, restore: () => { globalThis.fetch = realFetch; } };
+}
+
+test("the 100MB ceiling is asserted BEFORE the bytes are read", async () => {
+  // Guarded with a small ceiling so the test does not write 100MB to disk. The
+  // number is env-tunable precisely so the guard is reachable in a test.
+  const file = fakeMp4("too-big.mp4", 64 * 1024);
+  await withBskyEnv({ BLUESKY_VIDEO_MAX_BYTES: 32 * 1024 }, async () => {
+    await assert.rejects(
+      () => bsky.postVideoToBluesky({ text: "t", filePath: file, durationSecs: 60 }),
+      /over the .*MB ceiling — nothing was uploaded/,
+    );
+  });
+  assert.equal(bsky.BLUESKY_VIDEO_MAX_BYTES(), 100 * 1024 * 1024, "the default is the platform's 100MB");
+});
+
+test("a truncated render is refused as implausible, not uploaded", async () => {
+  const file = fakeMp4("tiny.mp4", 128);
+  await withBskyEnv({}, async () => {
+    await assert.rejects(
+      () => bsky.postVideoToBluesky({ text: "t", filePath: file, durationSecs: 60 }),
+      /implausible for a video/,
+    );
+  });
+});
+
+test("the 3-minute ceiling is asserted, and it is the platform's", async () => {
+  const file = fakeMp4("long.mp4", 64 * 1024);
+  await withBskyEnv({}, async () => {
+    await assert.rejects(
+      () => bsky.postVideoToBluesky({ text: "t", filePath: file, durationSecs: 181 }),
+      /181.0s is over the 180s ceiling — nothing was uploaded/,
+    );
+  });
+  assert.equal(bsky.BLUESKY_VIDEO_MAX_SECS(), 180);
+});
+
+test("a missing file is refused by statSync before any network call", async () => {
+  const s = stubBluesky();
+  try {
+    await withBskyEnv({}, async () => {
+      await assert.rejects(() => bsky.postVideoToBluesky({ text: "t", filePath: "/nonexistent/none.mp4", durationSecs: 60 }));
+    });
+    assert.equal(s.calls.length, 0, "nothing may be sent for a file that does not exist");
+  } finally { s.restore(); }
+});
+
+test("THE POLL IS BOUNDED — a stuck transcode fails the publish, it does not hang", async () => {
+  const file = fakeMp4("stuck.mp4", 64 * 1024);
+  const s = stubBluesky({ jobStates: ["JOB_STATE_RUNNING"] });   // never completes
+  try {
+    const started = Date.now();
+    await withBskyEnv({ BLUESKY_VIDEO_POLL_TIMEOUT_MS: 300, BLUESKY_VIDEO_POLL_INTERVAL_MS: 50 }, async () => {
+      await assert.rejects(
+        () => bsky.postVideoToBluesky({ text: "t", filePath: file, durationSecs: 60 }),
+        /did not finish within 300ms.*NOTHING WAS POSTED/s,
+      );
+    });
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 5000, `the bound must actually bound: took ${elapsed}ms`);
+    // The record is what makes a post exist. A timeout must not create one.
+    assert.ok(!s.calls.some(c => c.url.includes("createRecord")), "no post record may be written on timeout");
+  } finally { s.restore(); }
+});
+
+test("a FAILED transcode is reported with its reason, not retried forever", async () => {
+  const file = fakeMp4("failjob.mp4", 64 * 1024);
+  const s = stubBluesky({ jobStates: ["JOB_STATE_FAILED"] });
+  try {
+    await withBskyEnv({}, async () => {
+      await assert.rejects(
+        () => bsky.postVideoToBluesky({ text: "t", filePath: file, durationSecs: 60 }),
+        /FAILED: transcode_failed — bad codec/,
+      );
+    });
+    assert.ok(!s.calls.some(c => c.url.includes("createRecord")));
+  } finally { s.restore(); }
+});
+
+test("the happy path uploads RAW BYTES and embeds a video, not an external card", async () => {
+  const file = fakeMp4("good.mp4", 64 * 1024);
+  let uploadInit = null;
+  const s = stubBluesky({ jobStates: ["JOB_STATE_RUNNING", "JOB_STATE_COMPLETED"], onUpload: (_u, init) => { uploadInit = init; } });
+  try {
+    const out = await withBskyEnv({ BLUESKY_VIDEO_POLL_INTERVAL_MS: 10 }, () =>
+      bsky.postVideoToBluesky({ text: "hello", filePath: file, durationSecs: 60, aspectRatio: { width: 1080, height: 1920 } }));
+
+    // No public URL is ever handed over — this is the property that lets
+    // migration 026 skip 'pending' and the sweep ignore this channel entirely.
+    assert.ok(!s.calls.some(c => /videos-gen\/file/.test(c.url)), "no public URL may be involved");
+    assert.equal(uploadInit.headers["Content-Type"], "video/mp4");
+    assert.ok(Buffer.isBuffer(uploadInit.body), "the MP4 must be sent as bytes");
+    assert.equal(uploadInit.body.length, 64 * 1024);
+
+    const rec = JSON.parse(s.calls.find(c => c.url.includes("createRecord")).init.body).record;
+    assert.equal(rec.embed.$type, "app.bsky.embed.video");
+    assert.equal(rec.embed.video.ref.$link, "bafy-video");
+    assert.deepEqual(rec.embed.aspectRatio, { width: 1080, height: 1920 });
+    assert.equal(out.uri, "at://did:plc:test/app.bsky.feed.post/rkey1");
+    assert.match(out.url, /^https:\/\/bsky\.app\/profile\/.+\/post\/rkey1$/);
+  } finally { s.restore(); }
+});
+
+/**
+ * A REAL one-second MP4, because videoToBluesky measures duration with ffprobe
+ * before it will publish — a Buffer.alloc file is correctly refused as
+ * `unmeasurable`, which is the right behaviour and the wrong fixture.
+ *
+ * Generated rather than committed: `data/videos/` is gitignored working output,
+ * so depending on a file there would pass here and fail on a fresh clone.
+ * Skipped, not failed, when ffmpeg is absent — though a machine without it
+ * cannot render a video at all, so this is a courtesy rather than a real path.
+ */
+let REAL_MP4 = null;
+try {
+  const { execFileSync } = await import("node:child_process");
+  const { getFFmpegPath } = await import("./videoGenerator.js");
+  const ff = getFFmpegPath?.();
+  if (ff) {
+    const out = path.join(BS_DIR, "real-1s.mp4");
+    execFileSync(ff, [
+      "-y", "-hide_banner", "-loglevel", "error",
+      // testsrc, not a flat colour: a second of solid black encodes to ~2KB and
+      // is correctly refused by the 10KB implausible-file floor. The fixture has
+      // to be a plausible video, not merely a valid one.
+      "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=2",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", "2", out,
+    ], { timeout: 30000 });
+    REAL_MP4 = out;
+  }
+} catch { /* leave null — the test below skips */ }
+
+test("the AT-URI is stored, not the bare rkey — handles change, DIDs do not", {
+  skip: REAL_MP4 ? false : "ffmpeg unavailable — cannot build a probeable MP4",
+}, async () => {
+  cycleEnv();
+  const id = seedArt({ source: "BskyWire" });
+  claimVideoPost({ articleId: id, sourceName: "BskyWire", title: "t" });
+  markVideoPublished(id, { youtubeId: "yt-bsky", privacyStatus: "public" });
+  const file = REAL_MP4;
+  const s = stubBluesky({ jobStates: ["JOB_STATE_COMPLETED"] });
+  try {
+    const r = await withBskyEnv({ VIDEO_BLUESKY_ENABLED: "1" }, () =>
+      videoToBluesky({ id, source_name: "BskyWire", category: "world", title: "T", description: "d", content: "c" },
+        { filePath: file, title: "T", attribution: { publisher: "BskyWire" }, slides: [{ caption: "clean" }] }));
+    assert.equal(r.status, "posted", JSON.stringify(r));
+    const row = getVideoPost(id);
+    assert.equal(row.bluesky_status, "posted");
+    assert.match(row.bluesky_post_id, /^at:\/\/did:plc:/, "the AT-URI carries the DID; an rkey alone is not addressable");
+  } finally { s.restore(); }
+});
+
+test("the Bluesky cap is sized against VIDEO_MAX_PER_DAY, like its siblings", () => {
+  const savedMax = process.env.VIDEO_MAX_PER_DAY;
+  const savedOwn = process.env.VIDEO_BLUESKY_MAX_PER_DAY;
+  try {
+    process.env.VIDEO_MAX_PER_DAY = "12";           // prod's real value
+    delete process.env.VIDEO_BLUESKY_MAX_PER_DAY;
+    assert.equal(VIDEO_BLUESKY_MAX_PER_DAY(), 12, "unset must track the master cap, not the code default of 4");
+    process.env.VIDEO_BLUESKY_MAX_PER_DAY = "3";
+    assert.equal(VIDEO_BLUESKY_MAX_PER_DAY(), 3, "and it must be independently settable");
+    process.env.VIDEO_BLUESKY_MAX_PER_DAY = "0";
+    assert.equal(VIDEO_BLUESKY_MAX_PER_DAY(), 0, "0 means 0 — a valid way to pause one channel");
+  } finally {
+    if (savedMax === undefined) delete process.env.VIDEO_MAX_PER_DAY; else process.env.VIDEO_MAX_PER_DAY = savedMax;
+    if (savedOwn === undefined) delete process.env.VIDEO_BLUESKY_MAX_PER_DAY; else process.env.VIDEO_BLUESKY_MAX_PER_DAY = savedOwn;
+  }
+});
+
+test("the sweep guard is NOT widened to Bluesky — there is no fetch window to protect", async () => {
+  // hasPendingUrlFetchPublish's name is its contract. Bluesky uploads bytes
+  // in-band, so including it would pin every MP4 for the full hold in exchange
+  // for guarding a window that does not exist.
+  const { hasPendingUrlFetchPublish } = await import("../models/database.js");
+  cycleEnv();
+  const id = seedArt({ source: "SweepWire" });
+  claimVideoPost({ articleId: id, sourceName: "SweepWire", title: "t" });
+  db.prepare("UPDATE video_posts SET bluesky_status = 'pending' WHERE article_id = ?").run(id);
+  assert.equal(hasPendingUrlFetchPublish(id), false,
+    "a bluesky status must never hold an MP4 back from the sweep");
+  db.prepare("UPDATE video_posts SET instagram_status = 'pending' WHERE article_id = ?").run(id);
+  assert.equal(hasPendingUrlFetchPublish(id), true, "…while Instagram still must");
+});
+
+test("truncateGraphemes cuts on cluster boundaries, not code units", () => {
+  // The reason this exists: `.length` counts UTF-16 code units, so an emoji is
+  // 2 and a family emoji is 11 — a 300-char slice can both truncate a legal
+  // post early and cut a cluster in half, publishing a replacement character.
+  assert.equal(truncateGraphemes("hello", 10), "hello");
+  assert.equal(truncateGraphemes("hello", 3), "hel");
+  const family = "👨‍👩‍👧‍👦";
+  assert.equal([...family].length > 1, true, "the fixture must be a multi-code-point cluster");
+  assert.equal(truncateGraphemes(family, 1), family, "one grapheme must survive whole");
+  assert.equal(truncateGraphemes(family + family, 1), family, "and the cut must not split one");
+  assert.ok(!truncateGraphemes("é👍🏽🇵🇰x", 3).includes("�"));
 });

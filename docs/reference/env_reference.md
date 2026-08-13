@@ -156,6 +156,14 @@ and run in the **worker**. See `docs/video-pipeline.md` for why the rules are wh
 | `VIDEO_EVENT_COOLDOWN_MS` | `48h` | default | yes | Per-event gate at publish time. |
 | `VIDEO_CYCLE_HANG_MS` | `3600000` (1h) | default | yes | A cycle older than this is declared HUNG and a fresh one proceeds. |
 | `VIDEO_PENDING_HANG_MS` | `2700000` (45m) | default | yes | A `pending` row older than this counts as a failed attempt in the two-failure retire rule. |
+| `VIDEO_BLUESKY_ENABLED` | unset (**off**) | unset | yes | The fourth channel's kill switch. Literal `"1"`. Also needs `BLUESKY_HANDLE` + `BLUESKY_APP_PASSWORD`. |
+| `VIDEO_BLUESKY_MAX_PER_DAY` | falls back to `VIDEO_MAX_PER_DAY` (**12** in prod) | unset | yes | Rolling-24h Bluesky cap. `0` is valid and pauses the channel without unsetting the flag. |
+| `BLUESKY_VIDEO_MAX_BYTES` | `104857600` (100MB) | default | yes | Hard platform ceiling, asserted **before** the file is read. Our renders are a few MB, so this is a guard against a future format change, not a live constraint. |
+| `BLUESKY_VIDEO_MAX_SECS` | `180` (3 min) | default | yes | Hard platform ceiling. The format runs 60–100s (§5), so this is not close to binding today. |
+| `BLUESKY_VIDEO_POLL_TIMEOUT_MS` | `120000` (2 min) | default | yes | Wall-clock bound on the transcode poll. On timeout nothing is posted and the error names the jobId; the blob may complete server-side and is orphaned rather than published. |
+| `BLUESKY_VIDEO_POLL_INTERVAL_MS` | `3000` | default | yes | Gap between `getJobStatus` polls, clamped to the deadline. |
+| `BLUESKY_VIDEO_SERVICE_URL` | `https://video.bsky.app` | default | yes | The video service host — **not** the PDS. Uploads and job status go here. |
+| `BLUESKY_VIDEO_SERVICE_DID` | `did:web:video.bsky.app` | default | yes | `aud` for the scoped `getServiceAuth` token. |
 | `VIDEO_ALLOW_PK_DOMESTIC` | unset (**blocked**) | default | yes | Rule 0 escape hatch. Do not set it without reading §Rule 0 of `docs/video-pipeline.md`. |
 | `YOUTUBE_PRIVACY` | `public` | default | yes | Written to `video_posts.privacy_status` on publish. |
 
