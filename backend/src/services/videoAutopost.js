@@ -42,7 +42,10 @@ import {
   markVideoThreads, countThreadsPostsSince,
 } from "../models/database.js";
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
-import { selectionGate, diversifyByPublisher, MAX_PER_PUBLISHER } from "./videoSelection.js";
+import {
+  selectionGate, diversifyByPublisher, MAX_PER_PUBLISHER,
+  publisherCooldownFilter, buildRecentTitleCorpus,
+} from "./videoSelection.js";
 import { resolveAttribution, buildDescriptionCredit } from "./videoAttribution.js";
 import { writeVideoSpec, writePackaging, isVideoSpecEnabled } from "./videoSpecWriter.js";
 import { statesForCard, renderState, fitStatesToDuration, videoDesignKey } from "./videoSlideRenderer.js";
@@ -217,7 +220,62 @@ export const VIDEO_FACEBOOK_MAX_PER_DAY = () => {
 
 const SITE_ORIGIN = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 
-const MAX_ATTEMPTS = Number.parseInt(process.env.VIDEO_MAX_ATTEMPTS_PER_CYCLE || "", 10) || 8;
+/**
+ * THREE BUDGETS, THREE NUMBERS (DrJ, 2026-08-13).
+ *
+ * These were one constant — `MAX_ATTEMPTS`, default 8 — doing three jobs at
+ * three different altitudes, which is what produced `tried 8, produced 0 · spec
+ * spend $0.00000`: the cycle exhausted a budget that exists to cap Gemini spend
+ * without making a single Gemini call.
+ *
+ *   MAX_SPEC_CALLS   THE MONEY. Incremented immediately before _writeVideoSpec
+ *                    and nowhere else, so what it counts is what it is named
+ *                    for. A gate that refuses an article before the model is
+ *                    called costs nothing and now consumes nothing.
+ *
+ *   MAX_SCAN         THE WORK. A backstop, not a policy. Uncounted skips need
+ *                    their own bound or a pathological pool becomes an unbounded
+ *                    loop; after the publisher cooldown and the title corpus
+ *                    were hoisted out of the loop, one scan step is a couple of
+ *                    indexed reads, so this can sit far above the realistic
+ *                    eligible count (measured: 55 eligible from a 200-article
+ *                    pool at 2/publisher) and still bite if diversity is ever
+ *                    loosened. It is logged loudly when hit — no silent caps.
+ *
+ *   CANDIDATE_POOL   THE SAMPLE. Was `MAX_ATTEMPTS * 6` = 48, which made the
+ *                    attempt cap silently size the editorial pool: raising the
+ *                    budget would have widened what the query returns and
+ *                    changed WHICH stories are eligible. Now independent.
+ *
+ * On the pool default of 200: `findFreshUnvideoedArticles` orders by
+ * LENGTH(content) DESC, so the LIMIT does not sample the window — it takes the
+ * longest-bodied articles in it, and body length correlates with masthead.
+ * Measured on a prod snapshot, one 12h window at credibility >= 7:
+ *
+ *   pool, unlimited   449 articles   45 publishers
+ *   LIMIT 48          48 articles    11 publishers   top publisher 25%
+ *   LIMIT 200         200 articles   31 publishers   top publisher 12%
+ *
+ * The reported "Yahoo Finance x25 of 48 fresh" was this, not thin ingestion:
+ * 48 IS the limit, and 25 of the 48 longest bodies in the window came from the
+ * publisher that writes longest. The ordering is deliberately kept — a 5,000-char
+ * body caps the beat count, and that rationale is unchanged. What was wrong was
+ * sampling 48 from it.
+ *
+ * READ AT CALL TIME, NOT AT IMPORT. All three were `const X = parseInt(env)`
+ * evaluated once when the module loaded, which is the minority idiom in this
+ * file — VIDEO_MAX_PER_DAY, videoMinIntervalMs and VIDEO_FACEBOOK_MAX_PER_DAY
+ * are all lazy — and it made them untestable without a fresh module registry.
+ * A budget nobody can write a test for is how the old one drifted from its own
+ * name for this long.
+ */
+export const MAX_SPEC_CALLS = () =>
+  Number.parseInt(process.env.VIDEO_MAX_SPEC_CALLS_PER_CYCLE || "", 10) ||
+  // The name this budget used to have. Honoured so a prod .env that pins the
+  // old one keeps pinning the money, which is the half it was really steering.
+  Number.parseInt(process.env.VIDEO_MAX_ATTEMPTS_PER_CYCLE || "", 10) || 8;
+export const MAX_SCAN = () => Number.parseInt(process.env.VIDEO_MAX_SCAN_PER_CYCLE || "", 10) || 200;
+export const CANDIDATE_POOL = () => Number.parseInt(process.env.VIDEO_CANDIDATE_POOL || "", 10) || 200;
 const CYCLE_HANG_MS = Number.parseInt(process.env.VIDEO_CYCLE_HANG_MS || "", 10) || 60 * 60 * 1000;
 const FONT_FILE = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../assets/fonts/Inter-SemiBold.otf");
 
@@ -745,6 +803,14 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
   if (!dryRun) pingStart(VIDEO_PING);
 
   const attempts = [];
+  // Counted separately from `attempts` on purpose — see the MAX_SPEC_CALLS
+  // header. `attempts.length` is how many candidates were examined; this is how
+  // many of them cost money.
+  let specCalls = 0;
+  // Snapshotted once per cycle. Read lazily (so tests and .env can move them),
+  // but fixed for the duration of a run — a budget that changes underneath a
+  // half-finished loop is not a budget.
+  const maxSpecCalls = MAX_SPEC_CALLS(), maxScan = MAX_SCAN();
   let produced = null, spendUsd = 0;
   let current = null;   // the attempt in flight, so a throw is attributable
 
@@ -781,30 +847,63 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
 
     // Rule 0 FIRST, ahead of every editorial gate. It is absolute and must not
     // be reachable only after something cheaper happened to pass.
-    const raw = findFreshUnvideoedArticles({ limit: MAX_ATTEMPTS * 6, now });
+    const raw = findFreshUnvideoedArticles({ limit: CANDIDATE_POOL(), now });
     const afterRule0 = filterAtSelection(raw);
+
+    // PUBLISHER COOLDOWN, ONCE PER PUBLISHER. It is a fact about a masthead, not
+    // about an article, and asking it per-article is what spent 7 of 8 attempts
+    // to learn 4 facts. Placed ahead of diversity as the coarser, cheaper filter
+    // — not because the order changes the result; see publisherCooldownFilter.
+    const { kept: afterCooldown, dropped: cooled, queries: cooldownQueries } =
+      publisherCooldownFilter(afterRule0, { now });
 
     // PUBLISHER DIVERSITY AT SELECTION. Length-first ordering handed the window
     // to whoever writes longest — Yahoo Finance took 5 of 7 candidates, then 2
     // of 2. The publish-time cooldown cannot fix that: it refuses the second
     // VIDEO, long after the cycle has spent all eight attempts inside one
     // masthead. Capping the attempt list is the only place this is reachable.
-    const { kept: eligible, dropped: crowded } = diversifyByPublisher(afterRule0);
+    const { kept: eligible, dropped: crowded } = diversifyByPublisher(afterCooldown);
     logger.info(
-      `🎬 video cycle: ${raw.length} fresh → ${afterRule0.length} after Rule 0 → ` +
+      `🎬 video cycle: ${raw.length} fresh (pool ${CANDIDATE_POOL()}) → ${afterRule0.length} after Rule 0 → ` +
+      `${afterCooldown.length} after publisher cooldown (${cooldownQueries} publisher(s) checked` +
+      `${cooled.length ? `, dropped ${cooled.length}` : ""}) → ` +
       `${eligible.length} after publisher diversity (max ${MAX_PER_PUBLISHER}/publisher` +
       `${crowded.length ? `, dropped ${crowded.length}` : ""}) · ${rate.published24h}/${rate.max} today`
     );
-    if (crowded.length) {
+    // NO SILENT CAPS. Every article set aside before the loop is attributed to
+    // the filter that took it and to its publisher — these drops used to be
+    // visible as individual SKIP lines, and moving them out of the loop must not
+    // make them invisible.
+    const tally = (list, name) => {
+      if (!list.length) return;
       const by = {};
-      for (const a of crowded) by[a.source_name || "(none)"] = (by[a.source_name || "(none)"] || 0) + 1;
-      // NO SILENT CAPS. What was set aside, and whose, is stated.
-      logger.info(`🎬 diversity set aside: ${Object.entries(by).map(([k, n]) => `${k} x${n}`).join(", ")}`);
-    }
+      for (const a of list) by[a.source_name || "(none)"] = (by[a.source_name || "(none)"] || 0) + 1;
+      logger.info(`🎬 ${name}: ${Object.entries(by).map(([k, n]) => `${k} x${n}`).join(", ")}`);
+    };
+    tally(cooled.map((d) => d.article), "cooldown set aside (published inside 24h)");
+    tally(crowded, "diversity set aside");
+
+    // Built ONCE. cooldownGate ran this query per article, on the ~92% with no
+    // event linkage, for a result that cannot change while the cycle scans.
+    const titleCorpus = buildRecentTitleCorpus({ now });
 
     for (const article of eligible) {
-      if (attempts.length >= MAX_ATTEMPTS) {
-        logger.warn(`🎬 video cycle: hit the ${MAX_ATTEMPTS}-attempt cap without producing a video`);
+      // THE MONEY. Checked here so the cycle stops before selecting an article
+      // it cannot afford to write a spec for, rather than after.
+      if (specCalls >= maxSpecCalls) {
+        logger.warn(
+          `🎬 video cycle: hit the ${maxSpecCalls}-spec-call cap without producing a video ` +
+          `(${attempts.length} candidate(s) examined, $${spendUsd.toFixed(5)} spent)`
+        );
+        break;
+      }
+      // THE WORK. A backstop against a pool that is all cheap refusals; it is
+      // not expected to fire, so it says so loudly when it does.
+      if (attempts.length >= maxScan) {
+        logger.warn(
+          `🎬 video cycle: hit the ${maxScan}-candidate scan bound after only ${specCalls} spec call(s) — ` +
+          `every candidate was refused before the model. This is a selection-yield problem, not a spend problem.`
+        );
         break;
       }
       const n = attempts.length + 1;
@@ -820,7 +919,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       attempts.push(rec);
       current = rec;
 
-      const gate = selectionGate(article, { now });
+      const gate = selectionGate(article, { now, titleCorpus });
       if (!gate.ok) {
         rec.stage = gate.gate; rec.reason = gate.reason;
         logger.info(`🎬 ${n} SKIP ${gate.gate}: ${gate.reason} — ${String(article.title).slice(0, 60)}`);
@@ -844,6 +943,12 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       }
 
       rec.stage = "spec";
+      // THE ONLY PLACE THIS IS INCREMENTED. Counted before the await, not after,
+      // so a call that throws or hangs still spends its slot — the budget is
+      // about what was ASKED of the model, and a request that died mid-flight
+      // may well have been billed.
+      specCalls += 1;
+      rec.specCall = specCalls;
       const r = await _writeVideoSpec(article, {
         allowedSources: [attribution.publisher].filter(Boolean),
         attribution,
@@ -1029,15 +1134,21 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
   function finish(extra) {
     const finishedAt = Date.now();
     const tried = attempts.length;
+    // BOTH NUMBERS, ALWAYS. "tried 8, produced 0 · spec spend $0.00000" was a
+    // true line that could not be read: it looked like eight failed generations
+    // and was in fact eight free refusals. Stating the spec-call count next to
+    // the candidate count makes the difference legible without opening the log.
     logger.info(
-      `🎬 video cycle done: tried ${tried}, produced ${produced ? 1 : 0}` +
-      (tried ? ` (yield 1 in ${tried})` : "") + ` · spec spend $${spendUsd.toFixed(5)}`
+      `🎬 video cycle done: examined ${tried}, spec calls ${specCalls}/${maxSpecCalls}, ` +
+      `produced ${produced ? 1 : 0}` +
+      (specCalls ? ` (yield 1 in ${specCalls} spec call(s))` : "") +
+      ` · spec spend $${spendUsd.toFixed(5)}`
     );
     try {
       recordHeartbeat(VIDEO_CYCLE_HEARTBEAT, {
         phase: produced ? "complete" : (extra?.skipped ? "skipped" : "complete"),
         startedAt, finishedAt, durationMs: finishedAt - startedAt,
-        tried, produced: produced ? 1 : 0, spendUsd: Number(spendUsd.toFixed(5)),
+        tried, specCalls, produced: produced ? 1 : 0, spendUsd: Number(spendUsd.toFixed(5)),
       });
     } catch { /* telemetry never blocks */ }
 
@@ -1073,7 +1184,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       if (detail) pingFail(VIDEO_PING, detail);
       else pingSuccess(VIDEO_PING);
     }
-    return { ...extra, tried, attempts, spendUsd, produced };
+    return { ...extra, tried, specCalls, attempts, spendUsd, produced };
   }
 }
 

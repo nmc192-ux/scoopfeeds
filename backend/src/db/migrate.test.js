@@ -112,3 +112,37 @@ test("024's columns actually exist after bootstrap — the regression itself", a
     assert.ok(cols.has(c), `video_posts.${c} is missing — migration 024 did not run`);
   }
 });
+
+// ─── 025: the stale source_health rows ──────────────────────────────────────
+
+test("025 deletes only the named rows that NEVER succeeded", async () => {
+  const { makeTestDb } = await import("../testing/testDb.js");
+  const { db } = makeTestDb();
+  const m025 = await import("./migrations/025_prune_stale_source_health.js");
+
+  const ins = db.prepare(
+    "INSERT INTO source_health (source_name, last_success, consecutive_failures, total_fetches) VALUES (?, ?, ?, ?)"
+  );
+  ins.run("Reuters", null, 452, 452);                 // debris — goes
+  ins.run("Associated Press", null, 450, 450);        // debris — goes
+  ins.run("Reuters Business", 1750000000000, 0, 12);  // named, but HAS history — stays
+  ins.run("BBC News", null, 3, 3);                    // not named, currently failing — stays
+
+  m025.up(db);
+
+  const left = db.prepare("SELECT source_name FROM source_health ORDER BY source_name").all().map(r => r.source_name);
+  assert.ok(!left.includes("Reuters"), "a never-succeeded removed source must go");
+  assert.ok(!left.includes("Associated Press"), "a never-succeeded removed source must go");
+  assert.ok(left.includes("Reuters Business"), "a named row WITH real history must survive");
+  assert.ok(left.includes("BBC News"), "a live source that is merely failing must survive");
+});
+
+test("025 is idempotent and safe on a table with none of the rows", async () => {
+  const { makeTestDb } = await import("../testing/testDb.js");
+  const { db } = makeTestDb();
+  const m025 = await import("./migrations/025_prune_stale_source_health.js");
+  db.prepare("INSERT INTO source_health (source_name, last_success) VALUES (?, ?)").run("NPR News", null);
+  m025.up(db);
+  m025.up(db);   // schema_migrations already prevents this; the migration must not rely on it
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM source_health").get().n, 1);
+});

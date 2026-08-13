@@ -268,7 +268,13 @@ export function diversifyByPublisher(articles, { max = MAX_PER_PUBLISHER } = {})
  * `videoSelection.test.js` look for it — the move must not become a rename.
  */
 export { tooSimilar, normText as norm } from "./textSimilarity.js";
-import { normText as norm } from "./textSimilarity.js";
+// BOTH NAMES MUST BE IMPORTED, NOT JUST RE-EXPORTED. `export { x } from "…"` is
+// a pure re-export: it makes `x` available to importers of this module and does
+// NOT bind it in local scope. #11 replaced tooSimilar's local definition with
+// the re-export above and imported only `normText`, so `cooldownGate`'s
+// title-similarity fallback has thrown `ReferenceError: tooSimilar is not
+// defined` ever since — see videoSelection.test.js for the regression test.
+import { normText as norm, tooSimilar } from "./textSimilarity.js";
 
 /** Cheap, deterministic, no database. Runs first. */
 export function staticGate(article) {
@@ -296,10 +302,92 @@ export function staticGate(article) {
 }
 
 /**
+ * PUBLISHER COOLDOWN AS A SET-LEVEL PREFILTER (DrJ, 2026-08-13).
+ *
+ * `publisherPublishedSince(source, now - 24h)` is a fact about a PUBLISHER, not
+ * about an article: `now` is fixed for the cycle and the attempt loop breaks the
+ * moment it publishes, so within one cycle every article from a masthead gets
+ * the same answer. Asked once per article it was the same query 7 times, and —
+ * because it ran inside the attempt loop — it spent 7 of the cycle's 8 attempts
+ * to learn at most 4 facts. The live symptom was `tried 8, produced 0 · spec
+ * spend $0.00000`: the whole budget consumed without one Gemini call.
+ *
+ * This is the same correction `diversifyByPublisher` already carries one layer
+ * up — "the publish-time cooldown cannot fix that: it refuses the second VIDEO,
+ * long after the cycle has spent all eight attempts inside one masthead". The
+ * cooldown is the same class of predicate and was left behind in the loop.
+ *
+ * ORDER: this runs before diversifyByPublisher, and — measured, not assumed —
+ * the order is NOT load-bearing today. Diversity caps per publisher and has no
+ * global cap, so removing a whole masthead before or after it yields the same
+ * list in the same order. It is placed first because it is the coarser and
+ * cheaper filter (one query per publisher, shrinking diversity's input), and
+ * because reading order should follow cost order.
+ *
+ * That equivalence is PINNED BY A TEST. Give diversifyByPublisher a global cap
+ * — a total ceiling on eligible articles — and the order becomes load-bearing
+ * immediately: diversity-first would spend the ceiling on mastheads that are
+ * wholly cooled down. The test fails at that moment, which is the point.
+ *
+ * Memoised on the RAW `source_name`, matching `publisherPublishedSince`'s
+ * case-sensitive `WHERE source_name = ?`. Note that `diversifyByPublisher`
+ * buckets case-INSENSITIVELY, so the two disagree about what one publisher is —
+ * pre-existing, not introduced here, and left alone because changing it would
+ * move which articles survive in the same commit that moves where they are
+ * filtered.
+ */
+export function publisherCooldownFilter(articles, { now = Date.now() } = {}) {
+  const verdict = new Map();     // source_name -> reason string | null
+  const kept = [], dropped = [];
+  for (const a of articles || []) {
+    const source = a?.source_name || null;
+    // No publisher name means nothing to cool down — the gate has always let
+    // these through, and the prefilter must not become a stricter rule than the
+    // gate it is hoisting.
+    if (!source) { kept.push(a); continue; }
+    if (!verdict.has(source)) {
+      verdict.set(
+        source,
+        publisherPublishedSince(source, now - PUBLISHER_COOLDOWN_MS) > 0
+          ? `${source} already published inside ${(PUBLISHER_COOLDOWN_MS / 3600000).toFixed(0)}h`
+          : null,
+      );
+    }
+    const reason = verdict.get(source);
+    if (reason) dropped.push({ article: a, reason });
+    else kept.push(a);
+  }
+  return { kept, dropped, queries: verdict.size };
+}
+
+/**
+ * The published-title corpus for the similarity fallback, built ONCE per cycle.
+ *
+ * `recentPublishedTitles` is a query plus an N-way Set build, and `cooldownGate`
+ * ran it per article — on the ~92% of candidates with no event linkage (measured:
+ * only 8.4% of prod candidates link to an event), for a result that cannot change
+ * while the cycle is scanning. Hoisting it is what makes a wide scan cheap enough
+ * to be worth doing.
+ */
+export function buildRecentTitleCorpus({ now = Date.now() } = {}) {
+  return recentPublishedTitles(now - EVENT_COOLDOWN_MS)
+    .map(t => new Set(norm(t).split(" ").filter(w => w.length > 4)));
+}
+
+/**
  * Database-backed gates: publisher cadence, then event cooldown, then the
  * title-similarity fallback for articles with no event.
+ *
+ * The publisher check is RETAINED here even though `publisherCooldownFilter`
+ * now removes those articles upstream. This function is the definition of the
+ * gate, and a caller that has not run the prefilter must still get the whole
+ * rule; the prefilter is an optimisation on top, not a relocation of the
+ * contract. In the video cycle it is therefore unreachable — which is the point.
+ *
+ * `titleCorpus` is accepted so the cycle can build it once. Omit it and it is
+ * built here, exactly as before.
  */
-export function cooldownGate(article, { now = Date.now() } = {}) {
+export function cooldownGate(article, { now = Date.now(), titleCorpus = null } = {}) {
   const source = article?.source_name || null;
   if (source && publisherPublishedSince(source, now - PUBLISHER_COOLDOWN_MS) > 0) {
     return {
@@ -326,8 +414,7 @@ export function cooldownGate(article, { now = Date.now() } = {}) {
   // fallback at all. Without it the 48h rule would cover only the minority of
   // articles the graph happened to link, and the same story under two
   // mastheads would publish twice.
-  const seen = recentPublishedTitles(now - EVENT_COOLDOWN_MS)
-    .map(t => new Set(norm(t).split(" ").filter(w => w.length > 4)));
+  const seen = titleCorpus || buildRecentTitleCorpus({ now });
   if (seen.length && tooSimilar(article.title, seen)) {
     return { ok: false, gate: "title-similarity", reason: "a near-identical headline published inside the cooldown" };
   }

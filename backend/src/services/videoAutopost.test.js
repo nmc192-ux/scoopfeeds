@@ -1034,3 +1034,229 @@ test("the public URL is built from the ARTICLE ID, not the filename", async () =
   assert.ok(!u.includes("vid-v"), "the design key must not appear in the URL");
   assert.match(publicVideoUrl("a b/c"), /a%20b%2Fc$/, "the id must be encoded");
 });
+
+// ─── The three budgets, and the hoisted prefilters ──────────────────────────
+//
+// The defect these pin, verbatim from prod: `tried 8, produced 0 · spec spend
+// $0.00000`. All eight attempts were pre-spec refusals (7 publisher-24h, 1
+// event-48h), so they cost nothing — and still consumed a budget whose entire
+// purpose is capping Gemini spend.
+
+const {
+  publisherCooldownFilter, buildRecentTitleCorpus, cooldownGate, diversifyByPublisher,
+} = await import("./videoSelection.js");
+const { MAX_SPEC_CALLS, MAX_SCAN, CANDIDATE_POOL } = await import("./videoAutopost.js");
+
+/** seedArticle with a custom title/body length — needed to steer ORDER BY LENGTH. */
+let bseq = 0;
+function seedArt({ source, title = null, cred = 9, len = 3000, category = "world" } = {}) {
+  const id = `budget-${++bseq}`;
+  db.prepare(`
+    INSERT INTO articles (id, title, description, content, url, category, source_name,
+                          published_at, fetched_at, credibility, is_duplicate)
+    VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, 0)
+  `).run(id, title || `Budget headline ${id}`, "x".repeat(len), `https://b.example/${id}`,
+         category, source, Date.now() - HOUR, Date.now(), cred);
+  return id;
+}
+/**
+ * Put a publisher inside its 24h cooldown by publishing a video for it.
+ *
+ * BACKDATED TWO HOURS. markVideoPublished stamps `now`, which leaves the SPACING
+ * gate blocking on its own freshness — the cycle would then decline before
+ * reaching any of the selection logic under test and the assertion would pass or
+ * fail for the wrong reason. Two hours is comfortably inside the 24h cooldown
+ * (which is the state being set up) and comfortably outside any spacing window.
+ */
+function coolDown(source) {
+  const id = seedArt({ source, len: 10 });
+  claimVideoPost({ articleId: id, sourceName: source, title: `cooled ${source}` });
+  markVideoPublished(id, { youtubeId: `yt-cool-${source}`, privacyStatus: "public" });
+  db.prepare("UPDATE video_posts SET published_at = ? WHERE article_id = ?")
+    .run(Date.now() - 2 * HOUR, id);
+}
+function withEnv(vars, fn) {
+  const saved = {};
+  for (const [k, v] of Object.entries(vars)) { saved[k] = process.env[k]; process.env[k] = String(v); }
+  const restore = () => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  };
+  return Promise.resolve(fn()).finally(restore);
+}
+
+test("THE DEFECT: cooled publishers no longer consume the spec budget", async () => {
+  cycleEnv();
+  // Four mastheads that already published inside 24h, two candidates each — the
+  // eight free refusals that ate the whole cap in prod. Long bodies so
+  // ORDER BY LENGTH puts every one of them AHEAD of the live candidate.
+  for (const p of ["P1", "P2", "P3", "P4"]) {
+    coolDown(p);
+    seedArt({ source: p, len: 5000 });
+    seedArt({ source: p, len: 4900 });
+  }
+  const fresh = seedArt({ source: "FreshWire", len: 100 });   // sorts LAST
+
+  const res = await runVideoRenderCycle({ dryRun: true, deps: baseDeps() });
+
+  assert.equal(res.error, undefined, `cycle threw: ${res.error}`);
+  assert.equal(res.produced?.articleId, fresh,
+    "the live candidate sits behind 8 cooled ones by body length; it must still be reached");
+  assert.equal(res.specCalls, 1, "exactly one spec call — the eight refusals are free");
+  assert.equal(res.tried, 1, "the cooled articles must never enter the attempt loop at all");
+});
+
+test("the cooldown filter asks once per PUBLISHER, not once per article", () => {
+  cycleEnv();
+  coolDown("Repeat");
+  const arts = [
+    { id: "a", source_name: "Repeat" }, { id: "b", source_name: "Repeat" },
+    { id: "c", source_name: "Repeat" }, { id: "d", source_name: "Cold" },
+    { id: "e", source_name: "Cold" },
+  ];
+  const { kept, dropped, queries } = publisherCooldownFilter(arts, { now: Date.now() });
+  assert.equal(queries, 2, "two distinct publishers means two queries, not five");
+  assert.equal(dropped.length, 3);
+  assert.deepEqual(kept.map(a => a.id), ["d", "e"]);
+  assert.match(dropped[0].reason, /Repeat already published inside 24h/);
+});
+
+test("an article with no publisher name passes the cooldown filter", () => {
+  // The gate has always let these through; a prefilter that is STRICTER than the
+  // gate it hoists is a behaviour change wearing an optimisation's clothes.
+  const { kept, queries } = publisherCooldownFilter(
+    [{ id: "x", source_name: null }, { id: "y" }], { now: Date.now() });
+  assert.equal(kept.length, 2);
+  assert.equal(queries, 0, "no name, no query");
+});
+
+test("cooldown-before-diversity is EQUIVALENT today — pinned so it fails if that changes", () => {
+  // The comment in publisherCooldownFilter claims the order is not load-bearing,
+  // because diversifyByPublisher caps per publisher and has no global ceiling.
+  // Measured here rather than asserted in prose. Add a global cap to diversity
+  // and this test fails, which is the signal that the order now matters.
+  const arts = [
+    { id: "h1", source_name: "HOT" }, { id: "h2", source_name: "HOT" }, { id: "h3", source_name: "HOT" },
+    { id: "c1", source_name: "COLD" }, { id: "c2", source_name: "COLD" }, { id: "d1", source_name: "DEEP" },
+  ];
+  const cool = (l) => l.filter(a => a.source_name !== "HOT");
+  const cooldownFirst = diversifyByPublisher(cool(arts)).kept.map(a => a.id);
+  const diversityFirst = cool(diversifyByPublisher(arts).kept).map(a => a.id);
+  assert.deepEqual(cooldownFirst, diversityFirst,
+    "if these diverge, publisherCooldownFilter's ordering note is now wrong");
+});
+
+test("REGRESSION (#11): the title-similarity branch does not throw ReferenceError", async () => {
+  // `export { tooSimilar } from "…"` is a pure re-export and does NOT bind the
+  // name locally. #11 replaced the local definition with that re-export, so this
+  // branch threw for every article with no event linkage and a non-empty corpus
+  // — which is every article, on any day a video has published in the last 48h.
+  // It stayed invisible because the cadence gates returned first.
+  cycleEnv();
+  const id = seedArt({ source: "SimWire", title: "Undersea cable severed by anchor near Taiwan strait" });
+  claimVideoPost({ articleId: id, sourceName: "SimWire", title: "Undersea cable severed by anchor near Taiwan strait" });
+  markVideoPublished(id, { youtubeId: "yt-sim", privacyStatus: "public" });
+
+  const corpus = buildRecentTitleCorpus({ now: Date.now() });
+  assert.ok(corpus.length > 0, "the corpus must be non-empty or this proves nothing");
+
+  const near = { id: "near-1", title: "Undersea cable severed by anchor near Taiwan strait waters", source_name: "OtherWire" };
+  const far = { id: "far-1", title: "Municipal budget hearing adjourned without a vote", source_name: "OtherWire" };
+  const g1 = cooldownGate(near, { now: Date.now(), titleCorpus: corpus });
+  assert.equal(g1.ok, false);
+  assert.equal(g1.gate, "title-similarity");
+  assert.equal(cooldownGate(far, { now: Date.now(), titleCorpus: corpus }).ok, true);
+});
+
+test("the corpus is injectable, and an omitted one is still built", () => {
+  // Hoisting must not change the ANSWER, only how often the query runs.
+  const now = Date.now();
+  const article = { id: "inj-1", title: "Municipal budget hearing adjourned without a vote", source_name: "OtherWire" };
+  const built = cooldownGate(article, { now });
+  const injected = cooldownGate(article, { now, titleCorpus: buildRecentTitleCorpus({ now }) });
+  assert.deepEqual(built, injected);
+});
+
+test("the spec cap stops the cycle at the cap, counting only spec calls", async () => {
+  cycleEnv();
+  for (const p of ["S1", "S2", "S3", "S4", "S5"]) seedArt({ source: p });
+  const res = await withEnv({ VIDEO_MAX_SPEC_CALLS_PER_CYCLE: 2 }, () =>
+    runVideoRenderCycle({
+      dryRun: true,
+      deps: { ...baseDeps(), writeVideoSpec: async () => ({ ok: false, spec: null, costUsd: 0.0001, reason: "too thin", attempts: 1 }) },
+    }));
+  assert.equal(res.specCalls, 2, "the cap is on spec calls");
+  assert.equal(res.tried, 2, "and nothing is examined beyond it");
+  assert.equal(res.produced, null);
+});
+
+test("free refusals do NOT consume the spec budget — the whole point", async () => {
+  cycleEnv();
+  // Four live-blogs (refused by staticGate, before any model call), long bodies
+  // so they sort first. One real candidate, shortest, last in the queue.
+  for (const p of ["L1", "L2", "L3", "L4"]) {
+    seedArt({ source: p, len: 5000, title: `Ukraine war live: rolling coverage from ${p}` });
+  }
+  const good = seedArt({ source: "GoodWire", len: 100 });
+  const res = await withEnv({ VIDEO_MAX_SPEC_CALLS_PER_CYCLE: 1 }, () =>
+    runVideoRenderCycle({ dryRun: true, deps: baseDeps() }));
+
+  assert.equal(res.tried, 5, "all five were examined");
+  assert.equal(res.specCalls, 1, "only the one that reached the model cost a slot");
+  assert.equal(res.produced?.articleId, good,
+    "with a budget of 1, four free refusals must still leave the call available");
+});
+
+test("the scan bound is a real backstop and says so when it fires", async () => {
+  cycleEnv();
+  for (const p of ["B1", "B2", "B3", "B4", "B5", "B6"]) {
+    seedArt({ source: p, title: `Election night live: rolling coverage from ${p}` });
+  }
+  const res = await withEnv({ VIDEO_MAX_SCAN_PER_CYCLE: 3 }, () =>
+    runVideoRenderCycle({ dryRun: true, deps: baseDeps() }));
+  assert.equal(res.tried, 3, "the scan bound must stop the loop");
+  assert.equal(res.specCalls, 0, "and it fired without a single spec call");
+  assert.equal(res.produced, null);
+});
+
+test("the pool no longer derives from the attempt cap", async () => {
+  // Was `limit: MAX_ATTEMPTS * 6` — raising the budget silently widened the
+  // editorial sample. The two are now independent numbers.
+  assert.equal(CANDIDATE_POOL(), 200, "the default pool is 200, not 8 x 6");
+  await withEnv({ VIDEO_MAX_SPEC_CALLS_PER_CYCLE: 40 }, () => {
+    assert.equal(MAX_SPEC_CALLS(), 40);
+    assert.equal(CANDIDATE_POOL(), 200, "moving the budget must not move the pool");
+  });
+  await withEnv({ VIDEO_CANDIDATE_POOL: 25 }, () => {
+    assert.equal(CANDIDATE_POOL(), 25);
+    assert.equal(MAX_SPEC_CALLS(), 8, "and moving the pool must not move the budget");
+  });
+});
+
+test("the pool limit actually bounds what the cycle examines", async () => {
+  cycleEnv();
+  for (const p of ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6"]) {
+    seedArt({ source: p, title: `Budget vote live: rolling coverage from ${p}` });
+  }
+  const res = await withEnv({ VIDEO_CANDIDATE_POOL: 3 }, () =>
+    runVideoRenderCycle({ dryRun: true, deps: baseDeps() }));
+  assert.equal(res.tried, 3, "six candidates exist; the pool limit admits three");
+});
+
+test("the old env name still pins the money", () => {
+  // Prod may have VIDEO_MAX_ATTEMPTS_PER_CYCLE set; it steered spend, and must
+  // keep steering spend rather than silently reverting to the default.
+  return withEnv({ VIDEO_MAX_ATTEMPTS_PER_CYCLE: 3 }, () => {
+    assert.equal(MAX_SPEC_CALLS(), 3);
+  }).then(() => withEnv({ VIDEO_MAX_ATTEMPTS_PER_CYCLE: 3, VIDEO_MAX_SPEC_CALLS_PER_CYCLE: 9 }, () => {
+    assert.equal(MAX_SPEC_CALLS(), 9, "the new name wins when both are set");
+  }));
+});
+
+test("MAX_SCAN defaults above the realistic eligible count but is not infinite", () => {
+  // Measured: a 200-article pool at 2/publisher yields ~55 eligible. The bound
+  // must sit above that (so it is a backstop, not a policy) and below unbounded.
+  assert.equal(MAX_SCAN(), 200);
+  assert.ok(MAX_SCAN() >= CANDIDATE_POOL(), "a scan bound below the pool would silently cap selection");
+});

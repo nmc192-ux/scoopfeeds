@@ -147,9 +147,12 @@ and run in the **worker**. See `docs/video-pipeline.md` for why the rules are wh
 | `VIDEO_SPEC_ENABLED` | unset (**off**) | `1` | yes | Required, *and* `GEMINI_API_KEY` must be set, or the cycle aborts loudly rather than skipping every candidate. |
 | `VIDEO_MAX_PER_DAY` | `4` | **`12`** | yes | Rolling-24h publish cap. Not a calendar day — a calendar reset lets a quiet day burst. |
 | `VIDEO_MIN_INTERVAL_MS` | `24h / max × 0.8` (≈1.6h at 12/day) | default | yes | Spacing gate. The 0.8 slack gives more opportunities than videos, so a failure costs time rather than a video. |
-| `VIDEO_MAX_ATTEMPTS_PER_CYCLE` | `8` | default | yes | Candidates tried per cycle before giving up. |
+| `VIDEO_MAX_SPEC_CALLS_PER_CYCLE` | `8` | default | yes | **The money.** Gemini spec calls per cycle. Only incremented at the model call, so a gate that refuses an article before it costs nothing and consumes nothing. |
+| `VIDEO_MAX_ATTEMPTS_PER_CYCLE` | `8` | default | yes | **Deprecated name for the above**, still honoured; `VIDEO_MAX_SPEC_CALLS_PER_CYCLE` wins if both are set. It used to count *candidates examined*, which is how a cycle logged `tried 8, produced 0 · spec spend $0.00000` — the whole spend budget consumed without one model call. |
+| `VIDEO_MAX_SCAN_PER_CYCLE` | `200` | default | yes | **The work.** Candidates examined per cycle — a backstop, not a policy, since uncounted free refusals otherwise have no bound. Sits at the pool size so it cannot silently cap selection; logs loudly if it ever fires. |
+| `VIDEO_CANDIDATE_POOL` | `200` | default | yes | **The sample.** `LIMIT` on the candidate query. Was `VIDEO_MAX_ATTEMPTS_PER_CYCLE × 6` = 48, so the spend budget silently sized the editorial pool. Ordering is `LENGTH(content) DESC`, so the limit takes the longest-bodied articles rather than sampling: measured on one 12h prod window, `LIMIT 48` returned 11 publishers out of the 45 present, `LIMIT 200` returned 31. |
 | `VIDEO_MAX_PER_PUBLISHER_PER_CYCLE` | `2` | default | yes | Publisher diversity **at selection**. The publish-time cooldown cannot fix a candidate list already monopolised by one masthead. |
-| `VIDEO_PUBLISHER_COOLDOWN_MS` | `24h` | default | yes | Per-publisher gate at publish time. |
+| `VIDEO_PUBLISHER_COOLDOWN_MS` | `24h` | default | yes | Per-publisher gate. Applied as a **set-level prefilter** — evaluated once per publisher before the attempt loop, not once per article, because within a cycle it is a fact about a masthead. |
 | `VIDEO_EVENT_COOLDOWN_MS` | `48h` | default | yes | Per-event gate at publish time. |
 | `VIDEO_CYCLE_HANG_MS` | `3600000` (1h) | default | yes | A cycle older than this is declared HUNG and a fresh one proceeds. |
 | `VIDEO_PENDING_HANG_MS` | `2700000` (45m) | default | yes | A `pending` row older than this counts as a failed attempt in the two-failure retire rule. |
