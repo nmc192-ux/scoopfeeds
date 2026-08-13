@@ -16,7 +16,7 @@
 import { Router } from "express";
 import express from "express";
 import { z } from "zod";
-import { writeFileSync, existsSync, mkdirSync, statSync } from "fs";
+import { writeFileSync, existsSync, mkdirSync, statSync, readdirSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import {
@@ -848,10 +848,48 @@ router.post("/reset-failed", express.json({ limit: "8kb" }), (req, res) => {
 // Public — needed so social platform embeds + the admin review UI can play
 // the video. Falls back to 404 cleanly when a job hasn't been rendered yet.
 router.get("/file/:articleId", (req, res) => {
+  // SANITISED FIRST, and the sanitised value is the only thing that touches the
+  // filesystem. This route is PUBLIC (adminAuth's one allowlisted prefix), so
+  // the id is attacker-controlled; anything outside [a-z0-9_-] becomes "_" and
+  // path.join can therefore never escape VIDEOS_DIR.
   const articleId = String(req.params.articleId).replace(/[^a-z0-9_-]/gi, "_");
-  const filePath  = path.join(VIDEOS_DIR, `${articleId}-shorts.mp4`);
-  if (!existsSync(filePath)) return res.status(404).json({ ok: false, error: "not rendered yet" });
+
+  // TWO NAMING SCHEMES, and until 2026-08-13 this route only knew the older one.
+  //
+  //   legacy  {articleId}-shorts.mp4              — videoPublisher / videos-gen
+  //   autopost {articleId}-{videoDesignKey}.mp4   — the daily loop
+  //
+  // The design key is a content fingerprint that changes whenever a layout
+  // module changes, so it cannot be reconstructed from the id alone. The result
+  // was that every video the daily loop produced 404'd here — which did not
+  // matter while nothing consumed the URL, and matters completely now that
+  // Instagram and Threads publish BY fetching it.
+  //
+  // Legacy first: it is an exact stat() rather than a directory scan, and the
+  // legacy pipeline is the only one that ever wrote that name.
+  const legacy = path.join(VIDEOS_DIR, `${articleId}-shorts.mp4`);
+  let filePath = existsSync(legacy) ? legacy : null;
+
+  if (!filePath && existsSync(VIDEOS_DIR)) {
+    // Newest match wins. A design-key change leaves the old render on disk until
+    // the sweep, and serving the stale one would publish a video that no longer
+    // matches what the loop produced.
+    const prefix = `${articleId}-`;
+    let newest = null;
+    for (const entry of readdirSync(VIDEOS_DIR)) {
+      if (!entry.startsWith(prefix) || !entry.endsWith(".mp4")) continue;
+      const full = path.join(VIDEOS_DIR, entry);
+      try {
+        const mtime = statSync(full).mtimeMs;
+        if (!newest || mtime > newest.mtime) newest = { full, mtime };
+      } catch { /* raced with the sweep; skip it */ }
+    }
+    filePath = newest?.full ?? null;
+  }
+
+  if (!filePath) return res.status(404).json({ ok: false, error: "not rendered yet" });
   res.type("video/mp4");
+  // Meta fetches this asynchronously and may retry, so it must stay cacheable.
   res.setHeader("Cache-Control", "public, max-age=86400, immutable");
   res.sendFile(filePath);
 });
