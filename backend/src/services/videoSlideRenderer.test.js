@@ -428,3 +428,125 @@ test("audio duration drives the hold, exactly", async () => {
       `${n} states over ${audio}s audio produced a ${total}s slide`);
   }
 });
+
+// ─── Vertical display-type auto-fit ─────────────────────────────────────────
+//
+// EARNED 2026-08-14, from a live YouTube Short: the stat figure "14,000"
+// rendered with its last glyph clipped at the right frame edge. Vertical is
+// 1080 wide against 16:9's 1920, and the figure size was a fixed 400px carried
+// over from a frame with 792px more measure.
+//
+// These assert on MEASURED WIDTH rather than on rendered pixels: the metrics
+// table in videoSlideChrome is itself derived from renders (see its header), so
+// re-rendering here would test satori rather than the fit. The rendered-ink
+// verification is the ground harness's job and its numbers are in the commit.
+
+const { antonWidth, fitDisplaySize, ANTON_ADV } = await import("./videoSlideChrome.js");
+const { geometryFor } = await import("./videoGeometry.js");
+const VG = geometryFor("vertical");
+const HG = geometryFor("horizontal");
+
+/** Widest ink any state of this card puts on screen, from the tree itself. */
+function widestAntonInTree(node, acc = []) {
+  const st = node?.props?.style;
+  if (st?.fontFamily === "Anton" && typeof st.fontSize === "number") {
+    const s = node.props.children?.[0]?.props?.children;
+    if (s != null) acc.push({ text: String(s), size: st.fontSize, ls: st.letterSpacing || 0 });
+  }
+  for (const c of node?.props?.children || []) if (c) widestAntonInTree(c, acc);
+  return acc;
+}
+
+test("Anton digits are NOT tabular — which is why the fix is width-driven", () => {
+  // A digit-COUNT step would have been wrong: same length, 17 units apart.
+  assert.equal(ANTON_ADV["1"], 33);
+  assert.equal(ANTON_ADV["4"], 50);
+  assert.ok(antonWidth("11,111", 400) < antonWidth("44,444", 400) - 100,
+    "at display size the two are >100px apart despite identical character counts");
+});
+
+test("THE REPORTED CASE: 14,000 fits the vertical measure after the fit", () => {
+  const card = { t: "stat", eyebrow: "F", value: "14,000", lines: ["a", "b"], hi: 1, source: "R", caption: "c" };
+  const states = statesForCard(card, { outlet: "R", slideIndex: 2, slideCount: 7, orientation: "vertical" });
+  for (const st of states) {
+    for (const run of widestAntonInTree(st.tree)) {
+      assert.ok(antonWidth(run.text, run.size, run.ls) <= VG.contentW,
+        `"${run.text}" at ${run.size}px is ${Math.round(antonWidth(run.text, run.size, run.ls))}px against a ${VG.contentW}px measure`);
+    }
+  }
+});
+
+test("every plausible figure, with and without a unit, holds the measure", () => {
+  const ctx = { outlet: "R", slideIndex: 2, slideCount: 7, orientation: "vertical" };
+  for (const unit of [null, "%", "bn"]) {
+    for (const value of ["7", "70", "700", "7,000", "14,000", "44,444", "140,000", "1,400,000", "12,345,678"]) {
+      const card = { t: "stat", eyebrow: "F", value, unit, lines: ["a", "b"], hi: 1, source: "R", caption: "c" };
+      for (const st of statesForCard(card, ctx)) {
+        // The value box is a ROW of value + unit, so the runs are summed, not maxed.
+        const runs = widestAntonInTree(st.tree).filter(r => r.text === value || r.text === unit);
+        const total = runs.reduce((s, r) => s + antonWidth(r.text, r.size, r.ls), 0) + (unit ? 12 : 0);
+        assert.ok(total <= VG.contentW, `${value}${unit || ""} → ${Math.round(total)}px > ${VG.contentW}px`);
+      }
+    }
+  }
+});
+
+test("the unit keeps its 37.5% ratio to the figure when the figure shrinks", () => {
+  // Holding the unit at 150 while the figure shrank would invert the hierarchy
+  // on exactly the cards where the number matters most.
+  const ctx = { outlet: "R", slideIndex: 2, slideCount: 7, orientation: "vertical" };
+  const card = { t: "stat", eyebrow: "F", value: "12,345,678", unit: "%", lines: ["a"], hi: 0, source: "R", caption: "c" };
+  const st = statesForCard(card, ctx).find(s => s.key === "s2");
+  const runs = widestAntonInTree(st.tree);
+  const val = runs.find(r => r.text === "12,345,678");
+  const un = runs.find(r => r.text === "%");
+  assert.ok(val.size < 400, "this figure must have been fitted down");
+  assert.equal(un.size, Math.round(val.size * 150 / 400));
+});
+
+test("both title lines get ONE size, decided by the wider line", () => {
+  const ctx = { outlet: "R", slideIndex: 1, slideCount: 7, orientation: "vertical" };
+  const card = { t: "title", eyebrow: "B",
+    lines: [["COUNTERTERRORISMINVESTIGATION", "white"], ["SHORT", "lime"]], sub: "s", date: "AUG 14", caption: "c" };
+  const st = statesForCard(card, ctx).find(s => s.key === "s3");
+  const sizes = new Set(widestAntonInTree(st.tree)
+    .filter(r => r.text.includes("COUNTER") || r.text === "SHORT").map(r => r.size));
+  assert.equal(sizes.size, 1, "two headline lines at different sizes read as a mistake, not typography");
+  for (const r of widestAntonInTree(st.tree)) {
+    assert.ok(antonWidth(r.text, r.size, r.ls) <= VG.contentW, `"${r.text}" overflows`);
+  }
+});
+
+test("a word that fits is NOT shrunk — the fit is a ceiling, not a policy", () => {
+  const ctx = { outlet: "R", slideIndex: 1, slideCount: 7, orientation: "vertical" };
+  const card = { t: "title", eyebrow: "B", lines: [["CABLE", "white"], ["CUT", "lime"]], sub: "s", date: "AUG 14", caption: "c" };
+  const st = statesForCard(card, ctx).find(s => s.key === "s3");
+  assert.equal(widestAntonInTree(st.tree).find(r => r.text === "CABLE").size, 104,
+    "short headlines must render at the shipped nominal size");
+});
+
+test("16:9 IS NOT TOUCHED — it keeps its fixed sizes and its wider measure", () => {
+  // The horizontal layout was never overflowing: the same figures end at
+  // 833-1500px against an 1824px measure. Fitting it too would have changed a
+  // render that is proven byte-identical, for no defect.
+  const ctx = { outlet: "R", slideIndex: 2, slideCount: 7 };   // no orientation → horizontal
+  const card = { t: "stat", eyebrow: "F", value: "1,400,000", unit: "%", lines: ["a", "b"], hi: 1, source: "R", caption: "c" };
+  const runs = widestAntonInTree(statesForCard(card, ctx).find(s => s.key === "s2").tree);
+  // 340/120, not vertical's 400/150 — the two layouts have always had their own
+  // display scale, which is the point: this is a fork, not a shared constant.
+  assert.equal(runs.find(r => r.text === "1,400,000").size, 340, "horizontal keeps its fixed 340px figure");
+  assert.equal(runs.find(r => r.text === "%").size, 120, "and its fixed 120px unit");
+  const total = runs.reduce((s, r) => s + antonWidth(r.text, r.size, r.ls), 0) + 12;
+  assert.ok(total <= HG.contentW, "which is fine, because 1728px of measure holds it");
+});
+
+test("fitDisplaySize reports overflow instead of truncating at the floor", () => {
+  // No silent caps. If even the floor does not fit, the caller logs and renders
+  // the figure WHOLE — a clipped number is a wrong number.
+  const r = fitDisplaySize((size) => size * 100, { nominalSize: 400, maxWidth: 10, minSize: 200 });
+  assert.equal(r.size, 200);
+  assert.ok(r.fitted);
+  assert.equal(r.overflow, 200 * 100 - 10);
+  const ok = fitDisplaySize((size) => size, { nominalSize: 400, maxWidth: 1000, minSize: 200 });
+  assert.deepEqual(ok, { size: 400, fitted: false, overflow: 0 });
+});

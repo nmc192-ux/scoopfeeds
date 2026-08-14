@@ -32,6 +32,70 @@ export const COLORS = Object.freeze({
 
 export const FONTS = { inter: "Inter", anton: "Anton" };
 
+// ─── Anton metrics, for a SYNCHRONOUS fit ───────────────────────────────────
+//
+// WHY A BAKED TABLE. `statesForCard` is synchronous and three test files plus
+// the assembler depend on that, but the only in-process way to measure text is
+// `satori()`, which is async. Rather than make the whole layout path async for
+// a width check, the ADVANCE of every glyph the display face can receive is
+// measured once, offline, and baked here.
+//
+// MEASURED 2026-08-14 at size 100, by difference: adv(X) = ink("HXH") - ink("HH").
+// Ink width alone would fold in side bearings and under-measure a run, which
+// fails in the dangerous direction. Re-derive with the same method if
+// Anton-Regular.ttf is ever replaced — and note that replacing the font file
+// changes VIDEO_BUILDER_FINGERPRINT only if the font is hashed, which it is not.
+//
+// ANTON'S DIGITS ARE NOT TABULAR. "1" is 33 against 50 for every other digit —
+// a 34% difference. This is exactly why the fix is width-driven rather than the
+// digit-COUNT step it looked like it could be: "11,111" and "44,444" are the
+// same length and 100px apart at display size, so a count-based rule would
+// shrink one unnecessarily and let the other clip.
+export const ANTON_ADV_REF = 100;
+export const ANTON_ADV = Object.freeze({
+  "0": 50, "1": 33, "2": 50, "3": 50, "4": 50, "5": 50, "6": 50, "7": 50, "8": 50, "9": 50,
+  ",": 24, ".": 23, "%": 106, "$": 47, "+": 36, "-": 31, " ": 24,
+  A: 49, B: 48, C: 48, D: 50, E: 42, F: 40, G: 49, H: 50, I: 23, J: 47, K: 48, L: 40, M: 75,
+  N: 50, O: 49, P: 48, Q: 50, R: 48, S: 46, T: 40, U: 48, V: 47, W: 72, X: 49, Y: 45, Z: 41,
+});
+// An unmeasured glyph is assumed as wide as the widest letter, so an unexpected
+// character shrinks the type rather than silently overflowing the frame.
+const ANTON_ADV_FALLBACK = 75;
+
+/** Rendered width of `str` in Anton at `size`, including letter-spacing gaps. */
+export function antonWidth(str, size, letterSpacing = 0) {
+  const chars = [...String(str ?? "")];
+  if (!chars.length) return 0;
+  let units = 0;
+  for (const ch of chars) {
+    units += ANTON_ADV[ch] ?? ANTON_ADV[ch.toUpperCase()] ?? ANTON_ADV_FALLBACK;
+  }
+  return (units / ANTON_ADV_REF) * size + letterSpacing * (chars.length - 1);
+}
+
+/**
+ * The largest size at or below `nominalSize` at which `measure(size)` fits.
+ *
+ * Takes a MEASURE FUNCTION rather than a string so a composite — the stat card's
+ * value plus its unit, which are two Anton runs at a fixed size ratio — can be
+ * fitted as the single object it reads as. Steps down rather than solving
+ * algebraically because the composite is not affine in size once a fixed pixel
+ * margin sits between the runs.
+ *
+ * Returns `{ size, fitted, overflow }`. `overflow` is non-zero only when even
+ * `minSize` does not fit — the caller is expected to log that loudly. Nothing
+ * here truncates: shrinking to a floor and reporting is always preferable to
+ * dropping a glyph off a figure, because a clipped number is a WRONG number.
+ */
+export function fitDisplaySize(measure, { nominalSize, maxWidth, minSize, step = 4 }) {
+  if (measure(nominalSize) <= maxWidth) return { size: nominalSize, fitted: false, overflow: 0 };
+  for (let s = nominalSize - step; s > minSize; s -= step) {
+    if (measure(s) <= maxWidth) return { size: s, fitted: true, overflow: 0 };
+  }
+  const w = measure(minSize);
+  return { size: minSize, fitted: true, overflow: Math.max(0, Math.round(w - maxWidth)) };
+}
+
 // ─── Tree helpers — no geometry, pure shape ─────────────────────────────────
 
 export const box = (style, children = []) => ({ type: "div", props: { style: { display: "flex", ...style }, children } });
