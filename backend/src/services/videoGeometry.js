@@ -85,11 +85,16 @@ export const HORIZONTAL = Object.freeze({
  *     on the device     ~13  →  measured off DrJ's screenshots.
  *
  *   The last step is the one this number exists for. Shorts and Reels fill a
- *   screen taller than 9:16 by cropping the SIDES, and the amount depends on the
- *   handset's aspect ratio — roughly 52px per side to explain the reading above.
+ *   screen taller than 9:16 by cropping the SIDES — CONFIRMED on a device, not
+ *   inferred: the same screenshots that settled safeTop show the top edge intact
+ *   while the horizontal inset has collapsed. The amount depends on the
+ *   handset's aspect ratio, roughly 52px per side to explain the reading above.
  *   We cannot measure it, we cannot detect it, and it differs per phone, so the
- *   margin has to absorb it. 104 publishes at ~95 and leaves ~45 visible under
+ *   margin has to absorb it. 104 publishes at ~96 and leaves ~46 visible under
  *   the observed crop; 96 would have left ~37.
+ *
+ *   That the crop is HORIZONTAL ONLY is why safeTop survives at 140 while
+ *   marginX had to rise: the two edges are not exposed to the same thing.
  *
  *   That the chrome, the eyebrow and the display line all read the SAME ~13 is
  *   what identifies this as a uniform downstream crop rather than a layout bug:
@@ -106,12 +111,19 @@ export const HORIZONTAL = Object.freeze({
  * asymmetric numbers above are drawn by the stills harness's --safe overlay
  * alongside the 4:5 line, so the choice is checkable by looking.
  *
- * ⚠️ safeTop, safeBottom and safeRight REMAIN UNVERIFIED ON A DEVICE as
- * numbers, though DrJ's 2026-08-14 screenshots confirmed the two that matter
- * most: captions clear the handle row (safeBottom 320) and nothing runs under
- * the action rail (safeRight 168). safeTop 140 is still open — the screenshot
- * carried an iOS return-to-app banner, which pushes YouTube's own chrome DOWN
- * toward our content and so shows the pessimistic case.
+ * ✅ VERIFIED ON A DEVICE, 2026-08-14, from full-resolution Instagram Reels and
+ * YouTube Shorts screenshots. All three safe-area numbers hold:
+ *
+ *   safeBottom 320 — captions clear the handle row.
+ *   safeRight  168 — nothing runs under the action rail.
+ *   safeTop    140 — the eyebrow sits on its own row, clearly above YouTube's
+ *                    search and menu icons, WITH the iOS return-to-app banner
+ *                    present. That banner pushes YouTube's chrome DOWN toward
+ *                    our content, so the pessimistic case is the one that
+ *                    passed and the ordinary case has more clearance still.
+ *
+ * These stopped being reasoned numbers and became measured ones. What is NOT
+ * measurable from here is the player's horizontal crop — see marginX above.
  */
 const V_CANVAS = { w: 1080, h: 1920 };
 const V_SAFE_BOTTOM = 320;
