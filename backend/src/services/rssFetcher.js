@@ -28,17 +28,72 @@ const parser = new Parser({
     item: [
       ["media:content", "mediaContent", { keepArray: false }],
       ["media:thumbnail", "mediaThumbnail", { keepArray: false }],
+      // MEDIA RSS ALLOWS media:content TO BE WRAPPED IN media:group, and
+      // rss-parser's item-level customFields only match DIRECT children of
+      // <item>. ABC Australia ships an image on 25/25 items and we recorded
+      // image_url on 0 of them — the field was never absent, it was one level
+      // down and invisible to the extractor. Measured 2026-08-14.
+      ["media:group", "mediaGroup", { keepArray: false }],
       ["enclosure", "enclosure", { keepArray: false }],
       ["dc:creator", "dcCreator"],
     ],
   },
 });
 
-function extractImageUrl(item) {
+/**
+ * Is this Media RSS entry an IMAGE? A media:group legitimately carries video
+ * and audio renditions alongside the stills, and `medium`/`type` are how the
+ * spec says which is which. Without this an item with a video rendition first
+ * would set image_url to an .mp4.
+ *
+ * Entries with NEITHER attribute are accepted: `medium` is optional in the spec
+ * and some feeds omit both on a plain still. Rejecting those would trade this
+ * bug for a quieter one.
+ */
+function isImageEntry(attrs) {
+  if (!attrs?.url) return false;
+  if (attrs.medium && attrs.medium !== "image") return false;
+  if (attrs.type && !String(attrs.type).startsWith("image/")) return false;
+  return true;
+}
+
+/**
+ * Pick one URL out of a media:content / media:thumbnail list.
+ *
+ * PUBLISHER'S CHOICE FIRST. ABC ships four crops of the same photo — 16:9, 1:1,
+ * 3:2 and 3:4 — all at the same 862px width, so "widest" cannot discriminate
+ * between them. One carries `isDefault="true"`, which is the publisher saying
+ * which crop represents the story. That beats any rule we could invent.
+ *
+ * Width is the tiebreak only when nobody claims default, because the social card
+ * cascade applies a minimum-dimension floor downstream and the largest rendition
+ * is the one most likely to clear it.
+ */
+function pickFromMediaList(list) {
+  const entries = (Array.isArray(list) ? list : [list])
+    .map((e) => e?.["$"] ?? e)
+    .filter(isImageEntry);
+  if (!entries.length) return null;
+  const preferred =
+    entries.find((e) => String(e.isDefault) === "true") ||
+    entries.slice().sort((a, b) => (Number(b.width) || 0) - (Number(a.width) || 0))[0];
+  return preferred?.url || null;
+}
+
+export function extractImageUrl(item) {
   // Try various image fields
   if (item.mediaContent?.["$"]?.url) return item.mediaContent["$"].url;
   if (item.mediaThumbnail?.["$"]?.url) return item.mediaThumbnail["$"].url;
   if (item.enclosure?.url && item.enclosure.type?.startsWith("image/")) return item.enclosure.url;
+
+  // THEN the nested form, deliberately AFTER the three above so that every feed
+  // which already works keeps producing byte-identical output. This branch can
+  // only fire where the old code returned null.
+  const g = item.mediaGroup;
+  if (g) {
+    const fromGroup = pickFromMediaList(g["media:content"]) || pickFromMediaList(g["media:thumbnail"]);
+    if (fromGroup) return fromGroup;
+  }
 
   // Try to extract from content/description HTML
   const html = item["content:encoded"] || item.content || item.description || "";
