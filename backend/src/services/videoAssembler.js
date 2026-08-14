@@ -232,6 +232,46 @@ export async function buildCaptionFilter({ text, workDir, slideIndex, fontFile, 
   }).join(",");
 }
 
+/**
+ * FILM GRAIN — static, not temporal, and that choice is the whole cost story.
+ *
+ * Measured 2026-08-14 on a 43s vertical render, final encode from clean masters:
+ *
+ *   clean         2.0s    1.7MB
+ *   static 9      7.0s    7.7MB
+ *   static 14     7.6s    8.9MB      <- shipped
+ *   temporal 5   15.0s    9.0MB
+ *   temporal 9   33.4s   31.6MB
+ *
+ * Static at 14 costs about the same as temporal at 5 and looks considerably
+ * stronger; temporal at a comparable strength is roughly 4x the bytes and 4x the
+ * encode. Grain is unique per pixel per frame, so temporal grain defeats
+ * inter-frame compression completely — that is the 31.6MB.
+ *
+ * THE SEED IS FIXED ON PURPOSE. Slides are encoded separately and concatenated,
+ * and an unseeded `noise` would generate a different still pattern per slide —
+ * the texture would visibly jump at every cut, which is worse than no texture.
+ * One seed means one grain field across the whole video.
+ *
+ * VIDEO_GRAIN_STRENGTH=0 removes the filter node entirely rather than adding a
+ * zero-strength one: zero means zero, and it also means no encode cost at all.
+ */
+const GRAIN_SEED = 20260814;
+export const grainStrength = () => {
+  const raw = process.env.VIDEO_GRAIN_STRENGTH;
+  if (raw === undefined || raw === "") return 14;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0 || n > 100) {
+    logger.warn(`🎬 VIDEO_GRAIN_STRENGTH="${raw}" is not an integer 0-100 — using 14`);
+    return 14;
+  }
+  return n;
+};
+export const grainChain = () => {
+  const n = grainStrength();
+  return n > 0 ? `,noise=alls=${n}:allf=u:all_seed=${GRAIN_SEED}` : "";
+};
+
 export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0, caption = null, orientation = "horizontal" }) {
   const CV = geometryFor(orientation).canvas;
   const parts = [];
@@ -277,7 +317,7 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
     parts.push(
       `[${last}]scale=${w2s}:${h2s}:flags=lanczos,` +
       `crop=${CV.w}:${CV.h}:x=${offX}:y=${offY},` +
-      `setsar=1${captionChain}[out]`
+      `setsar=1${captionChain}${grainChain()}[out]`
     );
     return { filter: parts.join("; "), totalDuration: total };
   }
@@ -316,7 +356,7 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
   parts.push(
     `[${last}]scale=${w2}:${h2}:flags=lanczos,` +
     `crop=${cw}:${ch}:x='${Math.round(padX / 2)}+${xExpr}':y='${Math.round(padY / 2)}+${yExpr}',` +
-    `scale=${CV.w}:${CV.h}:flags=lanczos,setsar=1${captionChain}[out]`
+    `scale=${CV.w}:${CV.h}:flags=lanczos,setsar=1${captionChain}${grainChain()}[out]`
   );
 
   return { filter: parts.join("; "), totalDuration: total };

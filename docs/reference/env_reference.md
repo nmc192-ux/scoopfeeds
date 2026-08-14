@@ -164,6 +164,7 @@ and run in the **worker**. See `docs/video-pipeline.md` for why the rules are wh
 | `BLUESKY_VIDEO_POLL_INTERVAL_MS` | `3000` | default | yes | Gap between `getJobStatus` polls, clamped to the deadline. |
 | `BLUESKY_VIDEO_SERVICE_URL` | `https://video.bsky.app` | default | yes | The video service host — **not** the PDS. Uploads and job status go here. |
 | `BLUESKY_VIDEO_SERVICE_DID` | `did:web:video.bsky.app` | default | yes | `aud` for the scoped `getServiceAuth` token. |
+| `VIDEO_GRAIN_STRENGTH` | `14` | default | yes | Film grain, applied per slide as a STATIC field (`allf=u`) with a fixed seed — slides are encoded separately, and an unseeded pattern would jump at every cut. Measured on a 43s vertical render: static 14 costs 7.6s / 8.9MB against a clean 2.0s / 1.7MB, while TEMPORAL grain at a comparable strength costs 33.4s / 31.6MB — grain is unique per pixel per frame, so temporal defeats inter-frame compression. `0` removes the filter node entirely. |
 | `VIDEO_ALLOW_PK_DOMESTIC` | unset (**blocked**) | default | yes | Rule 0 escape hatch. Do not set it without reading §Rule 0 of `docs/video-pipeline.md`. |
 | `YOUTUBE_PRIVACY` | `public` | default | yes | Written to `video_posts.privacy_status` on publish. |
 
