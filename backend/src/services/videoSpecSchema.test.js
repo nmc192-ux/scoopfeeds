@@ -1290,17 +1290,25 @@ test("taped is NOT in the mount library", () => {
 
 const { unattributedMotive, MOTIVE_ERROR } = await import("./videoSpecSchema.js");
 
+// A source that reports an OBSTACLE and nobody's purpose. The gate now requires
+// a source to accuse against — "without a source there is no case" — so these
+// tests supply the shape the gate exists for rather than passing nothing.
+const NO_MOTIVE_SOURCE =
+  "Craig and Lindsay Foreman face a ten-year sentence. " +
+  "Their protective detail has blocked three attempts to serve papers in the civil case.";
+
 test("THE LIVE FAILURE: an unattributed motive is refused", () => {
   assert.ok(unattributedMotive(
-    "A court must decide whether the Foreman family can use taxpayer-funded security to keep a lawsuit at bay."),
+    "A court must decide whether the Foreman family can use taxpayer-funded security to keep a lawsuit at bay.",
+    NO_MOTIVE_SOURCE),
     "this is the sentence the rule exists for");
 });
 
 test("attribution is the escape, and stating the effect needs none", () => {
   // The rule costs a rewrite, never the idea.
-  assert.equal(unattributedMotive("The plaintiffs say the detail is being used to keep the suit at bay."), null);
-  assert.equal(unattributedMotive("The protection has blocked three attempts to serve papers."), null);
-  assert.equal(unattributedMotive("Beijing says the policy is designed to increase African exports."), null);
+  assert.equal(unattributedMotive("The plaintiffs say the detail is being used to keep the suit at bay.", NO_MOTIVE_SOURCE), null);
+  assert.equal(unattributedMotive("The protection has blocked three attempts to serve papers.", NO_MOTIVE_SOURCE), null);
+  assert.equal(unattributedMotive("Beijing says the policy is designed to increase African exports.", NO_MOTIVE_SOURCE), null);
 });
 
 test("ordinary reporting is untouched", () => {
@@ -1309,7 +1317,7 @@ test("ordinary reporting is untouched", () => {
     "Fifty-three countries, duty free, until twenty twenty-eight.",
     "She has been out of sight four years. Now state media says she is under house arrest.",
     "Seventy percent of recorded faults come down to a ship dragging its anchor.",
-  ]) assert.equal(unattributedMotive(c), null, `false positive on: ${c}`);
+  ]) assert.equal(unattributedMotive(c, NO_MOTIVE_SOURCE), null, `false positive on: ${c}`);
 });
 
 test("it does NOT require a name in the caption — the live case had none", () => {
@@ -1317,8 +1325,8 @@ test("it does NOT require a name in the caption — the live case had none", () 
   // prompted the rule: "the Foreman family" is one capitalised surname plus a
   // lowercase noun, and the individuals were named two cards earlier. A subject
   // introduced earlier is just as identifiable to a viewer.
-  assert.ok(unattributedMotive("The family is trying to avoid being served."));
-  assert.ok(unattributedMotive("The policy is designed to increase exports."));
+  assert.ok(unattributedMotive("The family is trying to avoid being served.", NO_MOTIVE_SOURCE));
+  assert.ok(unattributedMotive("The policy is designed to increase exports.", NO_MOTIVE_SOURCE));
 });
 
 test("the motive gate is an ERROR, not a silent card drop", () => {
@@ -1326,7 +1334,8 @@ test("the motive gate is an ERROR, not a silent card drop", () => {
   // into the regeneration retry with the phrase named, so the model can
   // attribute the claim or state the effect instead.
   const v = validateSpec(wrap({ t: "turn", eyebrow: "BUT", lines: [["X", "white"]],
-    caption: "The family can use their security detail to keep the lawsuit at bay for years." }), { headline: "H" });
+    caption: "The family can use their security detail to keep the lawsuit at bay for years." }),
+    { headline: "H", sourceText: NO_MOTIVE_SOURCE });
   assert.equal(v.ok, false);
   assert.ok(v.errors.some(e => e.includes(MOTIVE_ERROR)), v.errors.join(" | "));
   assert.ok(v.errors.some(e => /Say WHOSE claim it is/.test(e)), "the fix must be in the message");
@@ -1366,7 +1375,7 @@ test("every string the viewer reads or hears is collected, not just the caption"
 
 test("a motive in a DISPLAY LINE is caught, not only in the caption", () => {
   const v = validateSpec(wrap({ t: "turn", eyebrow: "BUT", lines: [["USING SECURITY TO DODGE IT", "white"]],
-    caption: "The case has stalled." }), { headline: "H" });
+    caption: "The case has stalled." }), { headline: "H", sourceText: NO_MOTIVE_SOURCE });
   assert.ok(v.errors.some(e => e.includes(MOTIVE_ERROR)), v.errors.join(" | "));
 });
 
@@ -1397,8 +1406,89 @@ test("A METAPHOR IS NOT CAUGHT, and that is stated rather than implied", () => {
   // Neither gate sees it. The prompt carries that one explicitly, because a
   // check that half-works is worse than a rule that is honest about its edge.
   const line = "THE SECRET SERVICE SHIELD";
-  assert.equal(unattributedMotive(line), null);
+  assert.equal(unattributedMotive(line, NO_MOTIVE_SOURCE), null);
   assert.deepEqual(unsupportedIntensifiers([line], "Their protective detail has blocked service."), []);
   const src = readFileSync(new URL("./videoSpecWriter.js", import.meta.url), "utf8");
   assert.match(src, /THE SECRET SERVICE SHIELD/, "the prompt must name the case the checks cannot see");
+});
+
+// ─── Reported intent is not asserted intent ─────────────────────────────────
+//
+// DrJ, 2026-08-15: two of three flags on a live run were FALSE POSITIVES and
+// they killed the article. "The broadcaster wants to use certified mail" is the
+// BBC's own filed request; "to prove what the president intended" is its own
+// stated purpose. Reporting a party's OWN stated position is not asserting a
+// hidden motive — and the first gate fired on the verb regardless.
+
+const { motiveIsReported } = await import("./videoSpecSchema.js");
+const { buildSpecPrompt } = await import("./videoSpecWriter.js");
+
+const BBC_FILING =
+  "The BBC has asked the court for alternative means of service, such as certified mail. " +
+  "In its filing the broadcaster said it needs the deposition to prove what the president actually intended that day.";
+const SECRET_SERVICE =
+  "Craig and Lindsay Foreman face a ten-year sentence. " +
+  "Their protective detail has blocked three attempts to serve papers in the civil case.";
+
+test("THE FALSE POSITIVES: a party's own filed purpose is reporting", () => {
+  for (const c of [
+    "The broadcaster wants to use certified mail.",
+    "To prove what the president actually intended that day, the broadcaster needs the deposition.",
+    "The broadcaster is seeking to serve papers by certified mail.",
+  ]) assert.equal(unattributedMotive(c, BBC_FILING), null, `must be allowed: ${c}`);
+});
+
+test("THE TRUE POSITIVE still fires: intent nobody put on the record", () => {
+  for (const c of [
+    "The family can use their taxpayer-funded security to keep a lawsuit at bay.",
+    "The detail is designed to frustrate service of the papers.",
+    "The Foremans are trying to avoid the civil case entirely.",
+  ]) assert.ok(unattributedMotive(c, SECRET_SERVICE), `must be refused: ${c}`);
+});
+
+test("the source must be about the SAME thing, not merely contain a purpose", () => {
+  // A long article almost always states some purpose somewhere. Sharing the
+  // subject matter is what separates "the reporting says this" from "the
+  // article happens to contain the word".
+  const tariffs = "China will scrap tariffs for all African countries from Friday, except Eswatini. " +
+    "Analysts say tariffs are rarely the main obstacle for exporters.";
+  assert.ok(unattributedMotive("Beijing is using the tariff cut to buy influence across the continent.", tariffs),
+    "an unrelated purpose elsewhere in the article must not license a new one");
+});
+
+test("a two-sentence WINDOW, because filings are reported across a pair", () => {
+  // The single-sentence version scored 1 on the real case and killed it:
+  // "broadcaster" and "certified" were one sentence apart.
+  assert.ok(motiveIsReported("The broadcaster wants to use certified mail.", BBC_FILING));
+  const split = "The BBC has asked the court for alternative means of service, such as certified mail.";
+  assert.ok(!motiveIsReported("The broadcaster wants to use unrelated methods.", split),
+    "the window widens the evidence, it does not remove the need for any");
+});
+
+test("WITHOUT A SOURCE THERE IS NO CASE", () => {
+  // The gate accuses the script of inventing an intent. With nothing to compare
+  // against, that accusation cannot be made fairly — and firing on absent
+  // evidence is how the first version killed an article whose motive was in the
+  // filing all along.
+  assert.equal(unattributedMotive("The family is trying to avoid being served.", ""), null);
+  assert.equal(unattributedMotive("The family is trying to avoid being served.", undefined), null);
+});
+
+test("in-caption attribution still short-circuits everything", () => {
+  assert.equal(unattributedMotive("The plaintiffs say the detail is being used to keep the suit at bay.", SECRET_SERVICE), null);
+});
+
+// ─── Rule 3's section paragraphs are conditional ────────────────────────────
+
+test("the prompt describes labelled sections ONLY when there are several outlets", () => {
+  // Nothing in this codebase builds "PRIMARY SOURCE" / "ADDITIONAL COVERAGE"
+  // blocks: resolveVideoSourceText fetches one article and the sole caller
+  // passes one publisher. ~1,020 characters of instruction about ATTRIBUTION
+  // described a structure the model could not see.
+  const article = { id: "a", title: "T", description: "d", content: "c".repeat(400), source_name: "R", category: "world" };
+  const one = buildSpecPrompt({ article, allowedSources: ["Reuters"] });
+  const two = buildSpecPrompt({ article, allowedSources: ["Reuters", "BBC News"] });
+  assert.ok(!/ADDITIONAL COVERAGE/.test(one), "one outlet, no sections to describe");
+  assert.ok(/ADDITIONAL COVERAGE/.test(two), "several outlets, the rules must appear");
+  assert.ok(one.length < two.length - 900, `the single-source prompt should shed ~1kB, shed ${two.length - one.length}`);
 });
