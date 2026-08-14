@@ -2504,7 +2504,13 @@ export function findFreshUnvideoedArticles({
   const staleBefore = now - VIDEO_PENDING_HANG_MS;
   return getDb().prepare(`
     SELECT a.id, a.title, a.description, a.content, a.category, a.source_name,
-           a.published_at, a.credibility, a.url, a.tags
+           a.published_at, a.credibility, a.url, a.tags,
+           -- The article's own photograph. Selected here because writeVideoSpec
+           -- receives this row AS its article argument, so a column missing from
+           -- this list is invisible to every consumer downstream however well
+           -- populated the table is. The social path (findFreshUnpostedArticles)
+           -- has always selected it; the video path never has.
+           a.image_url
     FROM articles a
     LEFT JOIN video_posts v ON v.article_id = a.id
     WHERE a.published_at > ?
