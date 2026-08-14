@@ -265,6 +265,68 @@ export function unattributedMotive(caption) {
 }
 export const MOTIVE_ERROR = "unattributed_motive";
 
+/**
+ * Every string a VIEWER READS OR HEARS on this card.
+ *
+ * The motive gate originally checked `caption` alone, and DrJ's second reading
+ * found why that is not enough: the display type was "THE SECRET SERVICE
+ * SHIELD" and the closer said "indefinitely". A two-word display line carries
+ * more framing per word than a caption does — it is on screen, in the largest
+ * type on the card, with no sentence around it to qualify it.
+ */
+export function displayStrings(card) {
+  if (!card || typeof card !== "object") return [];
+  const out = [];
+  const push = (v) => { if (typeof v === "string" && v.trim()) out.push(v); };
+  push(card.caption); push(card.sub); push(card.top); push(card.bottom);
+  for (const ln of Array.isArray(card.lines) ? card.lines : []) {
+    // `lines` is [text, colour] pairs on title/turn/photo/map, and plain
+    // strings on stat. Both shapes are display type and both count.
+    push(Array.isArray(ln) ? ln[0] : ln);
+  }
+  for (const b of Array.isArray(card.bars) ? card.bars : []) push(Array.isArray(b) ? b[0] : null);
+  for (const n of Array.isArray(card.nodes) ? card.nodes : []) {
+    if (Array.isArray(n)) { push(n[0]); push(n[1]); }
+  }
+  if (card.marker && typeof card.marker === "object") { push(card.marker.label); push(card.marker.sub); }
+  return out;
+}
+
+// ─── ABSOLUTES AND INTENSIFIERS ─────────────────────────────────────────────
+//
+// The second half of DrJ's reading: the closer said the detention could continue
+// "indefinitely", which no beat's evidence supported. That is a DIFFERENT defect
+// from an invented motive and it needs a different test — and, unlike a motive,
+// it is genuinely checkable, because an intensifier is a WORD rather than a
+// relation. Either the source says the thing is indefinite or we decided it was.
+//
+// Deliberately a short list of words that RAISE A CLAIM rather than describe
+// one. "All" and "every" are excluded despite being absolutes: "all but one
+// African nation" is the accurate phrasing of a real policy, and a gate that
+// fires on accurate reporting teaches people to route around it.
+//
+// Matched by STEM, so "indefinite" in the source licenses "indefinitely" in the
+// script — this checks that the idea came from the article, not morphology.
+const INTENSIFIER_STEMS = Object.freeze([
+  "indefinit", "forever", "permanent", "unprecedent", "historic", "massiv",
+  "enormous", "catastroph", "devastat", "crippl", "soar", "plummet",
+  "sweeping", "endless", "unparallel", "staggering", "shocking", "damning",
+  "utterly", "completely", "entirely", "totally",
+]);
+
+/**
+ * Intensifiers used in the script that the source never used. Returns the
+ * offending stems, or an empty array.
+ */
+export function unsupportedIntensifiers(strings, sourceText) {
+  if (!sourceText) return [];
+  const src = String(sourceText).toLowerCase();
+  const hay = strings.join(" ").toLowerCase();
+  return INTENSIFIER_STEMS.filter(stem => hay.includes(stem) && !src.includes(stem));
+}
+export const INTENSIFIER_ERROR = "unsupported_intensifier";
+
+
 // ─── ARC: the closer (B3) ───────────────────────────────────────────────────
 //
 // KICKER_BANNED_PHRASES already catches summary REGISTER ("in conclusion", "the
@@ -831,13 +893,25 @@ export function validateSpec(spec, {
     // attribute the claim or state the effect instead. If it will not, the
     // article is skipped — which is the correct failure direction for an
     // unattributed assertion about what someone intended.
-    const motive = unattributedMotive(card.caption);
-    if (motive) {
+    // EVERY string the viewer reads or hears, not just the spoken one.
+    const shown = displayStrings(card);
+    const motiveIn = shown.map(str => [str, unattributedMotive(str)]).find(([, mm]) => mm);
+    if (motiveIn) {
       errors.push(
-        `${MOTIVE_ERROR}: slides[${i}] (${card.t}) asserts a motive — "${motive}" — on its own ` +
-        `authority. Say WHOSE claim it is ("the filing alleges…", "prosecutors say…"), or state ` +
-        `what happened instead of why someone meant it to.`
+        `${MOTIVE_ERROR}: slides[${i}] (${card.t}) asserts a motive — "${motiveIn[1]}" in ` +
+        `"${motiveIn[0].slice(0, 60)}" — on its own authority. Say WHOSE claim it is ("the filing ` +
+        `alleges…", "prosecutors say…"), or state what happened instead of why someone meant it to.`
       );
+    }
+    if (sourceText) {
+      const loud = unsupportedIntensifiers(shown, sourceText);
+      if (loud.length) {
+        errors.push(
+          `${INTENSIFIER_ERROR}: slides[${i}] (${card.t}) uses ${loud.map(w => `"${w}…"`).join(", ")}, ` +
+          `which the source never does. An intensifier the article did not use is a claim you added — ` +
+          `either the source supports it, in which case use its word, or drop it.`
+        );
+      }
     }
 
     // Traceability + grounding (§3: "no source → drop the card, do not invent one").

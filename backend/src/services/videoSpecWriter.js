@@ -632,7 +632,13 @@ HARD RULES — violating any of these makes the output unusable:
     ALLOWED:  The plaintiffs say the detail is being used to keep the lawsuit at bay.
     ALLOWED:  The protection has blocked three attempts to serve papers.
 
-    The third is what the source said and it is the stronger sentence. When you are tempted to explain a motive, state the obstacle, the sequence or the consequence instead — those are facts, they are usually more concrete, and they need no one's permission.
+    The third is what the source said and it is the stronger sentence.
+
+    THIS APPLIES TO ON-SCREEN TYPE TOO, and the display lines are where it matters most. Two words in the largest type on the card carry more framing per word than a whole caption does, and they have no sentence around them to qualify anything. Every string a viewer reads or hears is checked, not just the spoken one.
+
+    The same goes for INTENSIFIERS AND ABSOLUTES. If the article does not say something is indefinite, unprecedented, sweeping or devastating, then neither do you — those words are checked against the source and a spec that adds one is rejected. Use the article's own word or use none.
+
+    One thing the checks CANNOT see, so it is on you: a metaphor that characterises. "THE SECRET SERVICE SHIELD" contains no motive verb and no intensifier, and it still reframes a protective detail as an instrument of obstruction. Compressing for display type is not licence to editorialise — name the thing the article names. When you are tempted to explain a motive, state the obstacle, the sequence or the consequence instead — those are facts, they are usually more concrete, and they need no one's permission.
 
 17. CAPTION LENGTH IS A HARD WRITING CONSTRAINT AT BOTH ENDS: keep every caption at or under ${CAPTION_MAX_CHARS} characters, and at or above ${CAPTION_MIN_CHARS}. The floor is not a style note — the slide is held for exactly as long as its narration, and a caption shorter than that loses one of the slide's reveals to the collapse rule. A one-line fragment is a beat you wrote and the viewer never sees. If a beat genuinely takes fewer words than that, it belongs joined to its neighbour, not standing alone. This is not a style preference — it is the measured width of two lines of burned-in caption at the size they are rendered. A longer caption wraps to a third line and sits higher than the band is designed for. Write shorter sentences; do not compress by deleting the source credit or the figure.
 

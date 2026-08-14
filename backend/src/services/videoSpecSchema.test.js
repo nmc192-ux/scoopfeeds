@@ -1346,3 +1346,59 @@ test("the subject is a noun phrase, not the beat restated", () => {
   assert.equal(d.length, 1);
   assert.match(d[0].reason, /noun phrase, not a sentence/);
 });
+
+// ─── Display type is checked too ────────────────────────────────────────────
+//
+// DrJ's second reading, 2026-08-15: the caption gate passed, and the card still
+// said "THE SECRET SERVICE SHIELD" over a closer promising "indefinitely".
+
+const { displayStrings, unsupportedIntensifiers, INTENSIFIER_ERROR } = await import("./videoSpecSchema.js");
+
+test("every string the viewer reads or hears is collected, not just the caption", () => {
+  assert.deepEqual(displayStrings({ t: "kicker", top: "HELD", bottom: "INDEFINITELY", sub: "s", caption: "c" }),
+    ["c", "s", "HELD", "INDEFINITELY"]);
+  // [text, colour] pairs and stat's plain strings are both display type.
+  assert.deepEqual(displayStrings({ t: "title", lines: [["A", "white"], ["B", "lime"]], caption: "c" }), ["c", "A", "B"]);
+  assert.deepEqual(displayStrings({ t: "stat", lines: ["one", "two"], caption: "c" }), ["c", "one", "two"]);
+  assert.ok(displayStrings({ t: "diagram", nodes: [["SHIP", "drags"]], marker: { label: "BREAK" }, caption: "c" })
+    .includes("BREAK"), "a marker label is on screen too");
+});
+
+test("a motive in a DISPLAY LINE is caught, not only in the caption", () => {
+  const v = validateSpec(wrap({ t: "turn", eyebrow: "BUT", lines: [["USING SECURITY TO DODGE IT", "white"]],
+    caption: "The case has stalled." }), { headline: "H" });
+  assert.ok(v.errors.some(e => e.includes(MOTIVE_ERROR)), v.errors.join(" | "));
+});
+
+test("AN INTENSIFIER THE SOURCE NEVER USED IS REFUSED", () => {
+  const src = "Their protective detail has blocked three attempts to serve papers.";
+  assert.deepEqual(unsupportedIntensifiers(["HELD INDEFINITELY"], src), ["indefinit"]);
+  // The source's own word licenses it — this checks provenance, not morphology.
+  assert.deepEqual(unsupportedIntensifiers(["HELD INDEFINITELY"], src + " Lawyers call it indefinite detention."), []);
+});
+
+test("accurate absolutes are NOT swept up", () => {
+  // "all" and "every" are excluded on purpose: "all but one African nation" is
+  // the accurate phrasing of a real policy, and a gate that fires on accurate
+  // reporting teaches people to route around it.
+  const src = "China will scrap tariffs for all African countries except Eswatini.";
+  assert.deepEqual(unsupportedIntensifiers(["ZERO TARIFFS", "FOR EVERY COUNTRY", "all but one"], src), []);
+});
+
+test("the intensifier check needs a source, and stays quiet without one", () => {
+  // validateSpec is called without sourceText in several places; a gate that
+  // fires on absent evidence would reject specs for the wrong reason.
+  assert.deepEqual(unsupportedIntensifiers(["HELD INDEFINITELY"], ""), []);
+});
+
+test("A METAPHOR IS NOT CAUGHT, and that is stated rather than implied", () => {
+  // "THE SECRET SERVICE SHIELD" carries no motive verb and no intensifier, and
+  // it still reframes a protective detail as an instrument of obstruction.
+  // Neither gate sees it. The prompt carries that one explicitly, because a
+  // check that half-works is worse than a rule that is honest about its edge.
+  const line = "THE SECRET SERVICE SHIELD";
+  assert.equal(unattributedMotive(line), null);
+  assert.deepEqual(unsupportedIntensifiers([line], "Their protective detail has blocked service."), []);
+  const src = readFileSync(new URL("./videoSpecWriter.js", import.meta.url), "utf8");
+  assert.match(src, /THE SECRET SERVICE SHIELD/, "the prompt must name the case the checks cannot see");
+});
