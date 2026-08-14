@@ -1238,15 +1238,16 @@ test("an exception outside the drawn set is refused", () => {
 
 test("a valid map and a valid photo card survive", () => {
   assert.equal(droppedFor({ t: "map", eyebrow: "W", codes: ["DZA", "EGY", "SWZ"], exception: "SWZ", caption: "z".repeat(80) }).length, 0);
-  assert.equal(droppedFor({ t: "photo", eyebrow: "W", lines: [["A", "white"], ["B", "lime"]], caption: "z".repeat(80) }).length, 0);
+  assert.equal(droppedFor({ t: "photo", eyebrow: "W", subject: "Aung San Suu Kyi",
+    lines: [["A", "white"], ["B", "lime"]], caption: "z".repeat(80) }).length, 0);
 });
 
 test("a photo card cannot smuggle in its own image", () => {
   // The photograph is the article's own and the treatment is a design decision.
   // pruneCard drops anything outside the contract, so a model-supplied URL never
   // reaches a renderer.
-  const v = validateSpec(wrap({ t: "photo", lines: [["A", "white"]], caption: "z".repeat(80),
-    image_url: "https://evil.test/x.jpg", mount: "polaroid" }), { headline: "H" });
+  const v = validateSpec(wrap({ t: "photo", lines: [["A", "white"]], subject: "Aung San Suu Kyi",
+    caption: "z".repeat(80), image_url: "https://evil.test/x.jpg", mount: "polaroid" }), { headline: "H" });
   const photo = v.spec.slides.find(c => c.t === "photo");
   assert.ok(photo, "the card itself is fine");
   assert.equal(photo.image_url, undefined, "a model-supplied image must be stripped");
@@ -1278,4 +1279,70 @@ test("taped is NOT in the mount library", () => {
   // between them — the one mount of the four that still risked reading as a
   // hole. It needs a bone border before it belongs.
   assert.deepEqual([...MOUNT_NAMES].sort(), ["cutting", "pinned", "polaroid"]);
+});
+
+// ─── Motive, and the photo card's declared subject ──────────────────────────
+//
+// DrJ, 2026-08-15, reading a live dry run: the source said a protective detail
+// HAS BLOCKED service of a lawsuit. The caption said the family could "use
+// taxpayer-funded security to keep a lawsuit at bay" — a purpose, ascribed to
+// three named living people, that the article never establishes.
+
+const { unattributedMotive, MOTIVE_ERROR } = await import("./videoSpecSchema.js");
+
+test("THE LIVE FAILURE: an unattributed motive is refused", () => {
+  assert.ok(unattributedMotive(
+    "A court must decide whether the Foreman family can use taxpayer-funded security to keep a lawsuit at bay."),
+    "this is the sentence the rule exists for");
+});
+
+test("attribution is the escape, and stating the effect needs none", () => {
+  // The rule costs a rewrite, never the idea.
+  assert.equal(unattributedMotive("The plaintiffs say the detail is being used to keep the suit at bay."), null);
+  assert.equal(unattributedMotive("The protection has blocked three attempts to serve papers."), null);
+  assert.equal(unattributedMotive("Beijing says the policy is designed to increase African exports."), null);
+});
+
+test("ordinary reporting is untouched", () => {
+  for (const c of [
+    "China drops tariffs on almost every country in Africa from Friday.",
+    "Fifty-three countries, duty free, until twenty twenty-eight.",
+    "She has been out of sight four years. Now state media says she is under house arrest.",
+    "Seventy percent of recorded faults come down to a ship dragging its anchor.",
+  ]) assert.equal(unattributedMotive(c), null, `false positive on: ${c}`);
+});
+
+test("it does NOT require a name in the caption — the live case had none", () => {
+  // The first draft required a proper noun and missed the sentence that
+  // prompted the rule: "the Foreman family" is one capitalised surname plus a
+  // lowercase noun, and the individuals were named two cards earlier. A subject
+  // introduced earlier is just as identifiable to a viewer.
+  assert.ok(unattributedMotive("The family is trying to avoid being served."));
+  assert.ok(unattributedMotive("The policy is designed to increase exports."));
+});
+
+test("the motive gate is an ERROR, not a silent card drop", () => {
+  // Dropping the card would delete a beat and publish the rest. An error routes
+  // into the regeneration retry with the phrase named, so the model can
+  // attribute the claim or state the effect instead.
+  const v = validateSpec(wrap({ t: "turn", eyebrow: "BUT", lines: [["X", "white"]],
+    caption: "The family can use their security detail to keep the lawsuit at bay for years." }), { headline: "H" });
+  assert.equal(v.ok, false);
+  assert.ok(v.errors.some(e => e.includes(MOTIVE_ERROR)), v.errors.join(" | "));
+  assert.ok(v.errors.some(e => /Say WHOSE claim it is/.test(e)), "the fix must be in the message");
+});
+
+test("a photo card MUST declare what the photograph should show", () => {
+  // Without it the renderer takes image_url on trust and nothing anywhere can
+  // notice a mismatch — the tariffs failure with a new name.
+  const d = droppedFor({ t: "photo", eyebrow: "W", lines: [["A", "white"]], caption: "z".repeat(80) });
+  assert.equal(d.length, 1);
+  assert.match(d[0].reason, /missing required field "subject"/);
+});
+
+test("the subject is a noun phrase, not the beat restated", () => {
+  const d = droppedFor({ t: "photo", eyebrow: "W", lines: [["A", "white"]], caption: "z".repeat(80),
+    subject: "a photograph of the family standing outside the courthouse after the hearing ended" });
+  assert.equal(d.length, 1);
+  assert.match(d[0].reason, /noun phrase, not a sentence/);
 });

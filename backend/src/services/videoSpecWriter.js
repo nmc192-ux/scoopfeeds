@@ -434,7 +434,13 @@ ${visualsOn ? `"map"     — a GEOGRAPHIC subject, drawn from a country list. { 
             because the excepted country is often a couple of pixels wide and it is usually the
             entire point of the story. Omit "exception" when there is no exception.
             You do not supply a projection, a colour or a position. The map is drawn by code.
-${hasPhoto ? `"photo"   — a NAMED PERSON or a specific place: the article's own photograph. { "t":"photo", "eyebrow":"...", "lines":[["TEXT","white"],["TEXT","lime"]], "caption":"..." }
+${hasPhoto ? `"photo"   — a NAMED PERSON or a specific place: the article's own photograph. { "t":"photo", "eyebrow":"...", "subject":"...", "lines":[["TEXT","white"],["TEXT","lime"]], "caption":"..." }
+            "subject" is REQUIRED and it is what makes this card checkable: a short noun phrase
+            naming what the photograph should SHOW — "Aung San Suu Kyi", "the Port of Mombasa".
+            Not a sentence, not the beat restated. The picture is the publisher's own and nobody
+            downstream can see it, so this is the only statement of what it is expected to be.
+            If you cannot say in a few words what the image ought to show, this story does not
+            want a photo card — use a map, a data card, or type.
             You do NOT supply an image, a URL, a crop or a treatment. The photograph is the
             article's own and the presentation is a design decision made in code.
             Write the two lines as you would for a title card: short, declarative, upper case.
@@ -617,6 +623,16 @@ HARD RULES — violating any of these makes the output unusable:
     So: ask questions on the opener and on any middle beat, PROVIDED the very next beat answers the question you just asked. A question you do not answer is a promise you broke.
 
     THE ONE PLACE THIS IS FORBIDDEN IS THE CLOSER. Nothing follows the last card, so a question there can never be answered — it is a hanging question by construction, whatever its wording. A caption on the final card that ends with a question mark is REJECTED and you will be asked to write it again. End the closer on the forward implication instead: the consequence that is now in motion, stated as a fact.
+
+10c. NEVER ASSERT WHY SOMEONE DID SOMETHING. Report what happened; attribute what anyone claims about the reason. This is the single hardest line in these rules and it is CHECKED, not trusted — a caption that ascribes intent, purpose or motive without saying whose claim it is will be rejected and you will be asked to write it again.
+
+    The trap is that spoken register makes this easy to do by accident. Compressing "the protection has blocked three attempts to serve papers" into something livelier reaches for "they are using their security to dodge the lawsuit" — and that second sentence asserts a purpose the source never established, about real people, under a real masthead. It is not a stylistic upgrade; it is a different and unsupported claim.
+
+    REFUSED:  The family can use their taxpayer-funded security to keep the lawsuit at bay.
+    ALLOWED:  The plaintiffs say the detail is being used to keep the lawsuit at bay.
+    ALLOWED:  The protection has blocked three attempts to serve papers.
+
+    The third is what the source said and it is the stronger sentence. When you are tempted to explain a motive, state the obstacle, the sequence or the consequence instead — those are facts, they are usually more concrete, and they need no one's permission.
 
 17. CAPTION LENGTH IS A HARD WRITING CONSTRAINT AT BOTH ENDS: keep every caption at or under ${CAPTION_MAX_CHARS} characters, and at or above ${CAPTION_MIN_CHARS}. The floor is not a style note — the slide is held for exactly as long as its narration, and a caption shorter than that loses one of the slide's reveals to the collapse rule. A one-line fragment is a beat you wrote and the viewer never sees. If a beat genuinely takes fewer words than that, it belongs joined to its neighbour, not standing alone. This is not a style preference — it is the measured width of two lines of burned-in caption at the size they are rendered. A longer caption wraps to a third line and sits higher than the band is designed for. Write shorter sentences; do not compress by deleting the source credit or the figure.
 

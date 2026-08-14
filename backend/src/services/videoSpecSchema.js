@@ -196,6 +196,75 @@ export const KICKER_BANNED_PHRASES = Object.freeze([
 // create-merge-split treadmill started. See textSimilarity.js.
 export const HOOK_RESTATES_ERROR = "hook_restates_headline";
 
+// ─── MOTIVE ASCRIBED TO A NAMED PERSON ──────────────────────────────────────
+//
+// THE FAILURE (DrJ, 2026-08-15, from a live dry run). The source said a
+// protective detail HAS BLOCKED service of a lawsuit — a fact about an obstacle.
+// The caption said a court must decide whether the family can "use taxpayer-
+// funded security to keep a lawsuit at bay" — a PURPOSE, ascribed to three named
+// living people, that the article never establishes. Conversational syntax
+// turning into judgement.
+//
+// WHY WORD-GROUNDING CANNOT CATCH THIS, and it was the first thing I tried:
+// every word in that caption IS in the source. "Lawsuit", "security",
+// "protection" all appear. What was invented is the RELATION between them —
+// effect reframed as intent. No overlap measure sees the difference, and a
+// general "is this motive supported?" test is an inference problem a regex has
+// no business pretending to solve.
+//
+// SO THE RULE IS NOT "IS IT SUPPORTED" BUT "WHO SAYS SO". A caption may not
+// ascribe intent, purpose or motive to a NAMED party unless it also attributes
+// that claim to someone. This is ordinary wire practice — you report that a
+// filing alleges a motive, you do not assert the motive yourself — and it gives
+// the model a legitimate route to the same content rather than banning the idea:
+//
+//   REFUSED  "The family can use their security detail to keep the suit at bay."
+//   ALLOWED  "The plaintiffs say the detail is being used to keep the suit at bay."
+//   ALLOWED  "The protection has blocked three attempts to serve papers."
+//
+// The last is what the source actually said, and it is the stronger sentence.
+const MOTIVE_MARKERS = new RegExp([
+  /\bin order to\b/, /\bso as to\b/, /\bin an effort to\b/, /\bin a bid to\b/,
+  /\bas a way to\b/, /\bas a means to\b/, /\bdeliberately\b/, /\bintentionally\b/,
+  /\bon purpose\b/, /\btrying to\b/, /\bseeking to\b/, /\baiming to\b/,
+  /\bhoping to\b/, /\bintends? to\b/, /\bintended to\b/, /\bdesigned to\b/,
+  /\bmeant to\b/, /\brefus(?:e|es|ing) to\b/, /\bwants? to\b/,
+  // The shape the live failure took: an instrument put to a purpose.
+  /\bus(?:e|es|ing) [^.]{0,60}? to \w+/, /\bto (?:avoid|evade|dodge|escape|sidestep|stall|frustrate)\b/,
+  /\bto keep [^.]{0,40}? at bay\b/,
+].map(r => r.source).join("|"), "i");
+
+// Saying WHOSE claim it is. Deliberately generous: the point is to make
+// attribution the easy path, not to police how it is phrased.
+const ATTRIBUTION_MARKERS =
+  /\b(say|says|said|saying|according to|alleges?|alleged|claims?|claimed|argues?|argued|accus\w+|contends?|maintains?|reportedly|denies|denied|filing|lawsuit (?:says|alleges|argues)|court heard)\b/i;
+
+// NO "IS ANYONE NAMED HERE" TEST, and the live failure is why. The first draft
+// required a proper noun in the caption, on the theory that exposure needs a
+// named party. It did not fire on the sentence that prompted this rule: the
+// caption said "the Foreman family" — one capitalised surname followed by a
+// lowercase noun — and the three individuals were named ELSEWHERE in the video,
+// not in the offending caption. A subject introduced two cards earlier is just
+// as identifiable to a viewer as one named in the sentence.
+//
+// So the rule is unconditional: no caption asserts a motive on its own
+// authority. Attribution is always available, always cheap, and always better
+// journalism, so the gate costs a rewrite rather than the idea.
+
+/**
+ * Does this caption assert a motive without saying whose claim it is?
+ * Returns the offending phrase, or null.
+ */
+export function unattributedMotive(caption) {
+  const c = String(caption || "").trim();
+  if (!c) return null;
+  const motive = c.match(MOTIVE_MARKERS);
+  if (!motive) return null;
+  if (ATTRIBUTION_MARKERS.test(c)) return null;   // someone is on the record
+  return motive[0];
+}
+export const MOTIVE_ERROR = "unattributed_motive";
+
 // ─── ARC: the closer (B3) ───────────────────────────────────────────────────
 //
 // KICKER_BANNED_PHRASES already catches summary REGISTER ("in conclusion", "the
@@ -370,7 +439,11 @@ const CARD_FIELDS = {
   // `photo` carries NO image field. The photograph is the article's own
   // (image_url), and the MOUNT is a design decision made in code — a model
   // choosing between a polaroid and a torn cutting is a model art-directing.
-  photo:   { required: ["lines", "caption"],                 optional: ["eyebrow", "sub"] },
+  // `subject` is REQUIRED and is the whole point of the card: it declares what
+  // the photograph is expected to SHOW. Without it the renderer takes image_url
+  // on trust and nothing anywhere can notice a mismatch — which is the tariffs
+  // failure with a new name (DrJ, 2026-08-15).
+  photo:   { required: ["lines", "caption", "subject"],      optional: ["eyebrow", "sub"] },
   // `codes` are ISO 3166-1 alpha-3. `exception` is the ONE member of the set
   // the story excludes — the "all but one" case, which is unreadable without a
   // callout because the excepted country is often a couple of pixels wide.
@@ -486,6 +559,16 @@ function validateCardShape(card, idx) {
     // photograph. Sharing the case rather than copying it means the lime
     // invariant is checked in one place for all three.
     case "photo": {
+      if (t === "photo") {
+        if (card.subject !== undefined && !isStr(card.subject)) {
+          e.push(`${at} (photo): "subject" must be a non-empty string naming what the photograph should show`);
+        } else if (isStr(card.subject) && card.subject.trim().split(/\s+/).length > 8) {
+          // A subject is a noun phrase — "Aung San Suu Kyi", "the Port of
+          // Mombasa". A sentence here means the model is describing the beat
+          // again rather than naming a thing that can be looked for.
+          e.push(`${at} (photo): "subject" is a noun phrase, not a sentence — got ${card.subject.trim().split(/\s+/).length} words`);
+        }
+      }
       // Code-injected on `title` only (the absorbed attribution card). Shape is
       // still checked, because injection is code and code has bugs.
       if (card.outlet !== undefined && !isStr(card.outlet)) e.push(`${at} (${t}): "outlet" must be a non-empty string`);
@@ -575,6 +658,7 @@ function validateCardShape(card, idx) {
       break;
     }
 
+    case "photo_subject_unused": break;
     case "map": {
       // COUNTRY CODES ARE CHECKED AGAINST THE ACTUAL GEOMETRY, not a regex. A
       // plausible-looking code the atlas does not carry would draw an empty map,
@@ -739,6 +823,21 @@ export function validateSpec(spec, {
     if (shapeErrors.length) {
       dropped.push({ index: i, t: card?.t ?? "?", kind: "structural", reason: shapeErrors.join("; ") });
       continue;
+    }
+
+    // MOTIVE. An ERROR rather than a card drop, deliberately: dropping the card
+    // would quietly delete a beat and publish the rest, whereas this routes into
+    // the regeneration retry with the phrase named, and the model can either
+    // attribute the claim or state the effect instead. If it will not, the
+    // article is skipped — which is the correct failure direction for an
+    // unattributed assertion about what someone intended.
+    const motive = unattributedMotive(card.caption);
+    if (motive) {
+      errors.push(
+        `${MOTIVE_ERROR}: slides[${i}] (${card.t}) asserts a motive — "${motive}" — on its own ` +
+        `authority. Say WHOSE claim it is ("the filing alleges…", "prosecutors say…"), or state ` +
+        `what happened instead of why someone meant it to.`
+      );
     }
 
     // Traceability + grounding (§3: "no source → drop the card, do not invent one").
