@@ -74,10 +74,31 @@ export const HORIZONTAL = Object.freeze({
  *   Anything running to the right edge below the midline is under a button.
  *   Full-bleed CHROME (the progress line) is fine there; content is not.
  *
- * marginX (72) — type margin, not a platform constraint. 16:9 uses 96 on 1920,
- *   which is 5.0%; 72 on 1080 is 6.7%. Deliberately a larger FRACTION — the
- *   vertical measure is 936 against 1728, and the same 5% would run lines edge
- *   to edge at a width the eye tracks effortlessly anyway.
+ * marginX (104) — NOW A PLATFORM CONSTRAINT, which it was not when it was 72.
+ *   Raised 72 → 104 on 2026-08-14 after DrJ read display type as nearly flush
+ *   to the frame edge on a real Short. The measurements:
+ *
+ *     as rendered        72  →  every card type measured 72-75, chrome and
+ *                              eyebrow included. No layout was misbehaving.
+ *     published frame    65  →  the 2% overscan (DRIFT_SCALE 1.02) scales to
+ *                              1102 and crops back at x=11, a fixed ~9px loss.
+ *     on the device     ~13  →  measured off DrJ's screenshots.
+ *
+ *   The last step is the one this number exists for. Shorts and Reels fill a
+ *   screen taller than 9:16 by cropping the SIDES, and the amount depends on the
+ *   handset's aspect ratio — roughly 52px per side to explain the reading above.
+ *   We cannot measure it, we cannot detect it, and it differs per phone, so the
+ *   margin has to absorb it. 104 publishes at ~95 and leaves ~45 visible under
+ *   the observed crop; 96 would have left ~37.
+ *
+ *   That the chrome, the eyebrow and the display line all read the SAME ~13 is
+ *   what identifies this as a uniform downstream crop rather than a layout bug:
+ *   a layout bug would not move three differently-positioned elements equally.
+ *
+ *   16:9 STAYS AT 96 and is unaffected — nothing crops a landscape upload, and
+ *   the fixed 9px overscan loss is 1.7x more of a 1080 frame than of a 1920 one.
+ *   The fractions are now 5.0% horizontal against 9.6% vertical, and that
+ *   asymmetry is the point rather than an inconsistency to tidy up.
  *
  * NOT THE 4:5 BOX. A symmetric 285/285 inset is the common rule of thumb, but
  * the real chrome is strongly asymmetric — almost all of it is at the bottom —
@@ -85,8 +106,12 @@ export const HORIZONTAL = Object.freeze({
  * asymmetric numbers above are drawn by the stills harness's --safe overlay
  * alongside the 4:5 line, so the choice is checkable by looking.
  *
- * ⚠️ UNVERIFIED ON A DEVICE. These are reasoned from documented overlay
- * positions, not measured on a phone. DrJ is reviewing the stills on one.
+ * ⚠️ safeTop, safeBottom and safeRight REMAIN UNVERIFIED ON A DEVICE as
+ * numbers, though DrJ's 2026-08-14 screenshots confirmed the two that matter
+ * most: captions clear the handle row (safeBottom 320) and nothing runs under
+ * the action rail (safeRight 168). safeTop 140 is still open — the screenshot
+ * carried an iOS return-to-app banner, which pushes YouTube's own chrome DOWN
+ * toward our content and so shows the pessimistic case.
  */
 const V_CANVAS = { w: 1080, h: 1920 };
 const V_SAFE_BOTTOM = 320;
@@ -94,13 +119,13 @@ const V_CONTENT_BOTTOM = V_CANVAS.h - V_SAFE_BOTTOM;   // 1600
 export const VERTICAL = Object.freeze({
   name: "vertical",
   canvas: Object.freeze({ w: 1080, h: 1920 }),
-  marginX: 72,
-  contentW: 1080 - 72 * 2,          // 936
+  marginX: 104,
+  contentW: 1080 - 104 * 2,         // 872
   safeTop: 140,
   safeBottom: 320,
   safeRight: 168,
   // The measure for anything that must dodge the action rail.
-  contentWRail: 1080 - 72 - 168,    // 840
+  contentWRail: 1080 - 104 - 168,   // 808
   chromeTopY: 140,
   counterTop: 140,
   driftSafeX: 44,

@@ -148,3 +148,32 @@ test("vertical content clears the platform's bottom band", () => {
   const lastNode = VY.diagramFirst + 5 * VY.diagramRow + 64;
   assert.ok(lastNode < VERTICAL.contentBottom, `last diagram node at ${lastNode} is in the platform band`);
 });
+
+// ─── The vertical margin, and what it is absorbing ──────────────────────────
+
+test("vertical marginX is LARGER than 16:9's, and deliberately so", () => {
+  // 16:9 is 96 on 1920 = 5.0%; vertical is 104 on 1080 = 9.6%. The asymmetry is
+  // the point, not an inconsistency: nothing crops a landscape upload, whereas
+  // Shorts and Reels crop the SIDES of a 9:16 upload to fill a taller screen by
+  // an amount that depends on the handset and cannot be detected from here.
+  assert.equal(VERTICAL.marginX, 104);
+  assert.equal(HORIZONTAL.marginX, 96);
+  assert.ok(VERTICAL.marginX / VERTICAL.canvas.w > HORIZONTAL.marginX / HORIZONTAL.canvas.w * 1.5,
+    "the vertical margin must stay a substantially larger FRACTION");
+});
+
+test("the derived measures follow marginX — no literal may drift from it", () => {
+  // Every card type derives from these two. If a layout ever hardcodes an inset
+  // instead, raising marginX silently stops working for that card.
+  assert.equal(VERTICAL.contentW, VERTICAL.canvas.w - VERTICAL.marginX * 2);
+  assert.equal(VERTICAL.contentWRail, VERTICAL.canvas.w - VERTICAL.marginX - VERTICAL.safeRight);
+  assert.equal(HORIZONTAL.contentW, HORIZONTAL.canvas.w - HORIZONTAL.marginX * 2);
+});
+
+test("the rail measure stays wide enough to be worth having", () => {
+  // contentWRail is what diagram labels and bar tracks get. Raising marginX
+  // narrows it from both ends at once, so it is the first thing to become
+  // unusable if the margin is pushed again.
+  assert.ok(VERTICAL.contentWRail >= 800,
+    `${VERTICAL.contentWRail}px — below ~800 the diagram's node labels start wrapping`);
+});
