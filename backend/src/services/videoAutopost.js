@@ -410,6 +410,15 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
           }
           if (!underlayPath) {
             logger.warn(`🎬 slide ${i} (${card.t}): no ${wants} could be built — rendering the type alone`);
+          } else if (wants === "photo") {
+            // THE DECLARED SUBJECT, BESIDE THE IMAGE IT GOT. Nothing downstream
+            // can see a photograph, so this pairing is the only place a mismatch
+            // is visible at all — the model's statement of what the picture
+            // should show, next to the URL it was actually given.
+            logger.info(
+              `🎬 slide ${i} photo: subject "${card.subject ?? "(none declared)"}" → ` +
+              `${String(article.image_url).slice(0, 100)}`
+            );
           }
         } catch (err) {
           logger.warn(`🎬 slide ${i} (${card.t}): ${wants} failed — ${err.message.slice(0, 120)}`);

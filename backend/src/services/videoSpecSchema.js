@@ -196,6 +196,137 @@ export const KICKER_BANNED_PHRASES = Object.freeze([
 // create-merge-split treadmill started. See textSimilarity.js.
 export const HOOK_RESTATES_ERROR = "hook_restates_headline";
 
+// ─── MOTIVE ASCRIBED TO A NAMED PERSON ──────────────────────────────────────
+//
+// THE FAILURE (DrJ, 2026-08-15, from a live dry run). The source said a
+// protective detail HAS BLOCKED service of a lawsuit — a fact about an obstacle.
+// The caption said a court must decide whether the family can "use taxpayer-
+// funded security to keep a lawsuit at bay" — a PURPOSE, ascribed to three named
+// living people, that the article never establishes. Conversational syntax
+// turning into judgement.
+//
+// WHY WORD-GROUNDING CANNOT CATCH THIS, and it was the first thing I tried:
+// every word in that caption IS in the source. "Lawsuit", "security",
+// "protection" all appear. What was invented is the RELATION between them —
+// effect reframed as intent. No overlap measure sees the difference, and a
+// general "is this motive supported?" test is an inference problem a regex has
+// no business pretending to solve.
+//
+// SO THE RULE IS NOT "IS IT SUPPORTED" BUT "WHO SAYS SO". A caption may not
+// ascribe intent, purpose or motive to a NAMED party unless it also attributes
+// that claim to someone. This is ordinary wire practice — you report that a
+// filing alleges a motive, you do not assert the motive yourself — and it gives
+// the model a legitimate route to the same content rather than banning the idea:
+//
+//   REFUSED  "The family can use their security detail to keep the suit at bay."
+//   ALLOWED  "The plaintiffs say the detail is being used to keep the suit at bay."
+//   ALLOWED  "The protection has blocked three attempts to serve papers."
+//
+// The last is what the source actually said, and it is the stronger sentence.
+const MOTIVE_MARKERS = new RegExp([
+  /\bin order to\b/, /\bso as to\b/, /\bin an effort to\b/, /\bin a bid to\b/,
+  /\bas a way to\b/, /\bas a means to\b/, /\bdeliberately\b/, /\bintentionally\b/,
+  /\bon purpose\b/, /\btrying to\b/, /\bseeking to\b/, /\baiming to\b/,
+  /\bhoping to\b/, /\bintends? to\b/, /\bintended to\b/, /\bdesigned to\b/,
+  /\bmeant to\b/, /\brefus(?:e|es|ing) to\b/, /\bwants? to\b/,
+  // The shape the live failure took: an instrument put to a purpose.
+  /\bus(?:e|es|ing) [^.]{0,60}? to \w+/, /\bto (?:avoid|evade|dodge|escape|sidestep|stall|frustrate)\b/,
+  /\bto keep [^.]{0,40}? at bay\b/,
+].map(r => r.source).join("|"), "i");
+
+// Saying WHOSE claim it is. Deliberately generous: the point is to make
+// attribution the easy path, not to police how it is phrased.
+const ATTRIBUTION_MARKERS =
+  /\b(say|says|said|saying|according to|alleges?|alleged|claims?|claimed|argues?|argued|accus\w+|contends?|maintains?|reportedly|denies|denied|filing|lawsuit (?:says|alleges|argues)|court heard)\b/i;
+
+// NO "IS ANYONE NAMED HERE" TEST, and the live failure is why. The first draft
+// required a proper noun in the caption, on the theory that exposure needs a
+// named party. It did not fire on the sentence that prompted this rule: the
+// caption said "the Foreman family" — one capitalised surname followed by a
+// lowercase noun — and the three individuals were named ELSEWHERE in the video,
+// not in the offending caption. A subject introduced two cards earlier is just
+// as identifiable to a viewer as one named in the sentence.
+//
+// So the rule is unconditional: no caption asserts a motive on its own
+// authority. Attribution is always available, always cheap, and always better
+// journalism, so the gate costs a rewrite rather than the idea.
+
+/**
+ * Does this caption assert a motive without saying whose claim it is?
+ * Returns the offending phrase, or null.
+ */
+export function unattributedMotive(caption) {
+  const c = String(caption || "").trim();
+  if (!c) return null;
+  const motive = c.match(MOTIVE_MARKERS);
+  if (!motive) return null;
+  if (ATTRIBUTION_MARKERS.test(c)) return null;   // someone is on the record
+  return motive[0];
+}
+export const MOTIVE_ERROR = "unattributed_motive";
+
+/**
+ * Every string a VIEWER READS OR HEARS on this card.
+ *
+ * The motive gate originally checked `caption` alone, and DrJ's second reading
+ * found why that is not enough: the display type was "THE SECRET SERVICE
+ * SHIELD" and the closer said "indefinitely". A two-word display line carries
+ * more framing per word than a caption does — it is on screen, in the largest
+ * type on the card, with no sentence around it to qualify it.
+ */
+export function displayStrings(card) {
+  if (!card || typeof card !== "object") return [];
+  const out = [];
+  const push = (v) => { if (typeof v === "string" && v.trim()) out.push(v); };
+  push(card.caption); push(card.sub); push(card.top); push(card.bottom);
+  for (const ln of Array.isArray(card.lines) ? card.lines : []) {
+    // `lines` is [text, colour] pairs on title/turn/photo/map, and plain
+    // strings on stat. Both shapes are display type and both count.
+    push(Array.isArray(ln) ? ln[0] : ln);
+  }
+  for (const b of Array.isArray(card.bars) ? card.bars : []) push(Array.isArray(b) ? b[0] : null);
+  for (const n of Array.isArray(card.nodes) ? card.nodes : []) {
+    if (Array.isArray(n)) { push(n[0]); push(n[1]); }
+  }
+  if (card.marker && typeof card.marker === "object") { push(card.marker.label); push(card.marker.sub); }
+  return out;
+}
+
+// ─── ABSOLUTES AND INTENSIFIERS ─────────────────────────────────────────────
+//
+// The second half of DrJ's reading: the closer said the detention could continue
+// "indefinitely", which no beat's evidence supported. That is a DIFFERENT defect
+// from an invented motive and it needs a different test — and, unlike a motive,
+// it is genuinely checkable, because an intensifier is a WORD rather than a
+// relation. Either the source says the thing is indefinite or we decided it was.
+//
+// Deliberately a short list of words that RAISE A CLAIM rather than describe
+// one. "All" and "every" are excluded despite being absolutes: "all but one
+// African nation" is the accurate phrasing of a real policy, and a gate that
+// fires on accurate reporting teaches people to route around it.
+//
+// Matched by STEM, so "indefinite" in the source licenses "indefinitely" in the
+// script — this checks that the idea came from the article, not morphology.
+const INTENSIFIER_STEMS = Object.freeze([
+  "indefinit", "forever", "permanent", "unprecedent", "historic", "massiv",
+  "enormous", "catastroph", "devastat", "crippl", "soar", "plummet",
+  "sweeping", "endless", "unparallel", "staggering", "shocking", "damning",
+  "utterly", "completely", "entirely", "totally",
+]);
+
+/**
+ * Intensifiers used in the script that the source never used. Returns the
+ * offending stems, or an empty array.
+ */
+export function unsupportedIntensifiers(strings, sourceText) {
+  if (!sourceText) return [];
+  const src = String(sourceText).toLowerCase();
+  const hay = strings.join(" ").toLowerCase();
+  return INTENSIFIER_STEMS.filter(stem => hay.includes(stem) && !src.includes(stem));
+}
+export const INTENSIFIER_ERROR = "unsupported_intensifier";
+
+
 // ─── ARC: the closer (B3) ───────────────────────────────────────────────────
 //
 // KICKER_BANNED_PHRASES already catches summary REGISTER ("in conclusion", "the
@@ -370,7 +501,11 @@ const CARD_FIELDS = {
   // `photo` carries NO image field. The photograph is the article's own
   // (image_url), and the MOUNT is a design decision made in code — a model
   // choosing between a polaroid and a torn cutting is a model art-directing.
-  photo:   { required: ["lines", "caption"],                 optional: ["eyebrow", "sub"] },
+  // `subject` is REQUIRED and is the whole point of the card: it declares what
+  // the photograph is expected to SHOW. Without it the renderer takes image_url
+  // on trust and nothing anywhere can notice a mismatch — which is the tariffs
+  // failure with a new name (DrJ, 2026-08-15).
+  photo:   { required: ["lines", "caption", "subject"],      optional: ["eyebrow", "sub"] },
   // `codes` are ISO 3166-1 alpha-3. `exception` is the ONE member of the set
   // the story excludes — the "all but one" case, which is unreadable without a
   // callout because the excepted country is often a couple of pixels wide.
@@ -486,6 +621,16 @@ function validateCardShape(card, idx) {
     // photograph. Sharing the case rather than copying it means the lime
     // invariant is checked in one place for all three.
     case "photo": {
+      if (t === "photo") {
+        if (card.subject !== undefined && !isStr(card.subject)) {
+          e.push(`${at} (photo): "subject" must be a non-empty string naming what the photograph should show`);
+        } else if (isStr(card.subject) && card.subject.trim().split(/\s+/).length > 8) {
+          // A subject is a noun phrase — "Aung San Suu Kyi", "the Port of
+          // Mombasa". A sentence here means the model is describing the beat
+          // again rather than naming a thing that can be looked for.
+          e.push(`${at} (photo): "subject" is a noun phrase, not a sentence — got ${card.subject.trim().split(/\s+/).length} words`);
+        }
+      }
       // Code-injected on `title` only (the absorbed attribution card). Shape is
       // still checked, because injection is code and code has bugs.
       if (card.outlet !== undefined && !isStr(card.outlet)) e.push(`${at} (${t}): "outlet" must be a non-empty string`);
@@ -575,6 +720,7 @@ function validateCardShape(card, idx) {
       break;
     }
 
+    case "photo_subject_unused": break;
     case "map": {
       // COUNTRY CODES ARE CHECKED AGAINST THE ACTUAL GEOMETRY, not a regex. A
       // plausible-looking code the atlas does not carry would draw an empty map,
@@ -739,6 +885,33 @@ export function validateSpec(spec, {
     if (shapeErrors.length) {
       dropped.push({ index: i, t: card?.t ?? "?", kind: "structural", reason: shapeErrors.join("; ") });
       continue;
+    }
+
+    // MOTIVE. An ERROR rather than a card drop, deliberately: dropping the card
+    // would quietly delete a beat and publish the rest, whereas this routes into
+    // the regeneration retry with the phrase named, and the model can either
+    // attribute the claim or state the effect instead. If it will not, the
+    // article is skipped — which is the correct failure direction for an
+    // unattributed assertion about what someone intended.
+    // EVERY string the viewer reads or hears, not just the spoken one.
+    const shown = displayStrings(card);
+    const motiveIn = shown.map(str => [str, unattributedMotive(str)]).find(([, mm]) => mm);
+    if (motiveIn) {
+      errors.push(
+        `${MOTIVE_ERROR}: slides[${i}] (${card.t}) asserts a motive — "${motiveIn[1]}" in ` +
+        `"${motiveIn[0].slice(0, 60)}" — on its own authority. Say WHOSE claim it is ("the filing ` +
+        `alleges…", "prosecutors say…"), or state what happened instead of why someone meant it to.`
+      );
+    }
+    if (sourceText) {
+      const loud = unsupportedIntensifiers(shown, sourceText);
+      if (loud.length) {
+        errors.push(
+          `${INTENSIFIER_ERROR}: slides[${i}] (${card.t}) uses ${loud.map(w => `"${w}…"`).join(", ")}, ` +
+          `which the source never does. An intensifier the article did not use is a claim you added — ` +
+          `either the source supports it, in which case use its word, or drop it.`
+        );
+      }
     }
 
     // Traceability + grounding (§3: "no source → drop the card, do not invent one").
