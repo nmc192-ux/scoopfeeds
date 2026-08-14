@@ -947,6 +947,19 @@ export async function writeVideoSpec(article, {
       );
     }
 
+    // THE WHOLE SPEC, on request. Off by default because a spec is a few KB of
+    // JSON and every cycle would emit one, but the summary line above says how
+    // many cards SURVIVED and never what they were — so a prompt change cannot
+    // be reviewed from the log alone. Turn this on for the first cycle after any
+    // prompt change, read it, turn it off.
+    //
+    // scripts/spec-dry-run.mjs is the cheaper path when the article can be
+    // chosen: it prints the same JSON without rendering or publishing anything.
+    // This flag is for seeing what the LIVE cycle actually produced.
+    if (process.env.VIDEO_SPEC_LOG_JSON === "1") {
+      logger.info(`🎬 videoSpec [${article.id}] FULL SPEC:\n${JSON.stringify(v.spec, null, 2)}`);
+    }
+
     const spec = {
       ...v.spec,
       meta: {
