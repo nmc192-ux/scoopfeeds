@@ -274,6 +274,29 @@ export function captionBridges(caption) {
 // rather than predicting from character count — and nothing is refused on it.
 export const CAPTION_MAX_CHARS = 160;
 
+// CAPTION FLOOR — the other end of the same writing constraint, and a gate for
+// exactly as long as the ceiling is: never.
+//
+// SLIDE DURATION IS AUDIO DURATION (§5), so a short caption is a short slide,
+// and a short slide loses beats. Measured through the real fitStatesToDuration
+// at ~2.6 words/sec, across every card type:
+//
+//   caption chars   secs   states kept
+//   150 ... 70      9.5 ... 4.4   all of them
+//   60              3.8           4 of 5 — a beat is dropped
+//
+// So 70 is where the collapse rule starts eating content rather than pacing.
+// It becomes load-bearing the moment captions move to a spoken register, which
+// is naturally shorter than the written prose the corpus was measured on: the
+// ceiling used to be the only edge anyone could hit, and now there are two.
+//
+// NOT VALIDATED, deliberately, for the same reason as the ceiling — discarding
+// an otherwise good video over one terse sentence costs far more than the
+// dropped beat does. It needs no separate warning either: fitStatesToDuration
+// already logs every collapse, so a caption under this floor announces itself
+// in the cycle log as the beat it dropped.
+export const CAPTION_MIN_CHARS = 70;
+
 // §3b/5 — THE PIPELINE'S OWN LAYER. A spec made only of title + stat + kicker
 // is a restatement of someone else's article with numbers pulled out: no
 // analysis added, nothing that is ours. §3b names this as BOTH the

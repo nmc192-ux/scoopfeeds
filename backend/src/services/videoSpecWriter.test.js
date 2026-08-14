@@ -487,3 +487,87 @@ test("B3: the closer rule names the three permitted moves and both wrong shapes"
   assert.match(p, /\(your own cold open again\)/);
   assert.match(p, /ILLUSTRATIVE ONLY/);
 });
+
+// ─── Spoken register ────────────────────────────────────────────────────────
+//
+// DrJ, 2026-08-14: "the captions are written news prose read aloud". The fix is
+// in the prompt, so the prompt is what these test. Whether the MODEL complies is
+// a live-cycle question no local test can answer — see the PR.
+
+const { CAPTION_MIN_CHARS: MINC } = await import("./videoSpecSchema.js");
+
+test("the prompt names the MECHANICS of spoken register, not just the adjective", () => {
+  // Rule 5 said "plain spoken prose" for months and produced wire copy. An
+  // adjective is not an instruction; these are.
+  const p = promptFor();
+  assert.match(p, /WRITE IT TO BE SAID, NOT TO BE READ/);
+  assert.match(p, /USE CONTRACTIONS/);
+  assert.match(p, /ONE IDEA PER CLAUSE/);
+  assert.match(p, /VARY THE LENGTH DELIBERATELY/);
+  assert.match(p, /FRAGMENTS ARE ALLOWED/);
+});
+
+test("the prompt SHOWS the change, with worked pairs", () => {
+  const p = promptFor();
+  const written = (p.match(/WRITTEN: "/g) || []).length;
+  const spoken = (p.match(/SPOKEN:  "/g) || []).length;
+  assert.ok(written >= 3, `expected at least 3 worked examples, found ${written}`);
+  assert.equal(written, spoken, "every WRITTEN example needs its SPOKEN counterpart");
+});
+
+test("THE EXEMPLARS OBEY THE RULES THEY TEACH", () => {
+  // A prompt that demonstrates its own constraint being broken teaches the
+  // broken version. Every SPOKEN example must sit inside the caption bounds.
+  const p = promptFor();
+  const spoken = [...p.matchAll(/SPOKEN:  "([^"]+)"/g)].map(m => m[1]);
+  assert.ok(spoken.length >= 3);
+  for (const s of spoken) {
+    assert.ok(s.length <= CAPTION_MAX_CHARS, `exemplar is ${s.length} chars, over the ${CAPTION_MAX_CHARS} ceiling: "${s}"`);
+    assert.ok(s.length >= MINC, `exemplar is ${s.length} chars, under the ${MINC} floor: "${s}"`);
+  }
+});
+
+test("register changed; STANCE did not", () => {
+  // The risk in rewriting the tone rule was quietly dropping the editorial
+  // protections that lived in the same paragraph.
+  const p = promptFor();
+  assert.match(p, /STANCE, NOT REGISTER/);
+  assert.match(p, /No editorialising/i);
+  assert.match(p, /Preserve the source's hedging/);
+  assert.match(p, /officials say/, "the hedging example must survive");
+  assert.match(p, /never a licence to lose precision/,
+    "spoken register must be explicitly fenced off from losing figures or qualifiers");
+  assert.ok(!/Neutral wire-service register/.test(p),
+    "the instruction that produced the written register must be gone");
+});
+
+// ─── The caption floor ──────────────────────────────────────────────────────
+
+test("the prompt states the floor, sourced from the constant", () => {
+  const p = promptFor();
+  assert.match(p, new RegExp(`at or above ${MINC}`),
+    "the number must come from CAPTION_MIN_CHARS, not be written twice");
+  assert.match(p, /loses one of the slide's reveals/, "state WHY — it costs a beat, not just tidiness");
+});
+
+test("the floor is NOT enforced anywhere either", () => {
+  const schema = readFileSync(new URL("./videoSpecSchema.js", import.meta.url), "utf8");
+  const code = schema.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  assert.ok(!/CAPTION_MIN_CHARS/.test(code.replace(/export const CAPTION_MIN_CHARS = \d+;/, "")),
+    "CAPTION_MIN_CHARS must be declared and never used as a validation threshold");
+});
+
+test("the floor is WHERE THE COLLAPSE RULE BITES — the constant matches its evidence", async () => {
+  // If someone later 'tidies' 70 to a rounder number, this fails: the value is
+  // derived from fitStatesToDuration, not chosen for looking sensible.
+  const { statesForCard, fitStatesToDuration } = await import("./videoSlideRenderer.js");
+  const ctx = { outlet: "Reuters", slideIndex: 2, slideCount: 7, orientation: "vertical" };
+  const card = { t: "stat", eyebrow: "F", value: "70", unit: "%", lines: ["a", "b"], hi: 1, source: "R", caption: "c" };
+  const all = statesForCard(card, ctx);
+  const secsFor = (chars) => (chars / 6.1) / 2.6;      // ~2.6 words/sec, ~6.1 chars/word
+  const kept = (chars) => fitStatesToDuration(all, secsFor(chars), { cardType: "stat", slideIndex: 2 }).length;
+
+  assert.equal(kept(MINC), all.length, `at the ${MINC}-char floor every state must survive`);
+  assert.ok(kept(MINC - 15) < all.length,
+    "well below the floor a beat must actually be dropped, or the floor is protecting nothing");
+});

@@ -50,7 +50,7 @@ import {
   markGeminiModelGone,
 } from "../realityIndex/llmQueue.js";
 import {
-  MODEL_EMITTABLE, THUMBNAIL_ANGLES, MIN_SLIDES, MAX_SLIDES, CAPTION_MAX_CHARS,
+  MODEL_EMITTABLE, THUMBNAIL_ANGLES, MIN_SLIDES, MAX_SLIDES, CAPTION_MAX_CHARS, CAPTION_MIN_CHARS,
   validateSpec, validatePackaging, decorateTitleCard,
 } from "./videoSpecSchema.js";
 import { resolveAttribution } from "./videoAttribution.js";
@@ -479,7 +479,33 @@ HARD RULES — violating any of these makes the output unusable:
 
 4. NO "attribution" CARD. You must never emit a card with "t":"attribution". That card names the outlet, headline and date of the reporting this video is built on, and it is built from the database, not written. A fabricated byline is the worst thing this pipeline could put on screen. If you emit one, the card is discarded.
 
-5. CAPTION IS THE NARRATION. Every card MUST have a "caption": the exact sentence spoken over that slide. It is both the voiceover line and the burned-in subtitle, so they can never drift apart. Write captions as plain spoken prose: no markdown, no brackets, no quotation marks, no emoji, no symbols. Write "percent" not "%", and write numbers the way a newsreader would say them. One or two spoken sentences per caption — say the beat and stop.
+5. CAPTION IS THE NARRATION. Every card MUST have a "caption": the exact sentence spoken over that slide. It is both the voiceover line and the burned-in subtitle, so they can never drift apart. No markdown, no brackets, no quotation marks, no emoji, no symbols. Write "percent" not "%", and write numbers the way a newsreader would say them.
+
+5b. WRITE IT TO BE SAID, NOT TO BE READ. This is the difference between a sentence that works on a page and one that works in an ear, and it is not a matter of degree — the two are built differently. A caption is heard once, at speed, with no way to go back:
+
+    - USE CONTRACTIONS. "It is not" is written; "it's not" is spoken.
+    - ONE IDEA PER CLAUSE. A sentence carrying three subordinate clauses is
+      readable and unspeakable. Break it.
+    - VARY THE LENGTH DELIBERATELY. A long sentence, then a short one. Uniform
+      sentence length is the single thing that makes narration sound automated.
+    - FRAGMENTS ARE ALLOWED, sparingly, where speech would use one. "That was
+      the plan." is a sentence in the ear.
+    - LEAD WITH THE SUBJECT DOING SOMETHING, not with a nominalised summary.
+      "A group of firms has committed to construction of" is a report about a
+      sentence; "these firms are spending" is the thing itself.
+
+    Three worked examples. The first version of each is grammatical, accurate, and wrong:
+
+    WRITTEN: "A group of major Japanese carriers has begun trialling humanoid robots in airport ground operations amid chronic labour shortages."
+    SPOKEN:  "Haneda airport cannot find enough staff. So Japan Airlines is trying something else: humanoid robots, working the ground crew shift alongside people."
+
+    WRITTEN: "Myanmar's former leader Aung San Suu Kyi has been moved from prison to house arrest, according to state media, after being detained since the military coup in 2021."
+    SPOKEN:  "She won a Nobel Prize, then her own army took the country back. She has been out of sight four years. Now state media says she is under house arrest."
+
+    WRITTEN: "China will scrap tariffs for all African countries from Friday, except Eswatini, which maintains ties with Taiwan."
+    SPOKEN:  "From Friday, China drops tariffs on almost every country in Africa. One is left out, and the reason is Taiwan."
+
+    Note what did NOT change: every figure, every hedge, every attribution survives. Spoken register is a change of SENTENCE CONSTRUCTION, never a licence to lose precision, drop a qualifier, or round a number.
 
 6. THE SLIDE TEXT IS NOT THE CAPTION. On-screen text is short and declarative — a few words, upper case where the grammar shows upper case. The caption is the sentence that explains it. They reinforce each other; they never repeat each other word for word.
 
@@ -520,9 +546,13 @@ HARD RULES — violating any of these makes the output unusable:
 
    AT LEAST ONE "diagram" OR "turn" IS REQUIRED. These are the cards that add something the source did not already say in that form — a mechanism drawn as a chain, or the point where the obvious reading gives way. A spec of only headline and figures is a restatement of someone else's article with the numbers pulled out; it is rejected outright. This is the part of the video that is ours.
 
-10. TONE. Neutral wire-service register. No editorialising, no outrage, no rhetorical questions, no "you won't believe". Interest comes from a specific fact being genuinely interesting, never from sensational phrasing. Preserve the source's hedging: if it says "reportedly" or "officials say", keep that attribution.
+10. TONE — STANCE, NOT REGISTER. These are two different things and only one of them is neutral.
 
-17. CAPTION LENGTH IS A HARD WRITING CONSTRAINT: keep every caption at or under ${CAPTION_MAX_CHARS} characters. This is not a style preference — it is the measured width of two lines of burned-in caption at the size they are rendered. A longer caption wraps to a third line and sits higher than the band is designed for. Write shorter sentences; do not compress by deleting the source credit or the figure.
+    The STANCE is neutral and stays neutral: no editorialising, no outrage, no "you won't believe", no manufactured stakes. Interest comes from a specific fact being genuinely interesting, never from sensational phrasing. Preserve the source's hedging: if it says "reportedly" or "officials say", keep that attribution.
+
+    The REGISTER is SPOKEN, per 5b. A wire-service sentence is a neutral stance in a written register, and reading one aloud is what makes narration sound like a machine reciting. Keep the detachment; lose the paperwork.
+
+17. CAPTION LENGTH IS A HARD WRITING CONSTRAINT AT BOTH ENDS: keep every caption at or under ${CAPTION_MAX_CHARS} characters, and at or above ${CAPTION_MIN_CHARS}. The floor is not a style note — the slide is held for exactly as long as its narration, and a caption shorter than that loses one of the slide's reveals to the collapse rule. A one-line fragment is a beat you wrote and the viewer never sees. If a beat genuinely takes fewer words than that, it belongs joined to its neighbour, not standing alone. This is not a style preference — it is the measured width of two lines of burned-in caption at the size they are rendered. A longer caption wraps to a third line and sits higher than the band is designed for. Write shorter sentences; do not compress by deleting the source credit or the figure.
 
 RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. These decide whether anyone is still watching at ten seconds.
 
