@@ -1027,7 +1027,10 @@ test("the closer gate abstains with no headline, but still checks the opening ca
 });
 
 test("a short closer with no content words is not read as a restatement", () => {
-  const v = validateSpec(closerSpec("So who pays now?"), arcOpts());
+  // Was "So who pays now?" until 2026-08-14 — a HANGING closer question, which
+  // the closer ban now correctly rejects. The subject here is the restatement
+  // check, so the fixture keeps its content-word-free shape without the device.
+  const v = validateSpec(closerSpec("So now they wait."), arcOpts());
   assert.equal(v.ok, true, v.errors.join(" | "));
 });
 
@@ -1102,4 +1105,86 @@ test("the renderer NEVER truncates silently", async () => {
   assert.equal(warns.length, 1, `expected one warning, got ${JSON.stringify(warns)}`);
   assert.match(warns[0], /DISCARDING 1/);
   assert.match(warns[0], /bypassed validation/);
+});
+
+// ─── The closer question ban ────────────────────────────────────────────────
+//
+// DrJ's ruling, 2026-08-14: "A question is only clickbait when the answer is
+// withheld." Permitted on the opener and mid-beats, where the next beat answers
+// it; rejected on the closer, where nothing follows.
+
+const { CLOSER_QUESTION_ERROR, TRAILING_QUESTION, captionBridges } = await import("./videoSpecSchema.js");
+const { readFileSync } = await import("node:fs");
+
+function specWithKicker(kicker, extra = {}) {
+  return {
+    slides: [
+      { t: "title", eyebrow: "B", lines: [["A", "white"], ["B", "lime"]], sub: "s",
+        caption: "So who actually pays for this? The households buying the imported goods do." },
+      { t: "diagram", eyebrow: "H", nodes: [["A", "x"], ["B", "y"]], marker: { on: 1, label: "M" },
+        caption: "The route runs through three countries before anything reaches a shelf here." },
+      { t: "turn", eyebrow: "BUT", lines: [["X", "white"], ["Y", "lime"]],
+        caption: "But the tariff is only part of what makes those goods expensive at the till." },
+      kicker,
+    ],
+    ...extra,
+  };
+}
+const KICKER_OK = { t: "kicker", top: "WHAT NOW", bottom: "THE BILL LANDS",
+  caption: "The cost lands with the importer first, and it reaches the shelf within about a month." };
+
+test("a closer ending on a question is REJECTED", () => {
+  const r = validateSpec(specWithKicker({ ...KICKER_OK,
+    caption: "So who actually gains from all of this, and how long before anyone finds out?" }),
+    { headline: "Tariffs cut for most of Africa" });
+  const err = (r.errors || []).join(" | ");
+  assert.match(err, new RegExp(CLOSER_QUESTION_ERROR), `expected a closer_question error, got: ${err}`);
+  assert.match(err, /the answer can never arrive/);
+});
+
+test("a question ASKED AND ANSWERED inside the closer is allowed", () => {
+  // The whole subtlety of trailing-only matching. This is the legitimate shape:
+  // the answer arrives immediately, in the same breath.
+  const r = validateSpec(specWithKicker({ ...KICKER_OK,
+    caption: "So who pays? Households do, through the price of everything imported from there." }),
+    { headline: "Tariffs cut for most of Africa" });
+  assert.ok(!(r.errors || []).join(" ").includes(CLOSER_QUESTION_ERROR),
+    "a self-answered question is the shape DrJ asked to keep");
+});
+
+test("questions on the OPENER and mid-beats are untouched", () => {
+  // The opener in the fixture ends its question then answers it; the point is
+  // that no rule anywhere fires on a non-final card carrying "?".
+  const r = validateSpec(specWithKicker(KICKER_OK), { headline: "Tariffs cut for most of Africa" });
+  assert.ok(!(r.errors || []).join(" ").includes(CLOSER_QUESTION_ERROR));
+});
+
+test("the ON-SCREEN last line counts too, not just the narration", () => {
+  const r = validateSpec(specWithKicker({ ...KICKER_OK, bottom: "WHO PAYS?" }),
+    { headline: "Tariffs cut for most of Africa" });
+  assert.match((r.errors || []).join(" | "), new RegExp(CLOSER_QUESTION_ERROR),
+    "the last words left on screen end the video just as the narration does");
+});
+
+test("TRAILING_QUESTION matches only at the END, through closing punctuation", () => {
+  for (const yes of ["who pays?", "who pays? ", 'he asked "who pays?"', "who pays?)", "who pays?”"]) {
+    assert.ok(TRAILING_QUESTION.test(yes), `should match: ${yes}`);
+  }
+  for (const no of ["who pays? Households do.", "the 40% question is settled", "who pays? They do"]) {
+    assert.ok(!TRAILING_QUESTION.test(no), `should NOT match: ${no}`);
+  }
+});
+
+test("BRIDGE_PUNCT still counts a trailing question as a bridge", () => {
+  // DrJ: "keep BRIDGE_PUNCT as it is — it was right and rule 10 was over-broad."
+  assert.equal(captionBridges("So who actually pays for this?"), true);
+});
+
+test("nothing in the schema still RECOMMENDS ending on a question", () => {
+  // The kicker's own error message used to say the closer may end on "an open
+  // question" — it was teaching the failure this now rejects.
+  const src = readFileSync(new URL("./videoSpecSchema.js", import.meta.url), "utf8");
+  const recommending = src.split("\n").filter(l =>
+    /or an open question/.test(l) && !/used to (say|offer)/.test(l));
+  assert.deepEqual(recommending, [], "a stale recommendation would argue with the new gate");
 });
