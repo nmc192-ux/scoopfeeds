@@ -251,16 +251,90 @@ const ATTRIBUTION_MARKERS =
 // authority. Attribution is always available, always cheap, and always better
 // journalism, so the gate costs a rewrite rather than the idea.
 
+// ─── REPORTED INTENT IS NOT ASSERTED INTENT ─────────────────────────────────
+//
+// THE FALSE POSITIVES (DrJ, 2026-08-15). Two of three flags on a live run were
+// wrong, and they killed the article:
+//
+//   "The broadcaster wants to use certified mail"
+//   "To prove what Trump actually intended that day, the broadcaster…"
+//
+// Both are the BBC's OWN filed position, stated in the filing the article
+// reports. The gate fired on the verb without asking whose intent it was or
+// whether anyone had stated it — and a party's own stated purpose is reporting,
+// not an assertion. It would have hit legal and political stories hardest:
+// exactly the ones where parties put their intentions on the record.
+//
+// THE DISTINCTION THAT IS ACTUALLY CHECKABLE. Not "who is the grammatical
+// subject" — that needs parsing this codebase has no business attempting — but
+// DOES THE SOURCE ITSELF PUT THIS INTENT ON THE RECORD. A source sentence that
+// (a) states a purpose or a speech/filing act AND (b) is about the same thing
+// the caption is about, means the intent came from the reporting rather than
+// from us.
+//
+//   BBC filing:  "The BBC has asked the court for alternative means of service,
+//                 such as certified mail…"  -> request verb + shares "certified",
+//                 "mail" with the caption -> REPORTED, allowed.
+//   Secret Service: "Their protective detail has blocked three attempts to serve
+//                 papers."  -> no purpose, no speech act -> ASSERTED, refused.
+//
+// It is deliberately asymmetric. A false positive kills an article; a false
+// negative leaves one motive claim for rule 10c and a human to catch. After
+// this run the asymmetry runs the other way from where it started.
+const REPORTED_SPEECH = /\b(say|says|said|told|asks?|asked|request(?:s|ed)?|argu(?:e|es|ed)|fil(?:e|es|ed|ing)|seek(?:s|ing)?|sought|urge[sd]?|appl(?:y|ies|ied)|claim(?:s|ed)?|alleg(?:e|es|ed)|deni(?:es|ed)|propos(?:e|es|ed)|plans?|intends?|wants?|according to|in (?:its|their|his|her) (?:filing|petition|submission|statement))\b/i;
+
+/** Content words, long enough to be about something. Mirrors tooSimilar's >4. */
+const contentWords = (s) => [...new Set(
+  String(s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length > 4)
+)];
+
+/**
+ * Is this intent already ON THE RECORD in the source?
+ *
+ * Needs BOTH: a source sentence that states a purpose or a speech/filing act,
+ * and enough shared subject matter that it is plainly the same claim. Two
+ * content words is the bar — one is a coincidence in a long article.
+ */
+export function motiveIsReported(text, sourceText) {
+  if (!sourceText) return false;
+  const terms = new Set(contentWords(text));
+  if (terms.size === 0) return false;
+  // A TWO-SENTENCE WINDOW, not a single sentence. A filing is routinely reported
+  // across a pair — "asked the court for alternative means, such as certified
+  // mail. In its filing the broadcaster said it needs the deposition to prove…"
+  // — and a single-sentence test failed exactly there: "broadcaster" and
+  // "certified" were one sentence apart, so the real case scored 1 and the
+  // article died.
+  const sentences = String(sourceText).split(/(?<=[.!?])\s+/);
+  // And the bar is min(2, terms) so a short caption is not impossible to clear:
+  // "The broadcaster wants to use certified mail" carries two content words in
+  // total, and requiring three of two is a gate nothing can pass.
+  const need = Math.min(2, terms.size);
+  for (let i = 0; i < sentences.length; i++) {
+    const window = sentences.slice(i, i + 2).join(" ");
+    if (!MOTIVE_MARKERS.test(window) && !REPORTED_SPEECH.test(window)) continue;
+    let shared = 0;
+    for (const w of contentWords(window)) if (terms.has(w) && ++shared >= need) return true;
+  }
+  return false;
+}
+
 /**
  * Does this caption assert a motive without saying whose claim it is?
  * Returns the offending phrase, or null.
  */
-export function unattributedMotive(caption) {
+export function unattributedMotive(caption, sourceText = "") {
   const c = String(caption || "").trim();
   if (!c) return null;
   const motive = c.match(MOTIVE_MARKERS);
   if (!motive) return null;
-  if (ATTRIBUTION_MARKERS.test(c)) return null;   // someone is on the record
+  if (ATTRIBUTION_MARKERS.test(c)) return null;      // someone is on the record here
+  // WITHOUT A SOURCE THERE IS NO CASE. The gate accuses the script of inventing
+  // an intent; with nothing to compare against, that accusation cannot be made
+  // fairly — and firing on absent evidence is how the first version killed an
+  // article whose motive was in the filing all along.
+  if (!sourceText) return null;
+  if (motiveIsReported(c, sourceText)) return null;  // the source put it on the record
   return motive[0];
 }
 export const MOTIVE_ERROR = "unattributed_motive";
@@ -895,7 +969,7 @@ export function validateSpec(spec, {
     // unattributed assertion about what someone intended.
     // EVERY string the viewer reads or hears, not just the spoken one.
     const shown = displayStrings(card);
-    const motiveIn = shown.map(str => [str, unattributedMotive(str)]).find(([, mm]) => mm);
+    const motiveIn = shown.map(str => [str, unattributedMotive(str, sourceText)]).find(([, mm]) => mm);
     if (motiveIn) {
       errors.push(
         `${MOTIVE_ERROR}: slides[${i}] (${card.t}) asserts a motive — "${motiveIn[1]}" in ` +
