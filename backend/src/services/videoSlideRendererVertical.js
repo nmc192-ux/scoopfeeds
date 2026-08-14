@@ -22,8 +22,9 @@
  */
 
 import { VERTICAL } from "./videoGeometry.js";
-import { makePrimitives, COLORS as C, FONTS as F } from "./videoSlideChrome.js";
+import { makePrimitives, COLORS as C, FONTS as F, antonWidth, fitDisplaySize } from "./videoSlideChrome.js";
 import { truncateLoudly } from "./videoSlideRenderer.js";
+import { logger } from "./logger.js";
 
 const G = VERTICAL;
 const { root, chrome, eyebrow, hairline, sourceCredit, sourceBadge, antonLine, box, text, abs } = makePrimitives(G);
@@ -65,11 +66,57 @@ const base = (card, ctx) => [...chrome(ctx), eyebrowV(card.eyebrow || "")];
 
 // ─── title ──────────────────────────────────────────────────────────────────
 
+const TITLE_NOMINAL = 104;
+const TITLE_MIN = 64;
+const KICKER_NOMINAL = 96;
+
+/**
+ * ONE size for a GROUP of display lines, decided by the widest of them.
+ *
+ * Shared by title, turn and kicker — all three stack Anton lines at a fixed size
+ * over the same 936px measure, so all three have the same exposure. Fixing only
+ * the one that was reported would have left two card types looking fixed.
+ *
+ * Per-line fitting is deliberately not offered: two headline lines at different
+ * sizes read as a mistake rather than as typography.
+ */
+function fitLineGroup(texts, { nominal, min = TITLE_MIN, what }) {
+  const candidates = texts.filter(Boolean).map(String);
+  if (!candidates.length) return nominal;
+  const longest = candidates.sort((a, b) => antonWidth(b, nominal) - antonWidth(a, nominal))[0];
+  const fit = fitDisplaySize((size) => antonWidth(longest, size),
+    { nominalSize: nominal, maxWidth: G.contentW, minSize: min });
+  if (fit.overflow > 0) {
+    logger.warn(
+      `🎬 ${what} line "${longest}" does not fit ${G.contentW}px even at the ${min}px floor ` +
+      `(over by ${fit.overflow}px) — rendering whole rather than clipping`
+    );
+  } else if (fit.fitted) {
+    logger.info(`🎬 ${what} auto-fitted ${nominal}px → ${fit.size}px for "${longest}"`);
+  }
+  return fit.size;
+}
+
+/**
+ * Unlike the stat card this was NOT overflowing in the reported render, and the
+ * measurement says why: at 104px the longest realistic words clear the measure
+ * with room —
+ *
+ *   INFRASTRUCTURE (14ch)        706   ok
+ *   TELECOMMUNICATIONS (18ch)    931   ok   (against a 1008 measure edge)
+ *   COUNTERINTELLIGENCE (19ch)   907   ok
+ *
+ * So this is prevention, not a fix. The headroom is real but thin — roughly 19
+ * average characters, and only 12 of the widest glyph (Anton's M is 75 units
+ * against I's 23) — and a single unbreakable word has nowhere to wrap to.
+ */
 function titleStatesV(card, ctx) {
   const [l1, l2] = (card.lines || []).slice(0, 2);
   const limeIdx = (card.lines || []).findIndex(l => l[1] === "lime");
+
+  const size = fitLineGroup([l1?.[0], l2?.[0]], { nominal: TITLE_NOMINAL, what: "title" });
   const line = (pair, top) => pair
-    ? antonLine(pair[0], { top, size: 104, color: pair[1] === "lime" ? C.lime : C.white })
+    ? antonLine(pair[0], { top, size, color: pair[1] === "lime" ? C.lime : C.white })
     : null;
   const b = () => base(card, ctx);
   return [
@@ -99,14 +146,71 @@ function titleStatesV(card, ctx) {
 
 // ─── stat ───────────────────────────────────────────────────────────────────
 
+// The shipped design, as literals, so the fit reads as a departure from it.
+const STAT_NOMINAL = 400;
+const STAT_UNIT_RATIO = 150 / 400;   // the unit is 37.5% of the figure, always
+const STAT_UNIT_GAP = 12;
+const STAT_MIN = 200;
+const STAT_LS = -4;
+
+/**
+ * The figure, auto-fitted.
+ *
+ * MEASURED FAILURE (DrJ, 2026-08-14, from a live YouTube Short): "14,000"
+ * rendered with its last glyph clipped at the right frame edge. Confirmed on the
+ * real render path — at 1080 wide the fixed 400px figure runs past the 936px
+ * measure from five characters upward, and past the FRAME from six:
+ *
+ *   7,000               933   ok
+ *   14,000             1061   over by 53
+ *   140,000           >1079   clipped
+ *   7,000 + a unit    >1079   clipped
+ *
+ * 16:9 is unaffected — the same figures end at 833-1500 against a 1824 measure,
+ * so the horizontal layout keeps its fixed sizes and its byte-identical render.
+ * This is a consequence of spending width, not a latent bug that vertical
+ * happened to reveal.
+ *
+ * The unit scales WITH the figure rather than staying at 150: the 37.5% ratio is
+ * the design relationship, and holding the unit fixed while the figure shrinks
+ * inverts the hierarchy on exactly the cards where the number matters most.
+ */
+function fittedStatSize(card) {
+  const avail = G.contentW;
+  const measure = (size) =>
+    antonWidth(card.value, size, STAT_LS) +
+    (card.unit ? STAT_UNIT_GAP + antonWidth(card.unit, size * STAT_UNIT_RATIO) : 0);
+
+  const fit = fitDisplaySize(measure, { nominalSize: STAT_NOMINAL, maxWidth: avail, minSize: STAT_MIN });
+  if (fit.overflow > 0) {
+    // NO SILENT CAPS. At the floor and still over: the figure is rendered whole
+    // and overflowing rather than truncated, because a clipped number is a WRONG
+    // number and this is the one element on the card that must not lie.
+    logger.warn(
+      `🎬 stat "${card.value}${card.unit || ""}" does not fit ${avail}px even at the ${STAT_MIN}px floor ` +
+      `(over by ${fit.overflow}px) — rendering whole and overflowing rather than clipping a digit`
+    );
+  } else if (fit.fitted) {
+    logger.info(`🎬 stat "${card.value}${card.unit || ""}" auto-fitted ${STAT_NOMINAL}px → ${fit.size}px to hold the ${avail}px measure`);
+  }
+  return fit.size;
+}
+
 function statStatesV(card, ctx) {
   const b = () => base(card, ctx);
   const hi = Number.isInteger(card.hi) ? card.hi : -1;
+  const vSize = fittedStatSize(card);
   const value = box({
     position: "absolute", left: G.marginX, top: VY.statValue, alignItems: "flex-end",
   }, [
-    text(card.value, { fontFamily: F.anton, fontSize: 400, lineHeight: 1.0, letterSpacing: -4, color: C.white }),
-    card.unit ? text(card.unit, { fontFamily: F.anton, fontSize: 150, lineHeight: 1.0, color: C.white, marginLeft: 12, marginBottom: 52 }) : null,
+    text(card.value, { fontFamily: F.anton, fontSize: vSize, lineHeight: 1.0, letterSpacing: STAT_LS, color: C.white }),
+    card.unit ? text(card.unit, {
+      fontFamily: F.anton, fontSize: Math.round(vSize * STAT_UNIT_RATIO), lineHeight: 1.0,
+      color: C.white, marginLeft: STAT_UNIT_GAP,
+      // The unit sits on the figure's baseline, so its offset has to track the
+      // fitted size — a fixed 52 would float it off a shrunken figure.
+      marginBottom: Math.round(52 * (vSize / STAT_NOMINAL)),
+    }) : null,
   ].filter(Boolean));
   const supportLine = (i, top) => {
     const s = (card.lines || [])[i];
@@ -223,8 +327,9 @@ function diagramStatesV(card, ctx) {
 function turnStatesV(card, ctx) {
   const [l1, l2] = (card.lines || []).slice(0, 2);
   const limeIdx = (card.lines || []).findIndex(l => l[1] === "lime");
+  const size = fitLineGroup([l1?.[0], l2?.[0]], { nominal: TITLE_NOMINAL, what: "turn" });
   const line = (pair, top) => pair
-    ? antonLine(pair[0], { top, size: 104, color: pair[1] === "lime" ? C.lime : C.white })
+    ? antonLine(pair[0], { top, size, color: pair[1] === "lime" ? C.lime : C.white })
     : null;
   const b = () => base(card, ctx);
   return [
@@ -243,18 +348,21 @@ function turnStatesV(card, ctx) {
 
 function kickerStatesV(card, ctx) {
   const b = () => [...chrome(ctx), eyebrowV("WHAT NOW")];
+  // Same exposure as title and turn: two Anton lines at a fixed size over the
+  // same 936px measure. Fitted as one group so the pair keeps a single size.
+  const kSize = fitLineGroup([card.top, card.bottom], { nominal: KICKER_NOMINAL, what: "kicker" });
   return [
     { key: "s1", lime: false, tree: root([...b()]) },
-    { key: "s2", lime: false, tree: root([...b(), antonLine(card.top, { top: VY.kickTop, size: 96, color: C.white })]) },
+    { key: "s2", lime: false, tree: root([...b(), antonLine(card.top, { top: VY.kickTop, size: kSize, color: C.white })]) },
     { key: "s3", lime: true, tree: root([
         ...b(),
-        antonLine(card.top, { top: VY.kickTop, size: 96, color: C.white }),
-        antonLine(card.bottom, { top: VY.kickBottom, size: 96, color: C.lime }),
+        antonLine(card.top, { top: VY.kickTop, size: kSize, color: C.white }),
+        antonLine(card.bottom, { top: VY.kickBottom, size: kSize, color: C.lime }),
       ]) },
     { key: "s4", lime: true, tree: root([
         ...b(),
-        antonLine(card.top, { top: VY.kickTop, size: 96, color: C.white }),
-        antonLine(card.bottom, { top: VY.kickBottom, size: 96, color: C.lime }),
+        antonLine(card.top, { top: VY.kickTop, size: kSize, color: C.white }),
+        antonLine(card.bottom, { top: VY.kickBottom, size: kSize, color: C.lime }),
         card.sub ? text(card.sub, {
           position: "absolute", left: G.marginX, top: VY.kickSub, maxWidth: G.contentW,
           fontSize: 38, fontWeight: 600, color: C.sub, lineHeight: 1.3,
