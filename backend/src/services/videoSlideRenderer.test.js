@@ -737,3 +737,64 @@ test("the shipped cards spend NO gestures — emphasis is not a gesture", () => 
   statesForCard(barsCard, vctx);
   assert.equal(g.spent(), null);
 });
+
+// ─── B3: the ground contract's first real users ─────────────────────────────
+
+test("a GROUND.OVER state rasterises TRANSPARENT, not black", async () => {
+  // THE BUG THIS CAUGHT, on the first end-to-end render: renderState passed
+  // `background: C.base` unconditionally, so a transparent card came out as a
+  // black rectangle and buried the mount composited behind it. The contract
+  // knew the answer; the last step was still assuming one. Measured on real
+  // pixels rather than on the call's arguments.
+  const { Resvg } = await import("@resvg/resvg-js");
+  const card = { t: "photo", eyebrow: "WHO", lines: [["A", "white"], ["B", "lime"]], caption: "c" };
+  const [first] = statesForCard(card, { outlet: "R", slideIndex: 1, slideCount: 5, orientation: "vertical" });
+  const png = await renderState(first, { orientation: "vertical" });
+
+  // Composite the state over a MAGENTA field. If the card is opaque, none of it
+  // shows through; if it is transparent, most of the frame is magenta.
+  const raw = new Resvg(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920">` +
+    `<rect width="1080" height="1920" fill="#ff00ff"/>` +
+    `<image href="data:image/png;base64,${png.toString("base64")}" width="1080" height="1920"/></svg>`,
+    { fitTo: { mode: "original" } }).render().pixels;
+  let magenta = 0;
+  for (let i = 0; i < raw.length; i += 4) {
+    if (raw[i] > 200 && raw[i + 1] < 60 && raw[i + 2] > 200) magenta++;
+  }
+  const share = magenta / (raw.length / 4);
+  assert.ok(share > 0.5,
+    `only ${(share * 100).toFixed(1)}% of the frame showed through — a GROUND.OVER card must be transparent`);
+});
+
+test("an INK state is still fully opaque", () => {
+  // The other half: nothing about the OVER path may make ordinary cards
+  // transparent, or every existing slide would composite onto whatever is behind.
+  const [first] = statesForCard(
+    { t: "stat", eyebrow: "F", value: 70, unit: "%", lines: ["a", "b"], hi: 1, source: "R", caption: "c" },
+    { outlet: "R", slideIndex: 1, slideCount: 5, orientation: "vertical" });
+  assert.equal(first.ground, "ink");
+  assert.equal(first.tree.props.style.background, COLORS.base);
+});
+
+test("subject-visual states name the image they need behind them", () => {
+  const ctx = { outlet: "R", slideIndex: 1, slideCount: 5, orientation: "vertical" };
+  for (const [card, want] of [
+    [{ t: "photo", lines: [["A", "white"]], caption: "c" }, "photo"],
+    [{ t: "map", codes: ["DZA"], lines: [["A", "white"]], caption: "c" }, "map"],
+  ]) {
+    for (const st of statesForCard(card, ctx)) {
+      assert.equal(st.ground, "over", "the image goes behind, so the card paints no ground");
+      assert.equal(st.underlay, want, "the assembler needs to know WHICH image");
+    }
+  }
+});
+
+test("16:9 has no subject-visual layout, so it degrades and says so", () => {
+  // Losing an entire video over one card whose WORDS render perfectly would be
+  // the wrong trade. The imagery is a 9:16 composition; the type survives.
+  const st = statesForCard({ t: "photo", eyebrow: "W", lines: [["A", "white"], ["B", "lime"]], caption: "c" },
+    { outlet: "R", slideIndex: 1, slideCount: 5 });
+  assert.ok(st.length >= 3, "it still renders");
+  assert.equal(st[0].ground, "ink", "and paints its own ground, since nothing is composited behind it");
+});

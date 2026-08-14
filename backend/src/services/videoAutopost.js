@@ -59,6 +59,7 @@ import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from ".
 import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js";
 import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
 import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
+import { buildMount, buildMapPng, MOUNT_NAMES } from "./videoSubjectVisual.js";
 import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
@@ -240,6 +241,20 @@ export const VIDEO_FACEBOOK_MAX_PER_DAY = () => {
   return Number.isFinite(n) && n >= 0 ? n : VIDEO_MAX_PER_DAY();
 };
 
+/**
+ * ONE MOUNT PER VIDEO, chosen deterministically from the article id.
+ *
+ * Deterministic so a re-render is identical (the render cache means a video
+ * rebuilt tomorrow must not arrive in a different frame), and varied across
+ * articles so the channel does not look like one template. The ground never
+ * changes, so varying the mount is where variety comes from without
+ * inconsistency — DrJ's decision, 2026-08-14.
+ */
+export function mountFor(articleId) {
+  const h = [...String(articleId || "x")].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+  return MOUNT_NAMES[h % MOUNT_NAMES.length];
+}
+
 const SITE_ORIGIN = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 
 /**
@@ -369,10 +384,43 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
         writeFileSync(p, await renderState(st, { orientation }));
         paths.push(p);
       }
+      // SUBJECT VISUAL. A card whose states declare GROUND.OVER needs an image
+      // behind them; `underlay` on the state names which one. Built here, once
+      // per slide, because it is IO and the renderer is a pure tree builder.
+      //
+      // A failure returns null and the card renders over the bare ground rather
+      // than losing the video: the type still says what it says, and the log
+      // says why the picture is missing. Never a throw — a photo that would not
+      // fetch is not a reason to lose a story.
+      let underlayPath = null;
+      const wants = states.find(st => st.underlay)?.underlay;
+      if (wants) {
+        try {
+          const svWork = path.join(work, `sv${String(i).padStart(2, "0")}`);
+          if (wants === "photo") {
+            underlayPath = await buildMount({
+              imageUrl: article.image_url, mount: mountFor(article.id),
+              work: svWork, seed: article.id,
+            });
+          } else if (wants === "map") {
+            underlayPath = buildMapPng({
+              codes: card.codes, exception: card.exception ?? null,
+              out: path.join(svWork, "map.png"), work: svWork,
+            });
+          }
+          if (!underlayPath) {
+            logger.warn(`🎬 slide ${i} (${card.t}): no ${wants} could be built — rendering the type alone`);
+          }
+        } catch (err) {
+          logger.warn(`🎬 slide ${i} (${card.t}): ${wants} failed — ${err.message.slice(0, 120)}`);
+        }
+      }
+
       const seg = path.join(work, `slide${String(i).padStart(2, "0")}.mp4`);
       await assembleSlide({
         statePaths: paths, hold, outputPath: seg, driftDir: i, orientation,
         audioPath: audio[i].path, captionText: card.caption, workDir: work, fontFile: FONT_FILE,
+        underlayPath,
       });
       segments.push(seg);
     }

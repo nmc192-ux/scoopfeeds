@@ -1188,3 +1188,94 @@ test("nothing in the schema still RECOMMENDS ending on a question", () => {
     /or an open question/.test(l) && !/used to (say|offer)/.test(l));
   assert.deepEqual(recommending, [], "a stale recommendation would argue with the new gate");
 });
+
+// ─── B3: subject visuals ────────────────────────────────────────────────────
+//
+// The subject decides the visual, not the beat. A story about a tariff SYSTEM
+// once ran with a publisher photograph of two people, because the article
+// happened to carry one — the failure this whole feature exists to prevent.
+
+const { SUBJECT_VISUAL_TYPES } = await import("./videoSpecSchema.js");
+const { knownCountry, MOUNT_NAMES, buildLocatorMap } = await import("./videoSubjectVisual.js");
+
+// MIN_SLIDES is 5, at least one card must be an OWN_LAYER type (diagram or
+// turn), and a spec needs its `beats` enumeration — so a three-card wrapper is
+// rejected at the SPEC level and `spec` comes back null. `withBeats` is the
+// helper this file already uses for exactly that; reused rather than re-derived.
+const wrap = (card) => withBeats([
+  { t: "title", lines: [["A", "white"]], caption: "x".repeat(80) },
+  card,
+  { t: "diagram", eyebrow: "H", nodes: [["A", "a"], ["B", "b"]], caption: "d".repeat(80) },
+  { t: "turn", eyebrow: "BUT", lines: [["X", "white"]], caption: "t".repeat(80) },
+  { t: "kicker", top: "A", bottom: "B", caption: "y".repeat(80) },
+]);
+const droppedFor = (card) => validateSpec(wrap(card), { headline: "H" })
+  .dropped.filter(d => d.t === card.t);
+
+test("the schema knows photo and map UNCONDITIONALLY — that is what makes the flag safe", () => {
+  // The prompt flag decides whether the model is ASKED. If the contract were
+  // flagged too, a card emitted with the flag off would be dropped instead of
+  // drawn, and the two-stage deploy would need a temporary tolerance.
+  assert.deepEqual([...SUBJECT_VISUAL_TYPES], ["photo", "map"]);
+  for (const t of SUBJECT_VISUAL_TYPES) assert.ok(CARD_TYPES.includes(t), `${t} must be in the closed set`);
+});
+
+test("an unknown country code invalidates the map card", () => {
+  // Checked against the real atlas rather than a pattern: a plausible-looking
+  // code the atlas lacks would draw an EMPTY map — a card that renders, says
+  // nothing, and tells nobody a country is missing.
+  const d = droppedFor({ t: "map", eyebrow: "W", codes: ["DZA", "ZZZ"], caption: "z".repeat(80) });
+  assert.equal(d.length, 1);
+  assert.match(d[0].reason, /unknown country code\(s\) "ZZZ"/);
+});
+
+test("an exception outside the drawn set is refused", () => {
+  // "All of these except that one" means nothing if that one is not among them.
+  const d = droppedFor({ t: "map", eyebrow: "W", codes: ["DZA"], exception: "EGY", caption: "z".repeat(80) });
+  assert.equal(d.length, 1);
+  assert.match(d[0].reason, /not among "codes"/);
+});
+
+test("a valid map and a valid photo card survive", () => {
+  assert.equal(droppedFor({ t: "map", eyebrow: "W", codes: ["DZA", "EGY", "SWZ"], exception: "SWZ", caption: "z".repeat(80) }).length, 0);
+  assert.equal(droppedFor({ t: "photo", eyebrow: "W", lines: [["A", "white"], ["B", "lime"]], caption: "z".repeat(80) }).length, 0);
+});
+
+test("a photo card cannot smuggle in its own image", () => {
+  // The photograph is the article's own and the treatment is a design decision.
+  // pruneCard drops anything outside the contract, so a model-supplied URL never
+  // reaches a renderer.
+  const v = validateSpec(wrap({ t: "photo", lines: [["A", "white"]], caption: "z".repeat(80),
+    image_url: "https://evil.test/x.jpg", mount: "polaroid" }), { headline: "H" });
+  const photo = v.spec.slides.find(c => c.t === "photo");
+  assert.ok(photo, "the card itself is fine");
+  assert.equal(photo.image_url, undefined, "a model-supplied image must be stripped");
+  assert.equal(photo.mount, undefined, "the mount is art direction, not content");
+});
+
+test("THE MAP ANNOTATES THE EXCEPTION, not just the set", () => {
+  // DrJ, 2026-08-15: "Eswatini was 2px wide and it was the whole story."
+  const svg = buildLocatorMap({ codes: ["DZA", "EGY", "ZAF", "SWZ"], exception: "SWZ" });
+  assert.ok(svg, "a map should build");
+  assert.match(svg, /ESWATINI/, "the excepted country must be NAMED, not merely coloured differently");
+  assert.match(svg, /<circle/, "and pointed at");
+  assert.match(svg, /<line /, "with a leader, since the country itself is a couple of pixels");
+  const plain = buildLocatorMap({ codes: ["DZA", "EGY"] });
+  assert.ok(!/<circle/.test(plain), "no exception, no callout");
+});
+
+test("the 50m atlas carries the small island states 110m dropped", () => {
+  // The reason for the heavier file: at 110m these five are simply absent, so a
+  // map of Africa silently omitted five members of the set it claimed to show.
+  for (const c of ["CPV", "COM", "MUS", "STP", "SYC"]) {
+    assert.ok(knownCountry(c), `${c} must resolve at 50m`);
+  }
+  assert.ok(!knownCountry("ZZZ"));
+});
+
+test("taped is NOT in the mount library", () => {
+  // It has no border, so the print's dark edges meet the ground with nothing
+  // between them — the one mount of the four that still risked reading as a
+  // hole. It needs a bone border before it belongs.
+  assert.deepEqual([...MOUNT_NAMES].sort(), ["cutting", "pinned", "polaroid"]);
+});
