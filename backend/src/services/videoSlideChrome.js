@@ -28,6 +28,23 @@ export const COLORS = Object.freeze({
   faint:       "#6b675e",
   rule:        "#2a2721",
   track:       "#4a473f",
+
+  // ─── CONTEXT RECESSION ────────────────────────────────────────────────────
+  //
+  // What an entry looks like when it is on screen but NOT the one being
+  // discussed. Cheapest item in the visual set and one of the strongest: the
+  // eye goes straight to the single thing still in colour.
+  //
+  // THESE ARE CHOSEN COLOURS, NOT A DIMMED ACCENT (DrJ, 2026-08-15), and the
+  // difference is visible rather than theoretical. Lime at 25% over the ground
+  // composites to #3e3f06 — it keeps lime's hue, so a receded row reads as a
+  // BROKEN accent, a colour that failed to render. These sit on the ground's own
+  // warm-neutral axis instead: present, legible, obviously not the subject.
+  // videoSlideRenderer.test.js asserts they stay near-neutral, so nobody can
+  // quietly replace them with an alpha of the accent later.
+  recededText:   "#4a473f",   // a label that is not being discussed
+  recededFigure: "#3f3c35",   // its number
+  recededFill:   "#26241f",   // its bar, or its rail dot
 });
 
 export const FONTS = { inter: "Inter", anton: "Anton" };
@@ -123,6 +140,53 @@ export const GROUND_VALUES = new Set(Object.values(GROUND));
 export const GROUND_KEY = Symbol.for("scoopfeeds.videoGround");
 /** The ground a tree was built with, or null if it never went through root(). */
 export const groundOf = (tree) => tree?.[GROUND_KEY] ?? null;
+
+/**
+ * ONE GESTURE PER FRAME — the discipline, enforced rather than remembered.
+ *
+ * DrJ, 2026-08-14: "The vocabulary is slight rotation, torn edges, halftone, one
+ * hand-drawn mark, colour blocks behind words, scale contrast. THE RULE, and I
+ * want it enforced rather than approximated: ONE GESTURE PER FRAME. This is a
+ * news brand under my own name — I want crafted, not a meme account."
+ *
+ * A gesture is a deliberate departure from the grid: a tilt, a hand-drawn mark,
+ * a colour block behind a word, a torn edge. It is NOT ordinary emphasis —
+ * colour, weight, scale, the spotlight and context recession are how the design
+ * speaks normally, and none of them spends the budget. A frame carrying a tilted
+ * photograph AND a circled figure AND a highlighted word is the failure this
+ * prevents, and it is the shape that arrives one reasonable-looking commit at a
+ * time.
+ *
+ *   const g = gestureBudget("stat/s4");
+ *   tree = root(GROUND.INK, [...base, g("circle: round the figure", mark)]);
+ *
+ * The second claim throws, naming BOTH gestures and the frame, because "too
+ * many gestures" without saying which ones is a message you have to go and
+ * investigate.
+ *
+ * NOTHING CLAIMS IT YET. The shipped cards spend no gestures — that is correct,
+ * not an oversight: the vocabulary arrives with the photo mounts and the quote
+ * card. This lands first so those are written against a contract that already
+ * exists, exactly as the ground contract did.
+ */
+export function gestureBudget(frameName) {
+  let spent = null;
+  const claim = (kind, node) => {
+    if (typeof kind !== "string" || !kind.trim()) {
+      throw new Error(`gestureBudget("${frameName}"): a gesture must be NAMED — got ${JSON.stringify(kind)}`);
+    }
+    if (spent) {
+      throw new Error(
+        `ONE GESTURE PER FRAME: "${frameName}" already spent its gesture on "${spent}" ` +
+        `and then asked for "${kind}"`
+      );
+    }
+    spent = kind;
+    return node;
+  };
+  claim.spent = () => spent;
+  return claim;
+}
 
 export function makePrimitives(G) {
   const C = COLORS;

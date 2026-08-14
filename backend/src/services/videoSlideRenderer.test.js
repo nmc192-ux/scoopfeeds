@@ -244,7 +244,11 @@ test("a single-state slide still gets drift and a valid graph", () => {
   const { filter, totalDuration } = buildSlideFilter({ stateCount: 1, hold: 2 });
   assert.ok(!filter.includes("xfade="));
   assert.match(filter, /crop=\d+:\d+:x=/, "the drift crop must still be present with one state");
-  assert.match(filter, /scale=1920:1080:flags=lanczos,setsar=1\[out\]$/, "and must still land back at output size");
+  // Anchored on setsar rather than on the end of the chain: the film grain node
+  // now rides after it (B4). What matters is that the LAST scale returns to
+  // output size and SAR is reset there — not that nothing follows.
+  assert.match(filter, /scale=1920:1080:flags=lanczos,setsar=1(,noise=[^[]*)?\[out\]$/,
+    "and must still land back at output size");
   assert.equal(totalDuration, 2);
 });
 });
@@ -262,7 +266,7 @@ test("xfade offsets accumulate on the combined timeline", () => {
 
 test("the output is square-pixel — setsar after the crop", () => {
   const { filter } = buildSlideFilter({ stateCount: 2, hold: 1 });
-  assert.match(filter, /crop=[^[]*setsar=1\[out\]/,
+  assert.match(filter, /crop=[^[]*setsar=1(,noise=[^[]*)?\[out\]/,
     "cropping an overscanned frame perturbs SAR unless it is reset");
 });
 
@@ -616,4 +620,120 @@ test("the marker is invisible to satori — it is a symbol, not a prop", () => {
   assert.equal(groundOf(tree), GROUND.INK);
   assert.ok(!Object.keys(tree).includes("ground"), "no enumerable key that satori could trip on");
   assert.deepEqual(Object.keys(tree).sort(), ["props", "type"]);
+});
+
+// ─── B5: emphasis — recession, spotlight, growth ────────────────────────────
+
+const { gestureBudget } = await import("./videoSlideChrome.js");
+
+// `styles()` is the walker already defined at the top of this file — reused
+// rather than redeclared; the existing one also handles child ARRAYS, which a
+// second copy here did not.
+const barsCard = { t: "bars", eyebrow: "CAUSE",
+  bars: [["anchors", 70], ["gear", 18], ["natural", 9]], source: "Reuters", caption: "c" };
+const vctx = { outlet: "Reuters", slideIndex: 2, slideCount: 7, orientation: "vertical" };
+
+test("THE RECEDED COLOURS ARE CHOSEN, NOT A DIMMED ACCENT", () => {
+  // DrJ, 2026-08-15: "make sure the muted context colour is a real choice, not
+  // just an opacity drop on the accent." Measured rather than asserted in prose:
+  // lime at 25% over the ground composites to #3e3f06 — saturation 0.90, lime's
+  // own hue, which reads as a colour that failed to render. These are neutral.
+  const hex = (h) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const sat = (h) => { const [r, g, b] = hex(h); const mx = Math.max(r, g, b), mn = Math.min(r, g, b); return mx ? (mx - mn) / mx : 0; };
+  const over = (fg, bg, a) => "#" + hex(fg).map((c, i) => Math.round(a * c + (1 - a) * hex(bg)[i]).toString(16).padStart(2, "0")).join("");
+
+  const dimmedLime = over(COLORS.lime, COLORS.base, 0.25);
+  assert.ok(sat(dimmedLime) > 0.8, `the comparison must be a saturated olive, got ${dimmedLime}`);
+  for (const key of ["recededText", "recededFigure", "recededFill"]) {
+    assert.ok(sat(COLORS[key]) < 0.35,
+      `${key} (${COLORS[key]}) has saturation ${sat(COLORS[key]).toFixed(2)} — that is a dimmed accent, not a chosen neutral`);
+  }
+});
+
+test("only the entry being discussed is in colour", () => {
+  const states = statesForCard(barsCard, vctx);
+  const mid = states.find(s => s.key === "bar2");
+  const fills = styles(mid.tree).map(st => st.background).filter(Boolean);
+  assert.ok(fills.includes(COLORS.lime), "the active entry keeps the accent");
+  assert.ok(fills.includes(COLORS.recededFill), "an earlier entry must have receded");
+  assert.ok(!fills.includes(COLORS.track),
+    "COLORS.track was the old undifferentiated fill — nothing should still use it here");
+});
+
+test("a newly revealed bar ENTERS SHORT and is full width in the next state", () => {
+  // The growth costs no extra states: a bar that is 34% in one cumulative state
+  // and 100% in the next grows across the crossfade that was already happening.
+  const states = statesForCard(barsCard, vctx);
+  const widthOfFirstBar = (key) => {
+    const st = states.find(s => s.key === key);
+    // the fills sit at the bar's own row; take the widest non-track box on it
+    return Math.max(...styles(st.tree)
+      .filter(s => s.height === 46 && s.background && s.background !== "#151310")
+      .map(s => s.width));
+  };
+  const entering = widthOfFirstBar("bar1");
+  const settled = widthOfFirstBar("bar2");
+  assert.ok(entering < settled, `bar1 should enter short: ${entering} vs ${settled}`);
+  assert.ok(entering / settled < 0.5, `entry width should be a clear step, got ${(entering / settled).toFixed(2)}`);
+});
+
+test("the spotlight is a soft radial lift, and only on the active row", () => {
+  const states = statesForCard(barsCard, vctx);
+  const mid = states.find(s => s.key === "bar2");
+  const glows = styles(mid.tree).filter(s => /radial-gradient/.test(s.backgroundImage || ""));
+  assert.equal(glows.length, 1, "exactly one row may be spotlit");
+  assert.ok(!("borderRadius" in glows[0]) && !glows[0].border,
+    "a soft lift, not a container the design does not otherwise have");
+});
+
+test("the FINAL state returns to the card's point — every bar, lead in colour", () => {
+  // It is also the frame that survives every collapse, so it must be the whole
+  // card rather than whatever the last reveal happened to emphasise.
+  const states = statesForCard(barsCard, vctx);
+  const last = states[states.length - 1];
+  const fills = styles(last.tree).map(s => s.background).filter(Boolean);
+  assert.equal(fills.filter(f => f === COLORS.lime).length, 1, "exactly one entry in the accent");
+  assert.ok(fills.filter(f => f === COLORS.recededFill).length >= 2, "the rest receded");
+});
+
+test("the diagram's unmarked nodes recede too", () => {
+  const card = { t: "diagram", eyebrow: "HOW",
+    nodes: [["SHIP", "a"], ["SHELF", "b"], ["CABLE", "c"]], marker: { on: 2, label: "BREAK" }, caption: "c" };
+  const last = statesForCard(card, vctx).slice(-1)[0];
+  const colours = styles(last.tree).flatMap(s => [s.background, s.color]).filter(Boolean);
+  assert.ok(colours.includes(COLORS.recededFill) || colours.includes(COLORS.recededText),
+    "the rail should use the same recession vocabulary as the bars");
+});
+
+// ─── B7: one gesture per frame ──────────────────────────────────────────────
+
+test("a second gesture in one frame THROWS, naming both", () => {
+  const g = gestureBudget("stat/s4");
+  assert.equal(g("circle: round the figure", "MARK"), "MARK");
+  assert.throws(() => g("block: behind a word", "X"), (e) =>
+    /ONE GESTURE PER FRAME/.test(e.message) &&
+    /circle: round the figure/.test(e.message) &&
+    /block: behind a word/.test(e.message) &&
+    /stat\/s4/.test(e.message));
+});
+
+test("a gesture must be NAMED — an unlabelled one cannot be reported", () => {
+  for (const bad of ["", "   ", null, undefined, 7]) {
+    assert.throws(() => gestureBudget("f")(bad, "X"), /must be NAMED/);
+  }
+});
+
+test("budgets are per frame, not global", () => {
+  const a = gestureBudget("one"), b = gestureBudget("two");
+  a("tilt: photo", 1);
+  assert.doesNotThrow(() => b("tilt: photo", 1), "a second frame gets its own budget");
+});
+
+test("the shipped cards spend NO gestures — emphasis is not a gesture", () => {
+  // Colour, weight, scale, the spotlight and recession are how the design speaks
+  // normally. If ordinary emphasis started spending the budget, the photo mounts
+  // would arrive with nothing left to spend.
+  const g = gestureBudget("bars/credit");
+  statesForCard(barsCard, vctx);
+  assert.equal(g.spent(), null);
 });

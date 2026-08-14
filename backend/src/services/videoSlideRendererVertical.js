@@ -61,6 +61,11 @@ export const VY = Object.freeze({
   kickSub:    980,
 });
 
+// A newly revealed bar enters at this fraction of its final width and reaches
+// full width in the next state. Small enough that the growth is legible across a
+// 0.35s crossfade, large enough that the bar never reads as missing.
+const BAR_ENTER = 0.34;
+
 const eyebrowV = (s) => eyebrow(s, VY.eyebrow);
 const base = (card, ctx) => [...chrome(ctx), eyebrowV(card.eyebrow || "")];
 
@@ -259,17 +264,40 @@ function barsStatesV(card, ctx) {
   // rail-safe width and the label gets a whole line.
   const trackW = G.contentWRail;
 
-  const oneBar = (bar, i) => {
+  /**
+   * ONE ENTRY, in one of two conditions.
+   *
+   * ACTIVE — the entry this beat is about. Full accent, and a spotlight behind
+   * it. RECEDED — on screen, legible, plainly not the subject. The receded
+   * colours are chosen (COLORS.receded*), never an alpha of the accent: lime at
+   * 25% over the ground keeps lime's hue and reads as a rendering fault.
+   *
+   * `grow` is the bar's fraction of its own final width. A newly revealed bar
+   * enters SHORT and reaches full width in the next state, so the crossfade
+   * between two cumulative states does the growing — no extra states, and
+   * therefore nothing new for fitStatesToDuration to collapse.
+   */
+  const oneBar = (bar, i, { active, grow = 1 }) => {
     const top = VY.barsFirst + i * VY.barsRow;
-    const w = Math.max(10, Math.round((Number(bar[1]) / max) * trackW));
+    const full = Math.max(10, Math.round((Number(bar[1]) / max) * trackW));
+    const w = Math.max(10, Math.round(full * grow));
     return [
-      text(bar[0], { position: "absolute", left: G.marginX, top, maxWidth: trackW - 150, fontSize: 34, fontWeight: 600, color: C.sub }),
+      // The spotlight sits UNDER the row, first in paint order. A soft radial
+      // lift rather than a box: an edge would read as a container the design
+      // does not otherwise have.
+      active ? abs({
+        left: G.marginX - 40, top: top - 34, width: trackW + 80, height: BAR_H + 130,
+        backgroundImage: "radial-gradient(60% 120% at 22% 50%, rgba(221,231,6,0.16) 0%, rgba(221,231,6,0) 70%)",
+      }) : null,
+      text(bar[0], { position: "absolute", left: G.marginX, top, maxWidth: trackW - 150, fontSize: 34, fontWeight: 600,
+        color: active ? C.sub : C.recededText }),
       // Values right-align to the RAIL inset, not the margin — at the margin
       // they sit under the like/comment column.
-      text(bar[1], { position: "absolute", right: G.safeRight, top: top - 12, fontFamily: F.anton, fontSize: 62, color: i === leadIdx ? C.lime : C.white }),
+      text(bar[1], { position: "absolute", right: G.safeRight, top: top - 12, fontFamily: F.anton, fontSize: 62,
+        color: active ? C.lime : C.recededFigure }),
       abs({ left: G.marginX, top: top + 62, width: trackW, height: BAR_H, background: "#151310" }),
-      abs({ left: G.marginX, top: top + 62, width: w, height: BAR_H, background: i === leadIdx ? C.lime : C.track }),
-    ];
+      abs({ left: G.marginX, top: top + 62, width: w, height: BAR_H, background: active ? C.lime : C.recededFill }),
+    ].filter(Boolean);
   };
 
   const b = () => base(card, ctx);
@@ -278,18 +306,26 @@ function barsStatesV(card, ctx) {
   let shown = [];
   groups.forEach((g, gi) => {
     shown = [...shown, ...g];
+    // ACTIVE = the entry just revealed. The reveal order IS the order the
+    // narration discusses them in, so "newest" is the same thing as "the one
+    // being talked about" without needing a second field to say so.
+    const justRevealed = new Set(g);
     states.push({
       key: `bar${gi + 1}`,
-      lime: shown.includes(leadIdx),
-      tree: root(GROUND.INK, [...b(), ...shown.flatMap(i => oneBar(bars[i], i))]),
+      lime: true,
+      tree: root(GROUND.INK, [...b(), ...shown.flatMap(i =>
+        oneBar(bars[i], i, { active: justRevealed.has(i), grow: justRevealed.has(i) ? BAR_ENTER : 1 }))]),
     });
   });
 
+  // THE FINAL STATE RETURNS TO THE CARD'S POINT. Every bar is present and the
+  // LEAD is the one in colour — the comparison the card exists to make. This is
+  // also the frame that survives every collapse, so it has to be the whole card.
   const creditTop = Math.min(VY.barsFirst + bars.length * VY.barsRow + 10, G.contentBottom - 120);
   states.push({
     key: "credit", lime: true, credit: true,
     tree: root(GROUND.INK, [
-      ...b(), ...bars.flatMap((bar, i) => oneBar(bar, i)),
+      ...b(), ...bars.flatMap((bar, i) => oneBar(bar, i, { active: i === leadIdx })),
       hairline(creditTop, 420), sourceCredit(card.source, creditTop + 26),
     ]),
   });
@@ -309,7 +345,7 @@ function diagramStatesV(card, ctx) {
     const top = VY.diagramFirst + i * VY.diagramRow;
     const marked = withMarker && i === markerOn;
     return [
-      abs({ left: RAIL_X - 9, top: top + 6, width: 18, height: 18, background: marked ? C.lime : C.track, borderRadius: 9 }),
+      abs({ left: RAIL_X - 9, top: top + 6, width: 18, height: 18, background: marked ? C.lime : C.recededFill, borderRadius: 9 }),
       ...(i < n - 1 ? [
         abs({ left: RAIL_X - 1, top: top + 26, width: 2, height: VY.diagramRow - 26, background: C.rule }),
         // The same two-rotated-bars chevron as 16:9 — the CSS border-triangle
@@ -317,7 +353,7 @@ function diagramStatesV(card, ctx) {
         abs({ left: RAIL_X - 8, top: top + VY.diagramRow - 14, width: 16, height: 2, background: C.track, transform: "rotate(45deg)" }),
         abs({ left: RAIL_X + 1, top: top + VY.diagramRow - 14, width: 16, height: 2, background: C.track, transform: "rotate(-45deg)" }),
       ] : []),
-      text(nd[0], { position: "absolute", left: RAIL_X + 44, top, maxWidth: G.contentWRail - 70, fontFamily: F.anton, fontSize: 54, color: marked ? C.lime : C.white }),
+      text(nd[0], { position: "absolute", left: RAIL_X + 44, top, maxWidth: G.contentWRail - 70, fontFamily: F.anton, fontSize: 54, color: marked ? C.lime : C.recededText }),
       nd[1] ? text(nd[1], { position: "absolute", left: RAIL_X + 44, top: top + 64, maxWidth: G.contentWRail - 70, fontSize: 30, fontWeight: 600, color: C.dim, lineHeight: 1.25 }) : null,
       ...(marked && card.marker?.label ? [text(String(card.marker.label).toUpperCase(), {
         position: "absolute", right: G.safeRight, top: top + 8,
