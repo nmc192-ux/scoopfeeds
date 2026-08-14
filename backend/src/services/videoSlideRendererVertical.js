@@ -150,7 +150,15 @@ function titleStatesV(card, ctx) {
 const STAT_NOMINAL = 400;
 const STAT_UNIT_RATIO = 150 / 400;   // the unit is 37.5% of the figure, always
 const STAT_UNIT_GAP = 12;
-const STAT_MIN = 200;
+// LOWERED 200 → 180 WITH marginX 72 → 104. The floor is only meaningful
+// relative to the measure it is fitting into, and narrowing contentW from 936 to
+// 872 pushed realistic figures past it: "1,400,000%" missed by 1px and
+// "12,345,678%" by 45, which the guard would have rendered whole and overflowing
+// — correct behaviour, wrong trigger. 180 restores the headroom the margin took
+// (measured: "12,345,678%" lands at 823px against 872) and is still a very large
+// headline figure. Genuinely absurd input — nine digits plus a unit — still
+// exceeds any sane floor and is still logged loudly rather than truncated.
+const STAT_MIN = 180;
 const STAT_LS = -4;
 
 /**
@@ -177,9 +185,15 @@ const STAT_LS = -4;
  */
 function fittedStatSize(card) {
   const avail = G.contentW;
+  // THE MEASURE MUST MODEL THE RENDER EXACTLY, rounding included. The unit is
+  // rendered at Math.round(size * RATIO); measuring the unrounded value let the
+  // fit accept a size whose real width was up to ~1px wider, and "1,400,000%"
+  // duly overflowed by exactly 1px. A guarantee that is off by a rounding step
+  // is not a guarantee.
+  const unitSize = (size) => Math.round(size * STAT_UNIT_RATIO);
   const measure = (size) =>
     antonWidth(card.value, size, STAT_LS) +
-    (card.unit ? STAT_UNIT_GAP + antonWidth(card.unit, size * STAT_UNIT_RATIO) : 0);
+    (card.unit ? STAT_UNIT_GAP + antonWidth(card.unit, unitSize(size)) : 0);
 
   const fit = fitDisplaySize(measure, { nominalSize: STAT_NOMINAL, maxWidth: avail, minSize: STAT_MIN });
   if (fit.overflow > 0) {
