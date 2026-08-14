@@ -113,14 +113,58 @@ export const abs = (style, children = []) => box({ position: "absolute", ...styl
  * what keeps the 16:9 bodies byte-for-byte comparable to the versions they
  * replaced — and that comparability is what _stateHashes.mjs verifies.
  */
+/**
+ * Who paints the ground behind a card. See root() below for why this is a
+ * declared property rather than a default.
+ */
+export const GROUND = Object.freeze({ INK: "ink", OVER: "over" });
+export const GROUND_VALUES = new Set(Object.values(GROUND));
+/** Where root() stamps its choice. Non-enumerable, so satori never sees it. */
+export const GROUND_KEY = Symbol.for("scoopfeeds.videoGround");
+/** The ground a tree was built with, or null if it never went through root(). */
+export const groundOf = (tree) => tree?.[GROUND_KEY] ?? null;
+
 export function makePrimitives(G) {
   const C = COLORS;
   const F = FONTS;
 
-  const root = (children) => box({
-    width: G.canvas.w, height: G.canvas.h, background: C.base,
-    position: "relative", overflow: "hidden", flexDirection: "column",
-  }, children);
+  /**
+   * THE GROUND IS DECLARED, NEVER ASSUMED.
+   *
+   * `root` used to take children alone and always paint the near-black base.
+   * That implicit choice was invisible and therefore repeatedly wrong: across
+   * the collage prototypes it buried a photo under an opaque layer twice and
+   * produced a card with no ground at all once — three separate debugging
+   * sessions for one unstated assumption.
+   *
+   *   GROUND.INK  — this card paints the near-black ground itself.
+   *   GROUND.OVER — this card is a TRANSPARENT overlay. Something upstream
+   *                 (a composited photo, a map, a mount) supplies what is
+   *                 behind it, and painting a ground here would bury it.
+   *
+   * There is no default and an unknown value throws, so the failure is a build
+   * error naming the card rather than a black rectangle in a rendered file.
+   *
+   * The chosen ground is stamped on the returned tree as a non-enumerable
+   * marker — satori reads `type`/`props` and ignores it — so `renderState` can
+   * verify a tree came through here at all, and the assembler can later ask
+   * what a card expects behind it without re-deriving it from the pixels.
+   */
+  const root = (ground, children) => {
+    if (!GROUND_VALUES.has(ground)) {
+      throw new Error(
+        `videoSlideChrome: root() needs an explicit ground, one of ` +
+        `${[...GROUND_VALUES].map(g => `"${g}"`).join(" | ")} — got ${JSON.stringify(ground)}`
+      );
+    }
+    const tree = box({
+      width: G.canvas.w, height: G.canvas.h,
+      position: "relative", overflow: "hidden", flexDirection: "column",
+      ...(ground === GROUND.INK ? { background: C.base } : {}),
+    }, children);
+    Object.defineProperty(tree, GROUND_KEY, { value: ground, enumerable: false });
+    return tree;
+  };
 
   const chrome = ({ slideIndex = 0, slideCount = 1 }) => {
     const frac = slideCount > 1 ? (slideIndex + 1) / slideCount : 1;

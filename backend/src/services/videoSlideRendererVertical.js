@@ -22,7 +22,7 @@
  */
 
 import { VERTICAL } from "./videoGeometry.js";
-import { makePrimitives, COLORS as C, FONTS as F, antonWidth, fitDisplaySize } from "./videoSlideChrome.js";
+import { makePrimitives, COLORS as C, FONTS as F, antonWidth, fitDisplaySize, GROUND } from "./videoSlideChrome.js";
 import { truncateLoudly } from "./videoSlideRenderer.js";
 import { logger } from "./logger.js";
 
@@ -120,10 +120,10 @@ function titleStatesV(card, ctx) {
     : null;
   const b = () => base(card, ctx);
   return [
-    { key: "s1", lime: false, tree: root([...b()]) },
-    { key: "s2", lime: limeIdx === 0, tree: root([...b(), line(l1, VY.titleLine1)].filter(Boolean)) },
-    { key: "s3", lime: limeIdx >= 0, tree: root([...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2)].filter(Boolean)) },
-    { key: "s4", lime: limeIdx >= 0, tree: root([
+    { key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) },
+    { key: "s2", lime: limeIdx === 0, tree: root(GROUND.INK, [...b(), line(l1, VY.titleLine1)].filter(Boolean)) },
+    { key: "s3", lime: limeIdx >= 0, tree: root(GROUND.INK, [...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2)].filter(Boolean)) },
+    { key: "s4", lime: limeIdx >= 0, tree: root(GROUND.INK, [
         ...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2),
         card.sub ? text(card.sub, {
           position: "absolute", left: G.marginX, top: VY.titleSub, maxWidth: G.contentW,
@@ -236,11 +236,11 @@ function statStatesV(card, ctx) {
   };
   const limeAfterLines = hi >= 0 && Boolean((card.lines || [])[hi]);
   return [
-    { key: "s1", lime: false, tree: root([...b()]) },
-    { key: "s2", lime: false, tree: root([...b(), value]) },
-    { key: "s3", lime: hi === 0, tree: root([...b(), value, supportLine(0, VY.statLine1)].filter(Boolean)) },
-    { key: "s4", lime: limeAfterLines, tree: root([...b(), value, supportLine(0, VY.statLine1), supportLine(1, VY.statLine2)].filter(Boolean)) },
-    { key: "credit", lime: limeAfterLines, credit: true, tree: root([
+    { key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) },
+    { key: "s2", lime: false, tree: root(GROUND.INK, [...b(), value]) },
+    { key: "s3", lime: hi === 0, tree: root(GROUND.INK, [...b(), value, supportLine(0, VY.statLine1)].filter(Boolean)) },
+    { key: "s4", lime: limeAfterLines, tree: root(GROUND.INK, [...b(), value, supportLine(0, VY.statLine1), supportLine(1, VY.statLine2)].filter(Boolean)) },
+    { key: "credit", lime: limeAfterLines, credit: true, tree: root(GROUND.INK, [
         ...b(), value, supportLine(0, VY.statLine1), supportLine(1, VY.statLine2),
         hairline(VY.statRule, 420), sourceCredit(card.source, VY.statCredit),
       ].filter(Boolean)) },
@@ -273,7 +273,7 @@ function barsStatesV(card, ctx) {
   };
 
   const b = () => base(card, ctx);
-  const states = [{ key: "s1", lime: false, tree: root([...b()]) }];
+  const states = [{ key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) }];
   const groups = bars.length <= 4 ? bars.map((_, i) => [i]) : [[0], [1], [2], [3, 4]];
   let shown = [];
   groups.forEach((g, gi) => {
@@ -281,14 +281,14 @@ function barsStatesV(card, ctx) {
     states.push({
       key: `bar${gi + 1}`,
       lime: shown.includes(leadIdx),
-      tree: root([...b(), ...shown.flatMap(i => oneBar(bars[i], i))]),
+      tree: root(GROUND.INK, [...b(), ...shown.flatMap(i => oneBar(bars[i], i))]),
     });
   });
 
   const creditTop = Math.min(VY.barsFirst + bars.length * VY.barsRow + 10, G.contentBottom - 120);
   states.push({
     key: "credit", lime: true, credit: true,
-    tree: root([
+    tree: root(GROUND.INK, [
       ...b(), ...bars.flatMap((bar, i) => oneBar(bar, i)),
       hairline(creditTop, 420), sourceCredit(card.source, creditTop + 26),
     ]),
@@ -326,13 +326,13 @@ function diagramStatesV(card, ctx) {
     ].filter(Boolean);
   });
 
-  const states = [{ key: "s1", lime: false, tree: root([...b()]) }];
+  const states = [{ key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) }];
   const groups = n <= 4 ? nodes.map((_, i) => i + 1) : [1, 2, 3, n];
   groups.forEach((upto, gi) => {
-    states.push({ key: `node${gi + 1}`, lime: false, tree: root([...b(), ...rowsFor(upto, false)]) });
+    states.push({ key: `node${gi + 1}`, lime: false, tree: root(GROUND.INK, [...b(), ...rowsFor(upto, false)]) });
   });
   // The marker lands LAST and is the card's single lime element, matching 16:9.
-  states.push({ key: "marker", lime: markerOn >= 0, tree: root([...b(), ...rowsFor(n, true)]) });
+  states.push({ key: "marker", lime: markerOn >= 0, tree: root(GROUND.INK, [...b(), ...rowsFor(n, true)]) });
   return states;
 }
 
@@ -347,10 +347,10 @@ function turnStatesV(card, ctx) {
     : null;
   const b = () => base(card, ctx);
   return [
-    { key: "s1", lime: false, tree: root([...b()]) },
-    { key: "s2", lime: limeIdx === 0, tree: root([...b(), line(l1, VY.titleLine1)].filter(Boolean)) },
-    { key: "s3", lime: limeIdx >= 0, tree: root([...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2)].filter(Boolean)) },
-    { key: "s4", lime: limeIdx >= 0, tree: root([
+    { key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) },
+    { key: "s2", lime: limeIdx === 0, tree: root(GROUND.INK, [...b(), line(l1, VY.titleLine1)].filter(Boolean)) },
+    { key: "s3", lime: limeIdx >= 0, tree: root(GROUND.INK, [...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2)].filter(Boolean)) },
+    { key: "s4", lime: limeIdx >= 0, tree: root(GROUND.INK, [
         ...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2),
         card.sub ? text(card.sub, {
           position: "absolute", left: G.marginX, top: VY.titleSub, maxWidth: G.contentW,
@@ -366,14 +366,14 @@ function kickerStatesV(card, ctx) {
   // same 936px measure. Fitted as one group so the pair keeps a single size.
   const kSize = fitLineGroup([card.top, card.bottom], { nominal: KICKER_NOMINAL, what: "kicker" });
   return [
-    { key: "s1", lime: false, tree: root([...b()]) },
-    { key: "s2", lime: false, tree: root([...b(), antonLine(card.top, { top: VY.kickTop, size: kSize, color: C.white })]) },
-    { key: "s3", lime: true, tree: root([
+    { key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) },
+    { key: "s2", lime: false, tree: root(GROUND.INK, [...b(), antonLine(card.top, { top: VY.kickTop, size: kSize, color: C.white })]) },
+    { key: "s3", lime: true, tree: root(GROUND.INK, [
         ...b(),
         antonLine(card.top, { top: VY.kickTop, size: kSize, color: C.white }),
         antonLine(card.bottom, { top: VY.kickBottom, size: kSize, color: C.lime }),
       ]) },
-    { key: "s4", lime: true, tree: root([
+    { key: "s4", lime: true, tree: root(GROUND.INK, [
         ...b(),
         antonLine(card.top, { top: VY.kickTop, size: kSize, color: C.white }),
         antonLine(card.bottom, { top: VY.kickBottom, size: kSize, color: C.lime }),

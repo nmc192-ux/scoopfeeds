@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { GEOMETRY, HORIZONTAL, VERTICAL, geometryFor } from "./videoGeometry.js";
 import { statesForCard, VIDEO_BUILDER_FINGERPRINT, CANVAS, MARGIN_X } from "./videoSlideRenderer.js";
 import { verticalStatesForCard, VY } from "./videoSlideRendererVertical.js";
-import { makePrimitives } from "./videoSlideChrome.js";
+import { makePrimitives, GROUND } from "./videoSlideChrome.js";
 
 const CARDS = {
   title:   { t: "title", eyebrow: "E", lines: [["A", "white"], ["B", "lime"]], sub: "s", date: "12 AUGUST 2026", caption: "c" },
@@ -124,8 +124,9 @@ test("the primitives are ONE definition bound twice, not two copies", () => {
   // The whole reason videoSlideChrome exists. If someone forks it, the brand
   // invariant has two homes and they drift.
   const h = makePrimitives(HORIZONTAL), v = makePrimitives(VERTICAL);
-  assert.equal(h.root([]).props.style.width, 1920);
-  assert.equal(v.root([]).props.style.width, 1080);
+  // root() takes an explicit ground as of the B1 contract — see videoSlideChrome.
+  assert.equal(h.root(GROUND.INK, []).props.style.width, 1920);
+  assert.equal(v.root(GROUND.INK, []).props.style.width, 1080);
   // Same shape, different coordinates — the progress track is full-bleed in
   // BOTH, because it is chrome and the action rail does not apply to chrome.
   const hc = h.chrome({ slideIndex: 0, slideCount: 4 });
