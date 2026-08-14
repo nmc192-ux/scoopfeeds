@@ -1526,3 +1526,65 @@ test("truncateGraphemes cuts on cluster boundaries, not code units", () => {
   assert.equal(truncateGraphemes(family + family, 1), family, "and the cut must not split one");
   assert.ok(!truncateGraphemes("é👍🏽🇵🇰x", 3).includes("�"));
 });
+
+// ─── B2: the article's photo reaches the spec writer ────────────────────────
+//
+// writeVideoSpec receives the candidate row AS its article argument, so a column
+// missing from findFreshUnvideoedArticles' SELECT is invisible to everything
+// downstream however well populated the table is. The social path has always
+// selected image_url; the video path never had, which is why no card could use
+// a photograph even once coverage was good.
+
+test("the video candidate query SELECTS image_url", () => {
+  cycleEnv();
+  const id = `img-${Date.now()}`;
+  db.prepare(`
+    INSERT INTO articles (id, title, description, content, url, category, source_name,
+                          published_at, fetched_at, credibility, is_duplicate, image_url)
+    VALUES (?, ?, '', ?, ?, 'world', 'Wire', ?, ?, 9, 0, ?)
+  `).run(id, "T", "x".repeat(3000), `https://e.test/${id}`, Date.now() - HOUR, Date.now(),
+         "https://cdn.test/photo.jpg");
+  const row = findFreshUnvideoedArticles({ limit: 10 }).find(r => r.id === id);
+  assert.ok(row, "the seeded article must be a candidate");
+  assert.ok("image_url" in row, "the column must be in the projection, not merely in the table");
+  assert.equal(row.image_url, "https://cdn.test/photo.jpg");
+});
+
+test("an article with NO photo still returns the column, as null", () => {
+  // A missing photo must read as an absent value rather than an absent field —
+  // downstream branches on the value, and `undefined` from a missing column
+  // would look identical to "no photo" while meaning "never asked".
+  cycleEnv();
+  const id = `noimg-${Date.now()}`;
+  db.prepare(`
+    INSERT INTO articles (id, title, description, content, url, category, source_name,
+                          published_at, fetched_at, credibility, is_duplicate)
+    VALUES (?, ?, '', ?, ?, 'world', 'Wire', ?, ?, 9, 0)
+  `).run(id, "T", "x".repeat(3000), `https://e.test/${id}`, Date.now() - HOUR, Date.now());
+  const row = findFreshUnvideoedArticles({ limit: 10 }).find(r => r.id === id);
+  assert.ok("image_url" in row);
+  assert.equal(row.image_url, null);
+});
+
+test("THE PLUMBING HOLDS: the photo reaches writeVideoSpec", async () => {
+  // The end-to-end assertion. Everything else here tests one hop; this one
+  // proves the value survives selection, diversity, the gates and the loop to
+  // arrive at the call that will build a photo card.
+  cycleEnv();
+  const id = seedArt({ source: "PhotoWire" });
+  db.prepare("UPDATE articles SET image_url = ? WHERE id = ?").run("https://cdn.test/real.jpg", id);
+
+  let seen = "NOT CALLED";
+  await runVideoRenderCycle({
+    dryRun: true,
+    deps: {
+      ...baseDeps(),
+      writeVideoSpec: async (article) => {
+        seen = article.image_url;
+        return { ok: false, spec: null, costUsd: 0, reason: "stopping here", attempts: 1 };
+      },
+    },
+  });
+  assert.equal(seen, "https://cdn.test/real.jpg",
+    "writeVideoSpec must receive the photo; it is the argument every card builder reads it from");
+});

@@ -33,7 +33,7 @@
 import { renderTreeToPng, sourceFingerprint, fontsReady } from "./renderCore.js";
 import { logger } from "./logger.js";
 import { HORIZONTAL, geometryFor, DEFAULT_ORIENTATION } from "./videoGeometry.js";
-import { makePrimitives, COLORS as C, FONTS as F } from "./videoSlideChrome.js";
+import { makePrimitives, COLORS as C, FONTS as F, GROUND, groundOf } from "./videoSlideChrome.js";
 import { verticalStatesForCard } from "./videoSlideRendererVertical.js";
 
 export const VIDEO_DESIGN_VER = "vid-v1";
@@ -128,14 +128,14 @@ function titleStates(card, ctx) {
     : null;
   const base = () => [...chrome(ctx), eyebrow(card.eyebrow || "", Y.eyebrow)];
   return [
-    { key: "s1", lime: false, tree: root([...base()]) },
-    { key: "s2", lime: limeIdx === 0, tree: root([...base(), line(l1, Y.titleLine1)].filter(Boolean)) },
-    { key: "s3", lime: limeIdx >= 0, tree: root([...base(), line(l1, Y.titleLine1), line(l2, Y.titleLine2)].filter(Boolean)) },
+    { key: "s1", lime: false, tree: root(GROUND.INK, [...base()]) },
+    { key: "s2", lime: limeIdx === 0, tree: root(GROUND.INK, [...base(), line(l1, Y.titleLine1)].filter(Boolean)) },
+    { key: "s3", lime: limeIdx >= 0, tree: root(GROUND.INK, [...base(), line(l1, Y.titleLine1), line(l2, Y.titleLine2)].filter(Boolean)) },
     // s4 is where the absorbed attribution card lands: the badge was already
     // here, and the DATE line joins it. Both are code-injected onto the card by
     // decorateTitleCard, never model-written. The spoken credit rides in the
     // caption, so nothing else needs a slide of its own.
-    { key: "s4", lime: limeIdx >= 0, tree: root([
+    { key: "s4", lime: limeIdx >= 0, tree: root(GROUND.INK, [
         ...base(), line(l1, Y.titleLine1), line(l2, Y.titleLine2),
         card.sub ? text(card.sub, { position: "absolute", left: MARGIN_X, top: Y.titleSub, fontSize: 42, fontWeight: 600, color: C.sub, maxWidth: 1400 }) : null,
         sourceBadge(ctx.outlet),
@@ -169,11 +169,11 @@ function statStates(card, ctx) {
   };
   const limeAfterLines = hi >= 0 && Boolean((card.lines || [])[hi]);
   return [
-    { key: "s1", lime: false, tree: root([...base()]) },
-    { key: "s2", lime: false, tree: root([...base(), value]) },
-    { key: "s3", lime: hi === 0, tree: root([...base(), value, supportLine(0, Y.statLine1)].filter(Boolean)) },
-    { key: "s4", lime: limeAfterLines, tree: root([...base(), value, supportLine(0, Y.statLine1), supportLine(1, Y.statLine2)].filter(Boolean)) },
-    { key: "credit", lime: limeAfterLines, credit: true, tree: root([
+    { key: "s1", lime: false, tree: root(GROUND.INK, [...base()]) },
+    { key: "s2", lime: false, tree: root(GROUND.INK, [...base(), value]) },
+    { key: "s3", lime: hi === 0, tree: root(GROUND.INK, [...base(), value, supportLine(0, Y.statLine1)].filter(Boolean)) },
+    { key: "s4", lime: limeAfterLines, tree: root(GROUND.INK, [...base(), value, supportLine(0, Y.statLine1), supportLine(1, Y.statLine2)].filter(Boolean)) },
+    { key: "credit", lime: limeAfterLines, credit: true, tree: root(GROUND.INK, [
         ...base(), value, supportLine(0, Y.statLine1), supportLine(1, Y.statLine2),
         hairline(Y.statRule), sourceCredit(card.source, Y.statCredit),
       ].filter(Boolean)) },
@@ -205,7 +205,7 @@ function barsStates(card, ctx) {
   };
 
   const base = () => [...chrome(ctx), eyebrow(card.eyebrow || "", Y.eyebrow)];
-  const states = [{ key: "s1", lime: false, tree: root([...base()]) }];
+  const states = [{ key: "s1", lime: false, tree: root(GROUND.INK, [...base()]) }];
 
   // Bars enter WHOLE, one per state (approved) — a crossfade cannot grow one.
   // With 5 bars the last two share a state to stay inside the 6-state budget.
@@ -218,14 +218,14 @@ function barsStates(card, ctx) {
     states.push({
       key: `bar${gi + 1}`,
       lime: shown.includes(leadIdx),
-      tree: root([...base(), ...shown.flatMap(i => oneBar(bars[i], i))]),
+      tree: root(GROUND.INK, [...base(), ...shown.flatMap(i => oneBar(bars[i], i))]),
     });
   });
 
   const creditTop = Math.min(Y.barsFirst + bars.length * (H + GAP) + 24, RESERVED_BOTTOM_Y - 60);
   states.push({
     key: "credit", lime: true, credit: true,
-    tree: root([
+    tree: root(GROUND.INK, [
       ...base(), ...bars.flatMap((b, i) => oneBar(b, i)),
       hairline(creditTop), sourceCredit(card.source, creditTop + 26),
     ]),
@@ -280,14 +280,14 @@ function diagramStates(card, ctx) {
   ].filter(Boolean);
 
   const markerOn = Number.isInteger(card.marker?.on) ? card.marker.on : -1;
-  const states = [{ key: "s1", lime: false, tree: root([...base(), rule]) }];
+  const states = [{ key: "s1", lime: false, tree: root(GROUND.INK, [...base(), rule]) }];
 
   const groups = n <= 4 ? nodes.map((_, i) => [i]) : [[0], [1], [2], [3, 4, 5].slice(0, n - 3)];
   let shown = [];
   groups.forEach((g, gi) => {
     shown = [...shown, ...g];
     const parts = shown.flatMap(i => [...(i > 0 ? connector(i) : []), ...node(nodes[i], i, false)]);
-    states.push({ key: `node${gi + 1}`, lime: false, tree: root([...base(), rule, ...parts]) });
+    states.push({ key: `node${gi + 1}`, lime: false, tree: root(GROUND.INK, [...base(), rule, ...parts]) });
   });
 
   // The marker is the card's single lime element and lands last. The LIME IS
@@ -304,7 +304,7 @@ function diagramStates(card, ctx) {
     : null;
   states.push({
     key: "marker", lime: true,
-    tree: root([...base(), rule, ...allParts, markerLabel].filter(Boolean)),
+    tree: root(GROUND.INK, [...base(), rule, ...allParts, markerLabel].filter(Boolean)),
   });
   return states;
 }
@@ -320,10 +320,10 @@ function turnStates(card, ctx) {
     : null;
   const base = () => [...chrome(ctx), eyebrow(card.eyebrow || "", Y.eyebrow)];
   return [
-    { key: "s1", lime: false, tree: root([...base()]) },
-    { key: "s2", lime: limeIdx === 0, tree: root([...base(), line(l1, Y.titleLine1)].filter(Boolean)) },
-    { key: "s3", lime: limeIdx >= 0, tree: root([...base(), line(l1, Y.titleLine1), line(l2, Y.titleLine2)].filter(Boolean)) },
-    { key: "s4", lime: limeIdx >= 0, tree: root([
+    { key: "s1", lime: false, tree: root(GROUND.INK, [...base()]) },
+    { key: "s2", lime: limeIdx === 0, tree: root(GROUND.INK, [...base(), line(l1, Y.titleLine1)].filter(Boolean)) },
+    { key: "s3", lime: limeIdx >= 0, tree: root(GROUND.INK, [...base(), line(l1, Y.titleLine1), line(l2, Y.titleLine2)].filter(Boolean)) },
+    { key: "s4", lime: limeIdx >= 0, tree: root(GROUND.INK, [
         ...base(), line(l1, Y.titleLine1), line(l2, Y.titleLine2),
         card.sub ? text(card.sub, { position: "absolute", left: MARGIN_X, top: Y.titleSub, fontSize: 42, fontWeight: 600, color: C.sub, maxWidth: 1400 }) : null,
       ].filter(Boolean)) },
@@ -337,10 +337,10 @@ function kickerStates(card, ctx) {
   const sub    = card.sub ? text(card.sub, { position: "absolute", left: MARGIN_X, top: Y.kickSub, fontSize: 42, fontWeight: 600, color: C.sub, maxWidth: 1400 }) : null;
   const mark   = text("SCOOPFEEDS.COM", { position: "absolute", left: MARGIN_X, top: Y.kickMark, fontSize: 34, fontWeight: 600, letterSpacing: 8, color: C.white });
   return [
-    { key: "s1", lime: false, tree: root([...base(), top]) },
-    { key: "s2", lime: true,  tree: root([...base(), top, bottom]) },
-    { key: "s3", lime: true,  tree: root([...base(), top, bottom, sub].filter(Boolean)) },
-    { key: "s4", lime: true,  tree: root([...base(), top, bottom, sub, mark].filter(Boolean)) },
+    { key: "s1", lime: false, tree: root(GROUND.INK, [...base(), top]) },
+    { key: "s2", lime: true,  tree: root(GROUND.INK, [...base(), top, bottom]) },
+    { key: "s3", lime: true,  tree: root(GROUND.INK, [...base(), top, bottom, sub].filter(Boolean)) },
+    { key: "s4", lime: true,  tree: root(GROUND.INK, [...base(), top, bottom, sub, mark].filter(Boolean)) },
   ];
 }
 
@@ -361,10 +361,18 @@ const BUILDERS = {
  * missing slide rather than as an error.
  */
 export function statesForCard(card, ctx = {}) {
-  if ((ctx.orientation || "horizontal") === "vertical") return verticalStatesForCard(card, ctx);
-  const build = BUILDERS[card?.t];
-  if (!build) throw new Error(`videoSlideRenderer: no layout for card type "${card?.t}"`);
-  return build(card, ctx);
+  const states = (ctx.orientation || "horizontal") === "vertical"
+    ? verticalStatesForCard(card, ctx)
+    : (() => {
+        const build = BUILDERS[card?.t];
+        if (!build) throw new Error(`videoSlideRenderer: no layout for card type "${card?.t}"`);
+        return build(card, ctx);
+      })();
+  // SURFACE THE DECLARED GROUND onto the state. Downstream — the assembler, and
+  // the mount/map compositing that follows — needs to know what a card expects
+  // BEHIND it, and reading it off the tree is how that stays a single source of
+  // truth rather than a second list that drifts.
+  return states.map((st) => ({ ...st, ground: groundOf(st.tree) }));
 }
 
 /**
@@ -430,6 +438,15 @@ export function fitStatesToDuration(states, durationSecs, { minHold = 0.6, cross
  */
 export async function renderState(state, { orientation } = {}) {
   if (!fontsReady({ requireAnton: true })) throw new Error("videoSlideRenderer: Anton required for video display type");
+  // A tree that never went through root() has no declared ground, which means
+  // nobody decided what is behind it. That is the exact omission this contract
+  // exists to prevent, so it is an error here rather than a surprise in a file.
+  if (!groundOf(state?.tree)) {
+    throw new Error(
+      `videoSlideRenderer: state "${state?.key ?? "?"}" has no declared ground — ` +
+      `every card tree must be built with root(GROUND.INK | GROUND.OVER, ...)`
+    );
+  }
   const g = orientation ? geometryFor(orientation) : null;
   const w = g?.canvas.w ?? state.tree?.props?.style?.width ?? CANVAS.w;
   const h = g?.canvas.h ?? state.tree?.props?.style?.height ?? CANVAS.h;

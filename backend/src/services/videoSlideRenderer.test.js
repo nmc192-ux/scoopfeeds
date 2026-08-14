@@ -550,3 +550,70 @@ test("fitDisplaySize reports overflow instead of truncating at the floor", () =>
   const ok = fitDisplaySize((size) => size, { nominalSize: 400, maxWidth: 1000, minSize: 200 });
   assert.deepEqual(ok, { size: 400, fitted: false, overflow: 0 });
 });
+
+// ─── B1: the ground is declared, never assumed ──────────────────────────────
+//
+// root() used to take children alone and always paint the near-black base. That
+// implicit choice was invisible and therefore repeatedly wrong — across the
+// collage prototypes it buried a photo under an opaque layer twice and produced
+// a card with no ground at all once. Three debugging sessions, one unstated
+// assumption. These make the assumption a contract.
+
+const { GROUND, groundOf, makePrimitives } = await import("./videoSlideChrome.js");
+const { renderState } = await import("./videoSlideRenderer.js");
+const { VERTICAL } = await import("./videoGeometry.js");
+
+test("every shipped card declares its ground, in both frames", () => {
+  const ctx = { outlet: "Reuters", slideIndex: 2, slideCount: 7 };
+  const cards = {
+    title:   { t:"title", eyebrow:"B", lines:[["A","white"],["B","lime"]], sub:"s", date:"AUG 15", caption:"c" },
+    stat:    { t:"stat", eyebrow:"F", value:70, unit:"%", lines:["a","b"], hi:1, source:"R", caption:"c" },
+    bars:    { t:"bars", eyebrow:"C", bars:[["a",70],["b",18]], source:"R", caption:"c" },
+    diagram: { t:"diagram", eyebrow:"H", nodes:[["A","x"],["B","y"]], marker:{on:1,label:"M"}, caption:"c" },
+    turn:    { t:"turn", eyebrow:"BUT", lines:[["X","white"],["Y","lime"]], caption:"c" },
+    kicker:  { t:"kicker", top:"A", bottom:"B", sub:"s", caption:"c" },
+  };
+  for (const orientation of ["horizontal", "vertical"]) {
+    for (const [name, card] of Object.entries(cards)) {
+      for (const st of statesForCard(card, { ...ctx, orientation })) {
+        assert.equal(st.ground, GROUND.INK,
+          `${orientation}/${name}/${st.key} must declare a ground — got ${JSON.stringify(st.ground)}`);
+      }
+    }
+  }
+});
+
+test("root() REFUSES an unstated or unknown ground", () => {
+  const { root } = makePrimitives(VERTICAL);
+  for (const bad of [undefined, null, "", "black", "paper", true, 1]) {
+    assert.throws(() => root(bad, []), /needs an explicit ground/,
+      `root(${JSON.stringify(bad)}) must throw`);
+  }
+  assert.doesNotThrow(() => root(GROUND.INK, []));
+  assert.doesNotThrow(() => root(GROUND.OVER, []));
+});
+
+test("GROUND.OVER paints NOTHING — that is the whole point of it", () => {
+  // A transparent card is what lets a photo, a mount or a map sit behind the
+  // type. If OVER ever starts painting a background it buries them silently,
+  // which is precisely the failure this vocabulary exists to prevent.
+  const { root } = makePrimitives(VERTICAL);
+  assert.equal(root(GROUND.OVER, []).props.style.background, undefined);
+  assert.ok(root(GROUND.INK, []).props.style.background, "INK must still paint one");
+});
+
+test("renderState refuses a tree that never declared a ground", async () => {
+  // The contract has to bite at the point of rendering too: a tree assembled by
+  // hand, bypassing root(), is a card where nobody decided what is behind it.
+  const naked = { key: "hand-rolled", tree: { type: "div", props: { style: { display: "flex" }, children: [] } } };
+  await assert.rejects(() => renderState(naked, { orientation: "vertical" }),
+    /has no declared ground/);
+});
+
+test("the marker is invisible to satori — it is a symbol, not a prop", () => {
+  const { root } = makePrimitives(VERTICAL);
+  const tree = root(GROUND.INK, []);
+  assert.equal(groundOf(tree), GROUND.INK);
+  assert.ok(!Object.keys(tree).includes("ground"), "no enumerable key that satori could trip on");
+  assert.deepEqual(Object.keys(tree).sort(), ["props", "type"]);
+});
