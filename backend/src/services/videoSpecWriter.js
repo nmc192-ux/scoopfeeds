@@ -552,6 +552,12 @@ HARD RULES — violating any of these makes the output unusable:
 
     The REGISTER is SPOKEN, per 5b. A wire-service sentence is a neutral stance in a written register, and reading one aloud is what makes narration sound like a machine reciting. Keep the detachment; lose the paperwork.
 
+10b. QUESTIONS ARE ALLOWED, AND THEY ARE THE STRONGEST HOOK YOU HAVE — with one condition. A question is only clickbait when the ANSWER IS WITHHELD. "So who actually pays for this?" followed immediately by who pays is legitimate journalism and the best opening shape available. Leaving it hanging is what makes it cheap.
+
+    So: ask questions on the opener and on any middle beat, PROVIDED the very next beat answers the question you just asked. A question you do not answer is a promise you broke.
+
+    THE ONE PLACE THIS IS FORBIDDEN IS THE CLOSER. Nothing follows the last card, so a question there can never be answered — it is a hanging question by construction, whatever its wording. A caption on the final card that ends with a question mark is REJECTED and you will be asked to write it again. End the closer on the forward implication instead: the consequence that is now in motion, stated as a fact.
+
 17. CAPTION LENGTH IS A HARD WRITING CONSTRAINT AT BOTH ENDS: keep every caption at or under ${CAPTION_MAX_CHARS} characters, and at or above ${CAPTION_MIN_CHARS}. The floor is not a style note — the slide is held for exactly as long as its narration, and a caption shorter than that loses one of the slide's reveals to the collapse rule. A one-line fragment is a beat you wrote and the viewer never sees. If a beat genuinely takes fewer words than that, it belongs joined to its neighbour, not standing alone. This is not a style preference — it is the measured width of two lines of burned-in caption at the size they are rendered. A longer caption wraps to a third line and sits higher than the band is designed for. Write shorter sentences; do not compress by deleting the source credit or the figure.
 
 RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. These decide whether anyone is still watching at ten seconds.

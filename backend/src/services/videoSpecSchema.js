@@ -146,8 +146,15 @@ export const BEAT_KINDS = Object.freeze(["figure", "mechanism", "turn", "consequ
 //
 // A kicker that wraps up is a retention leak at the exact moment a viewer
 // decides whether to watch anything else: summarising tells them the thing is
-// over and they already have it. The closer ends on the FORWARD implication or
-// an open question, never on a restatement of what was just said.
+// over and they already have it. The closer ends on the FORWARD implication —
+// the consequence now in motion — never on a restatement of what was just said.
+//
+// AND NEVER ON A QUESTION (DrJ, 2026-08-14). This comment used to offer "or an
+// open question" as an acceptable ending, which was wrong and was actively
+// teaching the failure: a question is only clickbait when the ANSWER IS
+// WITHHELD, and nothing follows the last card, so a question there is hanging by
+// construction. Questions are welcome on the opener and mid-beats, where the
+// next beat answers them — see CLOSER_QUESTION_ERROR and rule 10b.
 //
 // Enforced as a banned-phrase check rather than a style note because "don't
 // summarise" is precisely the instruction models comply with least — it reads
@@ -194,6 +201,22 @@ export const HOOK_RESTATES_ERROR = "hook_restates_headline";
 // editorial failure — the video ends where it began — so they share an error
 // code, and `restatesAny` reports WHICH one matched so the retry note can say.
 export const CLOSER_RESTATES_ERROR = "closer_restates";
+
+// ─── ARC: the hanging closer question (DrJ, 2026-08-14) ─────────────────────
+//
+// THE RULING: a question is only clickbait when the answer is withheld. "So who
+// actually pays for this?" answered by the next beat is the strongest hook shape
+// available; the same question left hanging is the cheap one. So questions are
+// PERMITTED on the opener and mid-beats — BRIDGE_PUNCT counts a trailing "?" as
+// a valid bridge and that was right all along — and FORBIDDEN on the closer,
+// where nothing follows and the answer therefore cannot arrive.
+//
+// TRAILING-ONLY, and that is the whole subtlety. "So who pays? Households do."
+// on the closer is a question ASKED AND ANSWERED inside one caption, which is
+// exactly the legitimate shape; its "?" is not at the end. Matching anywhere in
+// the string would reject the good version along with the bad one.
+export const CLOSER_QUESTION_ERROR = "closer_question";
+export const TRAILING_QUESTION = /\?["'\u201d\u2019)\]]*\s*$/;
 
 // ─── ARC: opening-stem repetition (B2) ──────────────────────────────────────
 //
@@ -802,7 +825,7 @@ export function validateSpec(spec, {
       if (hit) {
         errors.push(
           `kicker is in summary register ("${hit}") — the closer must end on the ` +
-          `forward implication or an open question, never restate what was said`
+          `forward implication, never restate what was said`
         );
       }
 
@@ -811,9 +834,22 @@ export function validateSpec(spec, {
       // saying the headline again in other words, or circling back to the cold
       // open. Both end the video where it began.
       //
-      // Only when the register check did not already fire: two errors for one
-      // fault would send a confused correction note into the single retry.
-      if (!hit) {
+      // A HANGING QUESTION ON THE CLOSER. Checked on the caption (the spoken
+      // line, always present) and on `bottom` (the last words left on screen) —
+      // both of them end the video, so either one hanging is the same failure.
+      const hanging = !hit && [last.caption, last.bottom]
+        .filter(Boolean).map(String).find(t => TRAILING_QUESTION.test(t.trim()));
+      if (hanging) {
+        errors.push(
+          `${CLOSER_QUESTION_ERROR}: the closer ends on a question ("${hanging.trim().slice(-60)}") — ` +
+          `nothing follows the last card, so the answer can never arrive. Questions are welcome ` +
+          `earlier, where the next beat answers them. End on the forward implication instead.`
+        );
+      }
+
+      // Only when neither check above fired: two errors for one fault would
+      // send a confused correction note into the single retry.
+      if (!hit && !hanging) {
         const r = restatesAny(last.caption, [
           { label: "the article headline", text: headline },
           // kept[0] is the title card — guaranteed by the ordering check above,
