@@ -215,6 +215,7 @@ the outage that once froze three queues.
 
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
+| `ENRICH_IMAGE_MAX_AGE_MS` | `172800000` (48h) | default | yes | How old an article may be and still be fetched **for its image alone**. The content criterion is deliberately **not** time-boxed — content feeds the event graph and video full-text, where an older article is still worth having; an image is only ever read by the social card, and both posting queries use a **12h** window, so this is 4× the window it serves. It also stops the widened selection eating itself: a page with genuinely no `og:image` can never be satisfied and unbounded would be re-picked every 15 minutes forever. |
 | `QUEUE_LOCK_MS_VIDEO_RENDER` | `600000` (10 min) | default | restart | The render cycle. Sized for minutes of work plus the polls and the mandatory 30s Threads wait the channel work adds. |
 | `QUEUE_LOCK_MS_INGESTION` | `120000` (2 min) | default | restart | |
 | `QUEUE_LOCK_MS_VIDEO` | `120000` | default | restart | |
