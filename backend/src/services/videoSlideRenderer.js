@@ -360,13 +360,32 @@ const BUILDERS = {
  * closed, and a vertical layout quietly missing a type would surface as a
  * missing slide rather than as an error.
  */
+/**
+ * What a subject-visual card becomes when the frame has no layout for it. Both
+ * carry [text, colour] lines, which is exactly a `turn` — a statement beat.
+ */
+const TYPOGRAPHIC_FALLBACK = Object.freeze({ photo: "turn", map: "turn" });
+
 export function statesForCard(card, ctx = {}) {
   const states = (ctx.orientation || "horizontal") === "vertical"
     ? verticalStatesForCard(card, ctx)
     : (() => {
         const build = BUILDERS[card?.t];
-        if (!build) throw new Error(`videoSlideRenderer: no layout for card type "${card?.t}"`);
-        return build(card, ctx);
+        if (build) return build(card, ctx);
+        // SUBJECT VISUALS ARE VERTICAL-FIRST. `photo` and `map` are composed for
+        // 9:16, which is what the channel publishes; 16:9 has no layout for
+        // them. Rather than throw — losing an entire video over one card whose
+        // WORDS are perfectly renderable — the card degrades to its typographic
+        // form and says so. Loudly, because a landscape render quietly dropping
+        // its subject imagery is a thing someone must be able to find in a log.
+        if (TYPOGRAPHIC_FALLBACK[card?.t] && Array.isArray(card?.lines) && card.lines.length) {
+          logger.warn(
+            `🎬 no 16:9 layout for "${card.t}" — rendering it as a ${TYPOGRAPHIC_FALLBACK[card.t]} card. ` +
+            `The subject imagery is a 9:16 composition; only the type survives here.`
+          );
+          return BUILDERS[TYPOGRAPHIC_FALLBACK[card.t]]({ ...card, t: TYPOGRAPHIC_FALLBACK[card.t] }, ctx);
+        }
+        throw new Error(`videoSlideRenderer: no layout for card type "${card?.t}"`);
       })();
   // SURFACE THE DECLARED GROUND onto the state. Downstream — the assembler, and
   // the mount/map compositing that follows — needs to know what a card expects
@@ -450,7 +469,16 @@ export async function renderState(state, { orientation } = {}) {
   const g = orientation ? geometryFor(orientation) : null;
   const w = g?.canvas.w ?? state.tree?.props?.style?.width ?? CANVAS.w;
   const h = g?.canvas.h ?? state.tree?.props?.style?.height ?? CANVAS.h;
-  return renderTreeToPng(state.tree, { width: w, height: h, background: C.base });
+  // THE RASTERISER MUST HONOUR THE DECLARED GROUND TOO. This passed
+  // `background: C.base` unconditionally, which made every state opaque no
+  // matter what its tree said — so a GROUND.OVER card rendered as a black
+  // rectangle and buried the mount composited behind it. The contract knew the
+  // answer; the last step was still assuming one.
+  const ground = groundOf(state.tree);
+  return renderTreeToPng(state.tree, {
+    width: w, height: h,
+    background: ground === GROUND.OVER ? undefined : C.base,
+  });
 }
 
 export const _internals = { chrome, Y, C, BUILDERS };

@@ -55,6 +55,9 @@
 // videoAttribution imports nothing, so there is no cycle.
 import { resolveAttribution } from "./videoAttribution.js";
 import { restatesAny } from "./textSimilarity.js";
+// Country codes are validated against the shipped atlas, not a pattern — see the
+// map case below for why a plausible-but-absent code is the dangerous one.
+import { knownCountry } from "./videoSubjectVisual.js";
 
 // ─── The closed set ─────────────────────────────────────────────────────────
 
@@ -65,6 +68,11 @@ export const CARD_TYPES = Object.freeze([
   "bars",     // small comparison set
   "turn",     // the pivot beat: "but here is what that misses"
   "kicker",   // closer
+  // ─── SUBJECT VISUALS ─────────────────────────────────────────────────────
+  // The subject decides the visual, not the beat. Both of these carry an image
+  // the CODE builds — the model never supplies a URL, a mount or a projection.
+  "photo",    // a named person or place: the article's own photograph, mounted
+  "map",      // a geographic subject: a locator map built from a country list
 ]);
 
 // `turn` is DEFINED HERE, not inherited. Brief §3 lists it as
@@ -359,6 +367,14 @@ const CARD_FIELDS = {
   bars:    { required: ["bars", "caption", "source"],        optional: ["eyebrow", "source_note"] },
   turn:    { required: ["lines", "caption"],                 optional: ["eyebrow", "sub"] },
   kicker:  { required: ["top", "bottom", "caption"],         optional: ["sub"] },
+  // `photo` carries NO image field. The photograph is the article's own
+  // (image_url), and the MOUNT is a design decision made in code — a model
+  // choosing between a polaroid and a torn cutting is a model art-directing.
+  photo:   { required: ["lines", "caption"],                 optional: ["eyebrow", "sub"] },
+  // `codes` are ISO 3166-1 alpha-3. `exception` is the ONE member of the set
+  // the story excludes — the "all but one" case, which is unreadable without a
+  // callout because the excepted country is often a couple of pixels wide.
+  map:     { required: ["codes", "caption"],                 optional: ["eyebrow", "exception", "lines"] },
 };
 
 // Card types the MODEL is allowed to emit. The `attribution` card is GONE —
@@ -367,6 +383,13 @@ const CARD_FIELDS = {
 // What the model still may not write are the title's `outlet` and `date`
 // fields; those are stripped and code-injected. See decorateTitleCard.
 export const MODEL_EMITTABLE = Object.freeze([...CARD_TYPES]);
+
+// The two types whose content is an IMAGE the code builds. The schema and the
+// renderer know them unconditionally — that is what makes shipping them behind a
+// prompt flag safe, because a card the model somehow emits with the flag off
+// still validates and still draws. What the FLAG gates is whether the prompt
+// asks for them at all. See videoSpecWriter.subjectVisualsEnabled.
+export const SUBJECT_VISUAL_TYPES = Object.freeze(["photo", "map"]);
 export const CODE_INJECTED_TITLE_FIELDS = Object.freeze(["outlet", "date"]);
 
 // ─── Small helpers ──────────────────────────────────────────────────────────
@@ -458,7 +481,11 @@ function validateCardShape(card, idx) {
 
   switch (t) {
     case "title":
-    case "turn": {
+    case "turn":
+    // `photo` carries the same [text, colour] line pair over its mounted
+    // photograph. Sharing the case rather than copying it means the lime
+    // invariant is checked in one place for all three.
+    case "photo": {
       // Code-injected on `title` only (the absorbed attribution card). Shape is
       // still checked, because injection is code and code has bugs.
       if (card.outlet !== undefined && !isStr(card.outlet)) e.push(`${at} (${t}): "outlet" must be a non-empty string`);
@@ -545,6 +572,35 @@ function validateCardShape(card, idx) {
     case "kicker": {
       if (card.top    !== undefined && !isStr(card.top))    e.push(`${at} (kicker): "top" must be a non-empty string`);
       if (card.bottom !== undefined && !isStr(card.bottom)) e.push(`${at} (kicker): "bottom" must be a non-empty string`);
+      break;
+    }
+
+    case "map": {
+      // COUNTRY CODES ARE CHECKED AGAINST THE ACTUAL GEOMETRY, not a regex. A
+      // plausible-looking code the atlas does not carry would draw an empty map,
+      // which is worse than no map: the card would render, say nothing, and
+      // nobody would know a country was missing. An unknown code invalidates the
+      // card, and the card is dropped with the offending codes named.
+      if (card.codes !== undefined) {
+        if (!isArr(card.codes) || card.codes.length === 0) {
+          e.push(`${at} (map): "codes" must be a non-empty array of ISO 3166-1 alpha-3 codes`);
+        } else {
+          const bad = card.codes.filter(c => !isStr(c) || !knownCountry(c));
+          if (bad.length) {
+            e.push(`${at} (map): unknown country code(s) ${bad.map(b => JSON.stringify(b)).join(", ")}`);
+          }
+        }
+      }
+      if (card.exception !== undefined && card.exception !== null) {
+        if (!isStr(card.exception) || !knownCountry(card.exception)) {
+          e.push(`${at} (map): "exception" ${JSON.stringify(card.exception)} is not a known country code`);
+        } else if (isArr(card.codes) &&
+                   !card.codes.some(c => String(c).toUpperCase() === String(card.exception).toUpperCase())) {
+          // "All of these EXCEPT that one" only means something if that one is
+          // in the set being drawn. Outside it, the callout points at nothing.
+          e.push(`${at} (map): "exception" ${card.exception} is not among "codes"`);
+        }
+      }
       break;
     }
   }

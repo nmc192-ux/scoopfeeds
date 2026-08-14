@@ -372,6 +372,52 @@ function diagramStatesV(card, ctx) {
   return states;
 }
 
+// ─── SUBJECT VISUALS: photo and map ─────────────────────────────────────────
+//
+// Both declare GROUND.OVER: the image is composited UNDERNEATH by the assembler,
+// so painting a ground here would bury it. That is the failure the ground
+// contract exists to make impossible, and these are its first real users.
+//
+// The states also carry `underlay`, naming WHICH image the assembler must place
+// behind them. The renderer never touches the file — it stays a pure tree
+// builder, and the asset is produced by videoSubjectVisual.
+
+/** A scrim, so display type stays legible over a photograph or a map. */
+const overScrim = (top = 1360) => abs({
+  left: 0, top, width: G.canvas.w, height: G.canvas.h - top,
+  backgroundImage: "linear-gradient(180deg, rgba(9,7,6,0) 0%, rgba(9,7,6,0.90) 40%, rgba(9,7,6,0.97) 100%)",
+});
+
+function overStates(card, ctx, { underlay, lineTop = 1470, size = 84 }) {
+  const [l1, l2] = (card.lines || []).slice(0, 2);
+  const ch = () => chrome(ctx);
+  const eb = card.eyebrow ? [eyebrowV(card.eyebrow)] : [];
+  const L = (pair, top) => pair
+    ? antonLine(pair[0], { top, size, color: pair[1] === "lime" ? C.lime : C.white })
+    : null;
+  const st = (key, children) => ({ key, lime: true, underlay, tree: root(GROUND.OVER, children.filter(Boolean)) });
+  return [
+    // The image alone, briefly. A photograph that arrives already captioned has
+    // no moment of being looked at.
+    st("v1", [...ch()]),
+    st("v2", [...ch(), ...eb, overScrim(), L(l1, lineTop)]),
+    st("v3", [...ch(), ...eb, overScrim(), L(l1, lineTop), L(l2, lineTop + 96)]),
+  ];
+}
+
+/** The article's own photograph, on a mount. */
+function photoStatesV(card, ctx) {
+  return overStates(card, ctx, { underlay: "photo" });
+}
+
+/**
+ * A locator map. The lines sit lower than the photo card's because a map is
+ * read as a whole shape and wants more of the frame than a portrait does.
+ */
+function mapStatesV(card, ctx) {
+  return overStates(card, ctx, { underlay: "map", lineTop: 1500, size: 78 });
+}
+
 // ─── turn / kicker ──────────────────────────────────────────────────────────
 
 function turnStatesV(card, ctx) {
@@ -422,6 +468,8 @@ function kickerStatesV(card, ctx) {
 }
 
 const BUILDERS_V = {
+  photo: photoStatesV,
+  map: mapStatesV,
   title: titleStatesV, stat: statStatesV, bars: barsStatesV,
   diagram: diagramStatesV, turn: turnStatesV, kicker: kickerStatesV,
 };

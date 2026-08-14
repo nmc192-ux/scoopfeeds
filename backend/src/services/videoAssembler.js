@@ -256,6 +256,8 @@ export async function buildCaptionFilter({ text, workDir, slideIndex, fontFile, 
  * VIDEO_GRAIN_STRENGTH=0 removes the filter node entirely rather than adding a
  * zero-strength one: zero means zero, and it also means no encode cost at all.
  */
+// The one ground, as ffmpeg spells it. Kept beside the filter that pads onto it.
+const GROUND_HEX = "0x090706";
 const GRAIN_SEED = 20260814;
 export const grainStrength = () => {
   const raw = process.env.VIDEO_GRAIN_STRENGTH;
@@ -272,11 +274,30 @@ export const grainChain = () => {
   return n > 0 ? `,noise=alls=${n}:allf=u:all_seed=${GRAIN_SEED}` : "";
 };
 
-export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0, caption = null, orientation = "horizontal" }) {
+export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0, caption = null, orientation = "horizontal", underlay = false }) {
   const CV = geometryFor(orientation).canvas;
   const parts = [];
+  if (underlay) {
+    // The image is the LAST input, after the states. Centred and scaled to
+    // cover — a mount is taller than it is wide and must not be letterboxed
+    // onto the ground it is supposed to be sitting on.
+    const ui = stateCount;
+    parts.push(
+      `[${ui}:v]scale=${CV.w}:${CV.h}:force_original_aspect_ratio=decrease,` +
+      `pad=${CV.w}:${CV.h}:(ow-iw)/2:(oh-ih)/2:color=${GROUND_HEX},setsar=1,fps=${FPS},` +
+      `split=${stateCount}${Array.from({ length: stateCount }, (_, j) => `[u${j}]`).join("")}`
+    );
+  }
   for (let i = 0; i < stateCount; i++) {
-    parts.push(`[${i}:v]scale=${CV.w}:${CV.h},setsar=1,format=yuv420p,fps=${FPS}[s${i}]`);
+    // UNDERLAY. A subject-visual card declares GROUND.OVER — it is a transparent
+    // overlay, and the mount or map goes behind it here. The image is ONE input
+    // split per state rather than one input per state: same pixels, decoded once.
+    if (underlay) {
+      parts.push(`[${i}:v]format=rgba,scale=${CV.w}:${CV.h},setsar=1,fps=${FPS}[o${i}]`);
+      parts.push(`[u${i}][o${i}]overlay=0:0:format=auto,setsar=1,format=yuv420p,fps=${FPS}[s${i}]`);
+    } else {
+      parts.push(`[${i}:v]scale=${CV.w}:${CV.h},setsar=1,format=yuv420p,fps=${FPS}[s${i}]`);
+    }
   }
 
   let last = "s0";
@@ -399,7 +420,7 @@ export function holdForAudio(audioSecs, stateCount, crossfade = CROSSFADE_SECS) 
 export async function assembleSlide({
   statePaths, hold, outputPath, driftDir = 0, ffmpegPath = null,
   audioPath = null, captionText = null, workDir = null, fontFile = null,
-  orientation = "horizontal",
+  orientation = "horizontal", underlayPath = null,
 }) {
   const ff = ffmpegPath || getFFmpegPath();
   if (!ff) throw new Error("videoAssembler: ffmpeg not available");
@@ -407,7 +428,10 @@ export async function assembleSlide({
 
   const args = ["-y", "-loglevel", "error"];
   for (const p of statePaths) args.push("-loop", "1", "-t", String(hold), "-i", p);
-  const audioIdx = statePaths.length;
+  // Input ORDER is the contract with buildSlideFilter: states, then the
+  // underlay, then audio. The filter addresses them by index.
+  if (underlayPath) args.push("-loop", "1", "-t", String(hold * statePaths.length), "-i", underlayPath);
+  const audioIdx = statePaths.length + (underlayPath ? 1 : 0);
   if (audioPath) args.push("-i", audioPath);
 
   const caption = (captionText && workDir && fontFile)
@@ -416,6 +440,7 @@ export async function assembleSlide({
 
   const { filter, totalDuration } = buildSlideFilter({
     stateCount: statePaths.length, hold, driftDir, caption, orientation,
+    underlay: Boolean(underlayPath),
   });
 
   args.push("-filter_complex", filter, "-map", "[out]");

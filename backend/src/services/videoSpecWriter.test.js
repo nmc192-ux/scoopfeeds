@@ -571,3 +571,53 @@ test("the floor is WHERE THE COLLAPSE RULE BITES — the constant matches its ev
   assert.ok(kept(MINC - 15) < all.length,
     "well below the floor a beat must actually be dropped, or the floor is protecting nothing");
 });
+
+// ─── The spec dry-run gate ──────────────────────────────────────────────────
+//
+// DrJ, 2026-08-15: "I want to read what the model actually emits before a frame
+// is rendered, and right now there's no path to that." There wasn't:
+// writeVideoSpec had exactly one caller and it was inside the render cycle.
+
+test("VIDEO_SPEC_LOG_JSON is OFF unless explicitly set to 1", () => {
+  const src = readFileSync(new URL("./videoSpecWriter.js", import.meta.url), "utf8");
+  assert.match(src, /process\.env\.VIDEO_SPEC_LOG_JSON === "1"/,
+    "a literal 1, not a truthiness check — every other flag in this codebase reads that way");
+  assert.ok(!/VIDEO_SPEC_LOG_JSON \|\|/.test(src), "no default-on fallback");
+});
+
+test("the dry-run script is READ-ONLY at the handle, not by convention", async () => {
+  const raw = readFileSync(new URL("../../scripts/spec-dry-run.mjs", import.meta.url), "utf8");
+  // CODE ONLY. The header explains WHY getDb() is avoided, so a naive search of
+  // the whole file matches the explanation and fails on the documentation.
+  const src = raw.split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  assert.match(src, /readonly:\s*true/, "the database handle must refuse writes");
+  assert.ok(!/\bgetDb\(/.test(src),
+    "getDb() runs bootstrapSchema — an inspection command must not apply migrations");
+  for (const forbidden of ["claimVideoPost", "markVideoPublished", "produceVideo", "uploadToYouTube", "INSERT ", "UPDATE "]) {
+    assert.ok(!src.includes(forbidden), `the dry run must never reach ${forbidden.trim()}`);
+  }
+});
+
+test("the script builds its prompt with the REAL builder, not a copy", async () => {
+  // A second prompt assembled for inspection would drift from the one actually
+  // sent, and the drift would be invisible precisely when it mattered.
+  const src = readFileSync(new URL("../../scripts/spec-dry-run.mjs", import.meta.url), "utf8");
+  assert.match(src, /buildSpecPrompt\(/);
+  assert.match(src, /import\("\.\.\/src\/services\/videoSpecWriter\.js"\)/,
+    "imported from the real module — a copied prompt builder would drift invisibly");
+  const { buildSpecPrompt } = await import("./videoSpecWriter.js");
+  assert.equal(typeof buildSpecPrompt, "function", "the script depends on this staying exported");
+});
+
+test("the script selects the SAME columns the cycle does, image_url included", () => {
+  // If the dry run inspected a different article shape from the one the cycle
+  // hands the model, it would be reviewing a hypothetical.
+  const src = readFileSync(new URL("../../scripts/spec-dry-run.mjs", import.meta.url), "utf8");
+  const db = readFileSync(new URL("../models/database.js", import.meta.url), "utf8");
+  const cycleCols = db.slice(db.indexOf("export function findFreshUnvideoedArticles"));
+  for (const col of ["a.id", "a.title", "a.description", "a.content", "a.category",
+                     "a.source_name", "a.published_at", "a.credibility", "a.url", "a.tags", "a.image_url"]) {
+    assert.ok(src.includes(col), `the dry run must select ${col}`);
+    assert.ok(cycleCols.includes(col), `the cycle must still select ${col} — otherwise this test is stale`);
+  }
+});

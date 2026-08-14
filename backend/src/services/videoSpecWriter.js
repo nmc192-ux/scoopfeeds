@@ -50,7 +50,8 @@ import {
   markGeminiModelGone,
 } from "../realityIndex/llmQueue.js";
 import {
-  MODEL_EMITTABLE, THUMBNAIL_ANGLES, MIN_SLIDES, MAX_SLIDES, CAPTION_MAX_CHARS, CAPTION_MIN_CHARS,
+  MODEL_EMITTABLE, SUBJECT_VISUAL_TYPES, THUMBNAIL_ANGLES, MIN_SLIDES, MAX_SLIDES,
+  CAPTION_MAX_CHARS, CAPTION_MIN_CHARS,
   validateSpec, validatePackaging, decorateTitleCard,
 } from "./videoSpecSchema.js";
 import { resolveAttribution } from "./videoAttribution.js";
@@ -106,6 +107,17 @@ const RATE_OUT_PER_M = 2.50;
 const SPEC_BODY_MAX_CHARS = Number.parseInt(process.env.VIDEO_SPEC_BODY_MAX_CHARS || "28000", 10);
 
 const WPM = Number.parseInt(process.env.VIDEO_SPEC_WPM || "150", 10);
+
+/**
+ * Does the prompt ASK for subject-visual cards? Default off.
+ *
+ * The schema and both renderers know `photo` and `map` unconditionally, so this
+ * flag cannot produce a card the pipeline is unable to draw — which is the whole
+ * reason it gates the PROMPT rather than the contract. Off: the model is never
+ * told the types exist and the output is identical to before. On: it is told,
+ * and one env line is the entire difference.
+ */
+export const subjectVisualsEnabled = () => process.env.VIDEO_SUBJECT_VISUALS_ENABLED === "1";
 
 export function isVideoSpecEnabled() {
   return process.env.VIDEO_SPEC_ENABLED === "1" && !!process.env.GEMINI_API_KEY;
@@ -378,7 +390,13 @@ async function callModel(prompt, { articleId, tag, model, maxOutputTokens }) {
 
 // ─── Prompt 1 — the slide spec ──────────────────────────────────────────────
 
-const CARD_GRAMMAR = `
+/**
+ * The card grammar, as a FUNCTION of what this article and this configuration
+ * make available. It was a constant until subject visuals landed; the two new
+ * types must appear only when the prompt is asking for them, and `photo` only
+ * when there is a photograph, so the text is no longer the same for every call.
+ */
+const cardGrammar = ({ visualsOn = false, hasPhoto = false } = {}) => `
 "title"   — the opener. { "t":"title", "eyebrow":"SHORT LABEL", "lines":[["TEXT","white"],["TEXT","lime"]], "sub":"one line", "caption":"..." }
 "stat"    — ONE dominant number. { "t":"stat", "eyebrow":"...", "value":70, "unit":"%", "lines":["short line","short line"], "hi":1, "source":"OUTLET NAME", "caption":"..." }
             "hi" is the index of the line to emphasise. "value" MUST be a number, not a string.
@@ -407,7 +425,20 @@ const CARD_GRAMMAR = `
                what makes the point anyway.
 "turn"    — the pivot beat, where the obvious reading gives way to the real one.
             { "t":"turn", "eyebrow":"...", "lines":[["TEXT","white"],["TEXT","lime"]], "sub":"one line", "caption":"..." }
-"kicker"  — the closer. { "t":"kicker", "top":"...", "bottom":"...", "sub":"...", "caption":"..." }
+${visualsOn ? `"map"     — a GEOGRAPHIC subject, drawn from a country list. { "t":"map", "eyebrow":"...", "codes":["DZA","EGY"], "exception":"SWZ", "lines":[["TEXT","white"],["TEXT","lime"]], "caption":"..." }
+            "codes" are ISO 3166-1 alpha-3, one per country the story covers. They are checked
+            against a real atlas: a code that does not exist invalidates the card, so emit codes
+            you are sure of and omit ones you are not. Do not invent codes to pad a set.
+            "exception" is the ONE country the story EXCLUDES — the "all of them except this one"
+            case. It must also appear in "codes". It is drawn dark and CALLED OUT with a label,
+            because the excepted country is often a couple of pixels wide and it is usually the
+            entire point of the story. Omit "exception" when there is no exception.
+            You do not supply a projection, a colour or a position. The map is drawn by code.
+${hasPhoto ? `"photo"   — a NAMED PERSON or a specific place: the article's own photograph. { "t":"photo", "eyebrow":"...", "lines":[["TEXT","white"],["TEXT","lime"]], "caption":"..." }
+            You do NOT supply an image, a URL, a crop or a treatment. The photograph is the
+            article's own and the presentation is a design decision made in code.
+            Write the two lines as you would for a title card: short, declarative, upper case.
+` : ""}` : ""}"kicker"  — the closer. { "t":"kicker", "top":"...", "bottom":"...", "sub":"...", "caption":"..." }
 `.trim();
 
 /**
@@ -434,6 +465,22 @@ export function buildSpecPrompt({ article, allowedSources = [], bodyText = null 
   // stored content otherwise). The slice is a safety ceiling, not the
   // constraint — videoFullText already caps at MAX_FULLTEXT_LEN.
   const body = String(bodyText ?? article.content ?? "");
+  // THE PROMPT'S CARD LIST IS WHAT THE FLAG GATES. With subject visuals off the
+  // model is never told `photo` or `map` exist, so it cannot ask for one and the
+  // output is byte-identical to before the feature landed.
+  //
+  // A `photo` card also needs a photograph. The article either has one or it
+  // does not, and that is knowable HERE — offering the card for an article with
+  // no image would produce a card the renderer must then drop, which is a worse
+  // failure than never offering it.
+  const hasPhoto = Boolean(article.image_url);
+  const visualsOn = subjectVisualsEnabled();
+  const emittable = MODEL_EMITTABLE.filter(t => {
+    if (t === "sources") return false;
+    if (!SUBJECT_VISUAL_TYPES.includes(t)) return true;
+    if (!visualsOn) return false;
+    return t === "photo" ? hasPhoto : true;
+  });
   const sourceText = [
     `HEADLINE: ${article.title || ""}`,
     article.description ? `SUMMARY: ${article.description}` : "",
@@ -453,10 +500,23 @@ OUTLETS THAT ACTUALLY COVERED THIS STORY — the only names you may ever put in 
 ${allowedSources.length ? allowedSources.map(s => `  - ${s}`).join("\n") : "  (none — you may therefore emit NO stat and NO bars cards at all)"}
 
 CARD TYPES — a CLOSED SET. Emitting any type not on this list makes the entire spec invalid and the story is dropped:
-${MODEL_EMITTABLE.filter(t => t !== "sources").map(t => `  ${t}`).join("\n")}
+${emittable.map(t => `  ${t}`).join("\n")}
 
-CARD GRAMMAR — field names and types are exact:
-${CARD_GRAMMAR}
+${visualsOn ? `
+SUBJECT VISUALS — WHAT THE STORY IS ABOUT DECIDES WHAT IS ON SCREEN.
+This is a rule about the SUBJECT, not about the beat. Choose from the subject, in this order:
+
+  a GEOGRAPHIC subject (a country, a region, a set of places)  -> "map"
+  a NAMED PERSON or a specific place                            -> "photo"
+  an ABSTRACT quantity, comparison or mechanism                 -> "stat", "bars", "diagram"
+  nothing concrete to show                                      -> "title", "turn", "kicker"
+
+WHY THIS RULE EXISTS, stated plainly so you can apply it rather than pattern-match it: a story about a TARIFF SYSTEM once ran with a publisher photograph of two people, because the article happened to carry one. The subject was a system covering a continent; the picture showed neither. A map would have shown the subject exactly. Ask what the story is ABOUT, then pick — never pick a card because an image happens to exist.
+
+AT MOST ONE subject-visual card per video. It is the establishing shot, and it belongs early — normally the second or third card. Two of them is a slideshow.
+${hasPhoto ? "" : "This article has NO photograph, so \"photo\" is not on your list of card types. Do not ask for one."}
+` : ""}CARD GRAMMAR — field names and types are exact:
+${cardGrammar({ visualsOn, hasPhoto })}
 
 HARD RULES — violating any of these makes the output unusable:
 
@@ -947,6 +1007,19 @@ export async function writeVideoSpec(article, {
       );
     }
 
+    // THE WHOLE SPEC, on request. Off by default because a spec is a few KB of
+    // JSON and every cycle would emit one, but the summary line above says how
+    // many cards SURVIVED and never what they were — so a prompt change cannot
+    // be reviewed from the log alone. Turn this on for the first cycle after any
+    // prompt change, read it, turn it off.
+    //
+    // scripts/spec-dry-run.mjs is the cheaper path when the article can be
+    // chosen: it prints the same JSON without rendering or publishing anything.
+    // This flag is for seeing what the LIVE cycle actually produced.
+    if (process.env.VIDEO_SPEC_LOG_JSON === "1") {
+      logger.info(`🎬 videoSpec [${article.id}] FULL SPEC:\n${JSON.stringify(v.spec, null, 2)}`);
+    }
+
     const spec = {
       ...v.spec,
       meta: {
@@ -1048,6 +1121,6 @@ export async function writePackaging(spec, article) {
 }
 
 export const _internals = { decorateParsedSpec,
-  buildSpecPrompt, buildPackagingPrompt, CARD_GRAMMAR,
+  buildSpecPrompt, buildPackagingPrompt, cardGrammar,
   extractJsonPayload, stripCounts, isThinnessError, isInvalidArgument,
 };
