@@ -981,9 +981,16 @@ export function validateSpec(spec, {
       const loud = unsupportedIntensifiers(shown, sourceText);
       if (loud.length) {
         errors.push(
+          // THE RETRY READS THIS, so it says what to do instead rather than only
+          // what was wrong. "massive" killed the same article on two separate
+          // attempts: the model reaches for an intensifier next to a large
+          // figure, and "drop it" alone left it with a number it felt needed
+          // help and no sanctioned way to help it.
           `${INTENSIFIER_ERROR}: slides[${i}] (${card.t}) uses ${loud.map(w => `"${w}…"`).join(", ")}, ` +
-          `which the source never does. An intensifier the article did not use is a claim you added — ` +
-          `either the source supports it, in which case use its word, or drop it.`
+          `which the source never does. An intensifier the article did not use is a claim you added. ` +
+          `If it is sitting next to a figure, delete it — the number already carries the weight, and ` +
+          `"ten billion dollars" IS the stakes. If the figure genuinely needs help, use a comparison ` +
+          `the source supports (what it is a share of, what it was last year, who pays it), never an adjective.`
         );
       }
     }
