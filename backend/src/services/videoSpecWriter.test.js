@@ -227,13 +227,31 @@ test("without bodyText the prompt falls back to stored content", () => {
   assert.match(p, /STORED-BODY-MARKER/);
 });
 
-test("the retry correction note strips slide counts before the model sees it", () => {
+test("the retry correction note strips the FLOOR, which is target-shaped", () => {
   const { stripCounts } = _internals;
+  // "you need 6" is a number to pad to, and the model pads to it. This is the
+  // whole reason MIN_SLIDES/MAX_SLIDES are absent from the prompt.
   assert.equal(stripCounts('only 4 slides remain after dropping 3 (< 6) — too thin for a video'), "too thin for a video");
-  assert.match(stripCounts("too many slides: 41 > 34"), /enumerate the beats again/);
-  assert.ok(!/\d/.test(stripCounts("too many slides: 41 > 34")));
   // Card-level adjacency facts are NOT counts of the video's length, and stay.
   assert.match(stripCounts('3 consecutive "stat" cards (max 2 in a row)'), /consecutive "stat" cards/);
+});
+
+test("the retry note KEEPS the ceiling, which is a bound rather than a target", () => {
+  const { stripCounts } = _internals;
+  // CHANGED 2026-08-16 (DrJ). This assertion used to be `!/\d/` — no digits at
+  // all — which left the model told it had emitted "far more cards than the
+  // source establishes" with no bound it could act on. That is the prompt-
+  // silence failure in its retry form: a rejection the model cannot escape
+  // because it was never told what it violated.
+  //
+  // A ceiling is safe where a floor is not. Told "34" after emitting 41 there is
+  // nothing to pad toward — a real story sits far below it, and the note says so
+  // in the same breath.
+  const out = stripCounts("too many slides: 41 > 34");
+  assert.match(out, /41 cards/);
+  assert.match(out, /ceiling is 34/);
+  assert.match(out, /not a target/);
+  assert.match(out, /enumerate the beats again/i);
 });
 
 test("exact JSON parses", () => {
@@ -690,9 +708,25 @@ test("the dry run prints the rejected spec and the mismatch arithmetic", () => {
 // never named it, so the model kept producing it. The GATE was doing its job and
 // the PROMPT was silent, which is a rejection loop rather than a defence.
 
+// 2026-08-16: it recurred a third time, and when the retry note finally landed
+// the model dropped "massive" and reached ONE WORD TO THE LEFT for "completely"
+// — also on the stem list, also unnamed. Naming the word it happened to reach
+// for was never going to be enough; the whole list had to be named, which is
+// what videoPromptCoverage.test.js now enforces for all 22 stems.
+//
+// This test survives that sweep because it records the specific incident, but it
+// no longer pins the sentence's word ORDER — the exhaustive block replaced that
+// prose, and a test asserting a literal sequence would fail on every future
+// rewording without a single word going missing.
 test("the prompt names the specific word that keeps recurring", () => {
-  assert.match(promptFor(), /indefinite, unprecedented, sweeping, devastating, massive/,
-    "'massive' is caught by the gate and was absent from the examples the model reads");
+  const p = promptFor();
+  const at = p.indexOf("THE CHECKED WORDS, IN FULL");
+  assert.ok(at !== -1, "the exhaustive intensifier block is what names these words");
+  const block = p.slice(at, at + 900);
+  for (const word of ["massive", "completely"]) {
+    assert.match(block, new RegExp(`\\b${word}\\b`, "i"),
+      `'${word}' is caught by the gate and must be named in the block the model reads`);
+  }
 });
 
 test("THE PATTERN is named, not just the words", () => {
