@@ -164,6 +164,30 @@ if (!r || typeof r !== "object") {
 if (!r.ok) {
   console.log(`REJECTED after ${secs}s — ${r.reason}`);
   console.log(`cost $${(r.costUsd || 0).toFixed(5)} · attempts ${r.attempts ?? "?"}`);
+  // THE REJECTED SPEC, WHOLE. What failed is in the reason; what was PRODUCED is
+  // only here, and the two together are what makes a failure diagnosable. The
+  // beats/cards mismatch in particular can only be understood by reading the
+  // beats against the cards.
+  if (r.rejectedSpec) {
+    console.log("\n─── what the model produced (rejected, not used) ───");
+    console.log(JSON.stringify(r.rejectedSpec, null, 2));
+    const beats = r.rejectedSpec.beats || [];
+    const slides = r.rejectedSpec.slides || [];
+    const content = slides.filter(c => c && c.t !== "title" && c.t !== "kicker");
+    console.log(`\nbeats ${beats.length} vs content cards ${content.length}` +
+      (beats.length === content.length ? "" : `  <-- MISMATCH of ${beats.length - content.length}`));
+    if (beats.length) {
+      console.log("beat kinds, in order: " + beats.map(b => b?.kind ?? "?").join(", "));
+      const kicker = slides.find(c => c && c.t === "kicker");
+      if (kicker) console.log(`kicker caption: ${String(kicker.caption || "").slice(0, 140)}`);
+      // The comparison that diagnosed this class: does the closer restate the
+      // last enumerated beat? If it does, the model spent a beat on the wrapper.
+      const last = beats[beats.length - 1];
+      if (last?.beat) console.log(`last beat      : ${String(last.beat).slice(0, 140)}`);
+    }
+  } else {
+    console.log("(no parsed spec — the failure was before or during parsing)");
+  }
   process.exit(0);
 }
 
