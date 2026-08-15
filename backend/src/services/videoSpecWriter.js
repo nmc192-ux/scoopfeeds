@@ -599,7 +599,11 @@ ${multiSource ? `   THE ONE EXCEPTION: if a figure comes from a DIFFERENT outlet
    Each beat is an object: { "kind": "...", "beat": "one sentence stating it", "evidence": "the short verbatim phrase from the source material that grounds it" }.
    These are KINDS, not a checklist. A rich story may have six figures and three consequences; list every instance separately. Two sentences restating the same fact are ONE beat. A quote that adds no new fact is not a beat.
 
-   THEN emit exactly ONE CARD PER BEAT, choosing the card type that fits, wrapped by the opening "title" card and the closing "kicker" card. No card without a beat; no beat without a card. Do not merge beats to be brief, and do not split or invent beats to be long — how many beats the source holds is a discovery you make, never a decision.
+   THEN emit exactly ONE CARD PER BEAT, choosing the card type that fits, wrapped by the opening "title" card and the closing "kicker" card. Do not merge beats to be brief, and do not split or invent beats to be long — how many beats the source holds is a discovery you make, never a decision.
+
+   THE TITLE AND THE KICKER CARRY NO BEAT AND ARE NOT COUNTED. "One card per beat" governs the cards BETWEEN them: every beat you enumerate gets exactly one content card, and no content card exists without a beat. The two wrappers sit outside that arithmetic entirely.
+
+   A NOTE ON THE WORD "CONSEQUENCE", because it names two different things and confusing them is the commonest way this spec fails. A "consequence" BEAT is something the SOURCE STATES follows — it is in the article, it has evidence, and like every other beat it gets its own content card. The CONSEQUENCE the closer delivers (rule 16b) is DERIVED: what this means for someone outside the story, which the source never asserts and which therefore is NOT a beat and gets no content card. If you enumerate the closer's line as a beat, you will have one more beat than you have content cards and the spec is rejected.
 
    WORKED EXAMPLE of enumeration — a rich single-source story about subsea internet cables. This example is ILLUSTRATIVE ONLY: never reuse its facts, figures, or wording.
    "beats": [
@@ -617,6 +621,11 @@ ${multiSource ? `   THE ONE EXCEPTION: if a figure comes from a DIFFERENT outlet
      { "kind": "consequence", "beat": "Operators are rerouting traffic and burying new cable deeper.",    "evidence": "buried deeper in trenches" }
    ]
    Twelve beats, because that source established twelve distinct things — so that spec carries twelve content cards plus its "title" and "kicker". A thinner source might establish four; then you list four and emit four. The enumeration decides.
+
+   AND HERE IS THAT SPEC'S KICKER, so you can see where it comes from:
+     { "t":"kicker", "top":"ONE ANCHOR", "bottom":"THIRTEEN COUNTRIES",
+       "caption":"The next one will not be sabotage either. It will be a Tuesday, and a ship that did not know what was under it." }
+   NOTE WHAT IS NOT THERE: that closer is nowhere in the twelve beats. It is derived — the meaning of the twelve taken together — which is exactly why it is not enumerated and not counted. The list above ends on a "consequence" BEAT ("operators are rerouting traffic"), and that beat still gets its own content card. The closer is a different thing that happens to share the word.
 
 9. STRUCTURE AND MIX. The FIRST card must be "title" and the LAST card must be "kicker". In between, VARY THE CARD TYPES:
    - No card type may take more than about a third of the cards. A wall of number cards is a spreadsheet read aloud, not a video.
@@ -719,6 +728,9 @@ RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. 
       - the IMPLICATION — what this means for someone who is not in the story,
       - the CONSEQUENCE — what is now set in motion, or foreclosed,
       - WHAT TO WATCH — the decision, date, or number that will settle it.
+
+    ALL THREE ARE DERIVED, AND NONE OF THEM IS A BEAT. This is the thing the closer is FOR: it says something the article did not, drawn from what the article established. So it is not in your "beats" array, it gets no content card, and the kicker is not counted against the one-card-per-beat arithmetic in rule 8.
+    Do not confuse this CONSEQUENCE with rule 8's "consequence" beat kind. That one is a consequence the SOURCE STATES, it carries evidence, and it gets its own content card like every other beat. This one is yours.
 
     WORKED EXAMPLES — ILLUSTRATIVE ONLY. Never reuse these facts or wording.
 
@@ -911,7 +923,21 @@ export async function writeVideoSpec(article, {
   // absent, which is the same answer by the same function.
   attribution = null,
 } = {}) {
-  const reject = (reason, costUsd = 0, attempts = 0) => ({ ok: false, spec: null, costUsd, reason, attempts });
+  /**
+   * `spec` stays null on every rejection — a rejected spec must never be
+   * mistaken for a usable one by a caller reading `.spec`.
+   *
+   * `rejectedSpec` carries what the model actually produced, for inspection
+   * ONLY. Until now a rejected spec was unreadable: the reason said what failed
+   * and nothing said what was emitted, so diagnosing the beats/cards mismatch
+   * meant reasoning from rule text rather than reading four specs. DrJ:
+   * "a rejected spec being unreadable is a real gap and it'll pay for itself on
+   * the next one of these."
+   *
+   * Nothing in the pipeline reads it — scripts/spec-dry-run.mjs prints it.
+   */
+  const reject = (reason, costUsd = 0, attempts = 0, rejectedSpec = null) =>
+    ({ ok: false, spec: null, rejectedSpec, costUsd, reason, attempts });
   if (!isVideoSpecEnabled()) return reject("VIDEO_SPEC_ENABLED not set");
   if (!article?.title) return reject("article has no title");
 
@@ -1019,7 +1045,7 @@ export async function writeVideoSpec(article, {
         len: JSON.stringify(result.parsed).length,
         finishReason: result.finishReason, usage: result.usage,
       });
-      return reject(v.errors.slice(0, 3).join(" | "), spentUsd, attempts);
+      return reject(v.errors.slice(0, 3).join(" | "), spentUsd, attempts, result.parsed ?? null);
     }
 
     const { usage, finishReason } = result;

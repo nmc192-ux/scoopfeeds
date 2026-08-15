@@ -621,3 +621,64 @@ test("the script selects the SAME columns the cycle does, image_url included", (
     assert.ok(cycleCols.includes(col), `the cycle must still select ${col} — otherwise this test is stale`);
   }
 });
+
+// ─── The beats/cards arithmetic, and who is exempt from it ──────────────────
+//
+// DrJ, 2026-08-15: four rejections in the logs, every one "enumerated N beats
+// but emitted N-1 content cards", off by one in the same direction, surviving
+// the retry. Two model calls and a lost video each time. Rule 8 said "no card
+// without a beat" while rule 16b required the kicker to deliver a consequence —
+// and "consequence" named two different things.
+
+test("rule 8 states the wrappers are exempt, in so many words", () => {
+  const p = promptFor();
+  assert.match(p, /THE TITLE AND THE KICKER CARRY NO BEAT AND ARE NOT COUNTED/);
+  assert.match(p, /governs the cards BETWEEN them/,
+    "the arithmetic has to be stated, not left to be inferred from 'wrapped by'");
+});
+
+test("BOTH rules disambiguate 'consequence', each naming the other", () => {
+  // The root cause was one word meaning two things in two places. Fixing one
+  // side would have left the collision intact from the other direction.
+  const p = promptFor();
+  assert.match(p, /A NOTE ON THE WORD "CONSEQUENCE"/, "rule 8 side");
+  assert.match(p, /rule 16b/, "rule 8 must point at the other rule by name");
+  assert.match(p, /ALL THREE ARE DERIVED, AND NONE OF THEM IS A BEAT/, "rule 16b side");
+  assert.match(p, /rule 8's "consequence" beat kind/, "and 16b must point back");
+});
+
+test("the arithmetic failure is named as a consequence of confusing them", () => {
+  assert.match(promptFor(), /one more beat than you have content cards and the spec is rejected/,
+    "state the actual failure, so the rule reads as a reason rather than a preference");
+});
+
+test("THE WORKED EXAMPLE SHOWS ITS KICKER", () => {
+  // It ended on a "consequence" beat and never showed the closer, which taught
+  // the exact failure being seen: the natural home for a final consequence is
+  // the kicker, and the kicker is not counted.
+  const p = promptFor();
+  const beatsAt = p.indexOf('"kind": "consequence", "beat": "Operators are rerouting');
+  const kickerAt = p.indexOf('AND HERE IS THAT SPEC\'S KICKER');
+  assert.ok(beatsAt > 0, "the twelve-beat example is still there");
+  assert.ok(kickerAt > beatsAt, "and the kicker is shown after it, where it will be read");
+  assert.match(p, /NOTE WHAT IS NOT THERE/,
+    "the example must say explicitly that the closer is absent from the list");
+});
+
+test("a rejected spec is returned for inspection, and never as a usable one", () => {
+  // `spec` must stay null on rejection — a caller reading `.spec` must not get
+  // something that failed validation. `rejectedSpec` is inspection only.
+  const src = readFileSync(new URL("./videoSpecWriter.js", import.meta.url), "utf8");
+  assert.match(src, /ok: false, spec: null, rejectedSpec/,
+    "spec stays null; the parse rides alongside it");
+  assert.match(src, /reject\(v\.errors\.slice\(0, 3\)\.join\(" \| "\), spentUsd, attempts, result\.parsed/,
+    "the validation rejection is the one that must carry the parse");
+});
+
+test("the dry run prints the rejected spec and the mismatch arithmetic", () => {
+  const src = readFileSync(new URL("../../scripts/spec-dry-run.mjs", import.meta.url), "utf8");
+  assert.match(src, /r\.rejectedSpec/);
+  assert.match(src, /MISMATCH of/, "the off-by-N is the diagnosis — print it, do not make it be counted by hand");
+  assert.match(src, /beat kinds, in order/);
+  assert.match(src, /last beat/, "the comparison that diagnosed this class: closer against the final beat");
+});
