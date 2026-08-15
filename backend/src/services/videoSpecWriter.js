@@ -659,7 +659,14 @@ ${multiSource ? `   THE ONE EXCEPTION: if a figure comes from a DIFFERENT outlet
 
     THIS APPLIES TO ON-SCREEN TYPE TOO, and the display lines are where it matters most. Two words in the largest type on the card carry more framing per word than a whole caption does, and they have no sentence around them to qualify anything. Every string a viewer reads or hears is checked, not just the spoken one.
 
-    The same goes for INTENSIFIERS AND ABSOLUTES. If the article does not say something is indefinite, unprecedented, sweeping or devastating, then neither do you — those words are checked against the source and a spec that adds one is rejected. Use the article's own word or use none.
+    The same goes for INTENSIFIERS AND ABSOLUTES. If the article does not say something is indefinite, unprecedented, sweeping, devastating, massive, staggering or shocking, then neither do you — those words are checked against the source and a spec that adds one is rejected. Use the article's own word or use none.
+
+    THE COMMONEST WAY THAT HAPPENS, so watch for it specifically: A LARGE FIGURE NEEDS NO ADJECTIVE. The pull toward an intensifier is strongest exactly where it is least needed — next to a big number — because the number already carries the weight and the adjective feels like it is helping.
+
+      NO:  "The stakes are massive."          "A staggering ten billion dollars."
+      YES: "Ten billion dollars."             "Ten billion dollars, on one ruling."
+
+    "Ten billion dollars" IS the stakes. "The stakes are massive" adds nothing the number did not already say, and it trades a fact the source gave you for a judgement it did not. If a figure feels like it needs help, the help it needs is a comparison the source supports — what it is a share of, what it was last year, who pays it — never an adjective.
 
     One thing the checks CANNOT see, so it is on you: a metaphor that characterises. "THE SECRET SERVICE SHIELD" contains no motive verb and no intensifier, and it still reframes a protective detail as an instrument of obstruction. Compressing for display type is not licence to editorialise — name the thing the article names. When you are tempted to explain a motive, state the obstacle, the sequence or the consequence instead — those are facts, they are usually more concrete, and they need no one's permission.
 

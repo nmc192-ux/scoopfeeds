@@ -682,3 +682,48 @@ test("the dry run prints the rejected spec and the mismatch arithmetic", () => {
   assert.match(src, /beat kinds, in order/);
   assert.match(src, /last beat/, "the comparison that diagnosed this class: closer against the final beat");
 });
+
+// ─── A large figure needs no adjective ──────────────────────────────────────
+//
+// DrJ, 2026-08-15: "massive" killed attempt 2 and appeared on attempt 1 —
+// same word, four runs, one article. The gate caught it every time; the prompt
+// never named it, so the model kept producing it. The GATE was doing its job and
+// the PROMPT was silent, which is a rejection loop rather than a defence.
+
+test("the prompt names the specific word that keeps recurring", () => {
+  assert.match(promptFor(), /indefinite, unprecedented, sweeping, devastating, massive/,
+    "'massive' is caught by the gate and was absent from the examples the model reads");
+});
+
+test("THE PATTERN is named, not just the words", () => {
+  // A word list is finite and the model reaches for whichever synonym is not on
+  // it. The pull is what generalises: an intensifier arrives next to a big
+  // number, which is exactly where it is least needed.
+  const p = promptFor();
+  assert.match(p, /A LARGE FIGURE NEEDS NO ADJECTIVE/);
+  assert.match(p, /The stakes are massive/, "show the actual failure verbatim");
+  assert.match(p, /IS the stakes/, "and say why the adjective adds nothing");
+});
+
+test("it offers the alternative, since 'delete it' leaves the pull unanswered", () => {
+  assert.match(promptFor(), /a comparison the source supports — what it is a share of, what it was last year, who pays it/,
+    "a rule that only forbids leaves the model with a figure it thinks needs help");
+});
+
+test("the RETRY message says what to do instead, not only what was wrong", async () => {
+  // The retry reads the error text. Two attempts died on the same word, and
+  // "drop it" alone gave the model nowhere to go.
+  const { validateSpec } = await import("./videoSpecSchema.js");
+  const src = "A ruling could put ten billion dollars at risk for the broadcaster.";
+  const spec = { beats: [{ kind: "figure", beat: "Ten billion dollars is at risk.", evidence: "ten billion dollars" }],
+    slides: [
+      { t: "title", lines: [["A", "white"]], caption: "x".repeat(80) },
+      { t: "turn", eyebrow: "BUT", lines: [["THE STAKES", "white"]], caption: "The stakes are massive for the broadcaster here." },
+      { t: "kicker", top: "A", bottom: "B", caption: "y".repeat(80) },
+    ] };
+  const v = validateSpec(spec, { headline: "H", sourceText: src });
+  const err = v.errors.find(e => e.includes("unsupported_intensifier"));
+  assert.ok(err, `expected the gate to fire: ${v.errors.join(" | ")}`);
+  assert.match(err, /IS the stakes/, "the correction must carry the reasoning, not just the verdict");
+  assert.match(err, /never an adjective/);
+});
