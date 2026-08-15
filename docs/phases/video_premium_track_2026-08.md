@@ -283,9 +283,15 @@ not a tuning.
 ⚠️ **The metaphor case is prompt-only and unproven.** "THE SECRET SERVICE SHIELD" contains no
 motive verb and no intensifier, and still reframes a protective detail as an instrument of
 obstruction. It is not mechanically separable from a compressed paraphrase — "ZERO TARIFFS"
-is the same operation done honestly. The prompt names it explicitly; it recurred anyway on a
-later run. Evidence is being collected via `VIDEO_SPEC_LOG_JSON` to establish whether it
-recurs across *different* articles, which is what decides whether it must become mechanical.
+is the same operation done honestly. The prompt names it explicitly and it recurred anyway —
+**four runs of the same article as of 2026-08-16**, on the title each time.
+
+**Four recurrences are not yet evidence for a gate**, and the discipline here is worth stating
+because the temptation runs the other way: every one of those four is the *same article*, so
+what they establish is that this story pulls hard toward that phrase, not that the model
+reaches for metaphor generally. A gate built on a single article's evidence would be fitted to
+that article. `VIDEO_SPEC_LOG_JSON` is collecting across *different* articles, and that is what
+decides whether this becomes mechanical or stays a prompt rule (DrJ's ruling: hold).
 
 ### 3.8 The equality check stayed; the kicker was exempted instead
 
@@ -343,7 +349,21 @@ instruction. `MIN_SLIDES` / `MAX_SLIDES` exist as validation bounds only — the
 a spec too thin to carry a video, the ceiling catches a runaway.
 
 **This is the one place where "enforced but not named" is correct.** The audit in §4 flags it;
-it must not be "fixed".
+it must not be "fixed". `videoPromptCoverage.test.js` now asserts the number stays *out* of
+the prompt, so a later sweep closing §4's gap cannot helpfully add it.
+
+**But the ceiling does belong in the retry note** (DrJ, 2026-08-16), and the distinction is
+between a floor and a ceiling rather than between naming and silence:
+
+- a **floor** is target-shaped. Told "you need 6", the model emits exactly 6. That is the
+  flat-spec failure, and it is why no count appears in the prompt.
+- a **ceiling** is not. Told "34" *after emitting 41*, there is nothing to pad toward — a real
+  story sits far below it, and the note says so in the same sentence.
+
+What the old phrasing did instead was strip the bound entirely and tell the model it had
+emitted "far more cards than the source establishes". That is a rejection it cannot act on:
+the same prompt-silence failure as §4, in its retry form. The number is now stated in
+`stripCounts` and nowhere else. The floor is still stripped.
 
 ---
 
@@ -356,6 +376,16 @@ word again, and every occurrence costs a spec call and a video.
 This was found the expensive way. `massive` is in `INTENSIFIER_STEMS`, the gate caught it
 correctly on four consecutive runs, and the prompt's rule listed *indefinite, unprecedented,
 sweeping, devastating* — not `massive`. The gate was doing its job and the prompt was silent.
+
+**Then it escalated, which is what settled the fix.** Naming `massive` worked exactly as
+intended — the next run dropped it — and the model **reached one word to the left** for
+`completely`, also on the stem list, also unnamed. A fifth rejection on the same article.
+
+That is the argument against patching a word list one incident at a time: the model is not
+attached to the specific word, it is reaching for a register, and every near neighbour it
+reaches for is on the same list for the same reason. Naming the word that happened to recur
+just moves the rejection along the list. **The whole list has to be named, or none of it
+means anything.**
 
 A sweep of every mechanical check against the prompt text found **95 enforced things, 32 not
 named**:
@@ -372,16 +402,50 @@ named**:
 that drifted are both *word lists* — because adding a word to a list is a one-line change
 that never prompts anyone to touch the prompt.
 
-⚠️ **The naming fix and its guard test are not yet built.** The intended guard asserts every
-member of both lists appears in the prompt, so adding a stem without prompt text fails the
-suite rather than a video. Note that `KICKER_BANNED_PHRASES` is exported but
-`INTENSIFIER_STEMS` is module-private — the test needs it exported first, and that export
-exists for the test alone.
+### 4.1 What shipped (2026-08-16)
 
-The guard has to compare against **stems, not words**: the list holds `massiv`, `catastroph`,
-`unprecedent`. A test asserting the literal stem appears in the prompt would force the prompt
-to print truncated fragments at the reader. It should assert that some prompt word *starts
-with* the stem, which is the same containment rule the gate itself applies.
+All 30 remaining words named — 14 stems in rule 10c, 16 phrases in rule 16 — plus
+`videoPromptCoverage.test.js`, which fails when a check lands without prompt text.
+
+The word lists are named **grouped by what they do** (scale / duration / harm / movement /
+totality; closing-register / final-verdict / backward-looking / sign-off) rather than as a flat
+dump. A grouped list is readable at the length these have reached, and it teaches the
+*category* — which is the thing the model is actually reaching for.
+
+Three details the build turned up, each worth more than the list itself:
+
+**Coverage is asserted inside the block that owns the rule, not anywhere in the prompt.** The
+first draft of the test checked the whole string and reported `entirely` as already named. It
+was — in an unrelated sentence about beat counting. An incidental occurrence in neighbouring
+prose teaches the model nothing, and a whole-prompt check would have let a real gap ship
+green, which is the exact failure the test exists to prevent. Each list now has a marker line
+(`THE CHECKED WORDS, IN FULL`) and coverage is checked from that marker to the next numbered
+rule.
+
+**The guard compares stems by prefix, and phrases by containment.** The list holds `massiv`,
+`catastroph` — a test demanding the literal stem appear would force the prompt to print
+truncated fragments at the model. So a prompt *word* must start with the stem, which is the
+same containment the gate applies. For phrases the rule is looser in one specific way: naming
+`there you have it` already covers `so there you have it`, because any text tripping the
+longer phrase trips the shorter one too. That is why 16 phrases needed new text rather than
+17 — one of the audit's unnamed phrases was already covered. `key takeaway` is *not* covered
+by `the takeaway`, since neither contains the other.
+
+**`INTENSIFIER_STEMS` is exported for the test and for nothing else in production.**
+
+A test that cannot fail is worth nothing, so the guard was verified by adding a stem
+(`seismic`) with no prompt text and confirming the suite went red, before reverting it.
+
+### 4.2 One more of the same class, found on the way
+
+Rule 16 still ended *"End on the FORWARD implication or an OPEN QUESTION"* while the closer
+gate (§3.9) rejects a trailing question outright. **A prompt that recommends the rejected
+thing is worse than one that is silent** — silence leaves the model guessing; this actively
+pointed at the failure. Now removed, with an explicit cross-reference to rule 10b.
+
+This was the third shipped position to disagree about closer questions and the last one
+standing. It survived the §3.9 ruling because that work fixed the *gate* and the two rules
+that stated the policy, and nobody re-read rule 16's closing clause.
 
 A related instance, same shape: rule 3 described `PRIMARY SOURCE` / `ADDITIONAL COVERAGE`
 labelled sections that **nothing has ever built** — 1,031 characters of instruction about
@@ -452,7 +516,15 @@ and both renderers know `photo` and `map` unconditionally — which is what make
 — but the whole path has only ever run in a dry run. The mount and map builders have never
 produced a published frame.
 
-⚠️ **The prompt/validator naming fix and its guard test** — §4.
+**The generation half is doing better than expected, though** (DrJ, 2026-08-16). A dry run
+picked *"Trump Tower in New York City"* as a photo subject rather than a person, because the
+beat was about a place. That is the taxonomy working as designed and it was not the obvious
+outcome — the pull on a political story is toward a face, and the subject rule had to be
+stated explicitly in the prompt to resist it. Nothing to change; recorded because the next
+person to touch `SUBJECT_VISUAL` should know the place/person branch earns its place. **The
+render half remains unproven.**
+
+✅ **The prompt/validator naming fix and its guard test** — shipped 2026-08-16, §4.1.
 
 ⚠️ **Multi-outlet sourcing is feasible and unbuilt.** The cycle already resolves an `eventId`
 per article and `event_articles` holds the other outlets covering the same story. It would
