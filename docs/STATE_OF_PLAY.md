@@ -11,6 +11,7 @@ three checkouts agree, run `git fetch && git status -sb` on the Mac and on `/opt
 - **Where the strategic plan stands now:** [`docs/strategy/strategic_plan_v6_delta_2026-08.md`](strategy/strategic_plan_v6_delta_2026-08.md) — read before v6
 - Code-vs-docs reconciliation (2026-08): [`docs/audits/code_vs_docs_reconciliation_2026-08.md`](audits/code_vs_docs_reconciliation_2026-08.md)
 - Phase A exit-criteria correction (Jul 2026): [`docs/phases/phase_a_exit_criteria_correction_2026-07.md`](phases/phase_a_exit_criteria_correction_2026-07.md)
+- **Why the video/social calls went the way they did (Aug 2026):** [`docs/phases/video_premium_track_2026-08.md`](phases/video_premium_track_2026-08.md) — rationale, measurements, and what is still unfinished
 
 ## Where things stand
 

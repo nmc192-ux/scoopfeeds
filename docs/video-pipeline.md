@@ -4,6 +4,13 @@ Written 3 Aug 2026, the day the loop went live on `@scoopfeedsnews`.
 Purpose: so future-me knows what exists, why it's shaped this way, and what to
 check when it misbehaves.
 
+> **This note describes the pipeline. It does not carry the reasoning behind the
+> work done on it between 11–15 Aug 2026** — the vertical pivot, multi-platform
+> publishing, the selection budgets, the premium visual track and the editorial
+> gates. Several of those calls could reasonably have gone the other way and the
+> arguments are not reconstructable from the diffs. Before reversing any of them,
+> read [`docs/phases/video_premium_track_2026-08.md`](phases/video_premium_track_2026-08.md).
+
 ---
 
 ## 1. What it does
