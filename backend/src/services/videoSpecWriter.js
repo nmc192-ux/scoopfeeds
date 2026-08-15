@@ -480,6 +480,20 @@ export function buildSpecPrompt({ article, allowedSources = [], bodyText = null 
   // no image would produce a card the renderer must then drop, which is a worse
   // failure than never offering it.
   const hasPhoto = Boolean(article.image_url);
+  // RULE 3'S SECTION PARAGRAPHS DESCRIBE A SHAPE THAT IS NOT ALWAYS THERE
+  // (DrJ, 2026-08-15). They explain how to attribute a figure across "PRIMARY
+  // SOURCE" and "ADDITIONAL COVERAGE" blocks — and nothing in this codebase has
+  // ever built those: resolveVideoSourceText fetches ONE article, and the sole
+  // caller passes a single publisher. That was ~1,020 characters of instruction
+  // about ATTRIBUTION, the highest-stakes topic in the prompt, describing a
+  // structure the model could not see.
+  //
+  // Kept rather than deleted, and made conditional on the same fact that would
+  // produce the sections. The reasoning in them is worth having the day a
+  // multi-outlet bundle exists — the event graph already links the other
+  // outlets covering a story — and tying both to one condition means the
+  // instruction can never again describe material that is not present.
+  const multiSource = allowedSources.length > 1;
   const visualsOn = subjectVisualsEnabled();
   const emittable = MODEL_EMITTABLE.filter(t => {
     if (t === "sources") return false;
@@ -537,11 +551,11 @@ HARD RULES — violating any of these makes the output unusable:
 
    THE OUTLET IS CREDITED ALOUD ONCE, AND IT IS ALREADY DONE. A card near the start of the video names the outlet in its narration — you do not write that card, and you must not repeat its credit. So captions on your figure cards carry NO verbal attribution: write "Seventy percent of faults involve anchors", NOT "The Guardian reports that seventy percent of faults involve anchors". The "source" field still names the outlet on every figure card, and that credit is printed on screen; it is the spoken repetition that is unwanted. Hearing the same masthead four times in ninety seconds reads as a disclaimer, not as journalism.
 
-   THE ONE EXCEPTION: if a figure comes from a DIFFERENT outlet than the rest of the video, that caption must name it, because a source the viewer has not heard credited is a source that has not been credited.
+${multiSource ? `   THE ONE EXCEPTION: if a figure comes from a DIFFERENT outlet than the rest of the video, that caption must name it, because a source the viewer has not heard credited is a source that has not been credited.
 
    THE SOURCE MATERIAL IS ATTRIBUTED. It is divided into labelled sections — one "PRIMARY SOURCE — <outlet>" block and, when other outlets covered the same story, one or more "ADDITIONAL COVERAGE — <outlet>" blocks. Take a figure from whichever section actually contains it, and name THAT outlet in the "source" field. Do not attribute a figure to the lead publisher because it is listed first. Where two outlets report the same figure, either is correct.
 
-   Sections cover ONE story from different newsrooms, so treat them as one body of reporting, not as separate stories: a mechanism explained only in the third section is as usable as one in the first. Where outlets disagree on a number, prefer the one more outlets agree on, and if they cannot be reconciled, drop the card rather than picking a side.
+   Sections cover ONE story from different newsrooms, so treat them as one body of reporting, not as separate stories: a mechanism explained only in the third section is as usable as one in the first. Where outlets disagree on a number, prefer the one more outlets agree on, and if they cannot be reconciled, drop the card rather than picking a side.` : ""}
 
 4. NO "attribution" CARD. You must never emit a card with "t":"attribution". That card names the outlet, headline and date of the reporting this video is built on, and it is built from the database, not written. A fabricated byline is the worst thing this pipeline could put on screen. If you emit one, the card is discarded.
 
