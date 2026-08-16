@@ -191,6 +191,88 @@ export function runMigrations(db) {
   };
 }
 
+// ─── Single ownership ──────────────────────────────────────────────────────
+//
+// WHY ONE PROCESS MUST APPLY. runMigrations reads the applied set ONCE, at the
+// top, outside any transaction. Two processes both see 019 as unapplied, both
+// run it, and the loser dies on `duplicate column name: source` — reproduced
+// 2026-08-16 with four concurrent bootstraps. The per-migration transaction
+// makes each ATTEMPT atomic; it does nothing about check-then-act ACROSS
+// processes, and no busy_timeout can fix a race that never contends for a lock.
+//
+// The worker owns it: it is the only role with a naturally single instance.
+// `web` scaling to two replicas would otherwise reintroduce the race silently.
+// Unknown/unset role also applies — the db:migrate CLI, tests, and local dev all
+// run without a role and must still work.
+const WAITER_ROLES = new Set(["web", "scheduler"]);
+
+export function migrationsOwner() {
+  const role = String(process.env.SCOOP_PROCESS_ROLE || "").trim().toLowerCase();
+  return !WAITER_ROLES.has(role);
+}
+
+/** Sync sleep — bootstrapSchema is synchronous and runs before the event loop. */
+const sleepSync = (ms) => {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+  catch { /* SharedArrayBuffer unavailable — degrade to a spin-free no-op */ }
+};
+
+export const MIGRATION_WAIT_MS = (() => {
+  const raw = process.env.MIGRATION_WAIT_MS;
+  if (raw === undefined || raw === "") return 120_000;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : 120_000;
+})();
+
+/**
+ * Block until the owner has applied every registered migration.
+ *
+ * BOUNDED AND LOUD, deliberately. A web container that waits forever for a
+ * migration nobody will ever apply is a silent outage, which is strictly worse
+ * than the crash this replaces: a crash-looping container is visible in
+ * `docker ps` and in the restart count, a hung one looks healthy. So this throws
+ * with the id it was waiting for rather than hanging.
+ *
+ * It NAMES WHAT IT IS WAITING FOR on every change, so a three-in-the-morning log
+ * reads "waiting for migration 027_… (1 of 27 pending)" instead of silence.
+ */
+export function waitForMigrations(db, { timeoutMs = MIGRATION_WAIT_MS, pollMs = 250 } = {}) {
+  assertRegistryIntact();
+  ensureSchemaMigrationsTable(db);
+  const expected = MIGRATIONS.map((m) => m.id);
+  const started = Date.now();
+  const deadline = started + timeoutMs;
+  const applied = () => new Set(
+    db.prepare("SELECT id FROM schema_migrations").all().map((r) => r.id)
+  );
+
+  let announced = null;
+  let missing = expected.filter((id) => !applied().has(id));
+  while (missing.length && Date.now() < deadline) {
+    if (missing[0] !== announced) {
+      announced = missing[0];
+      logger.info(
+        `⏳ waiting for migration ${announced} — ${missing.length} of ${expected.length} pending ` +
+        `(this process does not apply migrations; the worker does)`
+      );
+    }
+    sleepSync(pollMs);
+    missing = expected.filter((id) => !applied().has(id));
+  }
+
+  const waitedMs = Date.now() - started;
+  if (missing.length) {
+    throw new Error(
+      `waitForMigrations: timed out after ${waitedMs}ms waiting for migration "${missing[0]}" ` +
+      `(${missing.length} of ${expected.length} still pending). The worker applies migrations — ` +
+      `check that it started and did not fail. Raise MIGRATION_WAIT_MS if this schema change is ` +
+      `genuinely slow, but a hang here means the owner is not running.`
+    );
+  }
+  if (waitedMs > pollMs) logger.info(`✅ schema ready after ${waitedMs}ms — ${expected.length} migrations applied`);
+  return { waitedMs, appliedCount: 0, registered: expected.length, waited: true };
+}
+
 function resolveDirectDbPath() {
   const dataDir = process.env.SCOOP_PERSISTENT_DATA_DIR
     ? path.resolve(process.env.SCOOP_PERSISTENT_DATA_DIR)
@@ -211,13 +293,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   // dynamic import runs there is nothing left to wait for.
   void (async () => {
     const Database = (await import("better-sqlite3")).default;
-    const { bootstrapSchema } = await import("../models/database.js");
+    const { bootstrapSchema, applyConnectionPragmas } = await import("../models/database.js");
     const dbPath = resolveDirectDbPath();
     const db = new Database(dbPath);
 
     try {
-      db.pragma("journal_mode = WAL");
-      db.pragma("busy_timeout = 5000");
+      // Same pragma path as getDb() — journal_mode ignores busy_timeout, so the
+      // shared helper is the only place that ordering is correct.
+      applyConnectionPragmas(db);
       // bootstrapSchema, not runMigrations: this CLI opens its own raw connection and
       // never goes through getDb(), so against a fresh data directory it used to die
       // at migration 011 on a table no migration creates.
