@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { sweepCards, formatSweep } from "./cardSweep.js";
+import { cachePath } from "./cardRenderer.js";
 import { makeTestDb } from "../testing/testDb.js";
 import { getDb } from "../models/database.js";
 
@@ -44,11 +45,47 @@ function fixture({ liveIds = [], files = [], imgFiles = [] } = {}) {
   return dir;
 }
 
+
+/**
+ * Seed an event and PROVE it landed.
+ *
+ * The first version used `INSERT OR IGNORE` with a partial column list, which
+ * silently swallowed a NOT NULL violation (`category`, `started_at`) and
+ * inserted nothing — so the "live event" test failed for a reason that had
+ * nothing to do with the code under test. A fixture that cannot fail loudly is
+ * the same defect as a test that builds its own inputs.
+ */
+function seedEvent(id) {
+  const now = Date.now();
+  // OR REPLACE, not OR IGNORE: idempotent across runs (the test DB persists),
+  // but still ABORTS on a NOT NULL violation with no default — so a wrong column
+  // list fails loudly instead of inserting nothing and blaming the sweep.
+  getDb().prepare(
+    `INSERT OR REPLACE INTO events (id, slug, title, category, status, started_at, last_activity_at, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`
+  ).run(id, `slug-${id}`, "T", "world", "active", now, now, now, now);
+  const n = getDb().prepare("SELECT COUNT(*) c FROM events WHERE id = ?").get(id).c;
+  assert.equal(n, 1, `seedEvent did not insert ${id} — the fixture is lying`);
+  return id;
+}
+
 let seq = 0;
 const uniq = (base) => `${base}-${process.pid}-${seq++}`;
 
 const HASH = "a1b2c3d4e5";
-const card = (id, preset = "og", hash = HASH) => `${id}-${preset}-${hash}.png`;
+
+/**
+ * FIXTURE NAMES COME FROM cachePath ITSELF, and from the hash shape the REAL
+ * call sites pass it — not from a helper that mirrors what I assumed.
+ *
+ * The first version of this file built names as `${id}-${preset}-${hash}.png`,
+ * which is cachePath's SIGNATURE and not what production writes: every live
+ * caller appends a `-p0`/`-p1` photo suffix to the hash first. The suite passed
+ * and the real dry run skipped 85% of the directory as unrecognised. A test that
+ * constructs its own inputs can only ever prove self-consistency.
+ */
+const card = (id, preset = "og", hash = HASH, suffix = "p1") =>
+  path.basename(cachePath(id, preset, suffix ? `${hash}-${suffix}` : hash));
 // Real UUID SHAPE — the hyphens are the point: a naive split on "-" would take
 // the article id apart, so the parser has to anchor on the last two segments.
 //
@@ -151,4 +188,60 @@ test("a UUID article id parses despite its own hyphens", () => {
   const s = sweepCards(dir, { daysToKeep: 7 });
   assert.equal(s.kept, 1, "the live UUID must be recognised, not treated as an orphan");
   assert.equal(s.deleted, 0);
+});
+
+// ── The regression that the first version of this file could not catch ──────
+//
+// These build names the way the FOUR LIVE CALL SITES do, not the way cachePath's
+// signature reads. That distinction is the entire bug: 12,029 of 14,156 real
+// files were unrecognised while this suite was green.
+test("every shape the real call sites produce is recognised", () => {
+  const shapes = [
+    // cardRenderer.js:2001 — intendedPath, photo render
+    cachePath(LIVE, "og", `${HASH}-p1`),
+    // :2002 — fallbackPath, typographic
+    cachePath(LIVE, "og", `${HASH}-p0`),
+    // :2019 — finalPath, after a satori fallback
+    cachePath(LIVE, "story", `${HASH}-p0`),
+    // :2084 — the event carousel, keyed evt-{eventId}
+    cachePath(`evt-${LIVE}`, "carousel1", `${HASH}-p0`),
+    // and the bare shape cachePath alone produces (pre-suffix files on disk)
+    cachePath(LIVE, "square", HASH),
+  ];
+  const dir = fixture({ liveIds: [], files: shapes.map((p) => [path.basename(p), true]) });
+  const s = sweepCards(dir, { daysToKeep: 7, dryRun: true });
+  assert.equal(s.unparseable, 0,
+    `every live shape must parse; got ${s.unparseable} unrecognised of ${s.scanned}`);
+  assert.equal(s.scanned, shapes.length);
+});
+
+// ── evt- policy ────────────────────────────────────────────────────────────
+test("an evt- card is judged against EVENTS, not articles", () => {
+  // The whole point of the ruling: these ids can never be in `articles`, so
+  // judging them there would orphan every event carousel on every run.
+  const evId = seedEvent("cccccccc-0000-4000-8000-000000000003");
+  const dir = fixture({ liveIds: [], files: [[path.basename(cachePath(`evt-${evId}`, "carousel1", `${HASH}-p0`)), false]] });
+  const s = sweepCards(dir, { daysToKeep: 7 });
+  assert.equal(s.orphaned, 0, "a live event's carousel must NOT be orphaned");
+  assert.equal(s.kept, 1);
+  assert.equal(s.evtChecked, 1, "and it must have been checked against events");
+});
+
+test("an evt- card whose event is gone IS orphaned", () => {
+  const dir = fixture({
+    liveIds: [],
+    files: [[path.basename(cachePath("evt-dddddddd-0000-4000-8000-000000000004", "carousel1", `${HASH}-p0`)), false]],
+  });
+  const s = sweepCards(dir, { daysToKeep: 7 });
+  assert.equal(s.orphaned, 1);
+});
+
+test("an evt- card is still swept on mtime while its event lives", () => {
+  // Events are not pruned on a 7-day rule, so mtime is what actually reclaims
+  // these — the orphan check only catches an event that genuinely went away.
+  const evId = seedEvent("eeeeeeee-0000-4000-8000-000000000005");
+  const dir = fixture({ liveIds: [], files: [[path.basename(cachePath(`evt-${evId}`, "carousel2", `${HASH}-p0`)), true]] });
+  const s = sweepCards(dir, { daysToKeep: 7 });
+  assert.equal(s.stale, 1);
+  assert.equal(s.orphaned, 0);
 });
