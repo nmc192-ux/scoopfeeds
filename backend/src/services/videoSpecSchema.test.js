@@ -1397,6 +1397,53 @@ test("LEAK 1: attribution is still the escape, on the new classes too", () => {
     "According to the filing, the memo was leaked to force a resignation.", NO_MOTIVE_SOURCE), null);
 });
 
+// ─── The verdict view, for the false-positive corpus ────────────────────────
+//
+// The corpus leak 3 must clear is harvested from live logs, and its value
+// depends entirely on the labels being the REAL gate's. So unattributedMotive
+// delegates to motiveVerdict rather than the diagnostic reimplementing it, and
+// this test pins that: if the two ever disagree, the corpus is mislabelled and
+// looks empirical while being wrong.
+const { motiveVerdict } = await import("./videoSpecSchema.js");
+
+test("motiveVerdict and unattributedMotive can never disagree", () => {
+  const src = "The BBC has asked the court for alternative means of service. " +
+    "Trump narrowed his claims after the BBC used them to subpoena documents.";
+  for (const sourceText of ["", NO_MOTIVE_SOURCE, src]) {
+    for (const c of [
+      "",
+      "China drops tariffs on almost every country in Africa from Friday.",
+      "Trump narrowed the scope to avoid BBC subpoenas.",
+      "Trump narrowed his claims to avoid BBC subpoenas.",
+      "The plaintiffs say the detail is being used to keep the suit at bay.",
+      "Trump has already scaled back his claims to protect his own business empire.",
+      "The company narrowed the disclosure to shield its executives.",
+    ]) {
+      const v = motiveVerdict(c, sourceText);
+      const expected = v.verdict === "fired" ? v.motive : null;
+      assert.equal(unattributedMotive(c, sourceText), expected,
+        `verdict "${v.verdict}" disagrees with the gate on: ${c}`);
+    }
+  }
+});
+
+test("the verdict names WHICH branch exempted, and LEAK 2 names the word", () => {
+  // This is what makes the harvest checkable: exempt_attribution is LEAK 2 and
+  // exempt_reported is LEAK 3, countable separately in a day of live specs.
+  assert.equal(motiveVerdict("China drops tariffs on Friday.", NO_MOTIVE_SOURCE).verdict, "no_motive");
+  assert.equal(motiveVerdict("Trump narrowed the scope to avoid subpoenas.", NO_MOTIVE_SOURCE).verdict, "fired");
+  assert.equal(motiveVerdict("Trump narrowed the scope to avoid subpoenas.", "").verdict, "exempt_no_source");
+
+  const leak2 = motiveVerdict("Trump narrowed his claims to avoid BBC subpoenas.", NO_MOTIVE_SOURCE);
+  assert.equal(leak2.verdict, "exempt_attribution");
+  assert.equal(leak2.by, "claims", "the corpus must name the word that switched the gate off");
+
+  const leak3 = motiveVerdict(
+    "Trump scaled back the lawsuit to protect his business empire.",
+    "He scaled back the lawsuit to protect the business, his spokesman said.");
+  assert.equal(leak3.verdict, "exempt_reported");
+});
+
 // KNOWN OPEN — LEAK 2, held by DrJ's ruling to close the leaks one at a time and
 // watch what each does. Recorded as a passing test rather than a comment so that
 // closing LEAK 2 FAILS HERE and forces this file to be updated, instead of

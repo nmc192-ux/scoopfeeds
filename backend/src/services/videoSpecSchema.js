@@ -354,22 +354,53 @@ export function motiveIsReported(text, sourceText) {
 }
 
 /**
- * Does this caption assert a motive without saying whose claim it is?
- * Returns the offending phrase, or null.
+ * The gate's full reasoning, not just its answer: WHICH branch decided, and for
+ * an exemption, what granted it.
+ *
+ * Built for the false-positive corpus (DrJ, 2026-08-16). A harvest that yields
+ * only captions is a pile of sentences somebody still has to re-judge; a harvest
+ * that yields VERDICTS is something that can be checked. It also separates the
+ * two open leaks in live data — `exempt_attribution` is LEAK 2 and names the
+ * word that did it, `exempt_reported` is LEAK 3 — so their real blast radii can
+ * be counted before either fix is designed.
+ *
+ * `unattributedMotive` DELEGATES to this rather than duplicating it. A separate
+ * diagnostic would be a second implementation of the gate, free to drift from
+ * the real one, and a corpus labelled by a drifting copy is worse than no corpus
+ * — it would look empirical while being wrong, which is the whole failure this
+ * corpus exists to avoid.
+ *
+ *   no_caption          nothing to judge
+ *   no_motive           no motive marker present
+ *   exempt_attribution  the caption says whose claim it is  (`by`: the word)
+ *   exempt_no_source    nothing to accuse against
+ *   exempt_reported     the source puts this intent on the record
+ *   fired               an unattributed motive
  */
-export function unattributedMotive(caption, sourceText = "") {
+export function motiveVerdict(caption, sourceText = "") {
   const c = String(caption || "").trim();
-  if (!c) return null;
+  if (!c) return { verdict: "no_caption", motive: null };
   const motive = c.match(MOTIVE_MARKERS);
-  if (!motive) return null;
-  if (ATTRIBUTION_MARKERS.test(c)) return null;      // someone is on the record here
+  if (!motive) return { verdict: "no_motive", motive: null };
+  const found = motive[0];
+  const attributed = c.match(ATTRIBUTION_MARKERS);
+  if (attributed) return { verdict: "exempt_attribution", motive: found, by: attributed[0] };
   // WITHOUT A SOURCE THERE IS NO CASE. The gate accuses the script of inventing
   // an intent; with nothing to compare against, that accusation cannot be made
   // fairly — and firing on absent evidence is how the first version killed an
   // article whose motive was in the filing all along.
-  if (!sourceText) return null;
-  if (motiveIsReported(c, sourceText)) return null;  // the source put it on the record
-  return motive[0];
+  if (!sourceText) return { verdict: "exempt_no_source", motive: found };
+  if (motiveIsReported(c, sourceText)) return { verdict: "exempt_reported", motive: found };
+  return { verdict: "fired", motive: found };
+}
+
+/**
+ * Does this caption assert a motive without saying whose claim it is?
+ * Returns the offending phrase, or null.
+ */
+export function unattributedMotive(caption, sourceText = "") {
+  const v = motiveVerdict(caption, sourceText);
+  return v.verdict === "fired" ? v.motive : null;
 }
 export const MOTIVE_ERROR = "unattributed_motive";
 

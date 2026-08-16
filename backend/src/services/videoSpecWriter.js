@@ -53,6 +53,7 @@ import {
   MODEL_EMITTABLE, SUBJECT_VISUAL_TYPES, THUMBNAIL_ANGLES, MIN_SLIDES, MAX_SLIDES,
   CAPTION_MAX_CHARS, CAPTION_MIN_CHARS,
   validateSpec, validatePackaging, decorateTitleCard,
+  displayStrings, motiveVerdict,
 } from "./videoSpecSchema.js";
 import { resolveAttribution } from "./videoAttribution.js";
 
@@ -1134,8 +1135,40 @@ export async function writeVideoSpec(article, {
     // scripts/spec-dry-run.mjs is the cheaper path when the article can be
     // chosen: it prints the same JSON without rendering or publishing anything.
     // This flag is for seeing what the LIVE cycle actually produced.
+    //
+    // IT ALSO LOGS THE SOURCE TEXT, AND THAT IS THE LOAD-BEARING PART (DrJ,
+    // 2026-08-16). The motive gate is `unattributedMotive(caption, sourceText)`,
+    // so a caption logged without the text it was judged against cannot be
+    // re-judged later — `resolved.text` may be a LIVE FETCH, and rebuilding it
+    // means re-fetching a page that may have changed, moved or started 403ing.
+    // A corpus labelled from a reconstructed source looks empirical and is not,
+    // which is worse than reasoning, because reasoning knows what it is. The
+    // origin is logged explicitly for the same reason: a FETCHED entry carries
+    // different confidence from a STORED one and that should not be inferred.
+    //
+    // ~24KB ceiling per spec (VIDEO_FULLTEXT_MAX_CHARS), so roughly 300KB/day at
+    // the current cadence. Noise against a day of container logs.
     if (process.env.VIDEO_SPEC_LOG_JSON === "1") {
       logger.info(`🎬 videoSpec [${article.id}] FULL SPEC:\n${JSON.stringify(v.spec, null, 2)}`);
+      logger.info(
+        `🎬 videoSpec [${article.id}] SOURCE TEXT (origin=${resolved.origin}` +
+        `${resolved.reason ? `, reason=${resolved.reason}` : ""}, chars=${sourceText.length}):\n${sourceText}`
+      );
+      // THE GATE'S VERDICTS, so the harvest is something to CHECK rather than a
+      // pile of sentences to re-judge. Only strings carrying a motive marker are
+      // printed — the rest are noise — and the branch names separate the two
+      // open leaks in live data: exempt_attribution is LEAK 2 (with the word
+      // that did it), exempt_reported is LEAK 3.
+      for (const [i, card] of (v.spec?.slides || []).entries()) {
+        for (const str of displayStrings(card)) {
+          const mv = motiveVerdict(str, sourceText);
+          if (mv.verdict === "no_motive" || mv.verdict === "no_caption") continue;
+          logger.info(
+            `🎬 videoSpec [${article.id}] MOTIVE slides[${i}] (${card.t}) ${mv.verdict}` +
+            `${mv.by ? ` by="${mv.by}"` : ""} marker="${mv.motive}" :: ${str}`
+          );
+        }
+      }
     }
 
     const spec = {
