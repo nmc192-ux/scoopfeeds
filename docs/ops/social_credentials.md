@@ -153,34 +153,22 @@ messages. Most common causes:
 - **Bluesky 429 "RateLimitExceeded"** → check `blueskyCooldown` in the
   `/auto-errors` response. The circuit breaker auto-clears in 10 minutes.
 
-## Stock-photo backgrounds for branded cards (Pexels)
+## Stock-photo backgrounds for branded cards (Pexels) — REMOVED 2026-08-14
 
-The card renderer composites a tag-matched landscape photo behind the
-headline + branding, giving Facebook / IG / LinkedIn posts the visual
-weight of a real news publisher's social graphics. Free to use — no
-attribution required on the card itself (Pexels license is permissive).
+**This setup no longer applies. Do not follow it.** The stock-photo step was
+removed from the card cascade entirely: a category-keyed stock query is never
+*relevant* to the story, and on hard news it is sometimes offensive — the same
+globe photo appeared on an 800m final and on a cyber-attack story, and a stock
+bar chart ran on a West Bank displacement story.
 
-Setup (~60 seconds):
+Cards now use **the article's own photograph**, falling back to the typographic
+path when there is none (`CARD_DESIGN_VER` v13 was the ship mechanism).
 
-1. Sign up at <https://www.pexels.com/api/> (email-only, no payment).
-2. Copy the API key from the dashboard.
-3. Add it to **the same persistent location** as the social credentials
-   above (Hostinger Environment Variables UI **or** `~/.scoopfeeds.env`):
-
-   ```
-   PEXELS_API_KEY=<your-key>
-   ```
-
-4. Restart the Node app. Next post-cycle the cards will be photo-backed.
-
-Free tier limit: 200 reqs/hour, 20,000 reqs/month. Auto-poster cadence is
-~30 posts/day across platforms → ~900/month → well under the limit. Photos
-are cached per-article in `data/stock-photos/` so re-posting / regenerating
-doesn't re-hit the API.
-
-**Without the key set**, the renderer falls back to the typographic-only
-design — still strong, just not photographic. So this is a "make-it-better"
-upgrade, not a critical dependency.
+`PEXELS_API_KEY` is read by nothing and clearing it from prod is safe.
+`backend/src/services/stockPhoto.js` was **deleted on 2026-08-16**: it had zero
+importers, and its module-scope `mkdirSync` meant any future import would
+silently recreate the 11GB `data/stock-photos/` cache that had just been cleared
+off a 99%-full disk. The directory is gone and nothing recreates it.
 
 ## Lesson (2026-07-14): identity changes ARE credential changes
 

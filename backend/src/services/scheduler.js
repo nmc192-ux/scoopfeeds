@@ -32,6 +32,8 @@ import { snapshotActiveMarkets } from "../realityIndex/ingest/predictionMarkets/
 import { runMarketMatcherCycle } from "../realityIndex/intelligence/marketMatcher.js";
 import { runSnapshotDownsampler } from "../realityIndex/jobs/snapshotDownsampler.js";
 import { runEventPromoter } from "../realityIndex/intelligence/eventPromoter.js";
+import { sweepCards, formatSweep } from "./cardSweep.js";
+import { CARDS_DIR } from "./cardRenderer.js";
 import { runEventBreakerSweep } from "../realityIndex/intelligence/eventBreaker.js";
 import { runTrackerDetector } from "../realityIndex/intelligence/trackerDetector.js";
 import { runScoringJob } from "../skills/scoring/runtime/scoringRun.js";
@@ -724,6 +726,18 @@ scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "
     logger.info("🧹 Pruning...");
     const n = pruneOldArticles(7);
     logger.info(`🧹 Pruned ${n} records`);
+    // IMMEDIATELY AFTER, and the ordering is the point: the articles are gone as
+    // of this line, so "card whose article no longer exists" is exactly the
+    // 7-day rule rather than an approximation needing its own cutoff.
+    //
+    // Nothing had ever deleted a card — 36k files and 34GB in about a month,
+    // because every CARD_DESIGN_VER bump orphans the previous generation. Its
+    // own failure must not take the article prune's result down with it.
+    try {
+      logger.info(formatSweep(sweepCards(CARDS_DIR, { daysToKeep: 7 })));
+    } catch (err) {
+      logger.error("🧹 card sweep failed", { error: err.message });
+    }
   });
   scheduleCron("35 4 * * *", async () => {
     try {

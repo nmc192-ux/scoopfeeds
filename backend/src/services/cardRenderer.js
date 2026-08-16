@@ -322,7 +322,7 @@ const BACKEND_ROOT = path.resolve(__dirname, "../..");
 // Facebook's photo URL fetcher would time out and silently fall back to a
 // link post (no image visible on FB). Persisting the cache eliminates that
 // cold-render window entirely.
-const CARDS_DIR = process.env.SCOOP_PERSISTENT_DATA_DIR
+export const CARDS_DIR = process.env.SCOOP_PERSISTENT_DATA_DIR
   ? path.join(path.resolve(process.env.SCOOP_PERSISTENT_DATA_DIR), "cards")
   : path.join(BACKEND_ROOT, "data", "cards");
 if (!existsSync(CARDS_DIR)) mkdirSync(CARDS_DIR, { recursive: true });

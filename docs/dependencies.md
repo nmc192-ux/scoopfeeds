@@ -367,14 +367,19 @@ For each platform: API access status, posting cadence, monetization status, bran
 
 ## 11. Other live dependencies (not in original spec)
 
-### Pexels API — *active*
-- **Purpose:** Stock photo backgrounds for branded social/news cards
-- **Account owner:** DrJ
-- **Cost:** Free tier — 200 reqs/hr, 20k/month
-- **Phase introduced:** Pre-Phase-A
-- **Criticality:** Optional (cards fall back to typographic-only when unset)
-- **Replacement options:** Unsplash API, self-hosted image library
-- **Code references:** [backend/src/services/stockPhoto.js](../backend/src/services/stockPhoto.js), [backend/src/services/cardRenderer.js](../backend/src/services/cardRenderer.js), [backend/src/routes/social.js](../backend/src/routes/social.js); env: `PEXELS_API_KEY`
+### Pexels API — *REMOVED (2026-08-14)*
+- **Purpose (historic):** Stock photo backgrounds for branded social/news cards
+- **Status:** **No code path reads this.** The stock step was removed from the
+  card cascade entirely — a category-keyed stock query is never *relevant* and on
+  hard news is sometimes offensive (observed: the same globe photo on an 800m
+  final and on a cyber-attack story; a stock bar chart on a West Bank
+  displacement story). Cards now use the article's own photograph, falling back
+  to the typographic path.
+- **Code references:** none. `backend/src/services/stockPhoto.js` was **deleted
+  on 2026-08-16** — it had zero importers, and its module-scope `mkdirSync`
+  meant any future import would silently recreate the 11GB `data/stock-photos/`
+  directory that had just been cleared off a 99%-full disk.
+- **Action:** clearing `PEXELS_API_KEY` from prod `.env` is safe and recommended.
 
 ### Google AdSense — *active*
 - **Purpose:** Ad monetization on the Newsroom site
