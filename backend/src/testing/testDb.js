@@ -42,7 +42,7 @@ import Database from "better-sqlite3";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { bootstrapSchema } from "../models/database.js";
+import { bootstrapSchema, applyConnectionPragmas } from "../models/database.js";
 
 /** Everything awaiting teardown. Drained once, at exit. */
 const pending = new Set();
@@ -81,8 +81,9 @@ export function makeTestDb({ prefix = "scoop-test-" } = {}) {
   const dbPath = path.join(dir, "t.db");
   const db = new Database(dbPath);
 
-  db.pragma("journal_mode = WAL");
-  db.pragma("busy_timeout = 5000");
+  // The SAME pragma path as prod. A harness that differs from getDb() on exactly
+  // the point that caused the 2026-08-16 outage cannot reproduce it.
+  applyConnectionPragmas(db);
 
   bootstrapSchema(db);
 

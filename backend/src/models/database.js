@@ -3,9 +3,72 @@ import * as sqliteVec from "sqlite-vec";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
-import { runMigrations } from "../db/migrate.js";
+import { runMigrations, waitForMigrations, migrationsOwner } from "../db/migrate.js";
 import { timedQuery } from "../db/queryTiming.js";
 import { logger } from "../services/logger.js";
+
+/**
+ * How long any connection waits for a lock before giving up. SET FIRST on every
+ * connection — see the block in getDb(). Shared so the three places that open a
+ * connection (getDb, the db:migrate CLI, makeTestDb) cannot drift apart, which
+ * is how one of them ended up with an unprotected journal_mode in the first
+ * place.
+ */
+export const BUSY_TIMEOUT_MS = (() => {
+  const raw = process.env.SQLITE_BUSY_TIMEOUT_MS;
+  if (raw === undefined || raw === "") return 30_000;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 30_000;
+})();
+
+/**
+ * Open-time pragmas, in the one order that survives a concurrent cold start.
+ * Shared by all three connection sites so they cannot drift — the drift is how
+ * one of them ended up with an unprotected journal_mode.
+ *
+ * TWO SEPARATE FIXES HERE, and the second is the one that actually stops the
+ * crash-loop.
+ *
+ * 1. busy_timeout FIRST. It was fifth, so the four pragmas before it ran with
+ *    the timeout at its default of ZERO. Necessary, but not sufficient.
+ *
+ * 2. journal_mode IS SET ONLY IF IT NEEDS TO CHANGE. `PRAGMA journal_mode = WAL`
+ *    needs an EXCLUSIVE lock, and **SQLite does not invoke the busy handler for
+ *    it** — it returns SQLITE_BUSY immediately, so busy_timeout cannot help no
+ *    matter how large. Measured: with busy_timeout already at 30s, two of three
+ *    concurrent starts still died here.
+ *
+ *    The journal mode is PERSISTENT — it lives in the database header, so it
+ *    survives restarts and only ever needs setting once. READING it takes no
+ *    lock. So every process after the very first now takes a lock-free path and
+ *    cannot fail, and only a genuinely first-ever open contends at all. That one
+ *    retries briefly rather than dying, because on a fresh volume all four
+ *    containers race to be first.
+ */
+export function applyConnectionPragmas(db, { busyTimeoutMs = BUSY_TIMEOUT_MS } = {}) {
+  db.pragma(`busy_timeout = ${busyTimeoutMs}`);
+
+  const current = () => String(db.pragma("journal_mode", { simple: true }) || "").toLowerCase();
+  if (current() !== "wal") {
+    // Only reachable on a database that is not yet WAL. Bounded retry: the
+    // window is milliseconds, and a hard failure here means no connection at all.
+    let lastErr = null;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      try { db.pragma("journal_mode = WAL"); lastErr = null; break; }
+      catch (err) {
+        lastErr = err;
+        if (current() === "wal") { lastErr = null; break; }   // someone else won; fine
+        try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50); } catch { /* no SAB */ }
+      }
+    }
+    if (lastErr && current() !== "wal") throw lastErr;
+  }
+
+  db.pragma("synchronous = NORMAL");
+  db.pragma("cache_size = 10000");
+  db.pragma("temp_store = MEMORY");
+  return db;
+}
 import { markVecAvailable, initRealityIndex } from "../realityIndex/schema.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,11 +94,9 @@ export function getDbPath() {
 export function getDb() {
   if (!db) {
     db = new Database(DB_PATH);
-    db.pragma("journal_mode = WAL");
-    db.pragma("synchronous = NORMAL");
-    db.pragma("cache_size = 10000");
-    db.pragma("temp_store = MEMORY");
-    db.pragma("busy_timeout = 5000");
+    // The pragmas that took prod down on 2026-08-16 — see applyConnectionPragmas
+    // for both halves of why, and for the measurement.
+    applyConnectionPragmas(db);
     // Load sqlite-vec on EVERY connection so the vec0 module is available in
     // every process (web, scheduler, worker) — not only whoever calls
     // initRealityIndex(). getDb() is a per-process singleton and the scheduler
@@ -89,9 +150,56 @@ export function getDbStatus() {
 // initRealityIndex stays fail-soft on purpose (see realityIndex/schema.js): the
 // site is live, and a native-extension load failure degrades embedding search
 // instead of downing the site. That degradation surfaces at /api/healthz.
+/**
+ * Add a column if it is not already there. Race-tolerant ON PURPOSE, and that
+ * purpose is now written down.
+ *
+ * THE ASYMMETRY THIS FIXES (DrJ, 2026-08-16). These ad-hoc column adds used to
+ * sit inside `try { ... } catch (err) { logger.warn(...) }` — swallowing every
+ * error. That made the SLOPPY code survive the four-container race (a duplicate
+ * ALTER logged a warning and carried on) while the CAREFUL code — migrations,
+ * which correctly refuse to swallow — crashed the container. Anyone reading both
+ * would have concluded the swallow was the good pattern and copied it.
+ *
+ * It is not. Blanket catch also hid every genuine failure: a typo'd DDL, a
+ * disk-full, a locked database. So the tolerance is now NARROW and explicit:
+ * exactly one error is benign — another process adding the same column between
+ * our check and our ALTER — and everything else is rethrown.
+ *
+ * Note this remains check-then-act, which is fine HERE because the losing side's
+ * outcome (column exists) is the outcome it wanted. Migrations cannot use the
+ * same trick: their loser has already had its DDL applied by someone else and
+ * still owes a schema_migrations row it cannot write, which is why they need a
+ * single owner instead.
+ */
+function addColumnIfMissing(db, table, column, ddl, extraDdl = null) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.length) return false;                        // table absent in this deployment
+  if (cols.some((c) => c.name === column)) return false; // already there
+  try {
+    db.exec(ddl);
+  } catch (err) {
+    // THE ONLY TOLERATED FAILURE. Another process won the race; the column now
+    // exists, which is exactly what this function wanted.
+    if (/duplicate column name/i.test(String(err?.message))) return false;
+    throw err;
+  }
+  if (extraDdl) db.exec(extraDdl);
+  logger.info(`Migrated ${table} table: +${column}`);
+  return true;
+}
+
 export function bootstrapSchema(db) {
   initializeSchema(db);
   initRealityIndex(db);
+  // ONE OWNER APPLIES; THE OTHERS WAIT. Four processes racing runMigrations is
+  // what took prod down on 2026-08-16 — see migrationsOwner() for why a lock
+  // timeout cannot fix it. The base schema above is still run by everyone: it is
+  // CREATE ... IF NOT EXISTS throughout and the column adds are explicitly
+  // race-tolerant (see addColumnIfMissing).
+  if (!migrationsOwner()) {
+    return waitForMigrations(db);
+  }
   return runMigrations(db);
 }
 
@@ -511,64 +619,25 @@ export function initializeSchema(db) {
     );
   `);
 
-  // Lightweight migration: add `language` column on existing deployments.
-  try {
-    const cols = db.prepare("PRAGMA table_info(articles)").all();
-    if (!cols.some((c) => c.name === "language")) {
-      db.exec("ALTER TABLE articles ADD COLUMN language TEXT DEFAULT 'en'");
-      logger.info("Migrated articles table: +language");
-    }
-    // Migration: add is_duplicate for same-story cross-source dedup.
-    if (!cols.some((c) => c.name === "is_duplicate")) {
-      db.exec("ALTER TABLE articles ADD COLUMN is_duplicate INTEGER DEFAULT 0");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_articles_dup ON articles(is_duplicate, published_at DESC)");
-      logger.info("Migrated articles table: +is_duplicate");
-    }
-    // Migration: AI-generated Instagram caption summary.
-    if (!cols.some((c) => c.name === "ig_summary")) {
-      db.exec("ALTER TABLE articles ADD COLUMN ig_summary TEXT");
-      logger.info("Migrated articles table: +ig_summary");
-    }
-  } catch (err) {
-    logger.warn("Migration check failed", { error: err.message });
+  // Lightweight migrations: columns added to existing deployments in place.
+  addColumnIfMissing(db, "articles", "language", "ALTER TABLE articles ADD COLUMN language TEXT DEFAULT 'en'");
+  addColumnIfMissing(db, "articles", "is_duplicate", "ALTER TABLE articles ADD COLUMN is_duplicate INTEGER DEFAULT 0",
+    "CREATE INDEX IF NOT EXISTS idx_articles_dup ON articles(is_duplicate, published_at DESC)");
+  addColumnIfMissing(db, "articles", "ig_summary", "ALTER TABLE articles ADD COLUMN ig_summary TEXT");
+  {
   }
 
-  // Migration: add `tier` column to users (free | premium) for paywall gating.
-  try {
-    const cols = db.prepare("PRAGMA table_info(users)").all();
-    if (cols.length && !cols.some((c) => c.name === "tier")) {
-      db.exec("ALTER TABLE users ADD COLUMN tier TEXT NOT NULL DEFAULT 'free'");
-      logger.info("Migrated users table: +tier");
-    }
-    if (cols.length && !cols.some((c) => c.name === "stripe_customer_id")) {
-      db.exec("ALTER TABLE users ADD COLUMN stripe_customer_id TEXT");
-      logger.info("Migrated users table: +stripe_customer_id");
-    }
-  } catch (err) {
-    logger.warn("Migration check (users.tier) failed", { error: err.message });
-  }
+  // Paywall gating. `users` may not exist in every deployment — addColumnIfMissing
+  // skips a table that is not there rather than needing a `cols.length &&` guard
+  // at each call site.
+  addColumnIfMissing(db, "users", "tier", "ALTER TABLE users ADD COLUMN tier TEXT NOT NULL DEFAULT 'free'");
+  addColumnIfMissing(db, "users", "stripe_customer_id", "ALTER TABLE users ADD COLUMN stripe_customer_id TEXT");
 
-  // Migration: add referred_by_token + referral_count to subscribers.
-  try {
-    const cols = db.prepare("PRAGMA table_info(subscribers)").all();
-    const names = new Set(cols.map((c) => c.name));
-    if (!names.has("referred_by_token")) {
-      db.exec("ALTER TABLE subscribers ADD COLUMN referred_by_token TEXT");
-      logger.info("Migrated subscribers table: +referred_by_token");
-    }
-    // Welcome-sequence tracking — added in Phase 4 to support day-1 + day-3
-    // touchpoint emails after the day-0 confirmation.
-    if (!names.has("welcome_d1_sent_at")) {
-      db.exec("ALTER TABLE subscribers ADD COLUMN welcome_d1_sent_at INTEGER");
-      logger.info("Migrated subscribers table: +welcome_d1_sent_at");
-    }
-    if (!names.has("welcome_d3_sent_at")) {
-      db.exec("ALTER TABLE subscribers ADD COLUMN welcome_d3_sent_at INTEGER");
-      logger.info("Migrated subscribers table: +welcome_d3_sent_at");
-    }
-  } catch (err) {
-    logger.warn("Migration check (subscribers) failed", { error: err.message });
-  }
+  // Referrals, and the Phase 4 welcome sequence (day-1 + day-3 touchpoints
+  // after the day-0 confirmation).
+  addColumnIfMissing(db, "subscribers", "referred_by_token", "ALTER TABLE subscribers ADD COLUMN referred_by_token TEXT");
+  addColumnIfMissing(db, "subscribers", "welcome_d1_sent_at", "ALTER TABLE subscribers ADD COLUMN welcome_d1_sent_at INTEGER");
+  addColumnIfMissing(db, "subscribers", "welcome_d3_sent_at", "ALTER TABLE subscribers ADD COLUMN welcome_d3_sent_at INTEGER");
 
   // FTS5 full-text search virtual table + sync triggers
   try {
