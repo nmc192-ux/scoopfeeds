@@ -125,22 +125,92 @@ async function call(pathPart, { method = "GET", params = {}, body } = {}) {
   return json;
 }
 
+/**
+ * TWO SURFACES, TWO BUDGETS — deliberately not one default with a call-site
+ * override (DrJ, 2026-08-16).
+ *
+ * The video path used to call waitForFinished() with no arguments, so it ran on
+ * the IMAGE path's stopwatch: 8 x 1500ms = 12000ms, sized by the comment "most
+ * posts go FINISHED within 1-2 seconds" — true of a container fetching a JPEG,
+ * false of one fetching AND TRANSCODING an MP4. Every Threads video failed
+ * "container not ready after 12000ms".
+ *
+ * Passing `maxAttempts` at the video call site would fix today and leave the
+ * trap: one stopwatch still serving two surfaces with different physics, and the
+ * next person tuning images would move video without knowing. This codebase has
+ * had that exact shape before — MAX_ATTEMPTS sized both the spec budget and the
+ * candidate pool, so widening the editorial sample silently widened the spend.
+ * The fix there was to split the budgets and name them, and it is the fix here.
+ *
+ * THE VIDEO CEILING IS A GUESS, AND THE LOG IS HOW IT STOPS BEING ONE. Nobody
+ * has measured what Meta actually takes, because the poll never once succeeded.
+ * 120s is deliberately generous; waitForFinished logs the elapsed time on
+ * success, so the next few videos report the real distribution and the number
+ * can be narrowed from data rather than from another guess.
+ *
+ * The image budget is UNCHANGED at 8 x 1500. That is the point of splitting.
+ */
+const intEnv = (name, fallback, min) => {
+  const raw = process.env[name];
+  // No `parseInt(x) || fallback` — that reads a deliberate 0 as absent.
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < min) {
+    logger.warn(`🧵 ${name}="${raw}" is not an integer >= ${min} — using ${fallback}`);
+    return fallback;
+  }
+  return n;
+};
+
+export const THREADS_IMAGE_POLL = () => ({
+  label: "image",
+  maxAttempts: intEnv("THREADS_IMAGE_POLL_ATTEMPTS", 8, 1),
+  gapMs: intEnv("THREADS_IMAGE_POLL_GAP_MS", 1500, 0),
+  attemptsVar: "THREADS_IMAGE_POLL_ATTEMPTS",
+});
+
+export const THREADS_VIDEO_POLL = () => ({
+  label: "video",
+  maxAttempts: intEnv("THREADS_VIDEO_POLL_ATTEMPTS", 24, 1),
+  // A slower cadence as well as a longer ceiling: 24 x 5s reaches 120s in 24
+  // calls, where the image gap would need 80 to cover the same window.
+  gapMs: intEnv("THREADS_VIDEO_POLL_GAP_MS", 5000, 0),
+  attemptsVar: "THREADS_VIDEO_POLL_ATTEMPTS",
+});
+
 // Two-step publish: create container → poll status (FINISHED) → publish.
-// Most posts go FINISHED within 1-2 seconds. We cap polling at ~10s to
-// avoid hanging the cron tail step.
-async function waitForFinished(creationId, { maxAttempts = 8, gapMs = 1500 } = {}) {
+// The budget is passed in by the caller — there is no default, so a new surface
+// has to state which physics it has rather than inheriting another's.
+async function waitForFinished(creationId, budget) {
+  const { maxAttempts, gapMs, label, attemptsVar } = budget;
+  const t0 = Date.now();
   for (let i = 0; i < maxAttempts; i++) {
     const out = await call(`/${creationId}`, { params: { fields: "status,error_message" } });
     // Threads API returns `status`; some older docs called it `status_code` — handle both.
     const s = out.status || out.status_code;
-    if (s === "FINISHED") return true;
+    if (s === "FINISHED") {
+      // THE MEASUREMENT. The ceiling above was chosen with no data because the
+      // video poll had never succeeded; this line is what replaces the guess.
+      logger.info(
+        `🧵 threads ${label} container ${creationId} FINISHED after ${Date.now() - t0}ms ` +
+        `(attempt ${i + 1}/${maxAttempts}, ceiling ${maxAttempts * gapMs}ms)`
+      );
+      return true;
+    }
     if (s === "ERROR" || s === "EXPIRED") {
       const detail = out.error_message ? ` (${out.error_message})` : "";
       throw new Error(`threads container ${creationId} → ${s}${detail}`);
     }
     await new Promise((r) => setTimeout(r, gapMs));
   }
-  throw new Error(`threads container ${creationId} not ready after ${maxAttempts * gapMs}ms`);
+  // Name the budget AND the var that raises it: a timeout that does not say
+  // which stopwatch ran is the operational form of a check the prompt never
+  // names — the reader cannot act on it without going to the source.
+  throw new Error(
+    `threads ${label} container ${creationId} not ready after ${maxAttempts * gapMs}ms ` +
+    `(${maxAttempts} attempts x ${gapMs}ms — raise ${attemptsVar}). ` +
+    `The container may still finish server-side; this gave up waiting.`
+  );
 }
 
 // Public: post text + (optional) external image URL. Returns { id, url }.
@@ -191,8 +261,10 @@ export async function postVideoToThreads({ text, videoUrl }) {
   }
 
   // Poll first — cheap, and it surfaces a fetch failure with a real reason
-  // rather than as a bare publish error half a minute later.
-  await waitForFinished(create.id);
+  // rather than as a bare publish error half a minute later. THE VIDEO BUDGET,
+  // stated explicitly: this call site used to take the image default and that is
+  // what made every Threads video fail at 12s.
+  await waitForFinished(create.id, THREADS_VIDEO_POLL());
 
   // THEN the mandatory wait, on top of the poll. See THREADS_VIDEO_WAIT_MS.
   const waitMs = THREADS_VIDEO_WAIT_MS();
@@ -222,7 +294,9 @@ export async function postToThreads({ text, imageUrl }) {
   const create = await call(`/${t.userId}/threads`, { method: "POST", params });
   if (!create?.id) throw new Error(`threads container creation returned no id: ${JSON.stringify(create).slice(0, 200)}`);
 
-  await waitForFinished(create.id);
+  // The image budget, unchanged at 8 x 1500ms. Splitting the two is what stops
+  // a future video tune from moving this one.
+  await waitForFinished(create.id, THREADS_IMAGE_POLL());
 
   const publish = await call(`/${t.userId}/threads_publish`, { method: "POST", params: { creation_id: create.id } });
   if (!publish?.id) throw new Error(`threads publish returned no id: ${JSON.stringify(publish).slice(0, 200)}`);
