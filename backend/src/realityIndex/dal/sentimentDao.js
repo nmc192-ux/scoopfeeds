@@ -12,10 +12,25 @@
  */
 
 import { getDb } from "../../models/database.js";
+import { shouldWrite, noteDecision, writeOnChangeEnabled } from "./writeOnChange.js";
 
 export function upsertSentimentSnapshot({
   scope, scope_id, ts, source, polarity, intensity, volume = 0, raw_meta = null,
 }) {
+  // WRITE-ON-CHANGE. Measured 100.0% of consecutive pairs identical here —
+  // INCLUDING `volume`, which was the one field that might plausibly move every
+  // run. It is tracked rather than assumed: a mention count going 4 → 5 is a
+  // real change and must produce a row.
+  if (writeOnChangeEnabled()) {
+    const prev = getDb().prepare(
+      `SELECT ts, polarity, intensity, volume FROM sentiment_snapshots
+       WHERE scope = ? AND scope_id = ? AND source = ? ORDER BY ts DESC LIMIT 1`
+    ).get(scope, scope_id, source);
+    const d = shouldWrite(prev, { polarity, intensity, volume }, ts);
+    noteDecision("sentiment_snapshots", d.reason);
+    if (!d.write) return { changes: 0, suppressed: true };
+  }
+
   return getDb().prepare(`
     INSERT INTO sentiment_snapshots
       (scope, scope_id, ts, source, polarity, intensity, volume, raw_meta)

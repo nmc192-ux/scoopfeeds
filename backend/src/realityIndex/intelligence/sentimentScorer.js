@@ -19,6 +19,7 @@ import { getDb } from "../../models/database.js";
 import { logger } from "../../services/logger.js";
 import { aggregateScores } from "./simpleSentiment.js";
 import { upsertSentimentSnapshot } from "../dal/sentimentDao.js";
+import { formatSnapshotWriteStats } from "../dal/writeOnChange.js";
 import { buildQuery } from "../ingest/social/baseSocialFetcher.js";
 
 import * as bluesky  from "../ingest/social/blueskyFetcher.js";
@@ -144,5 +145,7 @@ export async function runSentimentCycle({ limit = EVENTS_PER_CYCLE } = {}) {
     if (out?.sources?.length) scored++;
   }
   logger.info(`💬 sentiment cycle: ${scored}/${events.length} events scored across enabled social sources`);
+  // Rows STORED vs suppressed — `scored` counts events processed, not rows written.
+  for (const line of formatSnapshotWriteStats()) logger.info(line);
   return { scored, attempted: events.length };
 }
