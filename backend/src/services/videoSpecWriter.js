@@ -659,7 +659,15 @@ ${multiSource ? `   THE ONE EXCEPTION: if a figure comes from a DIFFERENT outlet
 
     THIS APPLIES TO ON-SCREEN TYPE TOO, and the display lines are where it matters most. Two words in the largest type on the card carry more framing per word than a whole caption does, and they have no sentence around them to qualify anything. Every string a viewer reads or hears is checked, not just the spoken one.
 
-    The same goes for INTENSIFIERS AND ABSOLUTES. If the article does not say something is indefinite, unprecedented, sweeping, devastating, massive, staggering or shocking, then neither do you — those words are checked against the source and a spec that adds one is rejected. Use the article's own word or use none.
+    The same goes for INTENSIFIERS AND ABSOLUTES. If the article does not say something is unprecedented, devastating or massive, then neither do you — every word listed below is checked against the source, and a spec that adds one the source never used is rejected. Use the article's own word or use none.
+
+    THE CHECKED WORDS, IN FULL. Reaching one word to the left of a rejected word lands on another entry in this same list, so read it as a whole rather than swapping the one you were pulled up on:
+      scale      massive, enormous, staggering, unprecedented, historic, sweeping, unparalleled
+      duration   indefinite, permanent, forever, endless
+      harm       devastating, catastrophic, crippling, damning, shocking
+      movement   soar, plummet — a figure "rose" or "fell" unless the source itself reaches higher
+      totality   utterly, completely, entirely, totally
+    Any form of these counts, because the check is on the stem: "indefinitely" for indefinite, "soaring" for soar, "catastrophic" for catastrophe. The source using the word licenses you to use it; nothing else does.
 
     THE COMMONEST WAY THAT HAPPENS, so watch for it specifically: A LARGE FIGURE NEEDS NO ADJECTIVE. The pull toward an intensifier is strongest exactly where it is least needed — next to a big number — because the number already carries the weight and the adjective feels like it is helping.
 
@@ -725,7 +733,14 @@ RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. 
       "So a single break takes about thirty days to mend — thirty days of a region running on what is left."
       "That timeline rests on sixty ageing ships for the whole planet."
 
-16. THE KICKER NEVER WRAPS UP. HARD RULE — the spec is REJECTED if broken. Do not summarise, do not restate what was already said, do not use the register of a conclusion. Never write: "in conclusion", "in summary", "to sum up", "overall", "ultimately", "at the end of the day", "the takeaway", "there you have it", "as we have seen", "the bottom line", "to recap". End on the FORWARD implication or an OPEN QUESTION — what happens next, what is still unknown, what this makes possible or inevitable.
+16. THE KICKER NEVER WRAPS UP. HARD RULE — the spec is REJECTED if broken. Do not summarise, do not restate what was already said, do not use the register of a conclusion. End on the FORWARD implication — what happens next, what is still unknown, what this makes possible or inevitable. NOT on a question: see 10b, the closer is the one card where a question is forbidden, because nothing follows it to answer one.
+
+    THE CHECKED PHRASES, IN FULL. The closer is rejected if it contains any of them, in any position:
+      closing register   "in conclusion", "to conclude", "in summary", "to summarise", "to summarize", "summing up", "to sum up", "in short", "all in all", "overall", "in essence", "essentially then"
+      final-verdict      "in the end", "at the end of the day", "ultimately", "the bottom line", "the takeaway", "key takeaway", "to recap", "recapping"
+      backward-looking   "as we have seen", "as we saw", "as mentioned", "as discussed"
+      sign-off           "that is the story", "that's the story", "there you have it", "so there you have it"
+    These are the REGISTER of a conclusion, and the register is the defect — a closer that avoids all of them and still merely restates the story is caught by 16b instead.
     WRONG: "Ultimately, the takeaway is that infrastructure is fragile."
     RIGHT: "Nobody has said who will pay to bury the next one."
 
@@ -824,10 +839,26 @@ function isThinnessError(e) {
 }
 
 /**
- * Strip slide counts out of anything the model will read. The retry prompt is
- * still a prompt: a note saying "only 4 slides remain (< 6)" hands the model
- * the exact anchor rule 7 exists to withhold, and it would pad to that number
- * on the second attempt just as it starved to it on the first.
+ * Strip slide counts out of anything the model will read — with ONE deliberate
+ * exception, below.
+ *
+ * The retry prompt is still a prompt: a note saying "only 4 slides remain (< 6)"
+ * hands the model the exact anchor rule 7 exists to withhold, and it would pad
+ * to that number on the second attempt just as it starved to it on the first.
+ *
+ * THE CEILING IS THE EXCEPTION (DrJ, 2026-08-16). A FLOOR is target-shaped —
+ * told "you need 6", the model emits exactly 6 and the spec goes flat, which is
+ * the whole reason MAX_SLIDES and MIN_SLIDES are absent from the prompt. A
+ * CEILING is not: told "34 is the ceiling" after emitting 41, there is nothing
+ * to pad toward, because a real story sits far below it and the same note says
+ * so. What the old vague phrasing produced instead was a rejection the model
+ * could not act on — it was told it had emitted "far more cards than the source
+ * establishes" and given no bound, which is the prompt-silence failure in its
+ * retry form.
+ *
+ * So the bound is stated HERE and nowhere else: in a correction to a spec that
+ * has already blown past it, rather than in the prompt as a number to fill.
+ * `videoPromptCoverage.test.js` asserts it stays out of the prompt.
  *
  * Card-level reasons ("3 consecutive stat cards") are left intact — those are
  * adjacency and type facts, not a length instruction.
@@ -835,7 +866,13 @@ function isThinnessError(e) {
 function stripCounts(error) {
   return String(error)
     .replace(/only \d+ slides remain[^—]*—?\s*/i, "")
-    .replace(/too many slides: \d+ > \d+/i, "you emitted far more cards than the source establishes — enumerate the beats again and emit one card per beat")
+    .replace(
+      /too many slides: (\d+) > (\d+)/i,
+      (_m, got, max) =>
+        `you emitted ${got} cards and the hard ceiling is ${max} — but the ceiling is a runaway ` +
+        `backstop, not a target: a real story establishes nowhere near that many beats. ` +
+        `Enumerate the beats again and emit one card per beat`
+    )
     .replace(/\((\d+)\/(\d+)\)/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();

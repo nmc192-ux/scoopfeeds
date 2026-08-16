@@ -381,7 +381,14 @@ export function displayStrings(card) {
 //
 // Matched by STEM, so "indefinite" in the source licenses "indefinitely" in the
 // script — this checks that the idea came from the article, not morphology.
-const INTENSIFIER_STEMS = Object.freeze([
+//
+// EXPORTED FOR THE PROMPT-COVERAGE GUARD, and for nothing else in production.
+// Every stem here must be named in the prompt: a word this list rejects and the
+// prompt never mentions is a rejection loop the model cannot escape, because it
+// has no way to learn the rule from the outside. It reaches for a neighbouring
+// word and is rejected again. `videoPromptCoverage.test.js` fails when a stem is
+// added without prompt text, which is the only thing that keeps the two in step.
+export const INTENSIFIER_STEMS = Object.freeze([
   "indefinit", "forever", "permanent", "unprecedent", "historic", "massiv",
   "enormous", "catastroph", "devastat", "crippl", "soar", "plummet",
   "sweeping", "endless", "unparallel", "staggering", "shocking", "damning",
