@@ -800,7 +800,12 @@ function contentHash(article, preset) {
   return h.digest("hex").slice(0, 10);
 }
 
-function cachePath(articleId, preset, hash) {
+// EXPORTED FOR cardSweep's TESTS. The sweep parses the names this produces, and
+// the first version of that parser was written against this function's
+// SIGNATURE rather than what its callers pass — 12,029 of 14,156 real files
+// were unrecognised as a result. The fixture now comes from here so the two can
+// never drift again silently.
+export function cachePath(articleId, preset, hash) {
   const safeId = String(articleId).replace(/[^a-z0-9_-]/gi, "_").slice(0, 120);
   return path.join(CARDS_DIR, `${safeId}-${preset}-${hash}.png`);
 }
