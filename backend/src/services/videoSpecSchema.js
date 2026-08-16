@@ -223,6 +223,39 @@ export const HOOK_RESTATES_ERROR = "hook_restates_headline";
 //   ALLOWED  "The protection has blocked three attempts to serve papers."
 //
 // The last is what the source actually said, and it is the stronger sentence.
+// THE BARE INFINITIVE OF PURPOSE, BY CLASS.
+//
+// "Trump has already scaled back his claims TO PROTECT his own business empire"
+// (DrJ, 2026-08-16) turns a sequence into a purpose — the source says he
+// narrowed them AFTER the BBC subpoenaed financial documents. The gate did not
+// fire, and the reason was not the exemption: `protect` was simply not here.
+//
+// Every verb this list held was an EVASION verb, because the list was written
+// from a live failure about evading service. That is the same mistake as the
+// intensifier list, in the same week: a register was named by way of the one
+// word that had happened to appear. The model is not reaching for "avoid", it
+// is reaching for a purpose clause, and the purposes ascribed to people in news
+// copy come in three recognisable flavours. So the CLASSES are named — here and
+// in rule 10c, which `videoPromptCoverage.test.js` now checks.
+//
+// Adding the two new classes widens what the gate catches, and therefore what it
+// can catch wrongly ("the law was written TO PROTECT tenants" is a statute's
+// purpose, not a person's hidden one). For now that is cushioned by
+// motiveIsReported: a purpose the source states is exempt, and a statute's
+// purpose is invariably stated. Anyone closing LEAK 3 must re-check this — the
+// cushion goes away with it.
+export const PURPOSE_EVASION = Object.freeze(
+  ["avoid", "evade", "dodge", "escape", "sidestep", "stall", "frustrate"]);
+export const PURPOSE_PROTECTIVE = Object.freeze(
+  ["protect", "shield", "safeguard", "preserve", "defend", "insulate", "secure"]);
+export const PURPOSE_COERCIVE = Object.freeze(
+  ["force", "pressure", "punish", "discredit", "silence"]);
+export const PURPOSE_VERBS = Object.freeze(
+  [...PURPOSE_EVASION, ...PURPOSE_PROTECTIVE, ...PURPOSE_COERCIVE]);
+
+/** A photo `subject` offering alternatives instead of naming one thing. */
+export const SUBJECT_HEDGE = /\s+or\s+|\s*\/\s*|\beither\b/i;
+
 const MOTIVE_MARKERS = new RegExp([
   /\bin order to\b/, /\bso as to\b/, /\bin an effort to\b/, /\bin a bid to\b/,
   /\bas a way to\b/, /\bas a means to\b/, /\bdeliberately\b/, /\bintentionally\b/,
@@ -230,7 +263,8 @@ const MOTIVE_MARKERS = new RegExp([
   /\bhoping to\b/, /\bintends? to\b/, /\bintended to\b/, /\bdesigned to\b/,
   /\bmeant to\b/, /\brefus(?:e|es|ing) to\b/, /\bwants? to\b/,
   // The shape the live failure took: an instrument put to a purpose.
-  /\bus(?:e|es|ing) [^.]{0,60}? to \w+/, /\bto (?:avoid|evade|dodge|escape|sidestep|stall|frustrate)\b/,
+  /\bus(?:e|es|ing) [^.]{0,60}? to \w+/,
+  new RegExp(`\\bto (?:${PURPOSE_VERBS.join("|")})\\b`),
   /\bto keep [^.]{0,40}? at bay\b/,
 ].map(r => r.source).join("|"), "i");
 
@@ -710,6 +744,18 @@ function validateCardShape(card, idx) {
           // Mombasa". A sentence here means the model is describing the beat
           // again rather than naming a thing that can be looked for.
           e.push(`${at} (photo): "subject" is a noun phrase, not a sentence — got ${card.subject.trim().split(/\s+/).length} words`);
+        } else if (isStr(card.subject) && SUBJECT_HEDGE.test(card.subject)) {
+          // A HEDGE MEANS THE MODEL DID NOT CHOOSE (DrJ, 2026-08-16). "Donald
+          // Trump Jr. or Trump Tower" is six words and passed the length check,
+          // but the field declares ONE thing to photograph — a disjunction hands
+          // the renderer an ambiguous instruction and there is no rule by which
+          // it could pick. The word count could never catch this, because the
+          // defect is the shape rather than the length.
+          //
+          // " or " and a bare slash only. NOT " and ", which is ordinary inside
+          // real names — "Health and Human Services", "Marks and Spencer" — and
+          // would reject correct subjects far more often than it caught hedges.
+          e.push(`${at} (photo): "subject" hedges between alternatives ("${card.subject.trim()}") — name ONE thing to photograph`);
         }
       }
       // Code-injected on `title` only (the absorbed attribution card). Shape is

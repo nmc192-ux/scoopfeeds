@@ -439,6 +439,10 @@ ${hasPhoto ? `"photo"   — a NAMED PERSON or a specific place: the article's ow
             naming what the photograph should SHOW — "Aung San Suu Kyi", "the Port of Mombasa".
             Not a sentence, not the beat restated. The picture is the publisher's own and nobody
             downstream can see it, so this is the only statement of what it is expected to be.
+            NAME ONE THING. "Donald Trump Jr. or Trump Tower" is rejected — a hedge is not a
+            subject, and nothing downstream can break the tie. If a beat could take either, pick
+            the one the beat is actually about: a place when the beat is about a place, a person
+            when it turns on what that person did.
             If you cannot say in a few words what the image ought to show, this story does not
             want a photo card — use a map, a data card, or type.
             You do NOT supply an image, a URL, a crop or a treatment. The photograph is the
@@ -656,6 +660,14 @@ ${multiSource ? `   THE ONE EXCEPTION: if a figure comes from a DIFFERENT outlet
     ALLOWED:  The protection has blocked three attempts to serve papers.
 
     The third is what the source said and it is the stronger sentence.
+
+    THE PURPOSE CLAUSE IS THE COMMONEST FORM THIS TAKES, and "to" plus a verb is all it needs to be — no "in order to" required. A sequence the source reports becomes a purpose it never stated: "he narrowed his claims AFTER the subpoenas" is what happened; "he narrowed his claims TO PROTECT his business" is why, and only he knows that.
+
+    THE CHECKED PURPOSES, IN FULL. Three classes, because you will be reaching for the register rather than for any one of these words:
+      evasion      to avoid, evade, dodge, escape, sidestep, stall, frustrate
+      protective   to protect, shield, safeguard, preserve, defend, insulate, secure
+      coercive     to force, pressure, punish, discredit, silence
+    None of them is forbidden — each is fine the moment you say WHOSE purpose it is ("the plaintiffs say he narrowed the claims to protect the business"), or when the source states the purpose itself. What is refused is the pipeline deciding why on its own authority.
 
     THIS APPLIES TO ON-SCREEN TYPE TOO, and the display lines are where it matters most. Two words in the largest type on the card carry more framing per word than a whole caption does, and they have no sentence around them to qualify anything. Every string a viewer reads or hears is checked, not just the spoken one.
 

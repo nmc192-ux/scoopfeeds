@@ -28,7 +28,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildSpecPrompt } from "./videoSpecWriter.js";
-import { INTENSIFIER_STEMS, KICKER_BANNED_PHRASES, MAX_SLIDES } from "./videoSpecSchema.js";
+import {
+  INTENSIFIER_STEMS, KICKER_BANNED_PHRASES, MAX_SLIDES, PURPOSE_VERBS,
+} from "./videoSpecSchema.js";
 
 // ── The prompt, in every shape it is emitted in ────────────────────────────
 //
@@ -157,6 +159,26 @@ test("every banned kicker phrase is named in the prompt, or covered by one that 
       `[${v.label}] ${missing.length} kicker phrase(s) are rejected by rule 16 but ` +
       `never named in the prompt: ${missing.map(p => `"${p}"`).join(", ")}.\n` +
       `Name them in rule 16, or remove them from KICKER_BANNED_PHRASES.`
+    );
+  }
+});
+
+// ── The third list, added the same week for the same reason ────────────────
+//
+// MOTIVE_MARKERS' bare-infinitive branch held only EVASION verbs, because it was
+// written from a live failure about evading service. "to protect" then walked
+// straight through it. That is the intensifier failure again: a register named
+// by way of the one word that had happened to appear. Both lists are now named
+// by CLASS, and both are guarded here.
+test("every purpose verb the motive gate rejects is named in the prompt", () => {
+  for (const v of VARIANTS) {
+    const scope = blockOrFail(v, "THE CHECKED PURPOSES, IN FULL");
+    const missing = PURPOSE_VERBS.filter(w => !new RegExp(`\\b${w}\\b`, "i").test(scope));
+    assert.deepEqual(
+      missing, [],
+      `[${v.label}] ${missing.length} purpose verb(s) are rejected by the motive gate but ` +
+      `never named in the prompt: ${missing.join(", ")}.\n` +
+      `Name them in rule 10c's class list, or remove them from PURPOSE_VERBS.`
     );
   }
 });

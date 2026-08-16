@@ -1254,6 +1254,40 @@ test("a photo card cannot smuggle in its own image", () => {
   assert.equal(photo.mount, undefined, "the mount is art direction, not content");
 });
 
+// A HEDGED SUBJECT MEANS THE MODEL DID NOT CHOOSE (DrJ, 2026-08-16). The field
+// declares ONE thing to photograph; "Donald Trump Jr. or Trump Tower" is six
+// words, cleared the length check, and hands the renderer an instruction it
+// cannot act on — there is no rule by which it could break the tie.
+// It DROPS the card rather than failing the spec, which is the proportionate
+// call: an ambiguous subject costs one photo card, and the other five are fine.
+// Contrast the motive gate, which is an error precisely because dropping the
+// card would ship the rest of a spec that had already editorialised.
+test("a hedged photo subject is dropped", () => {
+  for (const s of [
+    "Donald Trump Jr. or Trump Tower",
+    "the Port of Mombasa or the container yard",
+    "Aung San Suu Kyi / the courthouse",
+    "either the chancellor or the budget document",
+  ]) {
+    const d = droppedFor({ t: "photo", lines: [["A", "white"]], subject: s, caption: "z".repeat(80) });
+    assert.ok(d.some(x => /hedges between alternatives/.test(x.reason)), `hedge not caught: ${s}`);
+  }
+});
+
+test("a subject with 'and' inside a real name is NOT a hedge", () => {
+  // " and " is ordinary inside proper nouns, so it is deliberately not matched:
+  // rejecting it would kill correct subjects far more often than it caught hedges.
+  for (const s of [
+    "the Department of Health and Human Services",
+    "Marks and Spencer",
+    "Aung San Suu Kyi",
+    "the Port of Mombasa",
+  ]) {
+    const d = droppedFor({ t: "photo", lines: [["A", "white"]], subject: s, caption: "z".repeat(80) });
+    assert.ok(!d.some(x => /hedges between alternatives/.test(x.reason)), `false positive on: ${s}`);
+  }
+});
+
 test("THE MAP ANNOTATES THE EXCEPTION, not just the set", () => {
   // DrJ, 2026-08-15: "Eswatini was 2px wide and it was the whole story."
   const svg = buildLocatorMap({ codes: ["DZA", "EGY", "ZAF", "SWZ"], exception: "SWZ" });
@@ -1318,6 +1352,76 @@ test("ordinary reporting is untouched", () => {
     "She has been out of sight four years. Now state media says she is under house arrest.",
     "Seventy percent of recorded faults come down to a ship dragging its anchor.",
   ]) assert.equal(unattributedMotive(c, NO_MOTIVE_SOURCE), null, `false positive on: ${c}`);
+});
+
+// ─── LEAK 1: the purpose classes (DrJ, 2026-08-16) ──────────────────────────
+//
+// "Trump has already scaled back his claims TO PROTECT his own business empire
+// from BBC subpoenas" passed a clean spec. The source says he narrowed them
+// AFTER the BBC used them to subpoena documents — a sequence, turned into his
+// purpose. The gate never fired: every bare-infinitive verb it knew was an
+// EVASION verb, because the list was written from a live failure about evading
+// service. Naming the register rather than the one word that appeared is the
+// same lesson the intensifier list taught in the same week.
+
+test("LEAK 1: protective and coercive purposes are motives too", () => {
+  for (const c of [
+    "Trump scaled back the lawsuit to protect his business empire.",
+    "The company narrowed the disclosure to shield its executives.",
+    "The ministry redacted the report to safeguard its position.",
+    "The agency delayed the review to preserve its funding.",
+    "The board rewrote the terms to defend the chairman.",
+    "The trust restructured the holding to insulate the family.",
+    "The bank moved the assets to secure its own position.",
+    "The department leaked the memo to force a resignation.",
+    "The committee subpoenaed the records to pressure the witness.",
+    "The regulator published the fine to punish the operator.",
+    "The campaign released the tape to discredit the mayor.",
+    "The publisher settled the case to silence the reporter.",
+  ]) assert.ok(unattributedMotive(c, NO_MOTIVE_SOURCE), `missed a purpose clause: ${c}`);
+});
+
+test("LEAK 1: the evasion class it already had still fires", () => {
+  for (const v of ["avoid", "evade", "dodge", "escape", "sidestep", "stall", "frustrate"]) {
+    assert.ok(unattributedMotive(`The firm restructured the deal to ${v} the inquiry.`, NO_MOTIVE_SOURCE),
+      `evasion verb regressed: ${v}`);
+  }
+});
+
+test("LEAK 1: attribution is still the escape, on the new classes too", () => {
+  // Widening what the gate catches must not narrow the way out of it. The rule
+  // costs a rewrite, never the idea — that has to hold for all three classes.
+  assert.equal(unattributedMotive(
+    "The plaintiffs say he scaled back the lawsuit to protect his business empire.", NO_MOTIVE_SOURCE), null);
+  assert.equal(unattributedMotive(
+    "According to the filing, the memo was leaked to force a resignation.", NO_MOTIVE_SOURCE), null);
+});
+
+// KNOWN OPEN — LEAK 2, held by DrJ's ruling to close the leaks one at a time and
+// watch what each does. Recorded as a passing test rather than a comment so that
+// closing LEAK 2 FAILS HERE and forces this file to be updated, instead of
+// leaving a stale note nobody reads.
+//
+// ATTRIBUTION_MARKERS is caption-scoped and matches `claims?` and `filing` as
+// bare words. Both are ordinary legal NOUNS, so on litigation stories — the
+// exact stories this gate exists for — a reporting word in one clause excuses a
+// motive in another. The ruling when we get there: clause-scoped attribution,
+// and "claims that" counts where a bare "claims" does not.
+test("LEAK 2 is still open: a legal noun switches the gate off", () => {
+  const caught  = "Trump narrowed the scope to avoid BBC subpoenas.";
+  const escapes = "Trump narrowed his claims to avoid BBC subpoenas.";
+  assert.ok(unattributedMotive(caught, NO_MOTIVE_SOURCE), "the control must still fire");
+  assert.equal(unattributedMotive(escapes, NO_MOTIVE_SOURCE), null,
+    "LEAK 2 CLOSED? Good — now delete this test and add the real one: a bare " +
+    "'claims'/'filing' noun must no longer exempt, while 'claims that' still does.");
+});
+
+test("LEAK 1: a purpose the SOURCE states is still exempt", () => {
+  // The cushion that makes the two new classes safe to add tonight: a statute's
+  // or an agency's stated purpose is reported, not ascribed. This is the
+  // exemption LEAK 3 will have to preserve.
+  const src = "The law was written to protect tenants from eviction, the department said.";
+  assert.equal(unattributedMotive("The law was written to protect tenants.", src), null);
 });
 
 test("it does NOT require a name in the caption — the live case had none", () => {
