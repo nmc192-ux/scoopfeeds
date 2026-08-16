@@ -466,6 +466,33 @@ names — is §4 above, because it is a design rule and not just a habit.
 show logs since boot. Time-based log windows silently return less than asked for after any
 env change. Check uptime before trusting a `--since` window.
 
+**…and that was the small half of it. It is a RETENTION problem, not a reading problem**
+(2026-08-16). We wrote the lesson above as a log-*reading* gotcha — be careful what `--since`
+returns — and filed it. The same fact was quietly destroying data we had not read yet.
+
+`logger.js` wrote to `<repo>/backend/data/logs`, which in production is
+`/app/backend/data/logs` — the container's own filesystem. The only mounted volume is
+`scoop_data:/var/lib/scoop`. So **both** log destinations were ephemeral: docker's stdout log
+resets on recreate, and the winston files were deleted with the container. `VIDEO_SPEC_LOG_JSON`
+was turned on specifically to collect SHIELD evidence across days; three deploys in one day
+erased it, and the loss was only discovered when the harvest was attempted.
+
+**The distinction is the lesson.** A reading problem inconveniences you at the moment you
+read, and you find out immediately. A retention problem destroys data you have not read yet,
+and you find out when you go looking — which, for evidence being gathered to answer a
+question, is exactly too late. When a fact touches where data *lives* rather than how it is
+*queried*, it is worth asking the second question explicitly.
+
+Two corollaries worth keeping:
+
+- **"Collect evidence over days" and "deploy several times a day" were mutually exclusive**
+  and nobody noticed, because each was reasonable alone. Any decision gated on accumulated
+  data needs someone to check that the accumulation actually outlives the release cadence.
+- **Persisting was not sufficient on its own.** `combined.log` is a 10MB × 10 ring shared with
+  every other line the system writes, so its retention is set by ingestion chatter, not by the
+  corpus. The spec corpus therefore got its own file and its own rotation — otherwise a busy
+  ingestion day evicts the evidence regardless of how little the evidence costs.
+
 **Squash merges leave child branches carrying phantom duplicates.** This repo squash-merges,
 so a merged branch's commits are *not* ancestors of `main`. Pushing a follow-up commit to
 that branch updates a **closed** PR: the commit is on GitHub, looks pushed, and never

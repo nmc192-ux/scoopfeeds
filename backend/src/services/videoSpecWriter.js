@@ -41,7 +41,7 @@
  */
 
 import axios from "axios";
-import { logger } from "./logger.js";
+import { logger, logSpecCorpus } from "./logger.js";
 import {
   buildGeminiGenerationConfig,
   isGeminiThinkingRejection,
@@ -1149,8 +1149,8 @@ export async function writeVideoSpec(article, {
     // ~24KB ceiling per spec (VIDEO_FULLTEXT_MAX_CHARS), so roughly 300KB/day at
     // the current cadence. Noise against a day of container logs.
     if (process.env.VIDEO_SPEC_LOG_JSON === "1") {
-      logger.info(`🎬 videoSpec [${article.id}] FULL SPEC:\n${JSON.stringify(v.spec, null, 2)}`);
-      logger.info(
+      logSpecCorpus(`🎬 videoSpec [${article.id}] FULL SPEC:\n${JSON.stringify(v.spec, null, 2)}`);
+      logSpecCorpus(
         `🎬 videoSpec [${article.id}] SOURCE TEXT (origin=${resolved.origin}` +
         `${resolved.reason ? `, reason=${resolved.reason}` : ""}, chars=${sourceText.length}):\n${sourceText}`
       );
@@ -1163,7 +1163,7 @@ export async function writeVideoSpec(article, {
         for (const str of displayStrings(card)) {
           const mv = motiveVerdict(str, sourceText);
           if (mv.verdict === "no_motive" || mv.verdict === "no_caption") continue;
-          logger.info(
+          logSpecCorpus(
             `🎬 videoSpec [${article.id}] MOTIVE slides[${i}] (${card.t}) ${mv.verdict}` +
             `${mv.by ? ` by="${mv.by}"` : ""} marker="${mv.motive}" :: ${str}`
           );
