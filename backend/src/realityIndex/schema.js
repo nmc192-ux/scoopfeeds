@@ -289,7 +289,13 @@ export function initRealityIndex(db) {
       raw_meta    TEXT,                          -- JSON, optional
       PRIMARY KEY (scope, scope_id, ts, source)
     );
-    CREATE INDEX IF NOT EXISTS idx_sent_scope_ts ON sentiment_snapshots(scope, scope_id, ts DESC);
+    -- NO idx_sent_scope_ts. (scope, scope_id, ts) is a PREFIX of this table's
+    -- PRIMARY KEY, which SQLite already backs with an automatic index, so it was
+    -- 616MB of duplication that also made reads slower — see migration 027 for
+    -- the measurements. Dropping it in the migration alone would not hold:
+    -- bootstrapSchema runs initRealityIndex BEFORE runMigrations, so a CREATE
+    -- here would recreate it on the next boot and the migration would not run
+    -- again to undo that. Both halves are required.
     CREATE INDEX IF NOT EXISTS idx_sent_source   ON sentiment_snapshots(source, ts DESC);
 
     -- Composite Reality Index time-series. One row per scope per ts with
@@ -308,7 +314,9 @@ export function initRealityIndex(db) {
       components          TEXT,                  -- JSON: per-component detail
       PRIMARY KEY (scope, scope_id, ts)
     );
-    CREATE INDEX IF NOT EXISTS idx_ris_scope_ts  ON reality_index_snapshots(scope, scope_id, ts DESC);
+    -- NO idx_ris_scope_ts — same columns as this table's PRIMARY KEY (migration
+    -- 027). Keeping it cost 612MB and made topTruthGap 87% slower by pulling the
+    -- planner off idx_ris_truth_gap, which is the index that query wants.
     CREATE INDEX IF NOT EXISTS idx_ris_truth_gap ON reality_index_snapshots(scope, ts DESC, truth_gap);
 
     -- Anomaly alerts surfaced to the UI / push channel.

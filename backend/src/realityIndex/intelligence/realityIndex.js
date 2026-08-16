@@ -18,6 +18,7 @@
 
 import { getDb } from "../../models/database.js";
 import { latestSnapshotsByScope } from "../dal/sentimentDao.js";
+import { formatSnapshotWriteStats } from "../dal/writeOnChange.js";
 import { upsertRealityIndexSnapshot } from "../dal/realityIndexDao.js";
 import { scoreMarketConfidence } from "./confidenceScorer.js";
 import { logger } from "../../services/logger.js";
@@ -174,5 +175,10 @@ export function runRealityIndexCycle() {
     }
   }
   if (written) logger.info(`📊 reality-index recomposed for ${written}/${events.length} events`);
+  // WHAT THE CHANGE GATE SUPPRESSED. `written` above counts events COMPOSED, not
+  // rows stored — those diverged the moment write-on-change landed, and the
+  // difference is the whole point. Expect ~1000:1 on a steady day; anything near
+  // 1:1 means the gate is not firing and should be seen rather than assumed.
+  for (const line of formatSnapshotWriteStats()) logger.info(line);
   return { written, skipped, totalActive: events.length };
 }
