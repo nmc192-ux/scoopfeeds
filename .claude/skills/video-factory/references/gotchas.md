@@ -320,3 +320,21 @@ look at the 168px version — that is the size the decision is made at.
 Compositing note: the same thumbnail had vertical banding from scaling a
 semi-transparent layer after overlay. Render the type once at final size as
 transparent RGBA and overlay 1:1; scale nothing afterwards.
+
+## TikTok: an un-audited client posts, and nobody can see it
+
+TikTok does not reject a post from an un-audited Content Posting API client — it
+accepts it and forces it to private viewing. So the naive integration reports
+five successful posts and the account shows five videos no one but the owner can
+open. `creator_info/query` returns `privacy_level_options`; if the level you
+intend is not in that list, the client is not audited. Refuse there.
+
+The same endpoint is the only reliable audit-status check available at runtime,
+which is why the poller calls it every cycle rather than caching the answer.
+
+## TikTok has no scheduling either
+
+Like Instagram, and unlike YouTube and Facebook. Neither `publish_at` nor
+`schedule_time` exists on any Content Posting endpoint. Two of the four
+platforms in this pipeline can genuinely schedule; the other two need a process
+that wakes up and posts. Do not promise a schedule the API cannot keep.
