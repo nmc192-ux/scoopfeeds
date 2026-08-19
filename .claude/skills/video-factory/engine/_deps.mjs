@@ -8,11 +8,24 @@
 // own copy still wins.
 import { createRequire } from "module";
 import { readFileSync, existsSync } from "fs";
+import { fileURLToPath } from "url";
 import path from "path";
+
+// REPO_ROOT is DERIVED, never hardcoded. The engine lives at
+// <repo>/.claude/skills/video-factory/engine, so the repo is four levels up.
+// Seven absolute paths to one developer's checkout used to be baked in here and
+// across the engine, which meant the skill worked on exactly one machine at
+// exactly one path — clone the repo anywhere else and nothing resolved.
+export const REPO_ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+export const BACKEND = path.join(REPO_ROOT, "backend");
+export const FRONTEND = path.join(REPO_ROOT, "frontend");
+/** backend/.env then ~/.scoopfeeds.env — the order src/config/env.js uses. */
+export const ENV_FILES = [path.join(BACKEND, ".env"), `${process.env.HOME}/.scoopfeeds.env`];
 
 const CANDIDATES = [
   path.join(process.cwd(), "node_modules"),
-  "/Users/jahanzebhussain/Downloads/scoop-news/backend/node_modules",
+  path.join(BACKEND, "node_modules"),
 ];
 
 function resolverFor(name) {

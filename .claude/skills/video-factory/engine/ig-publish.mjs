@@ -21,13 +21,12 @@
 // a Story is not a reshare of the Reel, it is its own container.
 
 import { readFileSync, existsSync } from "fs";
-import { P } from "./_deps.mjs";
+import { P, ENV_FILES, BACKEND } from "./_deps.mjs";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO = "/Users/jahanzebhussain/Downloads/scoop-news/backend";
-for (const f of [path.join(REPO, ".env"), `${process.env.HOME}/.scoopfeeds.env`]) {
+for (const f of ENV_FILES) {
   if (!existsSync(f)) continue;
   for (const line of readFileSync(f, "utf8").split("\n")) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -42,7 +41,7 @@ const ONLY = arg("--only");
 const SKIP_STORY = process.argv.includes("--no-story");
 
 const IG_USER = process.env.INSTAGRAM_USER_ID || "17841429776015289";  // scoop.feeds
-const FB_DISK = path.join(process.env.SCOOP_PERSISTENT_DATA_DIR || path.join(REPO, "data"), "facebook-token.json");
+const FB_DISK = path.join(process.env.SCOOP_PERSISTENT_DATA_DIR || path.join(BACKEND, "data"), "facebook-token.json");
 let TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN || process.env.FACEBOOK_PAGE_TOKEN;
 if (!process.env.INSTAGRAM_ACCESS_TOKEN && existsSync(FB_DISK)) {
   const d = JSON.parse(readFileSync(FB_DISK, "utf8"));

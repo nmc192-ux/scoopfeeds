@@ -14,6 +14,45 @@ generation.
 fresh per topic: `script.md` (the narration) and `storyboard.mjs` (what is on
 screen for each beat). Author those; do not rewrite the engine.
 
+## Deployment
+
+**There is nothing to deploy to a server.** This is a project skill: it lives in
+the repo at `.claude/skills/video-factory/` and is active for anyone whose
+Claude Code session has this repo open. Merging the branch to `main` is the
+whole "release". It does **not** run on the VPS — it needs local ffmpeg, satori
+and Playwright, and every post is human-approved, which is the opposite of the
+unattended hourly loop in `backend/src/services/video*.js`.
+
+Nothing in the engine is tied to a machine any more: `REPO_ROOT` is derived from
+the skill's own location, so any checkout path works. (Seven absolute paths to
+one developer's home directory used to be baked in.)
+
+**Prerequisites on whatever machine runs it:**
+
+| Need | Why | Check |
+|---|---|---|
+| `backend/node_modules` installed | ffmpeg, satori, resvg | `node -e "require('@ffmpeg-installer/ffmpeg')"` |
+| `frontend/node_modules` installed | Playwright, for source screenshots | `ls frontend/node_modules/playwright` |
+| `ELEVENLABS_API_KEY` | narration | in `backend/.env` or `~/.scoopfeeds.env` |
+| `YOUTUBE_*`, `FACEBOOK_PAGE_TOKEN` | scheduling | `node engine/publish-all.mjs` dry run prints both identities |
+| Node 18+ | engine is ESM | `node -v` |
+
+Verify a fresh machine in one command — it prints both platform identities and
+schedules nothing:
+
+```bash
+cd <project> && node <skill>/engine/publish-all.mjs
+```
+
+**macOS-only:** `ig-setup.sh` uses `launchctl`. Instagram cannot schedule (no
+`publish_time`, and containers expire in 24h), so posting needs a process awake
+at post time. On Linux the same `ig-run.mjs` works — replace the launchd plist
+with a systemd timer or cron entry running `ig-cron.sh` every 30 minutes.
+
+**Per-film state lives outside the repo** in `~/.scoopfeeds-igpost-<slug>/`, one
+directory per film, each with its own marker and launchd label. Those are
+runtime state, deliberately not committed.
+
 ## Before anything else: does anyone search for this?
 
 The first film made under this pipeline was well-built and got **2 views**,

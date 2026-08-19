@@ -13,7 +13,7 @@ import { promisify } from "util";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
-import { ffmpegPath, P } from "./_deps.mjs";
+import { ffmpegPath, P, ENV_FILES } from "./_deps.mjs";
 
 const FFMPEG = ffmpegPath;
 const execFileP = promisify(execFile);
@@ -22,7 +22,7 @@ const AUDIO_DIR = P("out/audio");
 
 // ── env ──────────────────────────────────────────────────────────────────
 function loadEnv() {
-  for (const f of ["/Users/jahanzebhussain/Downloads/scoop-news/backend/.env", `${process.env.HOME}/.scoopfeeds.env`]) {
+  for (const f of ENV_FILES) {
     if (!existsSync(f)) continue;
     for (const line of readFileSync(f, "utf8").split("\n")) {
       const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);

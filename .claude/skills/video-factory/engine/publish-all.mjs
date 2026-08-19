@@ -28,13 +28,12 @@
 //      directly here rather than widening a live auto-poster's API for one video.
 
 import { readFileSync, existsSync, statSync, createReadStream } from "fs";
-import { P } from "./_deps.mjs";
+import { P, ENV_FILES, BACKEND } from "./_deps.mjs";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO = "/Users/jahanzebhussain/Downloads/scoop-news/backend";
-for (const f of [path.join(REPO, ".env"), `${process.env.HOME}/.scoopfeeds.env`]) {
+for (const f of ENV_FILES) {
   if (!existsSync(f)) continue;
   for (const line of readFileSync(f, "utf8").split("\n")) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -130,7 +129,7 @@ console.log("\nverifying identity…");
 
 // Disk cache OUTRANKS env, exactly as facebookClient._loadToken does. Reading
 // only env here would gate on one token and post with another.
-const FB_DISK = path.join(process.env.SCOOP_PERSISTENT_DATA_DIR || path.join(REPO, "data"), "facebook-token.json");
+const FB_DISK = path.join(process.env.SCOOP_PERSISTENT_DATA_DIR || path.join(BACKEND, "data"), "facebook-token.json");
 let fbToken = process.env.FACEBOOK_PAGE_TOKEN, fbPage = process.env.FACEBOOK_PAGE_ID, fbSrc = "env";
 if (existsSync(FB_DISK)) {
   const j = JSON.parse(readFileSync(FB_DISK, "utf8"));

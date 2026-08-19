@@ -22,7 +22,12 @@ DST="$HOME/.scoopfeeds-igpost-$SLUG"
 LABEL="com.scoopfeeds.igpost.$SLUG"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 ENGINE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKEND="/Users/jahanzebhussain/Downloads/scoop-news/backend"
+# Derived from this script's own location: the engine sits at
+# <repo>/.claude/skills/video-factory/engine, so the repo is four levels up.
+# Hardcoding one developer's checkout path here meant the skill only ran on one
+# machine.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+BACKEND="$REPO_ROOT/backend"
 NODE="$(command -v node)"
 
 [ -e "$DST" ] && { echo "refusing: $DST already exists"; exit 1; }

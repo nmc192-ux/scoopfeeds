@@ -13,7 +13,12 @@ SLUG="${1:-}"
 [ -z "$SLUG" ] && { echo "usage: bash engine/new-project.sh <slug> [parent-dir]"; exit 1; }
 PARENT="${2:-$PWD}"
 DIR="$PARENT/$SLUG"
-BACKEND="/Users/jahanzebhussain/Downloads/scoop-news/backend"
+# Derived from this script's own location: the engine sits at
+# <repo>/.claude/skills/video-factory/engine, so the repo is four levels up.
+# Hardcoding one developer's checkout path here meant the skill only ran on one
+# machine.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+BACKEND="$REPO_ROOT/backend"
 SKILL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 [ -e "$DIR" ] && { echo "refusing: $DIR already exists"; exit 1; }

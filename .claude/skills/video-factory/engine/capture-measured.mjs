@@ -18,12 +18,17 @@
 //
 // The renderer then draws highlights from measured coordinates. No calibration.
 
-import { chromium } from "/Users/jahanzebhussain/Downloads/scoop-news/frontend/node_modules/playwright/index.mjs";
+
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { P } from "./_deps.mjs";
+import { P, FRONTEND } from "./_deps.mjs";
+import { pathToFileURL } from "url";
+// Playwright ships with the FRONTEND workspace, not the backend, and is loaded
+// by derived path so this works from any checkout location.
+const { chromium } = await import(
+  pathToFileURL(path.join(FRONTEND, "node_modules/playwright/index.mjs")).href);
 const OUT = P("out/docs");
 mkdirSync(OUT, { recursive: true });
 
