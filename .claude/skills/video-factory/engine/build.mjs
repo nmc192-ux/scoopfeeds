@@ -29,7 +29,7 @@
 // join them without re-encoding the whole film.
 
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from "fs";
-import { execFile } from "child_process";
+import { execFile, spawnSync } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -54,6 +54,7 @@ const OUTRO_TAIL = 1.1;
 const ENTER_SECS = 1.20;    // entrance animation
 const PAYOFF_SECS = 0.70;   // payoff animation
 const MIN_PIECE = 1.1;      // never cut a fragment shorter than this
+const CARD_SPLIT = 7.0;     // above this, a card is split into animate + held push
 const PIECE_EPS = 0.02;     // float slack when testing piece lengths
 // Silence before the first word. The film used to open with narration already
 // running under a 1.4s video fade and a 0.8s audio fade, so the first line was
@@ -122,15 +123,47 @@ async function headerDur(file) {
   return (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]);
 }
 
+// A CLIP'S IN-POINT MUST STAY INSIDE THE CLIP. Now that main footage advances
+// its in-point across a beat's cutaways, a long beat over a short source can ask
+// for a second that does not exist; `-ss` past the end yields an empty input and
+// the shot renders black. `-stream_loop -1` already loops the source, so wrapping
+// the offset is the behaviour the flags were chosen for.
+const _durCache = new Map();
+function clipDuration(file) {
+  if (_durCache.has(file)) return _durCache.get(file);
+  const r = spawnSync(ffmpegPath, ["-hide_banner", "-i", file], { encoding: "utf8" });
+  const m = /Duration: (\d+):(\d+):([\d.]+)/.exec((r.stderr || "") + (r.stdout || ""));
+  const d = m ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) : 0;
+  _durCache.set(file, d);
+  return d;
+}
+
 /** A still or footage shot. */
 async function shotStill(p) {
-  const { image, clip, clipIn, grade, crop, ken, zoom0, seconds, out } = p;
+  const { image, clip, grade, crop, ken, zoom0, punch, pan, seconds, out } = p;
+  let clipIn = p.clipIn || 0;
+  if (clip) {
+    const d = clipDuration(clip);
+    // Leave room for the shot itself before wrapping, not just for the seek.
+    if (d > seconds && clipIn + seconds > d) clipIn = clipIn % Math.max(0.001, d - seconds);
+    else if (d > 0 && clipIn >= d) clipIn = clipIn % d;
+  }
   const frames = Math.max(2, Math.round(seconds * FPS));
   const args = [];
   let v;
   if (clip) {
     args.push("-stream_loop", "-1", "-ss", String(clipIn || 0), "-i", clip);
+    // RETURNS TO A LOCKED-OFF CLIP NEED A DIFFERENT FRAMING, NOT A DIFFERENT
+    // SECOND. `ken`/`zoom0` were read only on the image branch, so footage got
+    // no reframing at all: a beat that cut away and came back replayed a
+    // pixel-identical composition, and three of those inside nine seconds reads
+    // as a stock loop however far the in-point has advanced. The punch is
+    // cropped BEFORE the 1920x1080 normalise so a 2560-wide source spends its
+    // real resolution on it rather than upscaling a downscale.
+    const z = punch && punch > 1 ? punch : 0;
+    const px = { l: "0", r: "iw-ow", c: "(iw-ow)/2" }[pan || "c"] ?? "(iw-ow)/2";
     v = `[0:v]${crop ? `crop=${crop},` : ``}`
+      + (z ? `crop=floor(iw/${z}/2)*2:floor(ih/${z}/2)*2:${px}:(ih-oh)/2,` : ``)
       + `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,`
       + `fps=${FPS},${GRADES[grade] || GRADES.default},format=yuv420p,`
       + `trim=duration=${seconds},setpts=PTS-STARTPTS[v]`;
@@ -275,7 +308,8 @@ async function main() {
     if (lead) seconds = +(seconds + lead).toFixed(3);
     const isCard = !!v.card;
     const payoff = isCard && HAS_PAYOFF.has(v.card);
-    const ins = (INSERTS[id] || [])[0];
+    const insList = (INSERTS[id] || []).slice().sort((a, b) => a.at - b.at);
+    const ins = insList[0];
 
     const base = {
       beat: id, text: take.text, audio: take.file, audioLead: lead,
@@ -283,6 +317,35 @@ async function main() {
       clip: fo ? P(`out/footage/${fo.file}.mp4`) : null,
       clipIn: fo ? fo.in : 0, grade: fo ? fo.grade : null, crop: fo ? fo.crop : null,
       ken: v.photo && !fo ? v.ken : null,
+    };
+
+    // MAIN FOOTAGE CONTINUES ACROSS ITS OWN CUTAWAYS. Every non-insert fragment
+    // of a beat used to spread `base` verbatim, so `clipIn` stayed at `fo.in`
+    // and the clip RESTARTED from the same second each time. A beat with two
+    // cutaways therefore played main-A-main-B-main as the *identical* three
+    // seconds of footage three times inside nine seconds, which reads as a
+    // stock-library loop rather than as an edit. Advancing the in-point makes
+    // the fragments one continuous shot interrupted by cutaways — the ordinary
+    // grammar, and the thing a viewer stops noticing.
+    // Wide, then two tighter framings offset to opposite sides — so the beat
+    // reads as three angles on one scene rather than one shot played three
+    // times. Kept modest (1.34 max) because most sources are 1080p and a harder
+    // punch is visibly soft.
+    const MAIN_FRAMING = [
+      { punch: 1.0,  pan: "c" },
+      { punch: 1.22, pan: "l" },
+      { punch: 1.34, pan: "r" },
+      { punch: 1.14, pan: "c" },
+    ];
+    let mainUsed = 0, mainNth = 0;
+    const mainFrag = (extra) => {
+      const fr = MAIN_FRAMING[mainNth % MAIN_FRAMING.length];
+      const f = { ...base, kind: "still", ...extra,
+                  clipIn: (fo ? fo.in : 0) + mainUsed,
+                  punch: fo ? fr.punch : undefined, pan: fo ? fr.pan : undefined };
+      mainUsed += extra.seconds;
+      mainNth += 1;
+      return f;
     };
 
     // Where the card's animation finishes; an insert must come after it.
@@ -329,19 +392,40 @@ async function main() {
         if (isCard) {
           push(mkCard(cut, 0, true));
         } else {
-          push({ ...base, kind: "still", seconds: cut, audioStart: 0 });
+          push(mainFrag({ seconds: cut, audioStart: 0 }));
         }
         push({
           beat: id, kind: "still", text: null, audio: take.file, audioStart: cut,
           seconds: ins.dur,
           image: ins.photo ? insSrc : null,
           clip: ins.footage ? insSrc : null,
-          clipIn: ins.footage === "F_CPU" ? 1 : 2,
+          clipIn: ins.clipIn ?? (ins.footage === "F_CPU" ? 1 : 2),
           grade: ins.footage === "F_CABLES" ? "killblue" : null, crop: null,
           ken: ins.photo ? "in" : null, zoom0: 1.06,
         });
-        if (isCard) push(mkCard(after, cut + ins.dur, false));
-        else push({ ...base, kind: "still", seconds: after, audioStart: cut + ins.dur, zoom0: 1.08, ken: "in" });
+        // FURTHER INSERTS GO INSIDE THE TAIL. A beat used to get exactly one
+        // cutaway ([0] was taken and the rest silently dropped), which left
+        // long beats with a single cut and made the whole film metronomic —
+        // 88 shots with a standard deviation of 1.24s and only 3% under two
+        // seconds. Each extra insert splits the remaining tail again.
+        let tailStart = cut + ins.dur, tailLeft = after;
+        for (const extra of insList.slice(1)) {
+          const rel = Math.min(Math.max(tailLeft * extra.at, MIN_PIECE),
+                               tailLeft - extra.dur - MIN_PIECE);
+          if (!(rel >= MIN_PIECE - PIECE_EPS)) continue;
+          const src2 = extra.photo ? P(`out/photos/${extra.photo}.png`) : P(`out/footage/${extra.footage}.mp4`);
+          if (isCard) push(mkCard(+rel.toFixed(3), tailStart, false));
+          else push(mainFrag({ seconds: +rel.toFixed(3), audioStart: tailStart, zoom0: 1.06, ken: "in" }));
+          push({ beat: id, kind: "still", text: null, audio: take.file,
+                 audioStart: tailStart + rel, seconds: extra.dur,
+                 image: extra.photo ? src2 : null, clip: extra.footage ? src2 : null,
+                 clipIn: extra.clipIn ?? 3, grade: null, crop: null,
+                 ken: extra.photo ? "in" : null, zoom0: 1.06 });
+          tailStart += rel + extra.dur;
+          tailLeft = +(tailLeft - rel - extra.dur).toFixed(3);
+        }
+        if (isCard) push(mkCard(+tailLeft.toFixed(3), tailStart, false));
+        else push(mainFrag({ seconds: +tailLeft.toFixed(3), audioStart: tailStart, zoom0: 1.08, ken: "in" }));
         if (id === TITLE_SEGMENT.after) push({ kind: "title", beat: "title", seconds: TITLE_SEGMENT.seconds, text: null });
         continue;
       }
@@ -350,12 +434,26 @@ async function main() {
     // No insert. Long photo beats still split: wide shot, then a punch-in.
     if (!isCard && !fo && seconds >= 6.5) {
       const a = +(seconds * 0.55).toFixed(3), b = +(seconds - a).toFixed(3);
-      push({ ...base, kind: "still", seconds: a, audioStart: 0, ken: "out" });
-      push({ ...base, kind: "still", seconds: b, audioStart: a, ken: "in", zoom0: 1.10 });
+      push(mainFrag({ seconds: a, audioStart: 0, ken: "out" }));
+      push(mainFrag({ seconds: b, audioStart: a, ken: "in", zoom0: 1.10 }));
+    } else if (isCard && seconds >= CARD_SPLIT) {
+      // A LONG CARD IS STILL A STATIC FRAME. Cards animate in and then sit —
+      // so a beat with 12 seconds of narration puts an unmoving image on screen
+      // for nine of them. Ebola film beats ran 10-12.6s and the rhythm gates
+      // failed at a 6.95s median with only 5% of shots under 2s.
+      //
+      // Split it: the card animates and completes in the first piece, then the
+      // FINISHED card is held in a second piece with a slow push. Same
+      // information, same reading time, but a cut and some motion where there
+      // was a freeze. Uses the frozen-card path the insert logic already
+      // relies on, so nothing new is being invented here.
+      const a = +(seconds * 0.52).toFixed(3), b = +(seconds - a).toFixed(3);
+      push(mkCard(a, 0, true));
+      push({ ...mkCard(b, a, false), ken: "in", zoom0: 1.05 });
     } else if (isCard) {
       push(mkCard(seconds, 0, true));
     } else {
-      push({ ...base, kind: "still", seconds, audioStart: 0 });
+      push(mainFrag({ seconds, audioStart: 0 }));
     }
 
     if (id === TITLE_SEGMENT.after) {
