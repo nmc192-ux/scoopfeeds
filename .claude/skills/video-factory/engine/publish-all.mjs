@@ -27,7 +27,7 @@
 //      so neither of its post functions can schedule. The two calls are made
 //      directly here rather than widening a live auto-poster's API for one video.
 
-import { readFileSync, existsSync, statSync, createReadStream } from "fs";
+import { readFileSync, writeFileSync, existsSync, statSync, createReadStream } from "fs";
 import { P, ENV_FILES, BACKEND } from "./_deps.mjs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -275,6 +275,19 @@ try {
 }
 
 console.log("\n" + JSON.stringify(results, null, 1));
+
+// THE IDS ARE THE ONLY HANDLE ON A SCHEDULED UPLOAD, AND THEY WERE PRINTED ONLY.
+// Everything here goes up private with a publishAt, so until the slot the video
+// id is the sole way to find, correct or cancel it — and a private upload does
+// not appear in a channel's public listing. Losing them to terminal scrollback
+// means recovering them by re-querying the API. Persist next to the film.
+try {
+  writeFileSync(P("out/publish-result.json"), JSON.stringify(
+    { at: new Date().toISOString(), title: TITLE, ...results }, null, 2));
+  console.log("\nids written to out/publish-result.json");
+} catch (e) {
+  console.log("\ncould not persist ids: " + e.message + " — COPY THEM FROM ABOVE");
+}
 
 console.log("\nLEFT FOR YOU IN YOUTUBE STUDIO:");
 // Read from publish.json, NEVER assumed. This line was hardcoded to video 2's

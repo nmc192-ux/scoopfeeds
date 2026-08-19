@@ -282,3 +282,41 @@ truncated a series at day 37 and looked like the source only had partial data.
 
 When several series sit flat while one climbs, their end labels all want the
 same y and overprint into a smear. `multiline` de-collides them after layout.
+
+## The Instagram poller was installed without a module it imports
+
+`ig-setup.sh` copied `ig-run.mjs` and `ig-publish.mjs` into the per-film
+directory but never `_deps.mjs`, which `ig-publish.mjs` imports. Every poller
+installed after `_deps.mjs` was introduced died on `ERR_MODULE_NOT_FOUND`, every
+30 minutes, forever — while `launchctl list` reported `LastExitStatus = 0`,
+because the cron wrapper always exits 0 by design.
+
+`_deps.mjs` is now **symlinked**, not copied: it derives `REPO_ROOT` four levels
+up from its own location, so a copy sitting in `$HOME` resolves `BACKEND` to
+nonsense. Node resolves symlinks before computing `import.meta.url`, so the link
+keeps the real engine path.
+
+`ig-setup.sh` now also refuses to arm unless the self-test reaches the film gate
+(exit code 2). **An armed poller that cannot run is worse than none** — it looks
+scheduled and posts nothing. Check the log says "film not public yet", not just
+that the install printed "armed".
+
+## publish-all printed the video ids and never saved them
+
+Everything is uploaded private with a `publishAt`, so until the slot arrives the
+video id is the only way to find, correct or cancel an upload — and a private
+video does not appear in the channel's public listing. The ids went to stdout
+only, so a scrolled-past terminal meant re-querying the API to recover them.
+They are written to `out/publish-result.json` now.
+
+## Thumbnails carry numbers, and numbers go stale
+
+A thumbnail authored early in a project stated "5,021 cases" and was still
+sitting in `out/` when the film had been rebuilt on a corrected figure of 5,105.
+Nothing in the pipeline compares the two. Author it as a script with the figure
+in one named constant, regenerate whenever a number in the film changes, and
+look at the 168px version — that is the size the decision is made at.
+
+Compositing note: the same thumbnail had vertical banding from scaling a
+semi-transparent layer after overlay. Render the type once at final size as
+transparent RGBA and overlay 1:1; scale nothing afterwards.

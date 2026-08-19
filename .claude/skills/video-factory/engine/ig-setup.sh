@@ -36,6 +36,14 @@ ls "$PROJ"/out/shorts/*.mp4 >/dev/null 2>&1 || { echo "refusing: no Shorts in $P
 
 mkdir -p "$DST/out/shorts"
 cp "$ENGINE/ig-run.mjs" "$ENGINE/ig-publish.mjs" "$DST/"
+# _deps.mjs is SYMLINKED, not copied. ig-publish.mjs imports it, and this script
+# did not bring it across at all — every poller installed after _deps.mjs was
+# introduced died on ERR_MODULE_NOT_FOUND every 30 minutes and posted nothing.
+# It must not be copied either: _deps derives REPO_ROOT four levels up from its
+# OWN location, so a copy sitting in $HOME resolves BACKEND to nonsense. Node
+# resolves symlinks before computing import.meta.url, so the link keeps the
+# real engine path and REPO_ROOT stays correct.
+ln -sfn "$ENGINE/_deps.mjs" "$DST/_deps.mjs"
 cp "$PROJ/ig.json" "$DST/"
 cp "$PROJ"/out/shorts/*.mp4 "$DST/out/shorts/"
 ln -sfn "$BACKEND/node_modules" "$DST/node_modules"
@@ -89,9 +97,18 @@ PL
 plutil -lint "$PLIST" >/dev/null
 
 echo "installed $DST"
-echo "self-test (should refuse: film not public yet)…"
+echo "self-test (must refuse with code 2: film not public yet)…"
 "$DST/ig-cron.sh" || true
 tail -2 "$DST/out/ig-cron.log" 2>/dev/null || true
+# A poller that cannot run is worse than no poller: it looks armed, fires every
+# 30 minutes, and posts nothing. Only code 2 (film not yet public) means the
+# install is sound; refuse to arm on anything else.
+if ! grep -q "film not public yet" "$DST/out/ig-cron.log" 2>/dev/null; then
+  echo ""
+  echo "SELF-TEST DID NOT REACH THE FILM GATE — not arming. See $DST/out/ig-cron.log"
+  echo "Fix the cause, remove $DST, and run this again."
+  exit 1
+fi
 
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
