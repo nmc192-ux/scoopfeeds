@@ -123,6 +123,20 @@ for rationale and dates):
 V1 pipeline live end-to-end (first upload 2026-07-20); V5 production-quality phase specced
 and required before scale. Shorts as an independent track. WhatsApp approval loop +
 founder topic inbox.
+- **Long-form production is now a skill (2026-08-19).** `.claude/skills/video-factory/` —
+a 13-script engine plus house style, quality gates, sourcing and platform references.
+Renders locally (ffmpeg + satori); no paid video generation. Per topic it produces a
+7–10 min film, five vertical Shorts, a thumbnail and an SRT, then schedules YouTube,
+Facebook and Instagram. Only two files are authored per video (`script.md`,
+`storyboard.mjs`); everything else is reusable. Three films made under it:
+  - *Who's Actually Paying for AI?* — live, **2 views**. The topic had zero search demand,
+    which is why demand validation is now the first gate, before scripting.
+  - *Why There Are No Entry-Level Jobs Anymore* — scheduled 19–23 Aug.
+  - *What Happens If The Strait Of Hormuz Closes* — scheduled 26–30 Aug.
+
+  Quality is measured, not asserted: 7 gates (loudness, clipping, stereo width, median
+  shot ≤6s, ≥8% shots under 2s, Shorts count and dimensions). Anything unmeasurable
+  reports **UNVERIFIED**, never "pass". Details in the skill's `references/`.
 - **Rebrand (Decision 9 amended)** — "editorial disruption" direction locked; asset
 production in progress; name and handles unchanged.
 

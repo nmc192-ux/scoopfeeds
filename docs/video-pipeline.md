@@ -13,6 +13,34 @@ check when it misbehaves.
 
 ---
 
+## 0. There are TWO video systems. This note is about the first one.
+
+They share a channel and nothing else — different code, different cadence,
+different approval model. Confusing them is the most likely way to break either.
+
+| | **Automated shorts** (this note) | **Long-form explainers** |
+|---|---|---|
+| What | 60–100s clips from a news article | 7–10 min film + 5 vertical Shorts |
+| Code | `backend/src/services/video*.js` | `.claude/skills/video-factory/engine/` |
+| Cadence | hourly cron, up to 4/day | one per topic, hand-directed |
+| Runs | scheduler + worker, unattended | locally, agent-driven |
+| Cost | 1–4 cents each | ~$2 of ElevenLabs; renders free |
+| Approval | publishes unattended | DrJ approves every post |
+
+**Long-form lives in the `video-factory` skill**, not in `backend/`. Its
+workflow, house style, quality gates and platform notes are in
+[`.claude/skills/video-factory/SKILL.md`](../.claude/skills/video-factory/SKILL.md)
+and the `references/` beside it. Read those before touching long-form; read
+*this* note before touching `video*.js`.
+
+The two do share the platform clients (`youtubeClient`, `facebookClient`,
+`instagramClient`) and therefore the traps documented in §7 here and in the
+skill's `references/platform-apis.md` — notably that the YouTube token carries
+`upload` + `readonly` only, so `videos.update` is unavailable and `publishAt`
+must be set inside `videos.insert`.
+
+---
+
 ## 1. What it does
 
 Every hour a cron in the **scheduler** picks a fresh news article, turns it into a

@@ -56,3 +56,7 @@ backend/_entity_sync.db
 .claude/settings.local.json
 J-LOOP-INBOX.md
 .j-loop/
+
+# video-factory: working dirs symlink node_modules to backend's, and a stray
+# link once got staged. The engine resolves deps via _deps.mjs, not from here.
+.claude/skills/video-factory/engine/node_modules

@@ -15,10 +15,16 @@ behaviour, not intent, and they are kept current:
 - `docs/architecture/dossier_and_event_graph.md` — how the system actually works
 - `docs/reference/env_reference.md` — every flag, its code default, and its prod value
 - `docs/agentic-workflow.md` — the gates, the honesty rules, who approves what
-- `docs/video-pipeline.md` — the YouTube automation: format, Rule 0, sourcing,
-  selection gates, publishing, and the ops runbook. **Read it before touching
-  anything under `backend/src/services/video*.js`** — most of its rules were
-  earned by a live failure and look arbitrary without that history.
+- `docs/video-pipeline.md` — the **automated shorts** loop: format, Rule 0,
+  sourcing, selection gates, publishing, and the ops runbook. **Read it before
+  touching anything under `backend/src/services/video*.js`** — most of its rules
+  were earned by a live failure and look arbitrary without that history. Its §0
+  distinguishes the two video systems.
+- `.claude/skills/video-factory/SKILL.md` — the **long-form explainer** pipeline
+  (7–10 min film + Shorts + cross-platform scheduling). Separate system, separate
+  code, human-approved. Read it, and the `references/` beside it, before touching
+  anything under that skill. `references/gotchas.md` in particular is a list of
+  failures that each cost hours.
 
 ## Commands
 
@@ -209,6 +215,15 @@ post, credential use. Agents never deploy to prod. Build, verify, and present; d
 - **`initRealityIndex()` guards per CONNECTION, not per process** (a `WeakSet` of db
   handles). It was a module-level boolean, which silently no-oped for any second connection
   in the same process — the per-process-state bug class again.
+
+## Skills (`.claude/skills/`)
+
+`video-factory` — long-form video production and cross-platform scheduling.
+Invoke with `/video-factory`, or just ask for a video on a topic. Authors only
+`script.md` and `storyboard.mjs` per video; the engine is reused verbatim. Never
+`npm install` into a video working directory — `node_modules` there is a symlink
+to the backend's and npm replaces it, breaking ffmpeg and satori for every
+script in the folder.
 
 ## The J Loop (`.claude/skills/`)
 
