@@ -1,0 +1,133 @@
+# House style
+
+## Palette
+
+From `backend/src/services/videoSlideChrome.js` — keep them in sync.
+
+| Token | Hex | Use |
+|---|---|---|
+| base | `#090706` | ground |
+| lime | `#dde706` | the one accent; emphasis, rules, figures |
+| white | `#f5f2ea` | primary type |
+| sub | `#cfcabd` | secondary type |
+| dim | `#8a8578` | labels, eyebrows |
+| faint | `#6b675e` | source credits |
+| track | `#4a473f` | bar tracks |
+| recededText | `#4a473f` | ledger rows not yet revealed |
+| recededFigure | `#3f3c35` | figures not yet revealed |
+| recededFill | `#26241f` | fills not yet revealed |
+| alert | `#e0452b` | loss, removal, a blocked route |
+| water / land | `#0e1a22` / `#191510` | map ground |
+
+Lime is an accent, not a colour scheme. One idea per card carries it.
+
+Fonts: **Anton** for display, **Inter Bold/SemiBold** for everything else.
+Both are in `assets/fonts/`.
+
+## Card grammar
+
+`render.mjs` exports these types. Each is a function of progress `p ∈ [0,1]`.
+
+| Card | Carries |
+|---|---|
+| `title` | the film's title card |
+| `chapter` | numbered section divider |
+| `statement` | a sentence, set large |
+| `stat` | one number with a label |
+| `bars` | a small comparison, 2-5 bars |
+| `equation` | A vs B, two paths |
+| `map` | schematic geography — `variant: hormuz \| saudi \| uae` |
+| `linechart` | a value over time, plotted on a real axis |
+| `ledger` | a list revealed row by row |
+| `doc` | a captured source screenshot with measured highlights |
+| `dotgrid` | proportion of a hundred |
+| `pipeline` | ordered stages |
+| `quote` | attributed words |
+| `outro` | the sign-off |
+
+**Entrance and payoff.** Cards in `HAS_PAYOFF` split at `PAYOFF_P = 0.35`: the
+card assembles, then the point lands. `build.mjs` times the payoff so the card
+is complete well before the shot ends.
+
+**Readability floor.** A shot must hold a card for `words ÷ 3.0` seconds after
+it has fully formed, with a 1.4s minimum. `build.mjs` extends shots to satisfy
+this and logs every extension. 26 cards once failed this and the video read as
+unfollowable.
+
+**Every timing on a HAS_PAYOFF card must complete by `PAYOFF_P` (0.35), except
+the payoff itself.** The entrance span is rendered over p∈[0,0.35] and then
+HELD; a timing that straddles 0.35 freezes mid-motion and jumps. Check a new
+card by rendering at exactly p=0.35 — it must look deliberately paused.
+
+**Maps: shapes in SVG, labels in HTML.** satori does not give its fonts to
+images it rasterises, so `<text>` inside a nested SVG renders as nothing.
+Every label is an absolutely-positioned div in viewBox coordinates. Draw all
+maps in a film on ONE shared base, and keep the thing being avoided on screen
+when showing a bypass — a bypass is only legible next to what it bypasses.
+
+**Loss recolours, it does not vanish.** A dot removed from a dotgrid reads as
+"never there"; the claim is almost always "these are the loss". Recolour to
+`alert` instead.
+
+**Earn-render.** A section renders only when it has real data. An absent element
+is correct; placeholders are not.
+
+## Rhythm
+
+Reference measurements from a Vox explainer, against our own films:
+
+| | Vox | v1 | v2 |
+|---|---|---|---|
+| median shot | 3.42s | 7.69s | 5.34s |
+| shots under 2s | 21% | 0% | 10% |
+| moving frames | 62% | 19% | 37% |
+
+**Motion cadence.** Something should change on screen at least every ~3 seconds
+— a payoff landing, a bar filling, a highlight sweeping, a push starting. Vox
+runs 62% moving frames against our 37%; that gap is the difference between
+"informative" and "watchable", and it is a within-shot property that shot-length
+gates do not capture.
+
+Long static shots are the default failure. Break a long beat into two shots with
+opposed Ken Burns moves rather than holding one frame.
+
+## Inserts
+
+`INSERTS` cuts a brief image into a beat. **Only on imagery beats, never on a
+text card.** Interrupting a slide mid-read and returning to it gives the viewer
+time to read neither half — this was the loudest complaint on v2, and there were
+ten of them.
+
+## Music
+
+Procedural, built by `music.mjs` with ffmpeg `aevalsrc`. The design that works:
+
+- **112 BPM, A minor.** The first attempt was a 46 BPM drone and made the film
+  feel slower and duller — "barely audible and does not suit the video".
+- **Stereo by construction**: detune the two sides (~1.0015) and offset one by
+  ~11 ms (Haas). Measure the side channel; a mono bed reads about -91 dB.
+- **Chapter gates**: kick, hats and a second arp enter and leave across chapters
+  so the bed has an arc. Risers into chapters, a boom on each chapter start.
+- **Intensity arc**: drop to ~0.40 at the turn, rebuild after.
+- **Ducking**: `sidechaincompress` threshold 0.09, ratio 2.5.
+- **Chain order**: `loudnorm=I=-14:TP=-2.0:LRA=11` then `alimiter=limit=0.85`.
+  The limiter is LAST.
+
+## Shorts
+
+- Cut from the finished film using `out/<slug>.srt` for beat boundaries.
+- **Letterbox, never crop.** Scale to 1080x608 and pad onto the brand ground.
+- Burn a hook line under the video panel; keep the lime edge rule and wordmark.
+- Never open on a chapter card — it wastes the only second that matters.
+- Each Short targets a **different** measured search phrase so they do not
+  compete with each other.
+
+## Thumbnail
+
+- 1280x720, under 2 MB.
+- **Check it at 168px** before accepting it. That is the size it is judged at.
+- A real human face outperforms an empty room. If the source frame puts the
+  subject on the wrong side, mirror it — there is no text in frame to reverse.
+- Two lines of Anton maximum, plus one lime line. More does not survive the
+  downscale.
+- Build the scrim as a smooth ramp; a stepped one bands visibly.
