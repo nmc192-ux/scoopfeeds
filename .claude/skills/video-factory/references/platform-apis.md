@@ -95,3 +95,67 @@ interstitial. Serve ranged requests — Meta issues HEAD then a ranged GET.
 
 Captions cannot contain working links. Say "link in bio" and make sure the bio
 link is actually correct.
+
+---
+
+## TikTok — Content Posting API
+
+**Two facts decide the whole design, both verified against TikTok's docs:**
+
+1. **There is no scheduling.** No `publish_at`, no `schedule_time`, on any
+   endpoint. A post happens when the call is made. So TikTok gets a poller
+   (`tiktok-setup.sh`), the same shape as Instagram and for the same reason.
+2. **An un-audited client can only post `SELF_ONLY`.** TikTok forces every post
+   from a client that has not passed the Content Posting API audit to private
+   viewing. `creator_info/query` returns the allowed `privacy_level_options`;
+   `tiktok-publish.mjs` reads them and **refuses to post** if the level it was
+   asked for is missing, rather than putting five invisible videos on the
+   account and reporting success.
+
+Other limits: ~15 posts per creator per day; un-audited clients may enable at
+most 5 users in 24h. Captions up to 2200 UTF-16 characters.
+
+### Why not the Higgsfield connector
+
+It authenticates and reads fine — the Commercial Music Library returns results —
+but every publish call returns `error 40131: authentication failed`. Reads
+succeeding while writes fail isolates it to the Content Posting product, which
+is gated separately. A second, freshly authorised connector failed identically,
+so it is not a scope the user missed at the consent screen. It is that app's
+registration, and re-authorising cannot change it.
+
+### Flow
+
+```
+POST /v2/oauth/token/                     refresh_token → access_token
+POST /v2/post/publish/creator_info/query/ → privacy_level_options, max duration
+POST /v2/post/publish/video/init/         post_info + source_info{FILE_UPLOAD}
+                                          → publish_id, upload_url (1h)
+PUT  <upload_url>                         Content-Range: bytes 0-(n-1)/n
+POST /v2/post/publish/status/fetch/       poll until PUBLISH_COMPLETE | FAILED
+```
+
+`FILE_UPLOAD`, not `PULL_FROM_URL`: the latter needs a verified domain, and the
+files exist only on the build machine. Single chunk — TikTok wants 5–64 MB
+chunks and every file here is well under 64 MB, so chunking adds only failure
+modes. **Poll the status endpoint**: TikTok accepts the bytes and can still
+reject the video asynchronously, so a 200 on the PUT is not a published post.
+
+### Env
+
+```
+TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, TIKTOK_REFRESH_TOKEN
+```
+
+### Registering the app (one-time, and only the account holder can do it)
+
+1. developers.tiktok.com → register as a developer with the ScoopFeeds TikTok
+   account.
+2. Create an app. Add the **Content Posting API** product and request the
+   **`video.publish`** scope (`video.upload` only reaches drafts, which still
+   needs a human to press publish).
+3. Add **Login Kit** so the app can obtain a refresh token at all.
+4. Submit for audit. Until it passes, everything posts `SELF_ONLY` — the poller
+   detects this and holds rather than posting invisibly.
+5. Authorise once to mint `TIKTOK_REFRESH_TOKEN`, and put the three values in
+   `~/.scoopfeeds.env`.

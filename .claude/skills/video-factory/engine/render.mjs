@@ -24,8 +24,15 @@
 // ~45% through the spoken line. That preserves the reveal timing that fixed the
 // "voice lagging the picture" problem while adding the motion that was absent.
 
-import satori from "satori";
-import { Resvg } from "@resvg/resvg-js";
+// RESOLVED, NOT BARE-IMPORTED. Bare specifiers resolve relative to THIS file,
+// and the engine ships without a node_modules of its own — a stray symlink here
+// was removed before commit, which silently broke every render outside the
+// folder it was created in. dep() looks in the working directory first, then
+// the backend, the same way ffmpeg is found.
+import { dep } from "./_deps.mjs";
+const _satori = dep("satori");
+const satori = _satori.default ?? _satori;
+const { Resvg } = dep("@resvg/resvg-js");
 import { readFileSync, writeFileSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -37,7 +44,7 @@ export const H = 1080;
 /** Boundary between the entrance phase and the payoff phase. */
 export const PAYOFF_P = 0.35;
 /** Card types that hold something back for the payoff phase. */
-export const HAS_PAYOFF = new Set(["stat", "statement", "equation", "bars", "ledger", "doc", "dotgrid", "pipeline", "map", "linechart"]);
+export const HAS_PAYOFF = new Set(["stat", "statement", "equation", "bars", "ledger", "doc", "dotgrid", "pipeline", "map", "linechart", "multiline"]);
 
 export const C = {
   base: "#090706",
@@ -128,6 +135,37 @@ function mapSvg(variant, p = 1, opts = {}) {
 <circle cx="1090" cy="384" r="${26 + pulse * 20}" fill="none" stroke="${C.lime}"
         stroke-width="4" opacity="${(0.9 * (1 - pulse)).toFixed(3)}"/>
 <circle cx="1090" cy="384" r="14" fill="${C.lime}" opacity="${pulse.toFixed(3)}"/>
+</svg>`;
+  }
+
+  // ── DRC / GREAT LAKES — REAL GEOMETRY ──────────────────────────────────
+  // Country outlines are Natural Earth 1:110m (public domain), projected
+  // equirectangular into this viewBox with the aspect preserved, and the marked
+  // places are real coordinates: Bunia 1.56N 30.25E, Goma -1.68 29.22E,
+  // Bukavu -2.51 28.86E, Mongbwalu 1.94N 30.03E. The first version of this card
+  // was a hand-drawn blob; on a film about a specific outbreak in specific
+  // provinces, an invented coastline is not good enough.
+  if (variant === "drc") {
+    const spread = at(p, 0.16, 0.72);
+    const pin = at(p, 0.55, 0.92);
+    const NEIGH = ["M1146.8,248.3L1078.9,250.9L1042.3,250.5L1030.6,254.5L1010.7,264.8L1002.6,261.4L1002.9,236.2L1010.7,223.5L1012.5,196.8L1019.5,181.3L1032.3,163.9L1045.1,155.0L1055.8,143.2L1042.4,138.7L1044.5,99.7L1044.5,99.7L1058.2,90.6L1079.4,98.1L1106.2,90.3L1129.7,90.3L1150.2,75.0L1166.0,98.1L1169.9,114.9L1184.5,153.1L1172.4,177.4L1156.0,199.5L1146.5,213.0L1146.8,248.3Z","M1030.6,254.5L1043.9,273.3L1041.9,292.9L1032.3,297.1L1032.3,297.1L1014.6,294.9L1004.4,313.9L984.2,311.3L987.2,293.1L991.8,290.5L993.1,270.7L1002.6,261.4L1010.7,264.8L1030.6,254.5Z","M1032.3,297.1L1034.3,310.3L1041.4,317.8L1041.7,328.6L1033.5,335.6L1020.5,353.0L1008.5,365.1L994.7,366.7L992.5,326.5L984.2,311.3L1004.4,313.9L1014.6,294.9L1032.3,297.1Z","M1146.8,248.3L1152.4,252.0L1273.3,319.9L1275.6,339.2L1323.4,372.6L1308.0,413.6L1310.0,432.5L1331.3,444.7L1332.3,453.3L1323.2,473.5L1325.1,483.6L1322.9,499.5L1334.5,520.4L1348.3,553.3L1360.6,560.6L1360.6,560.6L1334.0,579.9L1297.6,592.8L1277.6,592.3L1265.7,602.3L1242.5,603.2L1233.8,607.4L1193.7,598.0L1168.7,600.7L1159.3,555.3L1148.0,539.8L1141.3,530.6L1108.6,524.4L1089.7,514.3L1068.5,508.7L1055.3,503.2L1041.3,494.7L1041.3,494.7L1023.3,452.7L1004.0,434.0L997.3,414.7L1000.7,397.3L994.7,366.7L1008.5,365.1L1020.5,353.0L1033.5,335.6L1041.7,328.6L1041.4,317.8L1034.3,310.3L1032.3,297.1L1032.3,297.1L1041.9,292.9L1043.9,273.3L1030.6,254.5L1042.3,250.5L1078.9,250.9L1146.8,248.3Z","M1044.5,99.7L1015.1,77.5L1007.2,63.3L988.6,70.4L973.2,68.2L964.3,73.8L949.3,69.7L929.1,42.2L923.8,31.6L898.9,18.4L890.4,-1.6L876.6,-16.0L854.1,-33.3L853.8,-44.2L835.6,-57.6L812.9,-70.7L823.1,-74.3L834.6,-80.6L843.2,-110.3L852.3,-125.8L876.4,-130.4L882.1,-121.2L899.2,-101.8L908.4,-98.9L920.4,-104.6L944.5,-103.5L949.0,-96.6L982.2,-96.6L983.4,-103.5L1000.5,-109.8L1004.0,-119.5L1016.6,-126.4L1044.6,-106.9L1061.8,-110.3L1078.4,-134.4L1096.7,-152.7L1093.8,-172.7L1085.8,-182.4L1105.8,-184.2L1108.1,-191.6L1123.6,-189.3L1119.6,-164.7L1123.6,-140.7L1140.7,-127.5L1144.7,-116.1L1144.2,-99.5L1148.8,-98.8L1149.2,-72.8L1144.2,-62.6L1126.5,-61.8L1115.1,-42.8L1135.6,-40.4L1152.5,-24.2L1158.3,-10.9L1173.6,-3.1L1193.3,33.1L1170.7,55.1L1150.2,75.0L1129.7,90.3L1106.2,90.3L1079.4,98.1L1058.2,90.6L1044.5,99.7Z","M929.1,42.2L918.1,45.7L896.8,45.0L871.7,41.5L859.3,44.3L854.3,52.4L843.5,53.4L830.4,46.4L793.2,63.0L778.0,59.7L773.5,62.2L763.5,82.4L738.6,75.9L714.3,72.6L693.0,60.3L665.6,48.9L647.7,59.7L634.8,76.6L631.8,99.9L610.3,98.0L587.8,92.4L567.9,110.1L550.4,141.1L546.9,131.4L545.4,116.2L530.2,105.5L517.9,88.3L515.0,76.3L499.3,58.9L502.0,49.0L498.6,34.9L501.2,9.1L509.2,3.1L526.0,-30.7L553.5,-33.2L559.7,-41.8L565.2,-41.2L573.5,-33.6L615.5,-46.4L629.7,-59.4L647.0,-71.0L643.7,-82.8L653.1,-85.8L685.3,-83.8L716.7,-99.2L740.8,-135.6L757.7,-149.1L778.8,-154.7L782.6,-140.5L801.8,-119.6L801.9,-106.0L796.5,-92.2L798.6,-81.8L810.2,-72.2L835.6,-57.6L853.8,-44.2L854.1,-33.3L876.6,-16.0L890.4,-1.6L898.9,18.4L923.8,31.6L929.1,42.2Z","M1041.3,494.7L1055.3,503.2L1068.5,508.7L1089.7,514.3L1108.6,524.4L1124.4,539.2L1132.9,567.5L1127.2,576.6L1120.5,603.6L1126.9,631.2L1116.4,642.8L1106.3,673.8L1123.8,682.4L1022.6,709.9L1025.8,733.6L1000.6,738.2L981.6,751.4L977.5,763.0L965.6,765.6L936.6,793.0L918.1,814.6L906.9,815.4L896.1,811.5L858.8,807.9L852.8,805.4L852.6,802.6L839.4,795.1L817.8,793.2L790.5,800.8L768.7,779.9L746.3,752.7L747.8,646.6L817.2,647.0L814.4,635.5L819.3,623.0L813.5,607.4L817.3,591.2L813.7,580.9L825.2,581.7L827.2,592.1L842.8,591.3L863.9,594.4L875.1,609.5L901.8,614.1L922.1,603.6L929.6,621.1L955.2,625.7L967.5,640.0L981.1,658.3L1006.7,658.6L1003.9,622.6L994.7,628.7L971.4,615.7L962.4,609.8L966.5,576.3L972.5,536.9L965.0,522.2L974.5,500.9L983.4,496.9L1028.2,491.3L1041.3,494.7Z","M427.4,420.0L441.2,415.5L450.8,416.1L462.5,412.1L560.9,412.6L569.1,437.4L578.7,457.4L586.3,468.2L599.1,485.6L621.1,482.9L632.1,478.2L650.6,482.9L655.6,474.6L663.9,455.2L684.6,453.9L686.4,448.1L703.4,448.0L700.5,460.0L740.9,459.7L741.5,480.7L748.3,493.5L743.4,513.6L745.8,534.1L757.0,546.5L755.2,586.2L763.4,583.1L777.9,583.9L798.6,578.9L813.7,580.9L817.3,591.2L813.5,607.4L819.3,623.0L814.4,635.5L817.2,647.0L747.8,646.6L746.3,752.7L768.7,779.9L790.5,800.8L729.2,814.4L648.5,809.6L625.4,793.7L490.3,795.1L485.3,797.4L465.4,782.4L443.8,781.4L423.8,787.1L407.8,793.4L404.7,772.4L409.3,743.1L420.8,712.6L422.5,698.3L433.3,668.3L441.3,654.6L460.4,632.8L471.1,618.0L474.6,593.3L472.9,574.4L462.9,562.5L454.0,542.2L445.8,522.2L447.6,515.3L457.9,502.1L447.8,469.9L440.9,447.6L424.2,426.5L427.4,420.0Z"];
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+<defs>${g("wd", "#12222c", "#0a1319")}${g("ld", "#1d1811", "#12100c")}</defs>
+<rect width="${W}" height="${H}" fill="#080d11"/>
+${NEIGH.map((d) => `<path d="${d}" fill="#100d08" stroke="#241f17" stroke-width="2" opacity="0.6"/>`).join("")}
+<path d="M994.7,366.7L1000.7,397.3L997.3,414.7L1004.0,434.0L1023.3,452.7L1041.3,494.7L1041.3,494.7L1028.2,491.3L983.4,496.9L974.5,500.9L965.0,522.2L972.5,536.9L966.5,576.3L962.4,609.8L971.4,615.7L994.7,628.7L1003.9,622.6L1006.7,658.6L981.1,658.3L967.5,640.0L955.2,625.7L929.6,621.1L922.1,603.6L901.8,614.1L875.1,609.5L863.9,594.4L842.8,591.3L827.2,592.1L825.2,581.7L813.7,580.9L798.6,578.9L777.9,583.9L763.4,583.1L755.2,586.2L757.0,546.5L745.8,534.1L743.4,513.6L748.3,493.5L741.5,480.7L740.9,459.7L700.5,460.0L703.4,448.0L686.4,448.1L684.6,453.9L663.9,455.2L655.6,474.6L650.6,482.9L632.1,478.2L621.1,482.9L599.1,485.6L586.3,468.2L578.7,457.4L569.1,437.4L560.9,412.6L462.5,412.1L450.8,416.1L441.2,415.5L427.4,420.0L422.7,409.7L431.2,406.1L432.3,391.6L437.7,383.0L449.9,376.0L458.6,379.4L470.0,366.7L488.2,367.0L490.3,376.4L502.8,382.3L522.4,361.5L541.8,345.2L550.2,334.5L549.1,307.1L563.6,274.7L578.8,257.5L600.8,241.5L604.6,230.8L605.5,218.6L610.9,207.0L609.1,188.1L613.3,158.6L619.8,137.8L629.8,120.0L631.8,99.9L634.8,76.6L647.7,59.7L665.6,48.9L693.0,60.3L714.3,72.6L738.6,75.9L763.5,82.4L773.5,62.2L778.0,59.7L793.2,63.0L830.4,46.4L843.5,53.4L854.3,52.4L859.3,44.3L871.7,41.5L896.8,45.0L918.1,45.7L929.1,42.2L949.3,69.7L964.3,73.8L973.2,68.2L988.6,70.4L1007.2,63.3L1015.1,77.5L1044.5,99.7L1044.5,99.7L1042.4,138.7L1055.8,143.2L1045.1,155.0L1032.3,163.9L1019.5,181.3L1012.5,196.8L1010.7,223.5L1002.9,236.2L1002.6,261.4L993.1,270.7L991.8,290.5L987.2,293.1L984.2,311.3L992.5,326.5L994.7,366.7Z" fill="url(#ld)" stroke="${C.landEdge}" stroke-width="3.5"/>
+<clipPath id="drcclip"><path d="M994.7,366.7L1000.7,397.3L997.3,414.7L1004.0,434.0L1023.3,452.7L1041.3,494.7L1041.3,494.7L1028.2,491.3L983.4,496.9L974.5,500.9L965.0,522.2L972.5,536.9L966.5,576.3L962.4,609.8L971.4,615.7L994.7,628.7L1003.9,622.6L1006.7,658.6L981.1,658.3L967.5,640.0L955.2,625.7L929.6,621.1L922.1,603.6L901.8,614.1L875.1,609.5L863.9,594.4L842.8,591.3L827.2,592.1L825.2,581.7L813.7,580.9L798.6,578.9L777.9,583.9L763.4,583.1L755.2,586.2L757.0,546.5L745.8,534.1L743.4,513.6L748.3,493.5L741.5,480.7L740.9,459.7L700.5,460.0L703.4,448.0L686.4,448.1L684.6,453.9L663.9,455.2L655.6,474.6L650.6,482.9L632.1,478.2L621.1,482.9L599.1,485.6L586.3,468.2L578.7,457.4L569.1,437.4L560.9,412.6L462.5,412.1L450.8,416.1L441.2,415.5L427.4,420.0L422.7,409.7L431.2,406.1L432.3,391.6L437.7,383.0L449.9,376.0L458.6,379.4L470.0,366.7L488.2,367.0L490.3,376.4L502.8,382.3L522.4,361.5L541.8,345.2L550.2,334.5L549.1,307.1L563.6,274.7L578.8,257.5L600.8,241.5L604.6,230.8L605.5,218.6L610.9,207.0L609.1,188.1L613.3,158.6L619.8,137.8L629.8,120.0L631.8,99.9L634.8,76.6L647.7,59.7L665.6,48.9L693.0,60.3L714.3,72.6L738.6,75.9L763.5,82.4L773.5,62.2L778.0,59.7L793.2,63.0L830.4,46.4L843.5,53.4L854.3,52.4L859.3,44.3L871.7,41.5L896.8,45.0L918.1,45.7L929.1,42.2L949.3,69.7L964.3,73.8L973.2,68.2L988.6,70.4L1007.2,63.3L1015.1,77.5L1044.5,99.7L1044.5,99.7L1042.4,138.7L1055.8,143.2L1045.1,155.0L1032.3,163.9L1019.5,181.3L1012.5,196.8L1010.7,223.5L1002.9,236.2L1002.6,261.4L993.1,270.7L991.8,290.5L987.2,293.1L984.2,311.3L992.5,326.5L994.7,366.7Z"/></clipPath>
+<g clip-path="url(#drcclip)">
+  <rect x="958" y="0" width="${W}" height="${H}" fill="${C.alertDim}"
+        opacity="${spread.toFixed(3)}"/>
+  <rect x="958" y="0" width="3" height="${H}" fill="${C.alert}"
+        opacity="${(spread * 0.9).toFixed(3)}"/>
+</g>
+<circle cx="990.7" cy="272.7" r="7" fill="${C.alert}" opacity="${at(p, 0.34, 0.62).toFixed(2)}"/>
+<circle cx="978.7" cy="300.3" r="7" fill="${C.alert}" opacity="${at(p, 0.42, 0.70).toFixed(2)}"/>
+<circle cx="1025" cy="164.7" r="${11 + pin * 13}" fill="none" stroke="${C.lime}"
+        stroke-width="3.5" opacity="${(0.9 * (1 - pin)).toFixed(3)}"/>
+<circle cx="1025" cy="164.7" r="8" fill="${C.lime}" opacity="${pin.toFixed(3)}"/>
 </svg>`;
   }
 
@@ -424,6 +462,13 @@ const CARDS = {
         { t: "GULF OF OMAN", x: 1270, y: 162, s: 30, c: C.dim, a: [0.18, 0.38], w: 500 },
         { t: pin || "STRAIT OF HORMUZ", x: 830, y: 250, s: 44, c: C.lime, a: [0.55, 0.90], f: "Anton", w: 700 },
       ],
+      drc: [
+        { t: "DEM. REP. CONGO", x: 505, y: 392, s: 30, c: C.dim, a: [0.02, 0.20], w: 460 },
+        { t: "UGANDA", x: 1076, y: 210, s: 24, c: C.sub, a: [0.10, 0.32], w: 260 },
+        { t: "ITURI", x: 1042, y: 140, s: 26, c: C.lime, a: [0.52, 0.86], w: 260 },
+        { t: "NORTH KIVU", x: 1006, y: 262, s: 22, c: C.alert, a: [0.34, 0.66], w: 300 },
+        { t: "SOUTH KIVU", x: 994, y: 306, s: 22, c: C.alert, a: [0.42, 0.74], w: 300 },
+      ],
       saudi: [
         { t: "IRAN", x: 1230, y: 60, s: 34, c: C.dim, a: [0.02, 0.20] },
         { t: "SAUDI ARABIA", x: 400, y: 636, s: 34, c: C.dim, a: [0.04, 0.24], w: 640 },
@@ -478,7 +523,7 @@ const CARDS = {
    * do not have. `points` are the reported reference values only, and the
    * caption says so.
    */
-  linechart: ({ kicker, title, points = [], yMin, yMax, note, src }, p) => {
+  linechart: ({ kicker, title, points = [], yMin, yMax, yPrefix = "", ySuffix = "", note, src }, p) => {
     const W = 1460, H = 460, PAD_L = 170, PAD_B = 82, PAD_T = 40;
     const lo = yMin ?? Math.min(...points.map((d) => d.v));
     const hi = yMax ?? Math.max(...points.map((d) => d.v));
@@ -518,7 +563,10 @@ ${points.map((d, i) => {
             position: "absolute", left: 0, top: py(v) - 20, width: PAD_L - 26,
             textAlign: "right", fontFamily: "Inter", fontWeight: 600, fontSize: 28,
             color: C.dim, opacity: at(p, 0.04, 0.20),
-          }, `$${Math.round(v)}`)),
+            // THE AXIS UNIT IS THE CARD'S TO DECLARE. This was a hardcoded "$"
+            // from the film this card was built for, so a percentage axis
+            // rendered "$55, $50, $45" and nobody caught it for a whole cut.
+          }, `${yPrefix}${Math.round(v)}${ySuffix}`)),
           // value + date per point
           ...points.flatMap((d, i) => {
             const vis = clamp01(shown - i + 1);
@@ -542,6 +590,111 @@ ${points.map((d, i) => {
         ...(note ? [h("div", {
           fontFamily: "Inter", fontWeight: 700, fontSize: 34, color: C.white,
           marginTop: 16, maxWidth: 1500, lineHeight: 1.3, ...enter(p, 0.68, 0.94, 20),
+        }, note)] : []),
+      ]),
+      ...(src ? [source(src, p)] : []),
+    ], p);
+  },
+
+  /**
+   * Several series on one axis, for "this one is not like the others".
+   *
+   * `linechart` plots ONE series with a value label per point and a hardcoded
+   * currency axis — it was built for a price that moved. This is the other
+   * shape: N series where the comparison between them IS the claim, so the
+   * lines carry the meaning and only the subject line is labelled. A reader
+   * should get it without reading the legend.
+   *
+   * Every series must be the SAME quantity over the SAME x range, and
+   * `values` are plotted verbatim at their index. Nulls end a line early
+   * rather than interpolating — a series whose data stops is drawn stopping.
+   *
+   * ALL DRAWING FINISHES BY 0.34, per the HAS_PAYOFF contract; only `note`
+   * uses the payoff span.
+   */
+  multiline: ({ kicker, title, series = [], xMax, yMax, xLabel, yTicks = 4, note, src }, p) => {
+    const W = 1460, H = 430, PAD_L = 150, PAD_B = 74, PAD_T = 26, PAD_R = 250;
+    const n = xMax ?? Math.max(...series.map((s) => s.values.length - 1));
+    const hi = yMax ?? Math.max(...series.flatMap((s) => s.values.filter((v) => v != null)));
+    const px = (i) => PAD_L + (i / Math.max(1, n)) * (W - PAD_L - PAD_R);
+    const py = (v) => PAD_T + (1 - v / Math.max(1, hi)) * (H - PAD_T - PAD_B);
+    const draw = at(p, 0.08, 0.34);
+
+    const ticks = Array.from({ length: yTicks + 1 }, (_, i) => (hi / yTicks) * i);
+    const paths = series.map((s) => {
+      const pts = [];
+      for (let i = 0; i < s.values.length && i <= n; i++) {
+        if (s.values[i] == null) break;
+        pts.push([px(i), py(s.values[i])]);
+      }
+      let len = 0;
+      for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1]);
+      return { s, d: pts.map((q, i) => `${i ? "L" : "M"}${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(" "), len, end: pts[pts.length - 1] };
+    });
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+${ticks.map((v) => `<line x1="${PAD_L}" y1="${py(v).toFixed(1)}" x2="${(W - PAD_R + 20).toFixed(1)}" y2="${py(v).toFixed(1)}" stroke="${C.rule}" stroke-width="2"/>`).join("")}
+${paths.filter((q) => !q.s.hot).map((q) => `<path d="${q.d}" fill="none" stroke="${C.dim}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="${q.len.toFixed(0)}" stroke-dashoffset="${((1 - draw) * q.len).toFixed(0)}"/>`).join("")}
+${paths.filter((q) => q.s.hot).map((q) => `<path d="${q.d}" fill="none" stroke="${C.lime}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="${q.len.toFixed(0)}" stroke-dashoffset="${((1 - draw) * q.len).toFixed(0)}"/>`).join("")}
+</svg>`;
+
+    return frame([
+      ...(kicker ? [eyebrow(kicker, p)] : []),
+      ...(title ? [h("div", {
+        fontFamily: "Anton", fontSize: 54, color: C.white, marginBottom: 8,
+        maxWidth: 1560, lineHeight: 1.1, ...enter(p, 0.02, 0.18, 22),
+      }, title)] : []),
+      col({ flexGrow: 1, justifyContent: "center" }, [
+        h("div", { display: "flex", position: "relative", width: W, height: H }, [
+          hsvg(svg, { position: "absolute", left: 0, top: 0, width: W, height: H,
+                      opacity: at(p, 0.02, 0.14) }),
+          ...ticks.map((v) => h("div", {
+            position: "absolute", left: 0, top: py(v) - 18, width: PAD_L - 26,
+            textAlign: "right", fontFamily: "Inter", fontWeight: 600, fontSize: 26,
+            color: C.dim, opacity: at(p, 0.04, 0.18),
+          }, v >= 1000 ? `${(v / 1000).toFixed(v % 1000 ? 1 : 0)}k` : String(Math.round(v)))),
+          // Each line names itself at its own end — no legend to cross-reference.
+          // LABELS ARE DE-COLLIDED. The whole point of this card is that four
+          // series sit flat near zero while one climbs, which means those four
+          // labels all want the same y and overprint into an unreadable smear.
+          // They are pushed apart to a minimum gap, in y order, after layout.
+          ...(() => {
+            const lab = paths.filter((q) => q.end).map((q) => ({ q, y: q.end[1] }))
+              .sort((a, b) => a.y - b.y);
+            const GAP = 34;
+            for (let i = 1; i < lab.length; i++) {
+              if (lab[i].y - lab[i - 1].y < GAP) lab[i].y = lab[i - 1].y + GAP;
+            }
+            // If the stack ran off the bottom, lift the whole run back inside.
+            const over = lab.length ? lab[lab.length - 1].y - (H - PAD_B) : 0;
+            if (over > 0) for (const l of lab) l.y -= over;
+            return lab.flatMap(({ q, y }) => {
+              const x = Math.min(W - PAD_R + 16, q.end[0] + 16);
+              const o = at(p, 0.24, 0.34);
+              return [
+                h("div", {
+                  position: "absolute", left: x, top: y - (q.s.hot ? 34 : 15),
+                  width: PAD_R - 20,
+                  fontFamily: q.s.hot ? "Anton" : "Inter", fontWeight: q.s.hot ? 400 : 600,
+                  fontSize: q.s.hot ? 38 : 24, color: q.s.hot ? C.lime : C.dim,
+                  lineHeight: 1.1, opacity: o,
+                }, q.s.name),
+                ...(q.s.hot && q.s.endLabel ? [h("div", {
+                  position: "absolute", left: x, top: y + 6, width: PAD_R - 20,
+                  fontFamily: "Anton", fontSize: 44, color: C.lime, opacity: o,
+                }, q.s.endLabel)] : []),
+              ];
+            });
+          })(),
+          ...(xLabel ? [h("div", {
+            position: "absolute", left: PAD_L, top: H - PAD_B + 30, width: W - PAD_L - PAD_R,
+            textAlign: "center", fontFamily: "Inter", fontWeight: 600, fontSize: 26,
+            color: C.dim, opacity: at(p, 0.06, 0.20),
+          }, xLabel)] : []),
+        ]),
+        ...(note ? [h("div", {
+          fontFamily: "Inter", fontWeight: 700, fontSize: 34, color: C.white,
+          marginTop: 18, maxWidth: 1500, lineHeight: 1.3, ...enter(p, 0.62, 0.92, 20),
         }, note)] : []),
       ]),
       ...(src ? [source(src, p)] : []),

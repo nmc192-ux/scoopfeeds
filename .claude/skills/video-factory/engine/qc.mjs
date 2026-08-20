@@ -94,7 +94,7 @@ const UNVERIFIED = Symbol("unverified");
     const med = lens[Math.floor(lens.length / 2)];
     const under2 = lens.filter((x) => x < 2).length / lens.length;
     gate("median shot length", med <= 6, `${med.toFixed(2)}s (${lens.length} shots)`, "<= 6s");
-    gate("shots under 2s", under2 >= 0.08, `${Math.round(under2 * 100)}%`, ">= 8%");
+    gate("shots under 2s", under2 >= 0.08, `${(under2 * 100).toFixed(1)}%`, ">= 8%");
   }
 }
 
@@ -104,8 +104,21 @@ const UNVERIFIED = Symbol("unverified");
   if (!existsSync(sd)) {
     gate("shorts duration", false, "UNVERIFIED (no shorts/)", "< 59s");
   } else {
-    const files = readdirSync(sd).filter((f) => /^\d.*\.mp4$/.test(f));
+    // GATE WHAT WILL BE PUBLISHED, NOT WHAT IS LYING IN THE DIRECTORY.
+    // This used to glob shorts/*.mp4, so Shorts from an earlier cut — renamed
+    // or dropped since — were still counted and still measured. A run that cut
+    // 5 reported 8, and "longest 42.5s" described a file that no longer
+    // belonged to the film. Stale cuts are also reported, because a leftover
+    // named like a current one is how the wrong video gets uploaded.
+    const declared = existsSync(path.join(DIR, "..", "shorts.json"))
+      ? JSON.parse(readFileSync(path.join(DIR, "..", "shorts.json"), "utf8")).map((x) => `${x.name}.mp4`)
+      : null;
+    const present = readdirSync(sd).filter((f) => /^\d.*\.mp4$/.test(f));
+    const files = declared ? declared.filter((f) => present.includes(f)) : present;
+    const missing = declared ? declared.filter((f) => !present.includes(f)) : [];
+    const stale = declared ? present.filter((f) => !declared.includes(f)) : [];
     let worst = 0, bad = [];
+    for (const f of missing) bad.push(`${f} DECLARED BUT NOT CUT`);
     for (const f of files) {
       const o = await ff(["-i", path.join(sd, f)]);
       const m = o.match(/Duration:\s*(\d+):(\d+):([\d.]+)/);
@@ -115,7 +128,11 @@ const UNVERIFIED = Symbol("unverified");
       const dim = o.match(/,\s*(\d+)x(\d+)/);
       if (dim && !(dim[1] === "1080" && dim[2] === "1920")) bad.push(`${f} is ${dim[1]}x${dim[2]}`);
     }
-    gate("shorts count", files.length >= 3, files.length, ">= 3");
+    gate("shorts count", files.length >= 3 && missing.length === 0,
+      declared ? `${files.length} of ${declared.length} declared` : String(files.length), ">= 3");
+    if (stale.length) {
+      console.log(`        note: ${stale.length} file(s) in shorts/ are not in shorts.json and were ignored — ${stale.join(", ")}`);
+    }
     gate("shorts duration + 1080x1920", bad.length === 0,
       bad.length ? bad.join(", ") : `longest ${worst.toFixed(1)}s`, "< 59s, 9:16");
   }

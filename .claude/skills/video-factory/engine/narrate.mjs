@@ -8,6 +8,7 @@
 // this tree) and parsing the final reported time.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { createHash } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -88,10 +89,22 @@ async function main() {
   for (const b of [...beats, { id: "outro", text: OUTRO_LINE }]) {
     const file = path.join(AUDIO_DIR, typeof b.id === "number"
       ? `b${String(b.id).padStart(2, "0")}.mp3` : `${b.id}.mp3`);
-    if (!existsSync(file)) {
+    // THE CACHE IS KEYED ON THE BEAT'S TEXT, NOT ITS NUMBER. Takes are named
+    // b01.mp3, b02.mp3 … and the cache used to be a bare existsSync on that
+    // path — so editing beat 12's line, or inserting a beat and shifting every
+    // number after it, silently kept the OLD audio under the new number. The
+    // film then narrates one script while showing the cards of another, and
+    // nothing in the build reports a problem. That failure has already cost one
+    // review cycle. A sidecar holds the text each take was synthesised from;
+    // any difference re-synthesises.
+    const sidecar = file.replace(/\.mp3$/, ".txt");
+    const stale = existsSync(file) && (!existsSync(sidecar)
+      || readFileSync(sidecar, "utf8") !== b.text);
+    if (!existsSync(file) || stale) {
       writeFileSync(file, await synth(b.text));
+      writeFileSync(sidecar, b.text);
       synthed++;
-      process.stdout.write(".");
+      process.stdout.write(stale ? "!" : ".");
     } else {
       cached++;
       process.stdout.write("·");
@@ -104,7 +117,7 @@ async function main() {
   writeFileSync(P("takes.json"), JSON.stringify(out, null, 2));
 
   const mins = Math.floor(total / 60);
-  console.log(`synthesised ${synthed}, cached ${cached}`);
+  console.log(`synthesised ${synthed}, cached ${cached}   (. new  ! text changed  · reused)`);
   console.log(`narration total: ${mins}m${(total % 60).toFixed(1)}s across ${out.length} takes`);
   const longest = [...out].sort((a, b) => b.dur - a.dur).slice(0, 3);
   console.log("longest takes:", longest.map((x) => `b${x.id}=${x.dur.toFixed(1)}s`).join(" "));
