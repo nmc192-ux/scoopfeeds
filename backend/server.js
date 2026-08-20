@@ -471,6 +471,14 @@ app.use("/", seoRouter);
 const distDir = path.join(__dirname, "../frontend/dist");
 if (existsSync(distDir)) {
   app.use(express.static(distDir, {
+    // Serve `/legal/tiktok-terms` from `legal/tiktok-terms.html`. Without this
+    // the SPA catch-all below answers every extensionless path with index.html,
+    // so a static legal page would return 200 and render the React app — which
+    // reads as "the page exists" to a curl check and as a broken link to a
+    // TikTok reviewer, who is required to see the text without JavaScript.
+    // Only paths with a matching .html on disk are affected; SPA routes have
+    // none and still fall through.
+    extensions: ["html"],
     setHeaders(res, filePath) {
       if (filePath.includes(`${path.sep}assets${path.sep}`)) {
         res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
