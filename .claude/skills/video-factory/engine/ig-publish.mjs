@@ -20,7 +20,7 @@
 // Reels and Stories are published as SEPARATE media objects from the same file:
 // a Story is not a reshare of the Reel, it is its own container.
 
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { P, ENV_FILES, BACKEND } from "./_deps.mjs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -70,6 +70,21 @@ if (!CFG.filmId || !Array.isArray(CFG.posts) || !CFG.posts.length) {
 const FILM_ID = CFG.filmId;
 const YT_FILM = `https://www.youtube.com/watch?v=${FILM_ID}`;
 const POSTS = CFG.posts.map((x, i) => ({ n: i + 1, ...x }));
+
+// A PARTIAL RUN MUST NOT REPLAY FROM THE TOP. Instagram posts are irreversible
+// — the Graph API has no delete for media — and this script had no per-item
+// memory, so a crash midway meant the next run re-posted everything that had
+// already succeeded. It happened live: a container failed with error 2207076 on
+// item 2, the process died before any marker was written, the poller fired
+// again 30 minutes later, and Reel 1 went up a second time. Every completed
+// item is recorded here the moment it succeeds, and skipped on later runs.
+const LEDGER = P("out/.ig-posted-items.json");
+const done = existsSync(LEDGER) ? JSON.parse(readFileSync(LEDGER, "utf8")) : {};
+const remember = (file, kind, id) => {
+  done[`${file}:${kind}`] = { id, at: new Date().toISOString() };
+  writeFileSync(LEDGER, JSON.stringify(done, null, 2));
+};
+const already = (file, kind) => done[`${file}:${kind}`];
 const TAGS = Object.fromEntries(POSTS.map((x) => [x.n, x.tags || ""]));
 
 const api = async (p, params, method = "POST") => {
@@ -176,8 +191,16 @@ if (!confirm) { console.log("\nDRY RUN — nothing posted. Add --confirm."); pro
 const out = [];
 for (const p of chosen) {
   const videoUrl = `${BASE}/${p.file}`;
-  const reel = await publish({ videoUrl, caption: p.caption + TAGS[p.n], kind: "REELS" });
-  console.log(`REEL  ${p.file} → ${reel}`);
+  const priorReel = already(p.file, "reel");
+  let reel;
+  if (priorReel) {
+    reel = priorReel.id;
+    console.log(`REEL  ${p.file} → ${reel}  (already posted ${priorReel.at} — skipped)`);
+  } else {
+    reel = await publish({ videoUrl, caption: p.caption + TAGS[p.n], kind: "REELS" });
+    remember(p.file, "reel", reel);
+    console.log(`REEL  ${p.file} → ${reel}`);
+  }
   out.push({ file: p.file, kind: "reel", id: reel });
 
   // STORIES IS BEST-EFFORT, DELIBERATELY.
@@ -189,8 +212,10 @@ for (const p of chosen) {
   // Reel and silently dropped the other four.
   if (!SKIP_STORY) {
     try {
-      const story = await publish({ videoUrl, kind: "STORIES" });
-      console.log(`STORY ${p.file} → ${story}`);
+      const priorStory = already(p.file, "story");
+      const story = priorStory ? priorStory.id : await publish({ videoUrl, kind: "STORIES" });
+      if (!priorStory) remember(p.file, "story", story);
+      console.log(`STORY ${p.file} → ${story}${priorStory ? "  (already posted — skipped)" : ""}`);
       out.push({ file: p.file, kind: "story", id: story });
     } catch (e) {
       console.log(`STORY ${p.file} → SKIPPED: ${e.message.slice(0, 160)}`);
