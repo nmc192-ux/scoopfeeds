@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScoopFeeds Publisher — Privacy Policy</title>
+<meta name="description" content="Privacy Policy for ScoopFeeds Publisher, the internal tool ScoopFeeds uses to publish its own videos to its own TikTok account. It collects no personal data.">
+<meta name="robots" content="index, follow">
+<style>
+  :root{--ink:#111827;--muted:#4b5563;--line:#e5e7eb;--accent:#F97316;--bg:#ffffff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+       -webkit-text-size-adjust:100%}
+  .wrap{max-width:720px;margin:0 auto;padding:48px 20px 72px}
+  .brand{font-weight:700;letter-spacing:.02em;color:var(--accent);text-decoration:none;font-size:15px}
+  h1{font-size:30px;line-height:1.2;margin:22px 0 6px}
+  .sub{color:var(--muted);margin:0 0 4px}
+  .updated{color:var(--muted);font-size:14px;margin:0 0 28px}
+  h2{font-size:19px;margin:32px 0 8px;padding-top:20px;border-top:1px solid var(--line)}
+  p,li{color:#1f2937}
+  ul{padding-left:20px}
+  li{margin:6px 0}
+  a{color:#1d4ed8}
+  .callout{border-left:3px solid var(--accent);padding:2px 0 2px 14px;margin:18px 0}
+  footer{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+  @media (prefers-color-scheme:dark){
+    :root{--ink:#e5e7eb;--muted:#9ca3af;--line:#374151;--bg:#0b0f19}
+    p,li{color:#d1d5db} a{color:#93c5fd}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="brand" href="https://scoopfeeds.com">ScoopFeeds</a>
+  <h1>ScoopFeeds Publisher — Privacy Policy</h1>
+  <p class="sub">Covers the ScoopFeeds Publisher application and its use of the TikTok Content Posting API.</p>
+  <p class="updated">Last updated: 20 August 2026</p>
+
+  <div class="callout">
+    <p><strong>In short:</strong> ScoopFeeds Publisher collects no personal data from anyone. It connects
+    to one TikTok account — our own — and uses that connection only to upload our own videos.</p>
+  </div>
+
+  <h2>1. What the application is</h2>
+  <p>ScoopFeeds Publisher is an internal tool operated by ScoopFeeds, the publisher of
+     <a href="https://scoopfeeds.com">scoopfeeds.com</a>. It uploads ScoopFeeds' own original
+     news-explainer videos to ScoopFeeds' own TikTok account. It is not offered to the public: there is
+     no sign-up and no user accounts.</p>
+
+  <h2>2. What it connects to</h2>
+  <p>The application authorises against a single TikTok account — the ScoopFeeds account — using TikTok's
+     OAuth (Login Kit) with the <code>video.publish</code> scope. That scope permits publishing videos to
+     the authorising account. It does not grant access to other users' accounts, videos, comments,
+     followers or messages, and we request no scope that would.</p>
+
+  <h2>3. What we store</h2>
+  <ul>
+    <li><strong>OAuth tokens</strong> — an access token and a refresh token for the ScoopFeeds TikTok
+        account. These are held in a configuration file on our own build machine and are used solely to
+        authenticate publishing requests for our own videos.</li>
+    <li><strong>Publish identifiers</strong> — the <code>publish_id</code> TikTok returns for each upload,
+        kept alongside the video project so we can check whether a post completed.</li>
+  </ul>
+  <p>That is the complete list. No other data is retained by the application.</p>
+
+  <h2>4. What we do not do</h2>
+  <ul>
+    <li>We do not collect, store or process personal data about TikTok users.</li>
+    <li>We do not read, scrape or analyse other people's accounts, videos or comments.</li>
+    <li>We do not track anyone, and we run no analytics inside the application.</li>
+    <li><strong>These two pages set no cookies</strong> and require no JavaScript to read. They are
+        static HTML with no third-party scripts, fonts or trackers.</li>
+    <li>We do not sell, rent or share data with third parties, and we do not use any data for
+        advertising or for training machine-learning models.</li>
+  </ul>
+
+  <h2>5. Access, revocation and deletion</h2>
+  <p>Because the only account involved is our own, the account holder controls access directly:</p>
+  <ul>
+    <li>Revoking the application in TikTok's own settings (<em>Settings and privacy → Security and
+        permissions → Manage app permissions</em>) immediately invalidates our tokens.</li>
+    <li>Emailing us at the address below will have any stored tokens deleted from our machine.</li>
+  </ul>
+  <p>Tokens are also discarded whenever they are rotated or the integration is retired. Deleting them
+     does not remove videos already published to TikTok; those are managed in the TikTok account itself.</p>
+
+  <h2>6. Security</h2>
+  <p>Credentials are kept outside the application's source repository and are not committed to version
+     control. They live on a single machine under the account holder's control.</p>
+
+  <h2>7. Changes</h2>
+  <p>If this policy changes, the "last updated" date above changes with it.</p>
+
+  <h2>8. Contact</h2>
+  <p>Privacy questions or deletion requests: <a href="mailto:hello@scoopfeeds.com">hello@scoopfeeds.com</a></p>
+
+  <footer>
+    See also the <a href="/legal/tiktok-terms">ScoopFeeds Publisher Terms of Service</a>,
+    and the site-wide <a href="https://scoopfeeds.com/privacy">ScoopFeeds Privacy Policy</a>,
+    which covers the scoopfeeds.com website rather than this application.
+  </footer>
+</div>
+</body>
+</html>
