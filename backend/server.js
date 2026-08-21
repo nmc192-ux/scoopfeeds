@@ -18,6 +18,7 @@ import marketRouter    from "./src/routes/market.js";
 import weatherRouter    from "./src/routes/weather.js";
 import liveStreamRouter from "./src/routes/liveStream.js";
 import seoRouter         from "./src/routes/seo.js";
+import tiktokCallbackRouter from "./src/routes/tiktokCallback.js";
 import geoRouter         from "./src/routes/geo.js";
 import readerRouter      from "./src/routes/reader.js";
 import newsletterRouter  from "./src/routes/newsletter.js";
@@ -453,6 +454,10 @@ app.get("/ads.txt", (req, res, next) => {
 // ── SEO routes (sitemaps, robots.txt, article detail SSR) ───────────────
 // Must be mounted BEFORE the SPA catch-all so crawlers get XML/HTML, not index.html.
 app.use("/", seoRouter);
+// Must sit above the SPA catch-all, same as seoRouter: /tiktok/callback needs to
+// render the authorisation code server-side, and the catch-all would otherwise
+// answer it with index.html.
+app.use("/", tiktokCallbackRouter);
 
 // ── Serve frontend (production) ──────────────────────────────────────────
 // Cache-Control strategy (Phase B Track 3 Sprint 0):
