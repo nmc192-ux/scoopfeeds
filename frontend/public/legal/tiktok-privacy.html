@@ -77,7 +77,14 @@
     <li>We do not read, scrape or analyse other people's accounts, videos or comments.</li>
     <li>We do not track anyone, and we run no analytics inside the application.</li>
     <li><strong>These two pages set no cookies</strong> and require no JavaScript to read. They are
-        static HTML with no third-party scripts, fonts or trackers.</li>
+        static HTML: we load no advertising scripts, no third-party fonts and no embedded media, and
+        we do not track visitors across sites.</li>
+    <li>The site is served through Cloudflare, which injects its own
+        <strong>Cloudflare Web Analytics</strong> beacon
+        (<code>static.cloudflareinsights.com/beacon.min.js</code>) into pages at the edge. It records
+        aggregate page-view data for us. It sets <strong>no cookies</strong>, does not fingerprint
+        visitors and does not track anyone across sites. It is not required to read these pages,
+        which render fully with JavaScript disabled.</li>
     <li>We do not sell, rent or share data with third parties, and we do not use any data for
         advertising or for training machine-learning models.</li>
   </ul>
