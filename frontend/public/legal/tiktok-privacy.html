@@ -50,9 +50,16 @@
 
   <h2>2. What it connects to</h2>
   <p>The application authorises against a single TikTok account — the ScoopFeeds account — using TikTok's
-     OAuth (Login Kit) with the <code>video.publish</code> scope. That scope permits publishing videos to
-     the authorising account. It does not grant access to other users' accounts, videos, comments,
-     followers or messages, and we request no scope that would.</p>
+     OAuth (Login Kit). It requests exactly three scopes:</p>
+  <ul>
+    <li><code>user.info.basic</code> — reads the authorising account's own basic profile, which the
+        Content Posting API requires before a post in order to return that account's permitted
+        privacy settings.</li>
+    <li><code>video.publish</code> — publishes a video to the authorising account.</li>
+    <li><code>video.upload</code> — uploads a video to the authorising account's drafts.</li>
+  </ul>
+  <p>All three apply only to the account that authorised the app. None grants access to other users'
+     accounts, videos, comments, followers or messages, and we request no scope that would.</p>
 
   <h2>3. What we store</h2>
   <ul>
