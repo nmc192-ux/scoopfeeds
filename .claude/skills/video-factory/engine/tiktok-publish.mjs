@@ -153,9 +153,13 @@ for (const p of posts) {
       title: p.title,
       privacy_level: WANT_PRIVACY,
       disable_comment: false, disable_duet: false, disable_stitch: false,
-      // Real footage, rendered cards. Declaring otherwise would be a false
-      // disclosure; declaring nothing where AI WAS used would be a policy breach.
-      is_aigc: !!CFG.syntheticContent,
+      // AIGC DISCLOSURE IS PER-PLATFORM, NOT ONE GLOBAL BOOLEAN. This used to
+      // read publish.json's `syntheticContent`, which is the YouTube
+      // "altered or synthetic content" answer — and the two thresholds differ.
+      // The Ebola film contains no AI imagery, so YouTube's flag is false, but
+      // its narration is a synthesised voice, which TikTok's AIGC label covers.
+      // Sharing one field would have under-declared on TikTok.
+      is_aigc: CFG.isAigc === true,
     },
     source_info: {
       source: "FILE_UPLOAD",

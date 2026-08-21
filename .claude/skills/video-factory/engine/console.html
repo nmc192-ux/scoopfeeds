@@ -1,0 +1,155 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ScoopFeeds Publisher</title>
+<style>
+ :root{--bg:#0b0f19;--panel:#111827;--line:#242c3d;--ink:#e8eaf0;--muted:#8b93a7;
+       --lime:#dde706;--ok:#22c55e;--bad:#ef4444;--warn:#f59e0b}
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--bg);color:var(--ink);
+   font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+ header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;
+   align-items:baseline;gap:14px;flex-wrap:wrap}
+ .logo{font-weight:800;letter-spacing:.04em;color:var(--lime);font-size:15px}
+ .sub{color:var(--muted)}
+ .bar{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+ .pill{border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:12px;color:var(--muted)}
+ .pill b{color:var(--ink);font-weight:600}
+ main{padding:22px 24px;max-width:1180px}
+ h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);
+   margin:26px 0 12px;font-weight:600}
+ .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+ .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;
+   display:flex;flex-direction:column}
+ .card.sel{border-color:var(--lime)}
+ video{width:100%;aspect-ratio:9/16;max-height:300px;object-fit:cover;background:#000;display:block;cursor:pointer}
+ .body{padding:12px 14px;display:flex;flex-direction:column;gap:10px;flex:1}
+ .fname{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--muted)}
+ .title{font-weight:600;line-height:1.35}
+ .stat{display:flex;gap:6px;flex-wrap:wrap}
+ .tag{font-size:11px;border-radius:5px;padding:3px 7px;border:1px solid var(--line);color:var(--muted)}
+ .tag.ok{color:var(--ok);border-color:#14532d} .tag.no{color:var(--muted)}
+ .tag.dup{color:#000;background:var(--bad);border-color:var(--bad);font-weight:700}
+ button{font:inherit;font-weight:600;border-radius:8px;padding:8px 14px;cursor:pointer;
+   border:1px solid var(--line);background:#1b2333;color:var(--ink)}
+ button:hover:not(:disabled){border-color:var(--lime)}
+ button:disabled{opacity:.45;cursor:not-allowed}
+ button.go{background:var(--lime);color:#0b0f19;border-color:var(--lime)}
+ .steps{margin-top:6px;border-top:1px solid var(--line);padding-top:10px;display:none}
+ .steps.on{display:block}
+ .step{display:flex;gap:9px;align-items:flex-start;padding:4px 0;font-size:12.5px}
+ .dot{width:9px;height:9px;border-radius:50%;margin-top:6px;flex:none;
+   background:#39415a}
+ .step.run .dot{background:var(--warn);animation:p 1s infinite}
+ .step.ok .dot{background:var(--ok)} .step.fail .dot{background:var(--bad)}
+ @keyframes p{50%{opacity:.3}}
+ .sname{font-family:ui-monospace,Menlo,monospace;min-width:96px;color:var(--ink)}
+ .sdetail{color:var(--muted);word-break:break-word}
+ .note{color:var(--muted);font-size:12.5px;margin:10px 0 0}
+ a{color:var(--lime)}
+ .banner{background:#241a08;border:1px solid #5a3d0a;color:#fbbf24;border-radius:10px;
+   padding:12px 14px;margin:0 0 18px;font-size:13px}
+</style></head><body>
+<header>
+  <span class="logo">SCOOPFEEDS PUBLISHER</span>
+  <span class="sub" id="film">loading…</span>
+  <div class="bar">
+    <span class="pill">TikTok privacy <b id="pv">—</b></span>
+    <span class="pill">AIGC declared <b id="ai">—</b></span>
+    <span class="pill">token <b id="tok">—</b></span>
+    <button id="connect">Connect TikTok</button>
+    <button id="who">Check account</button>
+  </div>
+</header>
+<main>
+  <div class="banner" id="banner" style="display:none"></div>
+  <h2>Shorts — approval gate</h2>
+  <div class="grid" id="grid"></div>
+  <p class="note">Every publish writes a ledger entry. A second attempt on the same file is
+     refused before any request is made — the guard that was missing when an Instagram run
+     replayed itself and posted the same Reel twice.</p>
+</main>
+<script>
+const $ = (s)=>document.querySelector(s);
+let S = null;
+
+function tags(s){
+  const t=[];
+  t.push(s.youtube ? `<span class="tag ok">YouTube ${s.youtube.publishAt?.slice(0,10)||"live"}</span>`
+                   : `<span class="tag no">YouTube —</span>`);
+  if(s.instagram){
+    const r=s.instagram.reel||0, st=s.instagram.story||0;
+    t.push(r>1 ? `<span class="tag dup">IG REEL ×${r} DUPLICATE</span>`
+               : `<span class="tag ok">IG reel ✓</span>`);
+    if(st) t.push(st>1 ? `<span class="tag dup">IG STORY ×${st}</span>` : `<span class="tag ok">IG story ✓</span>`);
+  } else t.push(`<span class="tag no">Instagram —</span>`);
+  t.push(s.tiktok ? `<span class="tag ok">TikTok ${s.tiktok.privacy||""} ✓</span>`
+                  : `<span class="tag no">TikTok —</span>`);
+  return t.join("");
+}
+
+function render(){
+  $("#film").textContent = `${S.film.title} — ${S.project}`;
+  $("#pv").textContent = S.tiktok.privacy;
+  $("#ai").textContent = S.tiktok.isAigc ? "yes" : "no";
+  $("#tok").textContent = S.tiktok.configured ? "present" : "missing";
+  const dup = S.shorts.filter(s=>s.instagram && s.instagram.reel>1);
+  if(dup.length){
+    $("#banner").style.display="block";
+    $("#banner").innerHTML = `<b>${dup.length} item(s) posted more than once on Instagram:</b> `
+      + dup.map(d=>d.file).join(", ") + ` — delete the extra in the Instagram app; the Graph API has no delete for media.`;
+  }
+  $("#grid").innerHTML = S.shorts.map((s,i)=>`
+    <div class="card" id="c${i}">
+      <video src="/media/${encodeURIComponent(s.file)}" muted playsinline preload="metadata"
+             onclick="this.paused?this.play():this.pause()"></video>
+      <div class="body">
+        <div class="fname">${s.file} · ${s.sizeMB} MB</div>
+        <div class="title">${s.title.replace(" #Shorts","")}</div>
+        <div class="stat">${tags(s)}</div>
+        <div>
+          <button class="go" onclick="pub('${s.file}',${i})" id="b${i}"
+            ${s.tiktok?"disabled":""}>${s.tiktok?"Posted to TikTok":"Publish to TikTok"}</button>
+        </div>
+        <div class="steps" id="s${i}"></div>
+      </div>
+    </div>`).join("");
+}
+
+const STEPS=["auth","creator_info","video_init","upload","status"];
+function pub(file,i){
+  const box=$("#s"+i), btn=$("#b"+i);
+  document.querySelectorAll(".card").forEach(c=>c.classList.remove("sel"));
+  $("#c"+i).classList.add("sel");
+  btn.disabled=true; box.className="steps on";
+  box.innerHTML=STEPS.map(n=>`<div class="step" id="st${i}_${n}">
+      <span class="dot"></span><span class="sname">${n}</span><span class="sdetail">waiting</span></div>`).join("");
+  const es=new EventSource("/api/tiktok/publish?file="+encodeURIComponent(file));
+  es.onmessage=(e)=>{
+    const d=JSON.parse(e.data);
+    let row=$("#st"+i+"_"+d.step);
+    if(!row){
+      box.insertAdjacentHTML("beforeend",`<div class="step" id="st${i}_${d.step}">
+        <span class="dot"></span><span class="sname">${d.step}</span><span class="sdetail"></span></div>`);
+      row=$("#st"+i+"_"+d.step);
+    }
+    row.className="step "+d.state;
+    row.querySelector(".sdetail").textContent=d.detail||"";
+    if(d.step==="done"){ es.close(); if(d.state==="ok") setTimeout(load,600); else btn.disabled=false; }
+  };
+  es.onerror=()=>{ es.close(); btn.disabled=false; };
+}
+
+$("#connect").onclick=async()=>{
+  const r=await (await fetch("/api/tiktok/connect")).json();
+  if(r.error) return alert(r.error);
+  alert(`Scopes requested: ${r.scopes.join(", ")}\nRedirect: ${r.redirect}\n\nOpening TikTok consent…`);
+  window.open(r.authorizeUrl,"_blank");
+};
+$("#who").onclick=async()=>{
+  const r=await (await fetch("/api/tiktok/whoami")).json();
+  alert(r.error ? "ERROR: "+r.error
+    : `@${r.username} (${r.nickname})\nGranted scopes: ${r.scopes.join(", ")}\nPrivacy options: ${r.privacyOptions.join(", ")}\nMax duration: ${r.maxDurationSec}s`);
+};
+async function load(){ S=await (await fetch("/api/state")).json(); render(); }
+load();
+</script></body></html>
