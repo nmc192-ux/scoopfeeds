@@ -151,9 +151,14 @@ TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, TIKTOK_REFRESH_TOKEN
 
 1. developers.tiktok.com → register as a developer with the ScoopFeeds TikTok
    account.
-2. Create an app. Add the **Content Posting API** product and request the
-   **`video.publish`** scope (`video.upload` only reaches drafts, which still
-   needs a human to press publish).
+2. Create an app. Add **Login Kit** and the **Content Posting API** products, and
+   request all three scopes: **`user.info.basic`**, **`video.publish`**,
+   **`video.upload`**.
+   `user.info.basic` is not optional — `creator_info/query` needs it, and that
+   call is what returns the account's permitted `privacy_level_options`, so
+   without it publishing cannot even determine what it is allowed to do.
+   **Whatever scopes the app requests must match what the privacy policy says
+   it requests**; a reviewer compares the two.
 3. Add **Login Kit** so the app can obtain a refresh token at all.
 4. Submit for audit. Until it passes, everything posts `SELF_ONLY` — the poller
    detects this and holds rather than posting invisibly.
