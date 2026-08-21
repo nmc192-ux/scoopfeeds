@@ -48,6 +48,15 @@
  a{color:var(--lime)}
  .banner{background:#241a08;border:1px solid #5a3d0a;color:#fbbf24;border-radius:10px;
    padding:12px 14px;margin:0 0 18px;font-size:13px}
+ .info{background:#0d1526;border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+   margin:0 0 18px;font-size:13px}
+ .info h3{margin:0 0 10px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+ .kv{display:grid;grid-template-columns:170px 1fr;gap:6px 14px}
+ .kv div:nth-child(odd){color:var(--muted)}
+ .kv code{color:var(--lime)}
+ .scopes{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
+ .scope{border:1px solid #3f4a2a;background:#1a1f10;color:var(--lime);border-radius:5px;
+   padding:3px 9px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px}
 </style></head><body>
 <header>
   <span class="logo">SCOOPFEEDS PUBLISHER</span>
@@ -62,6 +71,7 @@
 </header>
 <main>
   <div class="banner" id="banner" style="display:none"></div>
+  <div class="info" id="info" style="display:none"></div>
   <h2>Shorts — approval gate</h2>
   <div class="grid" id="grid"></div>
   <p class="note">Every publish writes a ledger entry. A second attempt on the same file is
@@ -139,16 +149,32 @@ function pub(file,i){
   es.onerror=()=>{ es.close(); btn.disabled=false; };
 }
 
+function panel(title, rows){
+  const el=$("#info"); el.style.display="block";
+  el.innerHTML=`<h3>${title}</h3><div class="kv">`+
+    rows.map(([k,v])=>`<div>${k}</div><div>${v}</div>`).join("")+`</div>`;
+  el.scrollIntoView({block:"nearest"});
+}
 $("#connect").onclick=async()=>{
   const r=await (await fetch("/api/tiktok/connect")).json();
-  if(r.error) return alert(r.error);
-  alert(`Scopes requested: ${r.scopes.join(", ")}\nRedirect: ${r.redirect}\n\nOpening TikTok consent…`);
-  window.open(r.authorizeUrl,"_blank");
+  if(r.error) return panel("Cannot connect",[["error",r.error]]);
+  panel("Requesting authorisation — Login Kit",[
+    ["scopes requested",`<div class="scopes">${r.scopes.map(s=>`<span class="scope">${s}</span>`).join("")}</div>`],
+    ["redirect_uri",`<code>${r.redirect}</code>`],
+    ["consent","opening TikTok in a new tab…"],
+  ]);
+  setTimeout(()=>window.open(r.authorizeUrl,"_blank"),900);
 };
 $("#who").onclick=async()=>{
+  panel("creator_info/query — Login Kit read",[["status","querying TikTok…"]]);
   const r=await (await fetch("/api/tiktok/whoami")).json();
-  alert(r.error ? "ERROR: "+r.error
-    : `@${r.username} (${r.nickname})\nGranted scopes: ${r.scopes.join(", ")}\nPrivacy options: ${r.privacyOptions.join(", ")}\nMax duration: ${r.maxDurationSec}s`);
+  if(r.error) return panel("creator_info/query failed",[["error",r.error]]);
+  panel("creator_info/query — Login Kit read",[
+    ["account",`<code>@${r.username}</code> ${r.nickname?"("+r.nickname+")":""}`],
+    ["granted scopes",`<div class="scopes">${r.scopes.map(s=>`<span class="scope">${s}</span>`).join("")}</div>`],
+    ["privacy options",r.privacyOptions.join(", ")],
+    ["max duration",r.maxDurationSec+"s"],
+  ]);
 };
 async function load(){ S=await (await fetch("/api/state")).json(); render(); }
 load();
