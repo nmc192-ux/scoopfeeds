@@ -14,6 +14,7 @@
 // from the same env files the CLI uses.
 
 import { createServer } from "http";
+import { randomBytes, createHash } from "crypto";
 import { readFileSync, writeFileSync, existsSync, statSync } from "fs";
 import path from "path";
 import { P, ENV_FILES, projectSlug } from "./_deps.mjs";
@@ -34,6 +35,27 @@ const readJson = (rel, fb = null) => {
   catch { return fb; }
 };
 const TT_LEDGER = "out/.tiktok-posted-items.json";
+const TT_API = "https://open.tiktokapis.com/v2";
+const PKCE = { verifier: null };
+
+// Written back to the same env file the CLI publishers read, so a token minted
+// in the console is immediately usable by tiktok-publish.mjs and the poller.
+function persistRefreshToken(token) {
+  // WRITE IT WHERE THE OTHER TIKTOK VARS ALREADY LIVE. This used to take the
+  // first existing file in ENV_FILES, which is backend/.env — so a token minted
+  // here landed in a different file from the client key and secret that minted
+  // it. Both get loaded, so nothing breaks immediately; it breaks later, when
+  // one file is edited or moved and the credentials silently disagree.
+  const target =
+    ENV_FILES.find((f) => existsSync(f) && /^TIKTOK_CLIENT_KEY=/m.test(readFileSync(f, "utf8")))
+    || ENV_FILES.find((f) => existsSync(f));
+  if (!target) throw new Error("no env file found to write the refresh token to");
+  const lines = readFileSync(target, "utf8").split("\n")
+    .filter((l) => !l.startsWith("TIKTOK_REFRESH_TOKEN="));
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+  lines.push(`TIKTOK_REFRESH_TOKEN=${token}`, "");
+  writeFileSync(target, lines.join("\n"));
+}
 
 function state() {
   const pub = readJson("publish.json", {});
@@ -99,16 +121,64 @@ const server = createServer(async (req, res) => {
     return res.end(readFileSync(f));
   }
 
+  // The code→token exchange runs HERE, not in a terminal. The console is a
+  // local process, so the client secret stays on this machine either way — but
+  // doing it in the UI is what makes connect → consent → code → publish a
+  // single unbroken sequence a reviewer can watch. Sending someone to paste a
+  // code into a shell breaks the take and demonstrates nothing.
+  if (url.pathname === "/api/tiktok/exchange" && req.method === "POST") {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    try {
+      let { code } = JSON.parse(raw || "{}");
+      if (!code) throw new Error("no code supplied");
+      // People paste the whole redirect URL as often as the bare code.
+      if (code.includes("code=")) {
+        try { code = new URL(code).searchParams.get("code") || code; } catch { /* not a URL */ }
+      }
+      code = decodeURIComponent(String(code).trim().replace(/\*$/, ""));
+      if (!PKCE.verifier) throw new Error("no pending authorisation — press Connect TikTok first");
+
+      const r = await fetch(`${TT_API}/oauth/token/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_key: process.env.TIKTOK_CLIENT_KEY,
+          client_secret: process.env.TIKTOK_CLIENT_SECRET,
+          code,
+          grant_type: "authorization_code",
+          redirect_uri: process.env.TIKTOK_REDIRECT_URI || "https://scoopfeeds.com/tiktok/callback",
+          code_verifier: PKCE.verifier,
+        }),
+      });
+      const j = await r.json();
+      if (!j.access_token) throw new Error(j.error_description || j.error || JSON.stringify(j).slice(0, 200));
+
+      persistRefreshToken(j.refresh_token);
+      process.env.TIKTOK_REFRESH_TOKEN = j.refresh_token;
+      PKCE.verifier = null;
+      return send(res, 200, "application/json", JSON.stringify({
+        ok: true, open_id: j.open_id, scopes: (j.scope || "").split(",").filter(Boolean),
+        refresh_expires_in: j.refresh_expires_in,
+      }));
+    } catch (e) {
+      return send(res, 200, "application/json", JSON.stringify({ error: e.message }));
+    }
+  }
+
   if (url.pathname === "/api/tiktok/connect") {
     const key = process.env.TIKTOK_CLIENT_KEY;
     if (!key) return send(res, 200, "application/json",
       JSON.stringify({ error: "TIKTOK_CLIENT_KEY not set — run scripts/tiktok-auth.mjs first" }));
     const redirect = process.env.TIKTOK_REDIRECT_URI || "https://scoopfeeds.com/tiktok/callback";
     const scopes = process.env.TIKTOK_SCOPES || "user.info.basic,video.publish,video.upload";
+    PKCE.verifier = randomBytes(48).toString("hex");
+    const challenge = createHash("sha256").update(PKCE.verifier).digest("base64url");
     return send(res, 200, "application/json", JSON.stringify({
       authorizeUrl: "https://www.tiktok.com/v2/auth/authorize/?" + new URLSearchParams({
         client_key: key, scope: scopes, response_type: "code",
         redirect_uri: redirect, state: "console",
+        code_challenge: challenge, code_challenge_method: "S256",
       }),
       redirect, scopes: scopes.split(","),
     }));

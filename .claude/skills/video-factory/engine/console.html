@@ -57,6 +57,10 @@
  .scopes{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
  .scope{border:1px solid #3f4a2a;background:#1a1f10;color:var(--lime);border-radius:5px;
    padding:3px 9px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px}
+ .exch{display:flex;gap:8px;margin-top:4px}
+ .exch input{flex:1;background:#0b1120;border:1px solid var(--line);border-radius:8px;
+   padding:9px 12px;color:var(--ink);font-family:ui-monospace,Menlo,monospace;font-size:12px}
+ .exch input:focus{outline:none;border-color:var(--lime)}
 </style></head><body>
 <header>
   <span class="logo">SCOOPFEEDS PUBLISHER</span>
@@ -162,7 +166,24 @@ $("#connect").onclick=async()=>{
     ["scopes requested",`<div class="scopes">${r.scopes.map(s=>`<span class="scope">${s}</span>`).join("")}</div>`],
     ["redirect_uri",`<code>${r.redirect}</code>`],
     ["consent","opening TikTok in a new tab…"],
+    ["authorisation code",`<div class="exch">
+        <input id="codein" placeholder="paste the code from the callback page" autocomplete="off">
+        <button id="exch">Exchange for token</button></div>
+      <div id="exres" style="margin-top:8px;color:var(--muted)"></div>`],
   ]);
+  // The exchange runs on this machine, in this UI — no terminal step, so the
+  // whole connect → consent → code → token sequence stays on camera.
+  $("#exch").onclick=async()=>{
+    const code=$("#codein").value.trim();
+    if(!code) return;
+    const out=$("#exres"); out.textContent="exchanging with TikTok…";
+    const j=await (await fetch("/api/tiktok/exchange",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({code})})).json();
+    if(j.error){ out.innerHTML=`<span style="color:var(--bad)">${j.error}</span>`; return; }
+    out.innerHTML=`<span style="color:var(--ok)">token stored</span> · open_id <code>${j.open_id}</code>`
+      +` · granted <div class="scopes" style="display:inline-flex">${j.scopes.map(s=>`<span class="scope">${s}</span>`).join("")}</div>`;
+    load();
+  };
   setTimeout(()=>window.open(r.authorizeUrl,"_blank"),900);
 };
 $("#who").onclick=async()=>{
