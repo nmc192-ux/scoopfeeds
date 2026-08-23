@@ -253,9 +253,12 @@ export const VIDEO_FACEBOOK_MAX_PER_DAY = () => {
  * changes, so varying the mount is where variety comes from without
  * inconsistency — DrJ's decision, 2026-08-14.
  */
-export function mountFor(articleId) {
+export function mountFor(articleId, ordinal = 0) {
   const h = [...String(articleId || "x")].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
-  return MOUNT_NAMES[h % MOUNT_NAMES.length];
+  // ORDINAL, because one video can hold more than one photo card and they were
+  // all landing on the same mount. Stable per article as before at ordinal 0,
+  // so nothing that does not ask for variety sees any change.
+  return MOUNT_NAMES[(h + ordinal) % MOUNT_NAMES.length];
 }
 
 const SITE_ORIGIN = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
@@ -373,6 +376,16 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
   const work = acquireFrameDir(`autopost-${article.id}`);
   try {
     const segments = [];
+    // HOW MANY PHOTO CARDS THIS VIDEO HAS ALREADY SPENT.
+    //
+    // The schema permits two "photo" cards in a row (MAX_CONSECUTIVE_SAME_TYPE)
+    // and any number apart, and every one of them was rendering the SAME
+    // `article.image_url` on the SAME mount. A viewer sees one photograph
+    // presented twice as if it were two — the repetition complaint from the
+    // long-form film, sitting in the automated loop.
+    //
+    // An article carries one picture, so the honest fix is to spend it once.
+    let photosUsed = 0;
     for (let i = 0; i < slides.length; i++) {
       const card = slides[i];
       const audioSecs = audio[i].durationSecs;
@@ -402,27 +415,45 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
         try {
           const svWork = path.join(work, `sv${String(i).padStart(2, "0")}`);
           if (wants === "photo") {
-            underlayPath = await buildMount({
-              imageUrl: article.image_url, mount: mountFor(article.id),
-              work: svWork, seed: article.id,
-            });
-            if (underlayPath) imageCredit = attribution.publisher || null;
-            // THE ARTICLE'S PHOTOGRAPH IS ALWAYS PREFERRED, and footage is only
-            // ever reached when there isn't one. The publisher chose that image
-            // to illustrate this story; no keyword search beats an editor. This
-            // branch is for the slides that were rendering as type on black.
+            const ordinal = photosUsed++;
+            const mount = mountFor(article.id, ordinal);
+            // THE ARTICLE'S PHOTOGRAPH IS PREFERRED, ONCE. The publisher chose
+            // it to illustrate this story and no keyword search beats an editor
+            // — but it is one picture, and showing it again on the next photo
+            // card does not make it two.
+            if (ordinal === 0) {
+              underlayPath = await buildMount({
+                imageUrl: article.image_url, mount, work: svWork, seed: article.id,
+              });
+              if (underlayPath) imageCredit = attribution.publisher || null;
+            }
+            // Footage covers both gaps: a first card with no article photo, and
+            // every later card, whose alternative is the same photograph twice.
             if (!underlayPath && footageEnabled()) {
               const found = await findFootageStill({ subject: card.subject, title: article.title });
               if (found) {
                 underlayPath = await buildMount({
-                  imageUrl: found.imageUrl, mount: mountFor(article.id),
-                  work: path.join(svWork, "footage"), seed: article.id,
+                  imageUrl: found.imageUrl, mount,
+                  work: path.join(svWork, "footage"), seed: `${article.id}-${ordinal}`,
                 });
                 // Credit the owner, or use nothing. Never the publisher.
                 if (underlayPath) {
                   imageCredit = found.credit;
                   logger.info(`🎬 slide ${i} footage: ${found.source} · ${found.licence} · ${found.sourceUrl || found.imageUrl}`);
                 }
+              }
+            }
+            // LAST RESORT ON A LATER CARD: the article photo again, but on a
+            // different mount and with its own push-in. A relevant picture
+            // repeated is still better than a black slide; a different mount is
+            // what stops it reading as a stuck frame.
+            if (!underlayPath && ordinal > 0) {
+              underlayPath = await buildMount({
+                imageUrl: article.image_url, mount, work: svWork, seed: `${article.id}-${ordinal}`,
+              });
+              if (underlayPath) {
+                imageCredit = attribution.publisher || null;
+                logger.info(`🎬 slide ${i} photo: no footage for photo card #${ordinal + 1} — reusing the article photo on mount "${mount}"`);
               }
             }
           } else if (wants === "map") {
