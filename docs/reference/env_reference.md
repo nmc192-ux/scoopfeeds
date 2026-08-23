@@ -251,6 +251,7 @@ they are **unverified against real platform chrome** as of 2026-08-12.
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
 | `VIDEO_SLIDE_DRIFT_ENABLED` | `0` (**static**) | default | restart | The slow whole-frame pan across each slide. **Off** — DrJ, 2026-08-12: eye-straining under text. `1` restores it. Progressive state reveals (`xfade`) are unaffected either way. With the pan off the 4× supersample is skipped too; the 2% overscan is kept and cropped dead centre, which is the midpoint the pan used to average out to. |
+| `VIDEO_MUSIC_BED_ENABLED` | unset (**off**) | unset | restart | Procedural score bed under the automated shorts, ported from the long-form engine's v4 bed (synthesis verbatim; arrangement generalized from six film chapters to the short's cold-open → build → turn → kicker shape). The turn card strips the music to 0.40 — the pull-back is what makes the argument land. Sidechain-ducked under narration, loudnorm to −14 LUFS, limiter last, 0.85 ceiling for AAC decode overshoot. Renders in <1s per video (pure ffmpeg synthesis, no assets, no licensing). A bed failure never costs a video: the caller logs and ships the unscored file. Dark until eyeballed live per house convention. |
 
 ### Artifact retention
 
