@@ -53,8 +53,8 @@ const iso = (d) => (d ? String(d).slice(0, 10) : null);
 async function dvids(q) {
   const key = process.env.DVIDS_API_KEY;
   if (!key) {
-    add({ source: "DVIDS", provenance: "verified", licence: "US Government work — public domain",
-          title: "(needs DVIDS_API_KEY — free at dvidshub.net/api)", url: "https://www.dvidshub.net/search?q=" + encodeURIComponent(q),
+    add({ source: "DVIDS", provenance: "verified", licence: "US Government works — public domain; per-asset credit still applies",
+          title: "(needs DVIDS_API_KEY — free self-signup at api.dvidshub.net)", url: "https://www.dvidshub.net/search?q=" + encodeURIComponent(q) + "&filter[type]=video",
           date: null, attribution: "US DoD / DVIDS", note: "browse manually until a key is set", query: q });
     return;
   }
@@ -62,10 +62,21 @@ async function dvids(q) {
     const u = `https://api.dvidshub.net/search?q=${encodeURIComponent(q)}&type=video&max_results=15&api_key=${key}`;
     const j = await (await fetch(u)).json();
     for (const it of j.results || []) {
-      add({ source: "DVIDS", provenance: "verified",
-            licence: "US Government work — public domain (17 U.S.C. §105)",
+      // NOT every DVIDS asset is a US Government work. DVIDS also carries
+      // allied-military and contractor material, which is not automatically
+      // public domain. The branch field is the tell: a US service branch means
+      // 17 U.S.C. §105 applies; anything else needs the asset's own credit line
+      // read before use.
+      const usGov = /^(Army|Navy|Air Force|Marines|Marine Corps|Coast Guard|Space Force|DoD)/i
+        .test(it.branch || "");
+      add({ source: "DVIDS", provenance: usGov ? "verified" : "declared",
+            licence: usGov
+              ? "US Government work — public domain (17 U.S.C. §105)"
+              : `credited to "${it.branch || "unknown"}" — NOT automatically public domain, read the asset credit`,
             title: it.title, url: it.url, date: iso(it.date_published || it.date),
-            attribution: `${it.branch || "US DoD"} / DVIDS${it.credit ? " · " + it.credit : ""}`,
+            durationSec: it.duration ?? null,
+            attribution: `${it.branch || "unknown"} / DVIDS${it.credit ? " · " + it.credit : ""}`,
+            note: usGov ? null : "allied or contractor material can appear on DVIDS; verify before use",
             query: q });
     }
   } catch (e) { add({ source: "DVIDS", provenance: "verified", error: e.message, query: q }); }
@@ -185,7 +196,8 @@ for (const r of results) {
     last = r.provenance;
   }
   if (r.error) { console.log(`  ${r.source}: error — ${r.error}`); continue; }
-  console.log(`  ${(r.date || "—").padEnd(11)} ${r.source.padEnd(20)} ${String(r.title).slice(0, 58)}`);
+  const dur = r.durationSec ? ` [${r.durationSec}s]` : "";
+  console.log(`  ${(r.date || "—").padEnd(11)} ${r.source.padEnd(20)} ${String(r.title).slice(0, 52)}${dur}`);
   console.log(`              ${r.licence}`);
   if (r.note) console.log(`              ⚠ ${r.note}`);
 }
