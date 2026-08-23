@@ -93,6 +93,32 @@ const DRIFT_RATE_PX_PER_SEC = Number.parseFloat(process.env.VIDEO_DRIFT_RATE || 
  */
 export const driftEnabled = () => process.env.VIDEO_SLIDE_DRIFT_ENABLED === "1";
 
+/**
+ * IMAGE-LAYER MOTION — a different thing from the slide pan, on purpose.
+ *
+ * The pan was removed (DrJ, 2026-08-12) because "a slow whole-frame pan under
+ * text someone is reading is eye-straining". That reasoning is about TEXT. It
+ * does not apply to a photograph or a locator map, which exist to be looked at
+ * rather than read — and a still image under static type is exactly why the
+ * shorts read as a slideshow (measured: 587 of 735 frames are duplicates).
+ *
+ * So this moves the UNDERLAY ONLY. The type overlay is composited on top,
+ * untouched and pixel-static. Every assertion pinning the static graph still
+ * holds, because they all describe slides with no underlay at all.
+ *
+ * WHY ZOOM AND NOT PAN. A pan is an animated integer crop, and at the rates
+ * that look good here (~0.3px/frame) it stalls and snaps 2px unless
+ * supersampled 4x — sixteen times the pixels, which this pipeline's economics
+ * cannot carry. A zoom is a continuous rescale: zoompan resamples, so there is
+ * no integer-offset staircase to hide.
+ *
+ * NO UPSCALING EVER. The underlay is laid out at canvas x (1 + zoom) and the
+ * zoom runs 1.0 -> 1+ZA, so z=1 downscales the oversized plate to canvas and
+ * z=1+ZA lands on native pixels. The push-in never invents detail.
+ */
+export const imageMotionEnabled = () => process.env.VIDEO_IMAGE_MOTION_ENABLED === "1";
+const IMAGE_ZOOM = Number.parseFloat(process.env.VIDEO_IMAGE_ZOOM || "0.06");
+
 // ENCODE, pinned rather than inherited. The demo came out at 129 kbps, which
 // is fine for static dark frames — but that number is a CONSEQUENCE of this
 // content, not a setting, and it would drift the moment card content changes.
@@ -277,16 +303,43 @@ export const grainChain = () => {
 export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0, caption = null, orientation = "horizontal", underlay = false }) {
   const CV = geometryFor(orientation).canvas;
   const parts = [];
+  // The whole-slide timeline, needed by image motion so each state animates its
+  // OWN slice of one continuous move. Mirrors the xfade arithmetic below.
+  const stepSecs = hold - crossfade;
+  const slideTotal = hold + (stateCount - 1) * stepSecs;
+  const motion = underlay && imageMotionEnabled() && IMAGE_ZOOM > 0;
   if (underlay) {
     // The image is the LAST input, after the states. Centred and scaled to
     // cover — a mount is taller than it is wide and must not be letterboxed
     // onto the ground it is supposed to be sitting on.
     const ui = stateCount;
+    // With motion the plate is laid out oversized so the push-in never upscales.
+    const PW = motion ? Math.round(CV.w * (1 + IMAGE_ZOOM)) : CV.w;
+    const PH = motion ? Math.round(CV.h * (1 + IMAGE_ZOOM)) : CV.h;
+    const tap = motion ? "m" : "u";
     parts.push(
-      `[${ui}:v]scale=${CV.w}:${CV.h}:force_original_aspect_ratio=decrease,` +
-      `pad=${CV.w}:${CV.h}:(ow-iw)/2:(oh-ih)/2:color=${GROUND_HEX},setsar=1,fps=${FPS},` +
-      `split=${stateCount}${Array.from({ length: stateCount }, (_, j) => `[u${j}]`).join("")}`
+      `[${ui}:v]scale=${PW}:${PH}:force_original_aspect_ratio=decrease,` +
+      `pad=${PW}:${PH}:(ow-iw)/2:(oh-ih)/2:color=${GROUND_HEX},setsar=1,fps=${FPS},` +
+      `split=${stateCount}${Array.from({ length: stateCount }, (_, j) => `[${tap}${j}]`).join("")}`
     );
+    if (motion) {
+      // STATES ARE CROSSFADED, SO THEIR ZOOMS MUST BE CONTIGUOUS. Each state is
+      // its own stream starting at t=0; state i appears at i*(hold-crossfade)
+      // in the assembled slide. Giving every state the same 1.0->1+ZA ramp
+      // would put two different zoom levels on screen during each dissolve and
+      // the image would visibly jump at every state change. Each state instead
+      // animates the sub-range its own window covers, so zEnd(i) == zStart(i+1)
+      // exactly and the dissolve is between matching frames.
+      for (let i = 0; i < stateCount; i++) {
+        const frames = Math.max(1, Math.round(hold * FPS));
+        const zAt = (T) => 1 + IMAGE_ZOOM * (slideTotal > 0 ? T / slideTotal : 0);
+        const z0 = zAt(i * stepSecs), z1 = zAt(i * stepSecs + hold);
+        parts.push(
+          `[m${i}]zoompan=z='${z0.toFixed(6)}+${(z1 - z0).toFixed(6)}*on/${frames}':` +
+          `x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${CV.w}x${CV.h}:fps=${FPS},setsar=1[u${i}]`
+        );
+      }
+    }
   }
   for (let i = 0; i < stateCount; i++) {
     // UNDERLAY. A subject-visual card declares GROUND.OVER — it is a transparent
