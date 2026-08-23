@@ -93,3 +93,25 @@ test("successive photo cards in one video land on different mounts", () => {
   const seen = MOUNT_NAMES.map((_, i) => mountFor("some-article-id", i));
   assert.equal(new Set(seen).size, MOUNT_NAMES.length, "ordinals collide before the mounts are exhausted");
 });
+
+// ─── recency ────────────────────────────────────────────────────────────────
+
+import { newestFirst } from "./videoFootage.js";
+
+test("recency is a tiebreak among acceptable pictures, newest first", () => {
+  // Measured effect on live NASA results: "flooding in Pakistan" moved from a
+  // 2010 image to 2022, and "volcanic eruption in Iceland" from a 2014 EO-1
+  // frame to the March 2024 eruption. For news that is the difference between
+  // archive material and something that reads as current.
+  const sorted = [
+    { date: "2010-08-04" }, { date: "2024-03-29" }, { date: "2017-12-08" },
+  ].sort(newestFirst).map(x => x.date);
+  assert.deepEqual(sorted, ["2024-03-29", "2017-12-08", "2010-08-04"]);
+});
+
+test("an undated candidate sorts last, not first", () => {
+  // "" beats every real date in a naive descending compare, which would rank
+  // the one candidate we know least about above all the others.
+  const sorted = [{ date: null }, { date: "2011-01-01" }, { date: "" }].sort(newestFirst);
+  assert.equal(sorted[0].date, "2011-01-01");
+});

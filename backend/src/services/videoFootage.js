@@ -195,6 +195,7 @@ const getJson = async (url, headers = {}) => {
 
 const MAX_WHITE = Number.parseFloat(process.env.VIDEO_FOOTAGE_MAX_WHITE || "0.20");
 const MAX_PROBES = Number.parseInt(process.env.VIDEO_FOOTAGE_MAX_PROBES || "3", 10);
+const MAX_AGE_DAYS = Number.parseInt(process.env.VIDEO_FOOTAGE_MAX_AGE_DAYS || "0", 10);
 
 export function whiteFraction(rgb) {
   let white = 0, n = 0;
@@ -225,6 +226,16 @@ function notAFigure(imageUrl) {
   }
 }
 
+/**
+ * Newest first, undated last.
+ *
+ * ISO dates sort correctly as strings, which is the only reason this is a
+ * one-liner. An undated candidate sorts to the BOTTOM rather than the top —
+ * "" would otherwise win a descending comparison against every real date.
+ */
+export const newestFirst = (a, b) =>
+  String(b?.date || "").localeCompare(String(a?.date || ""));
+
 // ─── NASA ───────────────────────────────────────────────────────────────────
 
 async function nasaCandidates(query) {
@@ -234,7 +245,7 @@ async function nasaCandidates(query) {
     const d = item.data?.[0] || {};
     if (!relevant(query, d.title)) continue;
     if (!looksPhotographic({ title: d.title, description: d.description })) continue;
-    out.push({ resolve: async () => {
+    out.push({ date: String(d.date_created || "").slice(0, 10) || null, resolve: async () => {
       // `item.href` is a manifest, not a picture: a collection.json listing the
       // rendition URLs. The original is the only one worth mounting — thumbs are
       // a few hundred pixels and the mount crops to 5:6 before scaling to 1080.
@@ -254,6 +265,11 @@ async function nasaCandidates(query) {
       };
     } });
   }
+  // NASA's API has no sort parameter, so recency is applied to the candidates
+  // that already PASSED both gates — never as a filter. Preferring a newer
+  // acceptable picture is a tiebreak; preferring a newer one over a relevant
+  // one would be a downgrade.
+  out.sort(newestFirst);
   return out;
 }
 
@@ -270,8 +286,21 @@ async function dvidsCandidates(query) {
   const key = process.env.DVIDS_API_KEY;
   if (!key) return [];
   const out = [];
-  const j = await getJson(
-    `https://api.dvidshub.net/search?q=${encodeURIComponent(query)}&type=image&max_results=15&api_key=${key}`);
+  // RECENCY IS THE POINT, for news imagery. DVIDS exposes `sort=date` and
+  // from/to windows (their own tutorial examples), so ask the server for newest
+  // first rather than re-ranking whatever relevance happened to return. The
+  // relevance and figure gates still run on top: newest is a tiebreak among
+  // acceptable pictures, never a reason to accept an unacceptable one.
+  const params = new URLSearchParams({
+    q: query, type: "image", max_results: "15", sort: "date", api_key: key,
+  });
+  // An explicit window is opt-in. Left unset because a hard cutoff turns "old
+  // picture" into "no picture", and a five-year-old photograph of the right
+  // place beats a black slide.
+  if (MAX_AGE_DAYS > 0) {
+    params.set("from_date", new Date(Date.now() - MAX_AGE_DAYS * 86_400_000).toISOString().replace(/\.\d+Z$/, "Z"));
+  }
+  const j = await getJson(`https://api.dvidshub.net/search?${params}`);
   for (const it of (j.results || []).slice(0, 15)) {
     // THE BRANCH TEST IS THE LICENCE TEST. DVIDS hosts allied and contractor
     // material that is not a US Government work and carries no §105 exemption;
