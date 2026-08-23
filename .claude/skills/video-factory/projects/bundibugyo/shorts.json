@@ -1,0 +1,37 @@
+[
+  {
+    "name": "01_fastest_outbreak",
+    "from": 3,
+    "to": 5,
+    "title": "The Fastest-Growing Ebola Outbreak On Record",
+    "hook": "Ebola is not airborne and does not spread by casual contact."
+  },
+  {
+    "name": "02_forty_days",
+    "from": 8,
+    "to": 9,
+    "title": "This Ebola Outbreak Hit 1,000 Cases In 40 Days",
+    "hook": "The 2018 outbreak, in the same country, took about 235 days."
+  },
+  {
+    "name": "03_ebola_is_not_airborne",
+    "from": 15,
+    "to": 18,
+    "title": "Ebola Is Not Airborne — Here Is How It Actually Spreads",
+    "hook": "Direct contact with blood or body fluids. Nothing else."
+  },
+  {
+    "name": "04_vaccine_different_species",
+    "from": 20,
+    "to": 24,
+    "title": "The Ebola Vaccine Is Licensed For A Different Species",
+    "hook": "Ervebo covers Zaire. This outbreak is Bundibugyo."
+  },
+  {
+    "name": "05_seven_weeks",
+    "from": 39,
+    "to": 43,
+    "title": "The Ebola Outbreak Was Moving Seven Weeks Before Anyone Knew",
+    "hook": "A burial on 27 March. Nobody knew it was Ebola."
+  }
+]

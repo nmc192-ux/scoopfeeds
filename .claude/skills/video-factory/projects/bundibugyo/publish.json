@@ -1,0 +1,75 @@
+{
+  "film": "out/bundibugyo-scored.mp4",
+  "thumb": "out/THUMB.png",
+  "srt": "out/bundibugyo.srt",
+  "youtube": {
+    "title": "The Ebola Outbreak Nobody Saw Coming",
+    "categoryId": "25",
+    "publishAt": "2026-08-20T19:00:00Z",
+    "tags": [
+      "ebola",
+      "ebola outbreak",
+      "ebola virus",
+      "ebola news",
+      "ebola congo",
+      "drc ebola",
+      "bundibugyo",
+      "bundibugyo virus",
+      "ebola vaccine",
+      "ervebo",
+      "contact tracing",
+      "who",
+      "cdc",
+      "public health",
+      "epidemic",
+      "outbreak explained",
+      "democratic republic of congo",
+      "ituri",
+      "north kivu",
+      "scoopfeeds"
+    ],
+    "description": "In March 2026, three Red Cross volunteers in eastern Congo were asked to bury the dead. It was a routine job, unrelated to Ebola \u2014 nobody knew there was an Ebola outbreak, because nobody had found it yet. All three were dead within seven weeks.\n\nThe outbreak was not declared until 15 May. As of 17 August the CDC reports 5,105 confirmed cases and 2,420 confirmed deaths in the Democratic Republic of the Congo. It is spreading substantially faster than any Ebola outbreak on record: it passed 1,000 confirmed cases 40 days after the response was activated, against roughly 235 days for the 2018 outbreak in the same country. CDC calls it the second-largest Ebola outbreak on record.\n\nThe reason everyone has reported is that there is no vaccine. That is true, and it is not the reason.\n\nThere is an Ebola vaccine \u2014 Ervebo \u2014 and it works. It is licensed against Zaire ebolavirus. This outbreak is a different species, Bundibugyo, seen only twice before and both times contained. CEPI puts it plainly: there are no licensed vaccines for Bundibugyo virus.\n\nBut containing Ebola has never depended on a vaccine. It depends on administration \u2014 finding every contact, visiting each daily for 21 days, isolating anyone who develops a fever. Every step assumes you can locate someone, reach them safely, and that they open the door. In eastern Congo each assumption fails independently: 4.4 million internally displaced people, years of armed conflict, responders briefly detained, facilities attacked. The CDC lists violence against health workers, shortages of protective equipment, and lack of trust in government and misinformation among the reasons the response is failing. The World Food Programme counted 8.7 million people at crisis levels of hunger in these provinces before Ebola arrived.\n\nThe absent vaccine is the headline. The absent administrative and security capacity is the cause.\n\nA NOTE ON RISK\nEbola is not airborne and does not spread by casual contact. The CDC has confirmed no cases in the United States from this outbreak and puts the risk to the American public at low. A case fatality rate describes people diagnosed with a disease in the places it is spreading. It does not describe your risk. Outside the region there has been one confirmed exported case, in France.\n\nCHAPTERS\n0:00 The burial nobody connected to Ebola\n0:43 What is actually happening\n2:02 What that number does not mean\n2:52 The headline\n3:37 What you do when there is no vaccine\n4:16 Why that fails here\n5:42 The seven weeks\n6:23 What happens now\n\nSOURCES\n\u2022 CDC, Ebola Outbreak: Current Situation, 20 Aug 2026 \u2014 all case and death figures in this film. DRC as of 17 Aug; Uganda and France as of 18 Aug. Also the second-largest-on-record framing, the 40-days-vs-235-days comparison, and the response-challenge list. https://www.cdc.gov/ebola/situation-summary/index.html\n\u2022 The first-100-days chart is redrawn from the data table CDC publishes beneath its own chart (Data Sources: DRC INSP, WHO; DRC data as of 19 Aug 2026). It compares EARLY GROWTH, not total outbreak size.\n\u2022 WHO Disease Outbreak News DON615, 12 Aug 2026 \u2014 54 health zones, 6 provinces. https://www.who.int/emergencies/disease-outbreak-news/item/2026-DON615\n\u2022 CEPI \u2014 \"There are no licensed vaccines for Bundibugyo virus.\" https://cepi.net/bundibugyo-virus-what-it-and-what-it-not\n\u2022 CDC, History of Ebola Outbreaks \u2014 the 2014-16 and 2018-20 comparisons. https://www.cdc.gov/ebola/outbreaks/index.html\n\u2022 IFRC, 23 May 2026 \u2014 the three volunteers, DRC Red Cross Mongbwalu branch. https://www.ifrc.org/article/statement-ifrc-saddened-deaths-three-drc-red-cross-volunteers-ituri-province\n\u2022 UN News, May 2026 (4.4m displaced; WHO DG on tracing) \u2022 OCHA, 27 Jul 2026 (responders detained) \u2022 US State Dept, 5 Aug 2026 ($512m) \u2022 CNN, 22 May 2026 (aid cuts) \u2022 WFP (hunger).\n\nWHAT WE LEFT OUT, AND WHY\nTwo institutions publish different totals for the same week. WHO AFRO, via UN News on 18 August, gave 5,021 cases and 2,378 deaths; CDC, reporting DRC health-ministry data as of 17 August, gives 5,105 and 2,420 \u2014 a higher figure on an earlier date. Neither is wrong: DRC excludes probable cases from official reporting and has temporarily excluded suspected ones pending investigation, so national surveillance and WHO's validated regional figures run on different clocks. This film uses CDC's numbers throughout, on one basis, with the date on screen.\n\nWe make no claim that the virus is mutating or becoming more lethal: the case fatality rate rose from 44% on 30 July to 47.4% on 17 August, and that can reflect improved counting. No death-toll projection. No causal line drawn between aid cuts and case counts \u2014 the commitment figure and the reported criticism sit side by side, attributed. No identifiable patient appears at any point.\n\nAll footage is real. No AI-generated imagery is used in this video.\n\nScoopFeeds \u2014 event-centric news. https://scoopfeeds.com\n\n#Ebola #EbolaOutbreak #DRCongo #PublicHealth #Bundibugyo"
+  },
+  "shorts": [
+    {
+      "file": "01_fastest_outbreak.mp4",
+      "publishAt": "2026-08-20T21:00:00Z",
+      "title": "The Fastest-Growing Ebola Outbreak On Record #Shorts",
+      "desc": "5,105 confirmed cases and 2,420 confirmed deaths in DR Congo as of 17 August 2026 (CDC). Ebola is not airborne and does not spread by casual contact. The CDC has confirmed no cases in the United States from this outbreak and puts the risk to the American public at low."
+    },
+    {
+      "file": "02_forty_days.mp4",
+      "publishAt": "2026-08-21T21:00:00Z",
+      "title": "This Ebola Outbreak Hit 1,000 Cases In 40 Days #Shorts",
+      "desc": "40 days from response activation to 1,000 confirmed cases. The 2018 outbreak in the same country took about 235. Source: CDC, 20 August 2026."
+    },
+    {
+      "file": "03_ebola_is_not_airborne.mp4",
+      "publishAt": "2026-08-22T21:00:00Z",
+      "title": "Ebola Is Not Airborne \u2014 Here Is How It Actually Spreads #Shorts",
+      "desc": "Direct contact with the blood or body fluids of someone sick, or someone who has died. Ebola is not airborne and does not spread by casual contact. The CDC has confirmed no cases in the United States from this outbreak and puts the risk to the American public at low."
+    },
+    {
+      "file": "04_vaccine_different_species.mp4",
+      "publishAt": "2026-08-23T21:00:00Z",
+      "title": "The Ebola Vaccine Is Licensed For A Different Species #Shorts",
+      "desc": "Ervebo is licensed against Zaire ebolavirus and it works. This outbreak is Bundibugyo, and CEPI states there are no licensed vaccines for it."
+    },
+    {
+      "file": "05_seven_weeks.mp4",
+      "publishAt": "2026-08-24T21:00:00Z",
+      "title": "The Ebola Outbreak Was Moving Seven Weeks Before Anyone Knew #Shorts",
+      "desc": "A burial on 27 March. The outbreak was not declared until 15 May. Named from the IFRC statement of 23 May 2026."
+    }
+  ],
+  "facebook": {
+    "publishAt": "2026-08-20T19:00:00Z",
+    "caption": "In March 2026, three Red Cross volunteers in eastern Congo were asked to bury the dead \u2014 a routine job, unrelated to Ebola. Nobody knew there was an outbreak, because nobody had found it yet. All three were dead within seven weeks. The outbreak was not declared until 15 May.\n\nAs of 17 August the CDC reports 5,105 confirmed cases and 2,420 confirmed deaths in DR Congo. It passed 1,000 cases 40 days after the response began; the 2018 outbreak in the same country took about 235 days.\n\nThe reason everyone has reported is that there is no vaccine. That is true, and it is not the reason. Ervebo works \u2014 it is licensed against Zaire ebolavirus, and this outbreak is a different species, Bundibugyo. But containing Ebola has never depended on a vaccine. It depends on finding every contact, visiting each daily for 21 days, and isolating on fever. In eastern Congo every one of those steps fails: 4.4 million displaced, years of armed conflict, responders detained, facilities attacked, and \u2014 in the CDC's own words \u2014 lack of trust and misinformation.\n\nEbola is not airborne and does not spread by casual contact. The CDC has confirmed no cases in the United States from this outbreak and puts the risk to the American public at low.\n\nSources: CDC (20 Aug 2026); WHO DON615 (12 Aug 2026); CEPI; IFRC (23 May 2026); WFP. All footage is real; no AI-generated imagery.\n\nhttps://scoopfeeds.com",
+    "reel": {
+      "file": "02_forty_days.mp4",
+      "publishAt": "2026-08-21T21:00:00Z",
+      "caption": "40 days from response activation to 1,000 confirmed cases. The 2018 Ebola outbreak in the same country took about 235 days. Source: CDC, 20 August 2026."
+    }
+  },
+  "syntheticContent": false
+}
