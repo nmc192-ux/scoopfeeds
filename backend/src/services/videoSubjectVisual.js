@@ -210,9 +210,29 @@ export async function buildMount({ imageUrl, mount, work, seed, ffmpegPath = nul
 function mountFrom(ff, raw, out, work, mount, seed, probeText) {
   const m = String(probeText).match(/,\s*(\d{2,5})x(\d{2,5})/);
   const W = m ? Number(m[1]) : 1920, H = m ? Number(m[2]) : 1080;
-  const ch = Math.min(H, Math.round(W * 6 / 5));
-  const cw = Math.min(W, Math.round(ch * 5 / 6));
-  const crop = { cw, ch, cx: Math.round((W - cw) / 2), cy: Math.round((H - ch) / 2) };
+  // EVERY CROP DIMENSION AND OFFSET IS EVEN, because `crop` runs on the source's
+  // native pixel format and article photographs are JPEG — yuv420p, whose chroma
+  // planes are half-resolution. ffmpeg silently rounds an odd crop DOWN to the
+  // chroma grid, so a nominal 711x853 comes out 710x852.
+  //
+  // Nothing complained until `cutting`, which renders its torn-paper alpha mask
+  // at the NOMINAL size and alphamerges it onto the ACTUAL one: "Input frame
+  // sizes do not match (710x852 vs 711x853)", the mount returns null, and the
+  // slide falls back to "rendering the type alone" — a bare type card, which is
+  // exactly the flatness this format exists to avoid. It stayed invisible
+  // because that fallback is a warning, not an error, and the video publishes.
+  //
+  // polaroid and pinned survived only by luck: they pad rather than alphamerge,
+  // so a silently-shrunk crop just makes a marginally smaller print.
+  // Dimensions floor to even with a floor of 2 (a zero-size crop errors out);
+  // OFFSETS floor to even with a floor of ZERO. Clamping an offset to 2 as well
+  // pushes the window 2px past the bottom edge on any source whose height is
+  // odd — which is most of them, since that is the case being fixed here.
+  const evenDim = (n) => Math.max(2, n - (n % 2));
+  const evenOff = (n) => Math.max(0, n - (n % 2));
+  const ch = evenDim(Math.min(H, Math.round(W * 6 / 5)));
+  const cw = evenDim(Math.min(W, Math.round(ch * 5 / 6)));
+  const crop = { cw, ch, cx: evenOff(Math.round((W - cw) / 2)), cy: evenOff(Math.round((H - ch) / 2)) };
   MOUNTS[mount](ff, { src: raw, out, crop, work, seed });
   return out;
 }
