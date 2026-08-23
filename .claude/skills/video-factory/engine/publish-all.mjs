@@ -68,6 +68,37 @@ for (const [k, ok] of [["film", CFG.film], ["thumb", CFG.thumb],
   }
 }
 
+// ── AIGC consistency gate ─────────────────────────────────────────────────
+// genscene.mjs `use` stamps LICENSES.md with the EXACT phrase below when an
+// AI-generated scene enters a project. A description still claiming "No
+// AI-generated imagery" over that stamp is a false public statement — the one
+// class of error this pipeline refuses to publish rather than paper over.
+// Keyed on the exact stamp, not /AI-generated/i: provenance notes legitimately
+// contain those words while EXCLUDING AI content (the Ebola project's does).
+const AIGC_STAMP = "**AI-generated content present in this project.**";
+{
+  const lic = P("out/footage/LICENSES.md");
+  if (existsSync(lic) && readFileSync(lic, "utf8").includes(AIGC_STAMP)) {
+    const desc = CFG.youtube?.description || "";
+    if (/no ai-generated imagery/i.test(desc)) {
+      console.error("REFUSING: LICENSES.md declares AI-generated content, but the YouTube");
+      console.error("description claims \"No AI-generated imagery\". Fix the description.");
+      process.exit(1);
+    }
+    if (!CFG.syntheticContent) {
+      console.error("REFUSING: AI-generated scenes present but publish.json syntheticContent");
+      console.error("is not set — the YouTube 'Altered content' disclosure would be skipped.");
+      process.exit(1);
+    }
+    const ttPath = P("tiktok.json");
+    if (existsSync(ttPath) && JSON.parse(readFileSync(ttPath, "utf8")).isAigc !== true) {
+      console.error("REFUSING: AI-generated scenes present but tiktok.json isAigc is not true.");
+      process.exit(1);
+    }
+    console.log("AIGC gate    : generated scenes present — disclosures verified consistent");
+  }
+}
+
 const FILM = P(CFG.film);
 const THUMB = P(CFG.thumb);
 const SRT = CFG.srt ? P(CFG.srt) : null;
