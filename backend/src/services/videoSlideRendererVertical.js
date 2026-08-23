@@ -388,7 +388,44 @@ const overScrim = (top = 1360) => abs({
   backgroundImage: "linear-gradient(180deg, rgba(9,7,6,0) 0%, rgba(9,7,6,0.90) 40%, rgba(9,7,6,0.97) 100%)",
 });
 
-function overStates(card, ctx, { underlay, lineTop = 1470, size = 84 }) {
+/**
+ * THE CREDIT ON THE PICTURE, NOT IN THE DESCRIPTION.
+ *
+ * Studied from a GPS segment (references/gps-grammar.md): every third-party
+ * asset — Getty, Reuters, CNBC — wears a small persistent corner credit, and
+ * that is most of how a broadcast package reads as sourced rather than
+ * decorated. We had `sourceBadge`, but only on the TITLE card. The photo and
+ * map cards, which are the ones actually carrying someone else's picture,
+ * carried nothing.
+ *
+ * WHAT GETS CREDITED IS WHAT IS NOT OURS. A photo comes from the article, so
+ * it credits the resolved publisher — the same resolver the description and
+ * the spoken credit use, so the three cannot drift. A locator map is drawn
+ * here from Natural Earth's public-domain geometry: no permission is needed
+ * and none is implied, but naming it is free and true.
+ *
+ * It rides the TYPE layer deliberately. With VIDEO_IMAGE_MOTION_ENABLED the
+ * image beneath is pushing in; a credit that drifted with it would read as
+ * part of the photograph rather than as a caption on it. Static is the point.
+ *
+ * Right-aligned inside safeRight so it never sits under the action rail.
+ */
+const imageCredit = (label) => label
+  ? text(String(label).toUpperCase(), {
+      position: "absolute", right: G.safeRight + G.marginX, top: G.safeTop + 8,
+      fontSize: 24, fontWeight: 600, letterSpacing: 4, color: C.sub,
+      // CARRIES ITS OWN CONTRAST. Unlike every other element here, this one sits
+      // on a PHOTOGRAPH rather than on the ground, and a photograph is whatever
+      // it happens to be — the first render put dim grey over a bright plate and
+      // the credit was unreadable. A credit that cannot be read is not a credit.
+      // The bottom display type solves the same problem with overScrim; a chip
+      // is the small-element form of it, and it keeps the ground contract (an
+      // object ON the ground) rather than tinting the picture.
+      backgroundColor: "rgba(9,7,6,0.62)", padding: "7px 13px", borderRadius: 5,
+    })
+  : null;
+
+function overStates(card, ctx, { underlay, lineTop = 1470, size = 84, credit = null }) {
   const [l1, l2] = (card.lines || []).slice(0, 2);
   const ch = () => chrome(ctx);
   const eb = card.eyebrow ? [eyebrowV(card.eyebrow)] : [];
@@ -396,18 +433,22 @@ function overStates(card, ctx, { underlay, lineTop = 1470, size = 84 }) {
     ? antonLine(pair[0], { top, size, color: pair[1] === "lime" ? C.lime : C.white })
     : null;
   const st = (key, children) => ({ key, lime: true, underlay, tree: root(GROUND.OVER, children.filter(Boolean)) });
+  // On EVERY state, including the bare first one — the credit belongs to the
+  // picture, and the picture is on screen from the first frame.
+  const cr = imageCredit(credit);
   return [
     // The image alone, briefly. A photograph that arrives already captioned has
     // no moment of being looked at.
-    st("v1", [...ch()]),
-    st("v2", [...ch(), ...eb, overScrim(), L(l1, lineTop)]),
-    st("v3", [...ch(), ...eb, overScrim(), L(l1, lineTop), L(l2, lineTop + 96)]),
+    st("v1", [...ch(), cr]),
+    st("v2", [...ch(), ...eb, overScrim(), L(l1, lineTop), cr]),
+    st("v3", [...ch(), ...eb, overScrim(), L(l1, lineTop), L(l2, lineTop + 96), cr]),
   ];
 }
 
 /** The article's own photograph, on a mount. */
 function photoStatesV(card, ctx) {
-  return overStates(card, ctx, { underlay: "photo" });
+  // The article's publisher, from the one resolver every consumer shares.
+  return overStates(card, ctx, { underlay: "photo", credit: ctx.outlet || null });
 }
 
 /**
@@ -415,7 +456,7 @@ function photoStatesV(card, ctx) {
  * read as a whole shape and wants more of the frame than a portrait does.
  */
 function mapStatesV(card, ctx) {
-  return overStates(card, ctx, { underlay: "map", lineTop: 1500, size: 78 });
+  return overStates(card, ctx, { underlay: "map", lineTop: 1500, size: 78, credit: "NATURAL EARTH" });
 }
 
 // ─── turn / kicker ──────────────────────────────────────────────────────────
