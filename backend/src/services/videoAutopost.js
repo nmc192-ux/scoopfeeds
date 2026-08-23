@@ -50,8 +50,10 @@ import {
 import { resolveAttribution, buildDescriptionCredit } from "./videoAttribution.js";
 import { writeVideoSpec, writePackaging, isVideoSpecEnabled } from "./videoSpecWriter.js";
 import { statesForCard, renderState, fitStatesToDuration, videoDesignKey } from "./videoSlideRenderer.js";
+import { getFFmpegPath } from "./videoGenerator.js";
 import { DEFAULT_ORIENTATION } from "./videoGeometry.js";
-import { assembleSlide, concatSlides, holdForAudio } from "./videoAssembler.js";
+import { assembleSlide, concatSlides, holdForAudio, slideTotalSecs } from "./videoAssembler.js";
+import { deriveShortArc, buildBed, scoreShort } from "./videoMusicBed.js";
 import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.js";
 import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
 import { uploadToYouTube, isYouTubeConfigured } from "./youtubeClient.js";
@@ -437,6 +439,31 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
     await concatSlides({ segmentPaths: segments, outputPath: out, workDir: work });
     if (!existsSync(out) || statSync(out).size < 10_000) {
       throw new Error(`assembled video is missing or implausibly small: ${out}`);
+    }
+
+    // ── Score bed (dark: VIDEO_MUSIC_BED_ENABLED=1) ─────────────────────────
+    // Slide starts are DERIVED from the same audio durations the assembler
+    // used — slideTotalSecs per slide, accumulated. Nothing here re-models the
+    // timeline (the long-form bed drifted ~50s the one time something did).
+    // A bed failure never costs the video: the unscored file ships instead.
+    if (process.env.VIDEO_MUSIC_BED_ENABLED === "1") {
+      try {
+        const starts = []; let t = 0;
+        for (let i = 0; i < slides.length; i++) { starts.push(t); t += slideTotalSecs(audio[i].durationSecs); }
+        const { arc, sections, phases } = deriveShortArc(slides, starts, t);
+        const bed = path.join(work, "bed.wav");
+        const scored = path.join(VIDEOS_DIR, `${article.id}-${videoDesignKey()}-scored.mp4`);
+        const ff = getFFmpegPath();
+        await buildBed(t, bed, { arc, sections, phases, ffmpegPath: ff });
+        await scoreShort(out, bed, scored, { ffmpegPath: ff });
+        if (existsSync(scored) && statSync(scored).size > 10_000) {
+          logger.info(`🎬 music bed: scored ${t.toFixed(1)}s, turn=${phases.turn?.toFixed(1) ?? "none"}, sections=${sections.length}`);
+          return { path: scored, slides };
+        }
+        logger.warn("🎬 music bed: scored file missing/small — shipping unscored");
+      } catch (err) {
+        logger.warn(`🎬 music bed failed (shipping unscored): ${err.message.slice(0, 160)}`);
+      }
     }
     return { path: out, slides };
   } finally {
