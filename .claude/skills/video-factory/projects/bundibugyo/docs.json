@@ -1,0 +1,23 @@
+[
+  {
+    "name": "cepi",
+    "url": "https://cepi.net/bundibugyo-virus-what-it-and-what-it-not",
+    "container": "no licensed vaccines for Bundibugyo",
+    "phrases": ["There are no licensed vaccines for Bundibugyo virus"],
+    "pad": 40, "minW": 620
+  },
+  {
+    "name": "who_don",
+    "url": "https://www.who.int/emergencies/disease-outbreak-news/item/2026-DON615",
+    "container": "no approved vaccines or specific treatments",
+    "phrases": ["no approved vaccines or specific treatments currently exist"],
+    "pad": 40, "minW": 620
+  },
+  {
+    "name": "who_quote",
+    "url": "https://news.un.org/en/story/2026/05/1167592",
+    "container": "nearly impossible",
+    "phrases": ["nearly impossible"],
+    "pad": 40, "minW": 620
+  }
+]
