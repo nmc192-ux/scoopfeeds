@@ -193,16 +193,45 @@ export async function buildMount({ imageUrl, mount, work, seed, ffmpegPath = nul
     logger.warn(`🎬 subject visual: photo fetch failed — ${err.message}`);
     return null;
   }
+  // ONE FRAME, BOUNDED, WITHOUT THE METADATA.
+  //
+  // Found on the first live DVIDS fetch. DoD photographs now ship with C2PA
+  // content credentials, and the C2PA block embeds a SECOND image. ffmpeg's
+  // image2 muxer therefore sees a two-frame input and dies writing the mount's
+  // intermediate: "Could not get frame filename number 2 from pattern". The
+  // mount returned null and the slide fell back to bare type — for every DVIDS
+  // photograph, silently.
+  //
+  // (The loud "unable to decode APP fields" warnings alongside it are a red
+  // herring; the pixels decode fine. The frame COUNT was the failure.)
+  //
+  // The same trap catches an animated GIF article image, which has always been
+  // possible and would have failed the same way. So this is normalisation, not
+  // a DVIDS patch: take the first video frame and nothing else.
+  //
+  // Bounded to 2000px on the long edge because the mount crops to roughly 700px
+  // and a 5000x3300 source costs a 23MB intermediate to gain nothing.
+  const flat = path.join(work, "sv-flat.png");
+  try {
+    execFileSync(ff, [
+      "-y", "-loglevel", "error", "-i", raw, "-map", "0:v:0", "-frames:v", "1",
+      "-vf", "scale='min(2000,iw)':-2:flags=lanczos", flat,
+    ], { stdio: ["ignore", "ignore", "pipe"] });
+  } catch (err) {
+    logger.warn(`🎬 subject visual: could not normalise the source — ${String(err.message).slice(0, 120)}`);
+    return null;
+  }
+
   const out = path.join(work, `mount-${mount}.png`);
   try {
     // A 5:6 crop from the middle of the frame. Publisher photos are landscape
     // and their subject is centred far more often than not; this is a crop rule,
     // not face detection, and it is stated as such rather than implied.
-    const probe = execFileSync(ff, ["-hide_banner", "-i", raw], { stdio: ["ignore", "ignore", "pipe"], encoding: "utf8" });
-    return mountFrom(ff, raw, out, work, mount, seed, probe);
+    const probe = execFileSync(ff, ["-hide_banner", "-i", flat], { stdio: ["ignore", "ignore", "pipe"], encoding: "utf8" });
+    return mountFrom(ff, flat, out, work, mount, seed, probe);
   } catch (err) {
     // ffmpeg writes stream info to stderr and exits non-zero on -i alone.
-    try { return mountFrom(ff, raw, out, work, mount, seed, String(err.stderr || "")); }
+    try { return mountFrom(ff, flat, out, work, mount, seed, String(err.stderr || "")); }
     catch (e2) { logger.warn(`🎬 subject visual: mount failed — ${e2.message.slice(0, 120)}`); return null; }
   }
 }

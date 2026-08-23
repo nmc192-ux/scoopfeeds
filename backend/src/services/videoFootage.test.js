@@ -115,3 +115,51 @@ test("an undated candidate sorts last, not first", () => {
   const sorted = [{ date: null }, { date: "2011-01-01" }, { date: "" }].sort(newestFirst);
   assert.equal(sorted[0].date, "2011-01-01");
 });
+
+// ─── attribution ────────────────────────────────────────────────────────────
+
+import { footageCreditLines } from "./videoFootage.js";
+
+const DVIDS = {
+  credit: "Air Force / DVIDS · SSgt Stacey Thornburg",
+  screenCredit: "Air Force / DVIDS",
+  licence: "Public domain — US Government work (17 U.S.C. §105)",
+  sourceUrl: "https://www.dvidshub.net/image/9876176/x",
+  disclaimer: "The appearance of U.S. Department of War (DoW) visual information does not imply or constitute DoW endorsement.",
+};
+const NASA = { credit: "NASA / GSFC", screenCredit: "NASA / GSFC", licence: "Public domain — US Government work (17 U.S.C. §105)", sourceUrl: null };
+
+test("DVIDS material carries its required disclaimer into the description", () => {
+  // dvidshub.net/about/copyright: "All users of DoW VI must display this
+  // non-DoW endorsement disclaimer". A condition met only when someone
+  // remembers is not met, so it travels with the asset.
+  const lines = footageCreditLines([DVIDS]);
+  assert.ok(lines.some(l => l.includes("does not imply or constitute DoW endorsement")));
+  assert.ok(lines.some(l => l.includes("SSgt Stacey Thornburg")), "the photographer is named");
+});
+
+test("NASA needs no disclaimer, and does not get one", () => {
+  const lines = footageCreditLines([NASA]);
+  assert.equal(lines.length, 1);
+  assert.ok(!lines[0].includes("DoW"));
+});
+
+test("several stills from one source do not repeat the disclaimer", () => {
+  // It is a statement about the channel, not about each picture.
+  const lines = footageCreditLines([DVIDS, { ...DVIDS, sourceUrl: "https://www.dvidshub.net/image/2/y" }]);
+  assert.equal(lines.filter(l => l.includes("DoW endorsement")).length, 1);
+});
+
+test("no footage means no lines at all", () => {
+  assert.deepEqual(footageCreditLines([]), []);
+  assert.deepEqual(footageCreditLines(), []);
+  assert.deepEqual(footageCreditLines([null, {}]), []);
+});
+
+test("the badge form is short enough to sit beside the wordmark", () => {
+  // "AIR FORCE / DVIDS · SSGT STACEY THORNBURG" rendered straight through the
+  // SCOOPFEEDS wordmark. The short form is composed, not truncated — truncating
+  // a credit risks misattributing it.
+  assert.ok(DVIDS.screenCredit.length <= 24, "screen credit would collide with the wordmark");
+  assert.ok(DVIDS.credit.startsWith(DVIDS.screenCredit), "the short form must be a true prefix of the full one");
+});

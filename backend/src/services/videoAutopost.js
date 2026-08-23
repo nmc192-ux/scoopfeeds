@@ -62,7 +62,7 @@ import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js
 import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
 import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
 import { buildMount, buildMapPng, MOUNT_NAMES } from "./videoSubjectVisual.js";
-import { findFootageStill, footageEnabled } from "./videoFootage.js";
+import { findFootageStill, footageEnabled, footageCreditLines } from "./videoFootage.js";
 import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
@@ -386,6 +386,10 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
     //
     // An article carries one picture, so the honest fix is to spend it once.
     let photosUsed = 0;
+    // EVERY BORROWED PICTURE, so the description can say where it came from.
+    // Public domain is not the same as unattributed, and DVIDS attaches an
+    // actual condition — see footageCreditLines.
+    const footageUsed = [];
     for (let i = 0; i < slides.length; i++) {
       const card = slides[i];
       const audioSecs = audio[i].durationSecs;
@@ -438,7 +442,9 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
                 });
                 // Credit the owner, or use nothing. Never the publisher.
                 if (underlayPath) {
-                  imageCredit = found.credit;
+                  // The badge gets the short form; the description gets the whole one.
+                  imageCredit = found.screenCredit || found.credit;
+                  footageUsed.push(found);
                   logger.info(`🎬 slide ${i} footage: ${found.source} · ${found.licence} · ${found.sourceUrl || found.imageUrl}`);
                 }
               }
@@ -524,14 +530,14 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
         await scoreShort(out, bed, scored, { ffmpegPath: ff });
         if (existsSync(scored) && statSync(scored).size > 10_000) {
           logger.info(`🎬 music bed: scored ${t.toFixed(1)}s, turn=${phases.turn?.toFixed(1) ?? "none"}, sections=${sections.length}`);
-          return { path: scored, slides };
+          return { path: scored, slides, footage: footageUsed };
         }
         logger.warn("🎬 music bed: scored file missing/small — shipping unscored");
       } catch (err) {
         logger.warn(`🎬 music bed failed (shipping unscored): ${err.message.slice(0, 160)}`);
       }
     }
-    return { path: out, slides };
+    return { path: out, slides, footage: footageUsed };
   } finally {
     releaseFrameDir(work);
   }
@@ -563,7 +569,7 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
 //
 // So every path below is caught here and reported as a value.
 export async function crossPostToFacebook(article, {
-  filePath, title, attribution, spec = null, slides = null, now = Date.now(),
+  filePath, title, attribution, spec = null, slides = null, now = Date.now(), footage = [],
 } = {}) {
   // Flag off: write NOTHING. NULL in facebook_status means "never attempted",
   // and that is exactly true of a dark period — recording 'skipped' for every
@@ -615,6 +621,7 @@ export async function crossPostToFacebook(article, {
     const description = [
       title,
       buildDescriptionCredit(article, attribution),
+      ...footageCreditLines(footage),
       `Full story → ${SITE_ORIGIN}/article/${encodeURIComponent(article.id)}` +
         `?utm_source=social_facebook_video&utm_medium=social&utm_campaign=scoop_video`,
     ].filter(Boolean).join("\n\n");
@@ -666,7 +673,7 @@ export async function crossPostToFacebook(article, {
  * a value — REFUSED, loudly, but never as an exception.
  */
 export async function reelToFacebook(article, {
-  filePath, title, attribution, spec = null, slides = null, now = Date.now(),
+  filePath, title, attribution, spec = null, slides = null, now = Date.now(), footage = [],
 } = {}) {
   if (!facebookReelsEnabled()) return { status: "off" };
 
@@ -708,6 +715,7 @@ export async function reelToFacebook(article, {
     const caption = [
       title,
       buildDescriptionCredit(article, attribution),
+      ...footageCreditLines(footage),
       `Full story → ${SITE_ORIGIN}/article/${encodeURIComponent(article.id)}` +
         `?utm_source=social_facebook_reel&utm_medium=social&utm_campaign=scoop_video`,
     ].filter(Boolean).join("\n\n").slice(0, 2200);
@@ -753,7 +761,7 @@ export async function reelToFacebook(article, {
  * escaping the cycle re-runs the BullMQ job.
  */
 export async function reelToInstagram(article, {
-  filePath, title, attribution, spec = null, slides = null, now = Date.now(),
+  filePath, title, attribution, spec = null, slides = null, now = Date.now(), footage = [],
 } = {}) {
   if (!instagramReelsEnabled()) return { status: "off" };
 
@@ -811,6 +819,7 @@ export async function reelToInstagram(article, {
     const caption = [
       title,
       buildDescriptionCredit(article, attribution),
+      ...footageCreditLines(footage),
       `Full story → ${SITE_ORIGIN}/article/${encodeURIComponent(article.id)}` +
         `?utm_source=social_instagram_reel&utm_medium=social&utm_campaign=scoop_video`,
     ].filter(Boolean).join("\n\n").slice(0, 2200);
@@ -851,7 +860,7 @@ export async function reelToInstagram(article, {
  * cannot delete the file mid-fetch; never throws. Same contract as its siblings.
  */
 export async function videoToThreads(article, {
-  filePath, title, attribution, spec = null, slides = null, now = Date.now(),
+  filePath, title, attribution, spec = null, slides = null, now = Date.now(), footage = [],
 } = {}) {
   if (!threadsVideoEnabled()) return { status: "off" };
 
@@ -888,6 +897,7 @@ export async function videoToThreads(article, {
     const text = [
       title,
       buildDescriptionCredit(article, attribution),
+      ...footageCreditLines(footage),
       `Full story → ${SITE_ORIGIN}/article/${encodeURIComponent(article.id)}` +
         `?utm_source=social_threads_video&utm_medium=social&utm_campaign=scoop_video`,
     ].filter(Boolean).join("\n\n").slice(0, 500);
@@ -961,7 +971,7 @@ export function truncateGraphemes(text, max) {
  * isQuotaExceeded matches foreign 403s, and a throw re-runs the BullMQ job).
  */
 export async function videoToBluesky(article, {
-  filePath, title, attribution, spec = null, slides = null, now = Date.now(),
+  filePath, title, attribution, spec = null, slides = null, now = Date.now(), footage = [],
 } = {}) {
   if (!blueskyVideoEnabled()) return { status: "off" };
 
@@ -1013,6 +1023,7 @@ export async function videoToBluesky(article, {
     const text = truncateGraphemes([
       title,
       buildDescriptionCredit(article, attribution),
+      ...footageCreditLines(footage),
       `Full story → ${SITE_ORIGIN}/article/${encodeURIComponent(article.id)}` +
         `?utm_source=social_bluesky_video&utm_medium=social&utm_campaign=scoop_video`,
     ].filter(Boolean).join("\n\n"), 300);
@@ -1328,6 +1339,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
           // no link at all.
           description: [
             buildDescriptionCredit(article, attribution),
+            ...footageCreditLines(video.footage),
             packaging?.description_hook || "",
           ].filter(Boolean).join("\n\n"),
           tags: packaging?.tags || [], isShort: false,
@@ -1363,7 +1375,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
         // markVideoPublished.
         try {
           const fb = await _crossPostToFacebook(article, {
-            filePath: video.path, title, attribution, spec: r.spec, slides: video.slides, now,
+            filePath: video.path, title, attribution, spec: r.spec, slides: video.slides, now, footage: video.footage,
           });
           if (fb && fb.status !== "off") produced.facebook = fb;
 
@@ -1373,7 +1385,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
           // for the same three reasons. Default OFF.
           const reel = await _reelToFacebook(article, {
             filePath: video.path, title, attribution,
-            spec: r.spec, slides: video.slides, now,
+            spec: r.spec, slides: video.slides, now, footage: video.footage,
           });
           if (reel && reel.status !== "off") produced.facebookReel = reel;
 
@@ -1382,7 +1394,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
           // guarded scope and never-throws contract as the two above.
           const igReel = await _reelToInstagram(article, {
             filePath: video.path, title, attribution,
-            spec: r.spec, slides: video.slides, now,
+            spec: r.spec, slides: video.slides, now, footage: video.footage,
           });
           if (igReel && igReel.status !== "off") produced.instagramReel = igReel;
 
@@ -1392,7 +1404,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
           // before this job spends half a minute asleep.
           const th = await _videoToThreads(article, {
             filePath: video.path, title, attribution,
-            spec: r.spec, slides: video.slides, now,
+            spec: r.spec, slides: video.slides, now, footage: video.footage,
           });
           if (th && th.status !== "off") produced.threads = th;
 
@@ -1405,7 +1417,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
           // URL for the sweep to race — see migration 026.
           const bs = await _videoToBluesky(article, {
             filePath: video.path, title, attribution,
-            spec: r.spec, slides: video.slides, now,
+            spec: r.spec, slides: video.slides, now, footage: video.footage,
           });
           if (bs && bs.status !== "off") produced.bluesky = bs;
         } catch (fbErr) {
