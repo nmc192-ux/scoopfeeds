@@ -78,3 +78,32 @@ test("the credit is static — same position on every state", () => {
     assert.equal(s.right, styles[0].right);
   }
 });
+
+test("the credit follows the picture's owner, not the article's publisher", () => {
+  // Open-licence footage substitutes for a missing article photo. Crediting the
+  // publisher for a NASA photograph is a false attribution, not a cosmetic slip.
+  const states = verticalStatesForCard(PHOTO, { ...CTX, imageCredit: "NASA / GSFC" });
+  for (const st of states) {
+    const texts = textsIn(st.tree);
+    assert.ok(texts.includes("NASA / GSFC".toUpperCase()), `state ${st.key} lost the footage credit`);
+    assert.ok(!texts.includes("REUTERS"), `state ${st.key} credited the publisher for someone else's picture`);
+  }
+});
+
+test("no picture means no credit — on photo and map alike", () => {
+  // The mount can fail. Before the caller owned the credit this rendered a
+  // publisher's name over bare black: a credit for nothing.
+  for (const card of [PHOTO, MAP]) {
+    for (const st of verticalStatesForCard(card, { ...CTX, imageCredit: null })) {
+      const texts = textsIn(st.tree);
+      assert.ok(!texts.includes("REUTERS"), `${card.t} ${st.key} credited a publisher with no picture`);
+      assert.ok(!texts.includes("NATURAL EARTH"), `${card.t} ${st.key} credited a map that was not built`);
+    }
+  }
+});
+
+test("callers that say nothing keep the old defaults", () => {
+  // Every other caller passes no imageCredit key at all and must be unaffected.
+  assert.ok(textsIn(verticalStatesForCard(PHOTO, CTX)[0].tree).includes("REUTERS"));
+  assert.ok(textsIn(verticalStatesForCard(MAP, CTX)[0].tree).includes("NATURAL EARTH"));
+});

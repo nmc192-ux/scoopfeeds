@@ -62,6 +62,7 @@ import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js
 import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
 import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
 import { buildMount, buildMapPng, MOUNT_NAMES } from "./videoSubjectVisual.js";
+import { findFootageStill, footageEnabled } from "./videoFootage.js";
 import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
@@ -252,9 +253,12 @@ export const VIDEO_FACEBOOK_MAX_PER_DAY = () => {
  * changes, so varying the mount is where variety comes from without
  * inconsistency — DrJ's decision, 2026-08-14.
  */
-export function mountFor(articleId) {
+export function mountFor(articleId, ordinal = 0) {
   const h = [...String(articleId || "x")].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
-  return MOUNT_NAMES[h % MOUNT_NAMES.length];
+  // ORDINAL, because one video can hold more than one photo card and they were
+  // all landing on the same mount. Stable per article as before at ordinal 0,
+  // so nothing that does not ask for variety sees any change.
+  return MOUNT_NAMES[(h + ordinal) % MOUNT_NAMES.length];
 }
 
 const SITE_ORIGIN = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
@@ -372,10 +376,112 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
   const work = acquireFrameDir(`autopost-${article.id}`);
   try {
     const segments = [];
+    // HOW MANY PHOTO CARDS THIS VIDEO HAS ALREADY SPENT.
+    //
+    // The schema permits two "photo" cards in a row (MAX_CONSECUTIVE_SAME_TYPE)
+    // and any number apart, and every one of them was rendering the SAME
+    // `article.image_url` on the SAME mount. A viewer sees one photograph
+    // presented twice as if it were two — the repetition complaint from the
+    // long-form film, sitting in the automated loop.
+    //
+    // An article carries one picture, so the honest fix is to spend it once.
+    let photosUsed = 0;
     for (let i = 0; i < slides.length; i++) {
       const card = slides[i];
       const audioSecs = audio[i].durationSecs;
-      let states = statesForCard(card, { outlet: attribution.publisher, slideIndex: i, slideCount: slides.length, orientation });
+      // SUBJECT VISUAL, RESOLVED BEFORE ANYTHING IS RENDERED.
+      //
+      // This used to run AFTER the states were built, which was harmless while
+      // the states carried no claim about the picture. They now carry a CREDIT,
+      // and a credit written before you know what you fetched is a guess. Two
+      // ways it was wrong: a failed mount rendered a publisher's name over bare
+      // black, and open-licence footage would have been credited to the article's
+      // publisher instead of its actual owner.
+      //
+      // So the order is now: ask what the card wants → get it → build the states
+      // that say where it came from. The first call is a pure tree build costing
+      // microseconds and `underlay` does not depend on the credit, so asking
+      // twice is cheaper than threading the answer through.
+      const ctxBase = { outlet: attribution.publisher, slideIndex: i, slideCount: slides.length, orientation };
+      const wants = statesForCard(card, ctxBase).find(st => st.underlay)?.underlay;
+
+      // A failure leaves both null and the card renders over the bare ground
+      // rather than losing the video: the type still says what it says, and the
+      // log says why the picture is missing. Never a throw — a photo that would
+      // not fetch is not a reason to lose a story.
+      let underlayPath = null;
+      let imageCredit = null;
+      if (wants) {
+        try {
+          const svWork = path.join(work, `sv${String(i).padStart(2, "0")}`);
+          if (wants === "photo") {
+            const ordinal = photosUsed++;
+            const mount = mountFor(article.id, ordinal);
+            // THE ARTICLE'S PHOTOGRAPH IS PREFERRED, ONCE. The publisher chose
+            // it to illustrate this story and no keyword search beats an editor
+            // — but it is one picture, and showing it again on the next photo
+            // card does not make it two.
+            if (ordinal === 0) {
+              underlayPath = await buildMount({
+                imageUrl: article.image_url, mount, work: svWork, seed: article.id,
+              });
+              if (underlayPath) imageCredit = attribution.publisher || null;
+            }
+            // Footage covers both gaps: a first card with no article photo, and
+            // every later card, whose alternative is the same photograph twice.
+            if (!underlayPath && footageEnabled()) {
+              const found = await findFootageStill({ subject: card.subject, title: article.title });
+              if (found) {
+                underlayPath = await buildMount({
+                  imageUrl: found.imageUrl, mount,
+                  work: path.join(svWork, "footage"), seed: `${article.id}-${ordinal}`,
+                });
+                // Credit the owner, or use nothing. Never the publisher.
+                if (underlayPath) {
+                  imageCredit = found.credit;
+                  logger.info(`🎬 slide ${i} footage: ${found.source} · ${found.licence} · ${found.sourceUrl || found.imageUrl}`);
+                }
+              }
+            }
+            // LAST RESORT ON A LATER CARD: the article photo again, but on a
+            // different mount and with its own push-in. A relevant picture
+            // repeated is still better than a black slide; a different mount is
+            // what stops it reading as a stuck frame.
+            if (!underlayPath && ordinal > 0) {
+              underlayPath = await buildMount({
+                imageUrl: article.image_url, mount, work: svWork, seed: `${article.id}-${ordinal}`,
+              });
+              if (underlayPath) {
+                imageCredit = attribution.publisher || null;
+                logger.info(`🎬 slide ${i} photo: no footage for photo card #${ordinal + 1} — reusing the article photo on mount "${mount}"`);
+              }
+            }
+          } else if (wants === "map") {
+            underlayPath = buildMapPng({
+              codes: card.codes, exception: card.exception ?? null,
+              out: path.join(svWork, "map.png"), work: svWork,
+            });
+            if (underlayPath) imageCredit = "NATURAL EARTH";
+          }
+          if (!underlayPath) {
+            logger.warn(`🎬 slide ${i} (${card.t}): no ${wants} could be built — rendering the type alone`);
+          } else if (wants === "photo") {
+            // THE DECLARED SUBJECT, BESIDE THE IMAGE IT GOT. Nothing downstream
+            // can see a photograph, so this pairing is the only place a mismatch
+            // is visible at all — the model's statement of what the picture
+            // should show, next to what it was actually given.
+            logger.info(
+              `🎬 slide ${i} photo: subject "${card.subject ?? "(none declared)"}" → ` +
+              `${String(imageCredit || "uncredited")} · ${String(article.image_url).slice(0, 90)}`
+            );
+          }
+        } catch (err) {
+          logger.warn(`🎬 slide ${i} (${card.t}): ${wants} failed — ${err.message.slice(0, 120)}`);
+        }
+      }
+
+      // Now the real states, credited to whoever actually owns what was fetched.
+      let states = statesForCard(card, { ...ctxBase, imageCredit });
       states = fitStatesToDuration(states, audioSecs, { cardType: card.t, slideIndex: i });
       const hold = holdForAudio(audioSecs, states.length);
 
@@ -385,46 +491,6 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
         const { writeFileSync } = await import("fs");
         writeFileSync(p, await renderState(st, { orientation }));
         paths.push(p);
-      }
-      // SUBJECT VISUAL. A card whose states declare GROUND.OVER needs an image
-      // behind them; `underlay` on the state names which one. Built here, once
-      // per slide, because it is IO and the renderer is a pure tree builder.
-      //
-      // A failure returns null and the card renders over the bare ground rather
-      // than losing the video: the type still says what it says, and the log
-      // says why the picture is missing. Never a throw — a photo that would not
-      // fetch is not a reason to lose a story.
-      let underlayPath = null;
-      const wants = states.find(st => st.underlay)?.underlay;
-      if (wants) {
-        try {
-          const svWork = path.join(work, `sv${String(i).padStart(2, "0")}`);
-          if (wants === "photo") {
-            underlayPath = await buildMount({
-              imageUrl: article.image_url, mount: mountFor(article.id),
-              work: svWork, seed: article.id,
-            });
-          } else if (wants === "map") {
-            underlayPath = buildMapPng({
-              codes: card.codes, exception: card.exception ?? null,
-              out: path.join(svWork, "map.png"), work: svWork,
-            });
-          }
-          if (!underlayPath) {
-            logger.warn(`🎬 slide ${i} (${card.t}): no ${wants} could be built — rendering the type alone`);
-          } else if (wants === "photo") {
-            // THE DECLARED SUBJECT, BESIDE THE IMAGE IT GOT. Nothing downstream
-            // can see a photograph, so this pairing is the only place a mismatch
-            // is visible at all — the model's statement of what the picture
-            // should show, next to the URL it was actually given.
-            logger.info(
-              `🎬 slide ${i} photo: subject "${card.subject ?? "(none declared)"}" → ` +
-              `${String(article.image_url).slice(0, 100)}`
-            );
-          }
-        } catch (err) {
-          logger.warn(`🎬 slide ${i} (${card.t}): ${wants} failed — ${err.message.slice(0, 120)}`);
-        }
       }
 
       const seg = path.join(work, `slide${String(i).padStart(2, "0")}.mp4`);
