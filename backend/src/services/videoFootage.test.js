@@ -1,0 +1,76 @@
+/**
+ * The gates that stand between the automated channel and a bad picture.
+ *
+ * Two of these were written only after looking at live results — the archive
+ * turned out to be full of scientific figures that are perfectly relevant and
+ * completely unusable. Both thresholds are measured, not guessed, and the
+ * measurements are in the module's comments.
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  tokens, relevant, looksPhotographic, whiteFraction, findFootageStill, footageEnabled,
+} from "./videoFootage.js";
+
+test("stop-words cannot establish relevance", () => {
+  // "the new report" sharing "new" with a candidate title is not a match.
+  assert.deepEqual(tokens("The new report"), ["report"]);
+  assert.ok(!tokens("the and for with").length);
+});
+
+test("relevance needs a shared significant word, not a shared API", () => {
+  assert.ok(relevant("hurricane michael", "SMAP captures Hurricane Michael"));
+  // The failure this exists to prevent: every one of these APIs returns its
+  // best effort for any string, and best-effort on an unrelated query is a
+  // confidently irrelevant picture that nothing downstream can see.
+  assert.ok(!relevant("semiconductor tariff negotiations", "The Carina Nebula"));
+  assert.ok(!relevant("", "anything at all"));
+});
+
+test("artists' concepts and diagrams are rejected by name", () => {
+  assert.ok(looksPhotographic({ title: "Flooding in Pakistan August 4, 2010" }));
+  // A painting under a credit line in a news short is a misrepresentation, not
+  // a stylistic choice.
+  assert.ok(!looksPhotographic({ title: "Artist's concept of the lander" }));
+  assert.ok(!looksPhotographic({ title: "Sea ice extent chart" }));
+  assert.ok(!looksPhotographic({ title: "Storm", description: "A diagram of the storm's structure." }));
+});
+
+test("the white-pixel measure is what it claims", () => {
+  const px = (n, [r, g, b]) => Buffer.from(Array.from({ length: n * 3 }, (_, i) => [r, g, b][i % 3]));
+  assert.equal(whiteFraction(Buffer.concat([px(50, [255, 255, 255]), px(50, [10, 10, 10])])), 0.5);
+  assert.equal(whiteFraction(px(10, [0, 0, 0])), 0);
+  // 236 is the threshold and it is exclusive — a pixel AT it is not white.
+  assert.equal(whiteFraction(px(10, [236, 236, 236])), 0);
+  assert.equal(whiteFraction(Buffer.alloc(0)), 0);
+});
+
+test("measured separation: figures sit far above the threshold, photographs far below", () => {
+  // Live measurement on four NASA results (see the module comment): scientific
+  // figures 32% and 48% near-white; genuine satellite imagery 0.8% and 2.0%.
+  // This pins the default threshold inside that gap rather than at its edge.
+  const MAX_WHITE = Number.parseFloat(process.env.VIDEO_FOOTAGE_MAX_WHITE || "0.20");
+  for (const figure of [0.32, 0.48]) assert.ok(figure > MAX_WHITE, `figure at ${figure} would be accepted`);
+  for (const photo of [0.008, 0.020]) assert.ok(photo <= MAX_WHITE, `photograph at ${photo} would be rejected`);
+});
+
+test("dark by default — nothing searches unless the flag is on", async () => {
+  const prev = process.env.VIDEO_FOOTAGE_ENABLED;
+  delete process.env.VIDEO_FOOTAGE_ENABLED;
+  try {
+    assert.equal(footageEnabled(), false);
+    // No network call is possible from here: the flag is checked first.
+    assert.equal(await findFootageStill({ subject: "flooding in Pakistan" }), null);
+  } finally {
+    if (prev === undefined) delete process.env.VIDEO_FOOTAGE_ENABLED;
+    else process.env.VIDEO_FOOTAGE_ENABLED = prev;
+  }
+});
+
+test("a query with no significant words never reaches the network", async () => {
+  process.env.VIDEO_FOOTAGE_ENABLED = "1";
+  try {
+    assert.equal(await findFootageStill({ subject: "the and for", title: "" }), null);
+    assert.equal(await findFootageStill({}), null);
+  } finally { delete process.env.VIDEO_FOOTAGE_ENABLED; }
+});

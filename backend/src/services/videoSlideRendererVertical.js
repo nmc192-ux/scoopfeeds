@@ -446,9 +446,27 @@ function overStates(card, ctx, { underlay, lineTop = 1470, size = 84, credit = n
 }
 
 /** The article's own photograph, on a mount. */
+/**
+ * WHO OWNS THE PICTURE IS NOT ALWAYS WHO WROTE THE STORY.
+ *
+ * The credit defaulted to the article's publisher, which is right when the
+ * picture came from the article — and wrong the moment it did not. Two cases
+ * make it wrong, and both are live:
+ *
+ *   - The photo is open-licence footage (NASA, DVIDS). Crediting Reuters for a
+ *     NASA photograph is a false attribution, not a cosmetic slip.
+ *   - The mount FAILED and there is no picture at all. That rendered a
+ *     publisher's name over bare black — a credit for nothing.
+ *
+ * So the caller, which is the only party that knows what was actually fetched,
+ * states it. An absent key keeps the old default for every other caller; an
+ * explicit null means "no picture, no credit".
+ */
+const creditFor = (ctx, fallback) =>
+  (ctx && "imageCredit" in ctx) ? ctx.imageCredit : fallback;
+
 function photoStatesV(card, ctx) {
-  // The article's publisher, from the one resolver every consumer shares.
-  return overStates(card, ctx, { underlay: "photo", credit: ctx.outlet || null });
+  return overStates(card, ctx, { underlay: "photo", credit: creditFor(ctx, ctx.outlet || null) });
 }
 
 /**
@@ -456,7 +474,7 @@ function photoStatesV(card, ctx) {
  * read as a whole shape and wants more of the frame than a portrait does.
  */
 function mapStatesV(card, ctx) {
-  return overStates(card, ctx, { underlay: "map", lineTop: 1500, size: 78, credit: "NATURAL EARTH" });
+  return overStates(card, ctx, { underlay: "map", lineTop: 1500, size: 78, credit: creditFor(ctx, "NATURAL EARTH") });
 }
 
 // ─── turn / kicker ──────────────────────────────────────────────────────────
