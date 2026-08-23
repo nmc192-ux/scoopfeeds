@@ -52,3 +52,68 @@ Enforced, not aspirational (`docs/agentic-workflow.md` §5):
   to.
 - Include caveats the source states about itself.
 - Unmeasured is reported as "unverified", never as "passing".
+
+---
+
+## footage-search.mjs — finding real footage without stealing it
+
+```bash
+node engine/footage-search.mjs "strait of hormuz" "persian gulf tanker"
+```
+
+Searches DVIDS, NASA, Wikimedia Commons, Internet Archive and YouTube's
+Creative-Commons filter, and writes `out/footage-candidates.json`. **It never
+downloads anything.** Whether a clip may be used is not a decision a search tool
+can make, so it assembles the evidence and stops.
+
+Results are ranked by **provenance, not relevance**:
+
+| tier | meaning | sources |
+|---|---|---|
+| **verified** | the publisher is the rights holder by construction | DVIDS, NASA/USGS — US Government works, public domain under 17 U.S.C. §105 |
+| **declared** | an explicit licence from a plausible owner; still needs a look | Wikimedia Commons, Internet Archive |
+| **unverified** | a lead. Not usable as found. | YouTube CC-marked |
+
+### Why YouTube's CC filter is a lead, not a source
+
+`videoLicense=creativeCommon` works and returns fresh results. Run it against a
+breaking-news topic and it returns **news aggregators re-uploading agency
+footage with the CC box ticked**. On "strait of hormuz" the first page was
+News18 Punjab, DISTRITOTV, YOUTH PILOT and similar — channels that did not shoot
+the material and cannot license it. A licence the uploader cannot grant is not a
+licence; it is infringement wearing a badge, and Content ID matches it anyway.
+
+Downloading also breaches YouTube's Terms of Service regardless of the licence
+field. The tool therefore surfaces these and refuses to treat them as usable.
+
+### Internet Archive's TV News Archive
+
+Searches for current events return broadcast recordings (IRINN, BBC Persian,
+TRT Haber) from hours ago. These have **no licence field**, and the tool labels
+them "treat as all rights reserved". The TV News Archive exists for research and
+citation, not for reuse in a monetised video.
+
+### The date trap
+
+Public-domain military footage is real but it is **not footage of your event**.
+The best DVIDS Hormuz transit video is from 2016. Cutting it under narration
+about a 2026 blockade makes it a claim about 2026 — the same error as a working
+port under "ships stranded at anchor", or a Bangladeshi village under narration
+about eastern Congo. Both of those cost a re-cut.
+
+Rules that follow:
+- Generic-but-true is fine **when the on-screen credit carries the date**:
+  `US Navy / DVIDS · 2016`. The visible date is what makes it honest.
+- Never place it under a sentence about a specific dated event.
+- **Satellite imagery is the safest and the best-looking.** Geography does not
+  go stale, NASA imagery is public domain with no attribution required, and a
+  real satellite plate of a strait beats any amount of typography.
+
+### Gotchas
+
+- `commons.wikimedia.org/w/api.php` is **reset at the connection level** from
+  some networks — ECONNRESET, which reads like a transient fault while
+  `en.wikipedia.org` answers fine from the same machine. Use
+  `api.wikimedia.org/core/v1/commons/…` instead.
+- DVIDS needs a free API key (`DVIDS_API_KEY`, dvidshub.net/api). Without one the
+  tool emits a browse link rather than pretending it found nothing.
