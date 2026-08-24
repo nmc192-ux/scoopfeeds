@@ -1315,9 +1315,24 @@ function stubBluesky({ jobStates = ["JOB_STATE_COMPLETED"], onUpload = null } = 
     const u = String(url);
     calls.push({ url: u, init });
     const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
-    if (u.includes("createSession")) return json({ did: "did:plc:test", accessJwt: "acc", refreshJwt: "ref" });
+    // The DID document is part of a real createSession response, and the video
+    // service-auth audience is derived from it. A fixture without it stopped
+    // reflecting a real session once that derivation existed.
+    if (u.includes("createSession")) return json({
+      did: "did:plc:test", accessJwt: "acc", refreshJwt: "ref",
+      didDoc: { service: [{ id: "#atproto_pds", type: "AtprotoPersonalDataServer",
+                            serviceEndpoint: "https://pds.test.host.bsky.network" }] },
+    });
     if (u.includes("refreshSession")) return json({ did: "did:plc:test", accessJwt: "acc", refreshJwt: "ref" });
-    if (u.includes("getServiceAuth")) return json({ token: "svc-token" });
+    if (u.includes("getServiceAuth")) {
+      // The audience must be the account's PDS, not the video service. Sending
+      // the video service DID here is what failed 116 times in production.
+      const aud = new URL(u).searchParams.get("aud");
+      if (aud !== "did:web:pds.test.host.bsky.network") {
+        return json({ error: "InvalidToken", message: `wrong audience: ${aud}` }, 401);
+      }
+      return json({ token: "svc-token" });
+    }
     if (u.includes("uploadVideo")) { onUpload?.(u, init); return json({ jobStatus: { jobId: "job-1", state: "JOB_STATE_RUNNING" } }); }
     if (u.includes("getJobStatus")) {
       const state = jobStates[Math.min(jobIdx++, jobStates.length - 1)];
