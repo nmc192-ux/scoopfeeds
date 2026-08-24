@@ -42,6 +42,7 @@ import {
   markVideoThreads, countThreadsPostsSince,
   markVideoBluesky, countBlueskyPostsSince,
   markVideoTikTok, countTikTokPostsSince,
+  markVideoX, countXPostsSince,
 } from "../models/database.js";
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
 import {
@@ -65,6 +66,7 @@ import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
 import { buildMount, buildMapPng, MOUNT_NAMES } from "./videoSubjectVisual.js";
 import { findFootageStill, footageEnabled, footageCreditLines, footageDateLabel } from "./videoFootage.js";
 import { isTikTokConfigured, uploadToTikTok, tiktokPrivacyLevel } from "./tiktokClient.js";
+import { isXConfigured, postToX, fitPost, xSafePublisher } from "./xClient.js";
 import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
@@ -662,6 +664,82 @@ export async function videoToTikTok(article, {
   }
 }
 
+// ─── X ──────────────────────────────────────────────────────────────────────
+
+const VIDEO_X_MAX_PER_DAY = () =>
+  Math.max(0, Number.parseInt(process.env.VIDEO_X_MAX_PER_DAY || "6", 10));
+
+/**
+ * Publish the SAME rendered MP4 to X.
+ *
+ * THE CAPTION CARRIES NO LINK, AND THAT IS THE ENTIRE ECONOMICS OF THIS
+ * CHANNEL. X went pay-per-use in February 2026: $0.015 a post, or $0.20 if it
+ * contains a link. At this cadence that is $4.70 a month against $63 — and X
+ * downranks link posts anyway, so the expensive option also performs worse. The
+ * site lives in the profile bio. `postToX` refuses a link outright rather than
+ * trusting this function to remember, because a post with a link succeeds
+ * exactly like one without and the difference appears only on a bill.
+ *
+ * So this is the ONE channel that does not get buildDescriptionCredit: that
+ * helper's entire job is to put the original article's URL above the fold.
+ * Attribution still happens — the publisher is NAMED in the caption, and the
+ * video itself carries the on-screen source badge — but it is named, not
+ * linked.
+ *
+ * BYTES, NOT A URL: INIT/APPEND/FINALIZE then a processing poll, so nothing on
+ * our server needs to outlive the call. `hasPendingUrlFetchPublish` untouched.
+ *
+ * NEVER THROWS, for the reasons written over the Facebook cross-post: the
+ * YouTube video is already live and irreversible, and a failure here must not
+ * reach markVideoFailed or isQuotaExceeded.
+ */
+export async function videoToX(article, {
+  filePath, title, attribution, spec = null, slides = null, now = Date.now(), footage = [],
+} = {}) {
+  try {
+    if (process.env.VIDEO_X_ENABLED !== "1") return { status: "off" };
+    if (!isXConfigured()) {
+      logger.warn("\u{1D54F} X cross-post SKIPPED — VIDEO_X_ENABLED=1 but the client is not configured " +
+        "(X_API_KEY / X_API_SECRET / X_ACCESS_TOKEN / X_ACCESS_SECRET). The video is published to " +
+        "YouTube; the cross-post is skipped.");
+      markVideoX(article.id, { status: "skipped", error: "x not configured" });
+      return { status: "skipped", reason: "not-configured" };
+    }
+
+    const max = VIDEO_X_MAX_PER_DAY();
+    const posted24h = countXPostsSince(now - 24 * 60 * 60 * 1000);
+    if (posted24h >= max) {
+      logger.info(`\u{1D54F} X cross-post SKIPPED — cap ${posted24h}/${max} in the last 24h`);
+      markVideoX(article.id, { status: "skipped", error: `daily cap ${posted24h}/${max}` });
+      return { status: "skipped", reason: "daily-cap" };
+    }
+
+    // Named, not linked. The publisher gets credit in words; the URL would cost
+    // thirteen times as much and reach fewer people.
+    // "Investing.com" is a real masthead here, and X bills any dotted name as a
+    // link. Strip the TLD rather than lose the channel for that publisher.
+    const who = xSafePublisher(attribution?.publisher);
+    const text = fitPost([title, who ? `Source: ${who}` : ""].filter(Boolean).join("\n\n"));
+
+    const { id, url } = await postToX({ filePath, text });
+    markVideoX(article.id, { status: "posted", postId: id });
+    logger.info(`\u{1D54F} X CROSS-POSTED ${id} (${posted24h + 1}/${max} today) — ${url}`);
+    return { status: "posted", id, url };
+
+  } catch (err) {
+    logger.error(
+      `\u{1F6A8} X CROSS-POST FAILED for ${article.id} — the YouTube video IS published and stays ` +
+      `published; only the X post is lost. ${err.message}`
+    );
+    try {
+      markVideoX(article.id, { status: "failed", error: err.message });
+    } catch (dbErr) {
+      logger.error(`\u{1F6A8} x cross-post: could not record the failure either: ${dbErr.message}`);
+    }
+    return { status: "failed", error: err.message };
+  }
+}
+
 // ─── Facebook cross-post ────────────────────────────────────────────────────
 //
 // Runs AFTER the YouTube upload has already succeeded and been recorded, on the
@@ -1212,6 +1290,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     videoToThreads: _videoToThreads = videoToThreads,
     videoToBluesky: _videoToBluesky = videoToBluesky,
     videoToTikTok: _videoToTikTok = videoToTikTok,
+    videoToX: _videoToX = videoToX,
   } = deps;
 
   if (!autopostEnabled()) {
@@ -1551,6 +1630,15 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             spec: r.spec, slides: video.slides, now, footage: video.footage,
           });
           if (tt && tt.status !== "off") produced.tiktok = tt;
+
+          // ─── X ───────────────────────────────────────────────────────────
+          // Raw bytes again, so no sweep race — see migration 029. The caption
+          // carries NO link: $0.015 a post against $0.20 with one.
+          const xp = await _videoToX(article, {
+            filePath: video.path, title, attribution,
+            spec: r.spec, slides: video.slides, now, footage: video.footage,
+          });
+          if (xp && xp.status !== "off") produced.x = xp;
         } catch (fbErr) {
           logger.error(
             `🚨 facebook cross-post threw past its own guard for ${article.id} — this is a code ` +

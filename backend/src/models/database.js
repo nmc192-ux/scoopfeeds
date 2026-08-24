@@ -2477,6 +2477,23 @@ export function countTikTokPostsSince(sinceMs) {
   `).get(sinceMs).n;
 }
 
+export function markVideoX(articleId, { status, postId = null, error = null }) {
+  getDb().prepare(`
+    UPDATE video_posts SET
+      x_status = ?, x_post_id = ?, x_error = ?, updated_at = ?
+    WHERE article_id = ?
+  `).run(status, postId, error ? String(error).slice(0, 500) : null, Date.now(), articleId);
+  return getVideoPost(articleId);
+}
+
+/** X posts in a ROLLING 24h, for VIDEO_X_MAX_PER_DAY. */
+export function countXPostsSince(sinceMs) {
+  return getDb().prepare(`
+    SELECT COUNT(*) AS n FROM video_posts
+    WHERE x_status = 'posted' AND published_at > ?
+  `).get(sinceMs).n;
+}
+
 export function markVideoTikTok(articleId, { status, postId = null, error = null }) {
   getDb().prepare(`
     UPDATE video_posts SET
