@@ -139,7 +139,34 @@ async function _getAccessToken() {
 // Uploads a local MP4 using TikTok's Direct Post API.
 // Returns { publishId, videoId, videoUrl }.
 //
-export async function uploadToTikTok({ filePath, title, description = "", tags = [] } = {}) {
+/**
+ * THE PRIVACY LEVEL IS NOW A CHOICE, AND IT WAS NOT ALWAYS.
+ *
+ * This was hardcoded to SELF_ONLY with the note "upload as private first;
+ * approve before making public". That was not caution — an unaudited client is
+ * REFUSED any other value by TikTok (`unaudited_client_can_only_post_to_private
+ * _accounts`), so the constant recorded a restriction rather than a decision.
+ *
+ * The app has since been approved: creator_info now returns
+ * ["PUBLIC_TO_EVERYONE","MUTUAL_FOLLOW_FRIENDS","SELF_ONLY"] (verified live,
+ * 2026-08-24). So the restriction is gone and the value becomes a real editorial
+ * choice — which means it belongs in configuration, not in a literal.
+ *
+ * The DEFAULT STAYS SELF_ONLY. Nothing that has only ever posted privately
+ * should start posting publicly because a constant became a variable.
+ */
+export const TIKTOK_PRIVACY_LEVELS = Object.freeze([
+  "PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY",
+]);
+
+export function tiktokPrivacyLevel() {
+  const v = String(process.env.VIDEO_TIKTOK_PRIVACY || "").trim().toUpperCase();
+  // An unrecognised value falls back to the private default rather than being
+  // passed through. A typo in an env var must not publish to everyone.
+  return TIKTOK_PRIVACY_LEVELS.includes(v) ? v : "SELF_ONLY";
+}
+
+export async function uploadToTikTok({ filePath, title, description = "", tags = [], privacyLevel = tiktokPrivacyLevel() } = {}) {
   if (!isTikTokConfigured()) throw new Error("TikTok not configured");
   if (!filePath || !existsSync(filePath)) throw new Error(`TikTok upload: file not found at ${filePath}`);
 
@@ -162,7 +189,7 @@ export async function uploadToTikTok({ filePath, title, description = "", tags =
     body: JSON.stringify({
       post_info: {
         title:          caption,
-        privacy_level:  "SELF_ONLY", // upload as private first; approve before making public
+        privacy_level:  privacyLevel,
         disable_duet:   false,
         disable_comment: false,
         disable_stitch: false,

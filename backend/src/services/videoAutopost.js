@@ -41,6 +41,7 @@ import {
   markVideoInstagram, countInstagramPostsSince,
   markVideoThreads, countThreadsPostsSince,
   markVideoBluesky, countBlueskyPostsSince,
+  markVideoTikTok, countTikTokPostsSince,
 } from "../models/database.js";
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
 import {
@@ -63,6 +64,7 @@ import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
 import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
 import { buildMount, buildMapPng, MOUNT_NAMES } from "./videoSubjectVisual.js";
 import { findFootageStill, footageEnabled, footageCreditLines, footageDateLabel } from "./videoFootage.js";
+import { isTikTokConfigured, uploadToTikTok, tiktokPrivacyLevel } from "./tiktokClient.js";
 import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
@@ -576,6 +578,87 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
     return { path: out, slides, footage: footageUsed };
   } finally {
     releaseFrameDir(work);
+  }
+}
+
+// ─── TikTok ─────────────────────────────────────────────────────────────────
+
+const VIDEO_TIKTOK_MAX_PER_DAY = () =>
+  Math.max(0, Number.parseInt(process.env.VIDEO_TIKTOK_MAX_PER_DAY || "6", 10));
+
+/**
+ * Publish the SAME rendered MP4 to TIKTOK.
+ *
+ * The fifth surface on one render, and the last one blocked by something other
+ * than our own code: an UNAUDITED client is refused any privacy level except
+ * SELF_ONLY, which made an automated public post impossible rather than merely
+ * unwise. The app has since been approved — creator_info now offers
+ * PUBLIC_TO_EVERYONE — so the channel can exist. It still ships dark, and its
+ * privacy level still defaults to SELF_ONLY: an approval that makes something
+ * possible is not an instruction to do it.
+ *
+ * BYTES, NOT A URL. TikTok hands back an upload URL, we PUT the file to it and
+ * poll a publish_id. So, like Facebook Reels and Bluesky and unlike Instagram
+ * and Threads, nothing on our server needs to survive the call —
+ * `hasPendingUrlFetchPublish` is deliberately not widened for this channel.
+ *
+ * NEVER THROWS, for the reasons written at length over the Facebook cross-post:
+ * the YouTube video is already live and irreversible by the time this runs, and
+ * a TikTok failure must not reach markVideoFailed (which would make the article
+ * selectable again and publish a SECOND YouTube video) or isQuotaExceeded
+ * (which would abort the whole cycle over someone else's throttling).
+ */
+export async function videoToTikTok(article, {
+  filePath, title, attribution, spec = null, slides = null, now = Date.now(), footage = [],
+} = {}) {
+  try {
+    if (process.env.VIDEO_TIKTOK_ENABLED !== "1") return { status: "off" };
+    if (!isTikTokConfigured()) {
+      logger.warn("\u{1F4F1} TikTok cross-post SKIPPED — VIDEO_TIKTOK_ENABLED=1 but the client is not configured " +
+        "(TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET / TIKTOK_REFRESH_TOKEN). The video is published to " +
+        "YouTube; the cross-post is skipped.");
+      markVideoTikTok(article.id, { status: "skipped", error: "tiktok not configured" });
+      return { status: "skipped", reason: "not-configured" };
+    }
+
+    const max = VIDEO_TIKTOK_MAX_PER_DAY();
+    const posted24h = countTikTokPostsSince(now - 24 * 60 * 60 * 1000);
+    if (posted24h >= max) {
+      logger.info(`\u{1F4F1} TikTok cross-post SKIPPED — cap ${posted24h}/${max} in the last 24h`);
+      markVideoTikTok(article.id, { status: "skipped", error: `daily cap ${posted24h}/${max}` });
+      return { status: "skipped", reason: "daily-cap" };
+    }
+
+    const privacy = tiktokPrivacyLevel();
+    const { publishId, videoUrl } = await uploadToTikTok({
+      filePath, title,
+      description: [
+        buildDescriptionCredit(article, attribution),
+        ...footageCreditLines(footage),
+      ].filter(Boolean).join("\n\n"),
+      tags: [],
+      privacyLevel: privacy,
+    });
+
+    markVideoTikTok(article.id, { status: "posted", postId: publishId });
+    // THE PRIVACY LEVEL IS LOGGED ON EVERY POST. It is the difference between a
+    // private draft and publishing to everyone, it is set by an env var, and
+    // nothing else in the log would reveal which one was in force.
+    logger.info(`\u{1F4F1} TIKTOK CROSS-POSTED ${publishId} privacy=${privacy} ` +
+      `(${posted24h + 1}/${max} today)${videoUrl ? ` — ${videoUrl}` : ""}`);
+    return { status: "posted", id: publishId, url: videoUrl, privacy };
+
+  } catch (err) {
+    logger.error(
+      `\u{1F6A8} TIKTOK CROSS-POST FAILED for ${article.id} — the YouTube video IS published and stays ` +
+      `published; only the TikTok post is lost. ${err.message}`
+    );
+    try {
+      markVideoTikTok(article.id, { status: "failed", error: err.message });
+    } catch (dbErr) {
+      logger.error(`\u{1F6A8} tiktok cross-post: could not record the failure either: ${dbErr.message}`);
+    }
+    return { status: "failed", error: err.message };
   }
 }
 
@@ -1128,6 +1211,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     reelToInstagram: _reelToInstagram = reelToInstagram,
     videoToThreads: _videoToThreads = videoToThreads,
     videoToBluesky: _videoToBluesky = videoToBluesky,
+    videoToTikTok: _videoToTikTok = videoToTikTok,
   } = deps;
 
   if (!autopostEnabled()) {
@@ -1456,6 +1540,17 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             spec: r.spec, slides: video.slides, now, footage: video.footage,
           });
           if (bs && bs.status !== "off") produced.bluesky = bs;
+
+          // ─── TikTok ──────────────────────────────────────────────────────
+          // Also raw bytes, so also no sweep race — see migration 028. Last in
+          // the chain and inside the same guard: every channel above it has
+          // already recorded its own outcome, so a throw here (which its own
+          // try/catch should make impossible) cannot undo any of them.
+          const tt = await _videoToTikTok(article, {
+            filePath: video.path, title, attribution,
+            spec: r.spec, slides: video.slides, now, footage: video.footage,
+          });
+          if (tt && tt.status !== "off") produced.tiktok = tt;
         } catch (fbErr) {
           logger.error(
             `🚨 facebook cross-post threw past its own guard for ${article.id} — this is a code ` +
