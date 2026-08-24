@@ -410,6 +410,22 @@ const overScrim = (top = 1360) => abs({
  *
  * Right-aligned inside safeRight so it never sits under the action rail.
  */
+/**
+ * The date rides UNDER the credit rather than inside it.
+ *
+ * Appending it would have put "AIR FORCE / DVIDS · JUN 2022" on one line — 28
+ * characters, which is how the credit ran through the SCOOPFEEDS wordmark in
+ * the first place. A second line grows downward into empty frame instead of
+ * sideways into the masthead.
+ */
+const imageDateLine = (label) => label
+  ? text(String(label).toUpperCase(), {
+      position: "absolute", right: G.safeRight + G.marginX, top: G.safeTop + 52,
+      fontSize: 20, fontWeight: 600, letterSpacing: 3, color: C.dim,
+      backgroundColor: "rgba(9,7,6,0.62)", padding: "5px 11px", borderRadius: 5,
+    })
+  : null;
+
 const imageCredit = (label) => label
   ? text(String(label).toUpperCase(), {
       position: "absolute", right: G.safeRight + G.marginX, top: G.safeTop + 8,
@@ -436,12 +452,14 @@ function overStates(card, ctx, { underlay, lineTop = 1470, size = 84, credit = n
   // On EVERY state, including the bare first one — the credit belongs to the
   // picture, and the picture is on screen from the first frame.
   const cr = imageCredit(credit);
+  // Only ever beside a credit: a date with no source is not provenance.
+  const dt = credit ? imageDateLine(ctx?.imageDate) : null;
   return [
     // The image alone, briefly. A photograph that arrives already captioned has
     // no moment of being looked at.
-    st("v1", [...ch(), cr]),
-    st("v2", [...ch(), ...eb, overScrim(), L(l1, lineTop), cr]),
-    st("v3", [...ch(), ...eb, overScrim(), L(l1, lineTop), L(l2, lineTop + 96), cr]),
+    st("v1", [...ch(), cr, dt]),
+    st("v2", [...ch(), ...eb, overScrim(), L(l1, lineTop), cr, dt]),
+    st("v3", [...ch(), ...eb, overScrim(), L(l1, lineTop), L(l2, lineTop + 96), cr, dt]),
   ];
 }
 

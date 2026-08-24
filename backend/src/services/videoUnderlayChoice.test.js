@@ -107,5 +107,34 @@ test("a failed footage mount does not report footage as used", async () => {
 
 test("an article with no photograph and no footage renders bare, uncredited", async () => {
   const r = await run({ article: { ...ARTICLE, image_url: null }, _findFootageStill: async () => null });
-  assert.deepEqual(r, { underlayPath: null, imageCredit: null, footage: null });
+  assert.deepEqual(r, { underlayPath: null, imageCredit: null, imageDate: null, footage: null });
+});
+
+// ─── dating archive material ────────────────────────────────────────────────
+
+test("footage older than the window is dated on screen", async () => {
+  // Recency ranking prefers newer pictures; it cannot conjure one. Plenty of
+  // stories have no rights-clean image newer than years old, and an undated
+  // 2022 flood photograph under a 2026 flood story tells the viewer something
+  // untrue.
+  const r = await run({ ordinal: 1, _findFootageStill: async () => ({ ...FOOTAGE, date: "2022-06-27" }) });
+  assert.equal(r.imageDate, "JUN 2022");
+});
+
+test("recent footage carries no date — it would be clutter", async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const r = await run({ ordinal: 1, _findFootageStill: async () => ({ ...FOOTAGE, date: today }) });
+  assert.equal(r.imageDate, null);
+});
+
+test("undated footage stays undated rather than being guessed", async () => {
+  const r = await run({ ordinal: 1, _findFootageStill: async () => ({ ...FOOTAGE, date: null }) });
+  assert.equal(r.imageDate, null);
+});
+
+test("the article's own photograph is never dated", async () => {
+  // It was published with the story. Dating it would imply archive material.
+  const r = await run({ ordinal: 0 });
+  assert.equal(r.imageCredit, "Reuters");
+  assert.equal(r.imageDate, null);
 });
