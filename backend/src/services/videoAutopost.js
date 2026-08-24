@@ -355,6 +355,70 @@ export function rateGate({ now = Date.now() } = {}) {
   return { ok: true, published24h, max };
 }
 
+/**
+ * WHICH PICTURE THIS PHOTO CARD GETS, AND THEREFORE WHOSE NAME IS ON IT.
+ *
+ * Extracted from the slide loop because it is the one piece of this pipeline
+ * that makes a RIGHTS decision, and it was unreachable by any test — buried
+ * inside a function that needs a database, a spec model and a voice API before
+ * it will run a line. "Credit the right owner" is not something to verify by
+ * watching the channel.
+ *
+ * The order encodes three separate judgements, and they are not interchangeable:
+ *
+ *   1. The article's own photograph, ONCE. An editor chose it for this story
+ *      and no keyword search beats that. But it is one picture, and showing it
+ *      again on the next photo card does not make it two.
+ *   2. Footage, for the gaps: a first card with no article photo, and every
+ *      later card, whose alternative is the same photograph twice.
+ *   3. The article photo again on a LATER card, on a different mount. A
+ *      relevant picture repeated still beats a black slide, and the changed
+ *      mount is what stops it reading as a stuck frame.
+ *
+ * `imageCredit` is null unless a picture was actually built. A credit for a
+ * picture that is not there is worse than no credit at all.
+ *
+ * Injectable collaborators, because the real ones fetch over the network.
+ */
+export async function choosePhotoUnderlay({
+  card, article, attribution, ordinal, work, slideIndex = 0,
+  mount = mountFor(article?.id, ordinal),
+  _buildMount = buildMount, _findFootageStill = findFootageStill, _footageEnabled = footageEnabled,
+  _log = logger,
+} = {}) {
+  const none = { underlayPath: null, imageCredit: null, footage: null };
+
+  if (ordinal === 0 && article?.image_url) {
+    const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: article.id });
+    if (p) return { underlayPath: p, imageCredit: attribution?.publisher || null, footage: null };
+  }
+
+  if (_footageEnabled()) {
+    const found = await _findFootageStill({ subject: card?.subject, title: article?.title });
+    if (found) {
+      const p = await _buildMount({
+        imageUrl: found.imageUrl, mount,
+        work: path.join(work, "footage"), seed: `${article?.id}-${ordinal}`,
+      });
+      if (p) {
+        _log.info(`🎬 slide ${slideIndex} footage: ${found.source} · ${found.licence} · ${found.sourceUrl || found.imageUrl}`);
+        // The badge gets the short form; the description gets the whole one.
+        return { underlayPath: p, imageCredit: found.screenCredit || found.credit, footage: found };
+      }
+    }
+  }
+
+  if (ordinal > 0 && article?.image_url) {
+    const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: `${article.id}-${ordinal}` });
+    if (p) {
+      _log.info(`🎬 slide ${slideIndex} photo: no footage for photo card #${ordinal + 1} — reusing the article photo on mount "${mount}"`);
+      return { underlayPath: p, imageCredit: attribution?.publisher || null, footage: null };
+    }
+  }
+
+  return none;
+}
+
 // ─── Produce one video ──────────────────────────────────────────────────────
 
 async function produceVideo(article, spec, attribution = resolveAttribution(article)) {
@@ -419,49 +483,12 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
         try {
           const svWork = path.join(work, `sv${String(i).padStart(2, "0")}`);
           if (wants === "photo") {
-            const ordinal = photosUsed++;
-            const mount = mountFor(article.id, ordinal);
-            // THE ARTICLE'S PHOTOGRAPH IS PREFERRED, ONCE. The publisher chose
-            // it to illustrate this story and no keyword search beats an editor
-            // — but it is one picture, and showing it again on the next photo
-            // card does not make it two.
-            if (ordinal === 0) {
-              underlayPath = await buildMount({
-                imageUrl: article.image_url, mount, work: svWork, seed: article.id,
-              });
-              if (underlayPath) imageCredit = attribution.publisher || null;
-            }
-            // Footage covers both gaps: a first card with no article photo, and
-            // every later card, whose alternative is the same photograph twice.
-            if (!underlayPath && footageEnabled()) {
-              const found = await findFootageStill({ subject: card.subject, title: article.title });
-              if (found) {
-                underlayPath = await buildMount({
-                  imageUrl: found.imageUrl, mount,
-                  work: path.join(svWork, "footage"), seed: `${article.id}-${ordinal}`,
-                });
-                // Credit the owner, or use nothing. Never the publisher.
-                if (underlayPath) {
-                  // The badge gets the short form; the description gets the whole one.
-                  imageCredit = found.screenCredit || found.credit;
-                  footageUsed.push(found);
-                  logger.info(`🎬 slide ${i} footage: ${found.source} · ${found.licence} · ${found.sourceUrl || found.imageUrl}`);
-                }
-              }
-            }
-            // LAST RESORT ON A LATER CARD: the article photo again, but on a
-            // different mount and with its own push-in. A relevant picture
-            // repeated is still better than a black slide; a different mount is
-            // what stops it reading as a stuck frame.
-            if (!underlayPath && ordinal > 0) {
-              underlayPath = await buildMount({
-                imageUrl: article.image_url, mount, work: svWork, seed: `${article.id}-${ordinal}`,
-              });
-              if (underlayPath) {
-                imageCredit = attribution.publisher || null;
-                logger.info(`🎬 slide ${i} photo: no footage for photo card #${ordinal + 1} — reusing the article photo on mount "${mount}"`);
-              }
-            }
+            const chosen = await choosePhotoUnderlay({
+              card, article, attribution, ordinal: photosUsed++, work: svWork, slideIndex: i,
+            });
+            underlayPath = chosen.underlayPath;
+            imageCredit = chosen.imageCredit;
+            if (chosen.footage) footageUsed.push(chosen.footage);
           } else if (wants === "map") {
             underlayPath = buildMapPng({
               codes: card.codes, exception: card.exception ?? null,
