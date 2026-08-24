@@ -163,3 +163,34 @@ test("the badge form is short enough to sit beside the wordmark", () => {
   assert.ok(DVIDS.screenCredit.length <= 24, "screen credit would collide with the wordmark");
   assert.ok(DVIDS.credit.startsWith(DVIDS.screenCredit), "the short form must be a true prefix of the full one");
 });
+
+// ─── dating archive material ────────────────────────────────────────────────
+
+import { footageDateLabel } from "./videoFootage.js";
+
+test("the date label says month and year, not a precise day", () => {
+  // The claim is "this is not from now". A day implies a precision the story
+  // does not turn on.
+  const now = Date.parse("2026-08-24");
+  assert.equal(footageDateLabel("2022-06-27", now), "JUN 2022");
+  assert.equal(footageDateLabel("2010-08-04T00:00:00Z", now), "AUG 2010");
+});
+
+test("nothing recent, undated, or malformed gets a label", () => {
+  const now = Date.parse("2026-08-24");
+  assert.equal(footageDateLabel("2026-08-18", now), null, "six days old is current");
+  assert.equal(footageDateLabel(null, now), null);
+  assert.equal(footageDateLabel("", now), null);
+  assert.equal(footageDateLabel("not a date", now), null);
+  // A future date is a metadata error, not tomorrow's news.
+  assert.equal(footageDateLabel("2027-01-01", now), null);
+});
+
+test("the boundary is the configured window, not a hardcoded guess", () => {
+  const now = Date.parse("2026-08-24");
+  const days = Number.parseInt(process.env.VIDEO_FOOTAGE_DATE_BADGE_DAYS || "60", 10);
+  const justInside = new Date(now - (days - 1) * 86400000).toISOString().slice(0, 10);
+  const justOutside = new Date(now - (days + 1) * 86400000).toISOString().slice(0, 10);
+  assert.equal(footageDateLabel(justInside, now), null);
+  assert.ok(footageDateLabel(justOutside, now), "an asset past the window must be dated");
+});

@@ -435,3 +435,38 @@ export function footageCreditLines(footage = []) {
   const disclaimers = [...new Set(items.map(f => f.disclaimer).filter(Boolean))];
   return [...credits, ...disclaimers];
 }
+
+// ─── dating what is not from now ────────────────────────────────────────────
+
+/**
+ * WHEN A PICTURE IS OLD, SAY SO ON THE PICTURE.
+ *
+ * From the GPS study (video-factory references/gps-grammar.md): archive
+ * material carries a visible date. This is the rule that makes recency ranking
+ * honest rather than merely preferential — ranking newest-first still leaves
+ * plenty of stories whose only rights-clean picture is years old, and a 2022
+ * flood photograph under a 2026 flood story, undated, tells the viewer
+ * something untrue.
+ *
+ * It is not a caveat and not an apology. Broadcast news dates archive footage
+ * as a matter of course, and the badge already exists to carry it.
+ *
+ * Returns null for anything recent enough to read as current — the common case,
+ * where a date would be clutter — and for anything undated, because inventing
+ * one would be worse than omitting it.
+ */
+const DATE_BADGE_AFTER_DAYS = Number.parseInt(process.env.VIDEO_FOOTAGE_DATE_BADGE_DAYS || "60", 10);
+const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+
+export function footageDateLabel(date, now = Date.now()) {
+  if (!date) return null;
+  const t = Date.parse(String(date).slice(0, 10));
+  if (!Number.isFinite(t)) return null;
+  const ageDays = (now - t) / 86_400_000;
+  // A future-dated asset is a metadata error, not tomorrow's news. Say nothing.
+  if (ageDays < DATE_BADGE_AFTER_DAYS) return null;
+  const d = new Date(t);
+  // Month and year, not the day. The claim is "this is not from now", and a
+  // precise day implies a precision the story does not turn on.
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}

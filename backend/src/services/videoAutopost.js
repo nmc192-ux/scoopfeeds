@@ -62,7 +62,7 @@ import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js
 import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
 import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
 import { buildMount, buildMapPng, MOUNT_NAMES } from "./videoSubjectVisual.js";
-import { findFootageStill, footageEnabled, footageCreditLines } from "./videoFootage.js";
+import { findFootageStill, footageEnabled, footageCreditLines, footageDateLabel } from "./videoFootage.js";
 import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
@@ -386,11 +386,11 @@ export async function choosePhotoUnderlay({
   _buildMount = buildMount, _findFootageStill = findFootageStill, _footageEnabled = footageEnabled,
   _log = logger,
 } = {}) {
-  const none = { underlayPath: null, imageCredit: null, footage: null };
+  const none = { underlayPath: null, imageCredit: null, imageDate: null, footage: null };
 
   if (ordinal === 0 && article?.image_url) {
     const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: article.id });
-    if (p) return { underlayPath: p, imageCredit: attribution?.publisher || null, footage: null };
+    if (p) return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null, footage: null };
   }
 
   if (_footageEnabled()) {
@@ -401,9 +401,16 @@ export async function choosePhotoUnderlay({
         work: path.join(work, "footage"), seed: `${article?.id}-${ordinal}`,
       });
       if (p) {
-        _log.info(`🎬 slide ${slideIndex} footage: ${found.source} · ${found.licence} · ${found.sourceUrl || found.imageUrl}`);
+        // ARCHIVE MATERIAL IS DATED ON SCREEN. Recency ranking prefers newer
+        // pictures; it cannot conjure one. When the best rights-clean image for
+        // a story is years old, the viewer is told.
+        const imageDate = footageDateLabel(found.date);
+        _log.info(
+          `🎬 slide ${slideIndex} footage: ${found.source} · ${found.licence} · ` +
+          `${imageDate ? `DATED ${imageDate} · ` : ""}${found.sourceUrl || found.imageUrl}`
+        );
         // The badge gets the short form; the description gets the whole one.
-        return { underlayPath: p, imageCredit: found.screenCredit || found.credit, footage: found };
+        return { underlayPath: p, imageCredit: found.screenCredit || found.credit, imageDate, footage: found };
       }
     }
   }
@@ -412,7 +419,7 @@ export async function choosePhotoUnderlay({
     const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: `${article.id}-${ordinal}` });
     if (p) {
       _log.info(`🎬 slide ${slideIndex} photo: no footage for photo card #${ordinal + 1} — reusing the article photo on mount "${mount}"`);
-      return { underlayPath: p, imageCredit: attribution?.publisher || null, footage: null };
+      return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null, footage: null };
     }
   }
 
@@ -479,6 +486,7 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
       // not fetch is not a reason to lose a story.
       let underlayPath = null;
       let imageCredit = null;
+      let imageDate = null;
       if (wants) {
         try {
           const svWork = path.join(work, `sv${String(i).padStart(2, "0")}`);
@@ -488,6 +496,7 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
             });
             underlayPath = chosen.underlayPath;
             imageCredit = chosen.imageCredit;
+            imageDate = chosen.imageDate;
             if (chosen.footage) footageUsed.push(chosen.footage);
           } else if (wants === "map") {
             underlayPath = buildMapPng({
@@ -514,7 +523,7 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
       }
 
       // Now the real states, credited to whoever actually owns what was fetched.
-      let states = statesForCard(card, { ...ctxBase, imageCredit });
+      let states = statesForCard(card, { ...ctxBase, imageCredit, imageDate });
       states = fitStatesToDuration(states, audioSecs, { cardType: card.t, slideIndex: i });
       const hold = holdForAudio(audioSecs, states.length);
 
