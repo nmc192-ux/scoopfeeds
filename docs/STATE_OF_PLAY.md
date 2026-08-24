@@ -89,6 +89,61 @@ dependent. **This blocks I3**: putting the suite in CI before this is fixed make
 red intermittently. Next step is cheap: the native frames beneath `node::Assert` name the
 addon. Full context in `CLAUDE.md` under "Known-flaky".
 
+## 2026-08-24 — the shorts got pictures, and two more channels
+
+**The finding that reframes the rest of this entry:** `VIDEO_SUBJECT_VISUALS_ENABLED`
+was **off in production the whole time**. With it off the spec writer strips `photo`
+and `map` from the card types the model is offered, so no underlay was ever
+requested, no photo was ever fetched, and footage — which only runs inside the
+photo branch — could never fire. Every visual improvement below shipped, deployed,
+and did nothing, on a channel publishing 12 videos a day. It was found by DrJ
+watching a published video and saying "it still does not show any visuals".
+
+It was not undocumented: `env_reference.md` carried it, and
+`phases/video_premium_track_2026-08.md` said in bold that it had never been
+switched on in a live cycle. Four PRs were built on top of it without reading
+that line. **Verify the gate above the feature is open before building on it.**
+
+Shipped and merged (#60–#66), all live in prod at `83ae3f7`:
+
+- **Source credit on the picture** (#60) — `sourceBadge` existed but rendered only
+  on the TITLE card, the one whose imagery is ours. Photo and map cards, which
+  carry someone else's picture, carried nothing. Now credited from the first
+  frame, on a chip that carries its own contrast.
+- **Open-licence footage** (#61, #62, #64) — NASA + US-service-branch DVIDS only.
+  Verified provenance ONLY, because nothing reads a licence at :12 past the hour.
+  Two gates: relevance, then a **pixel** gate (figures ran 32%/48% near-white,
+  real satellite imagery 0.8%/2.0%) after the first live result for "Hurricane
+  Michael" turned out to be a data grid. Archive material is dated on screen.
+  Wikimedia Commons is excluded because the only endpoint with machine-readable
+  licence data ECONNRESETs from our networks — a rights check against an
+  unreachable endpoint is not a check.
+- **One photo shown once** (#61) — `MAX_CONSECUTIVE_SAME_TYPE` is 2, and every
+  photo card was drawing the SAME `article.image_url` on the SAME mount. The
+  repetition complaint from the long-form film, living in the automated loop.
+- **C2PA broke every DVIDS photo, silently** (#62) — DoD imagery embeds a second
+  image in its content-credentials block, ffmpeg saw a two-frame input and died
+  writing the mount intermediate. Fixed by normalising the source to one frame,
+  which also covers animated-GIF article images (always possible, never handled).
+- **The rights decision became testable** (#63) — `choosePhotoUnderlay` decides
+  whose name goes on a picture and had never executed outside production.
+- **TikTok** (#65) and **X** (#66) as the sixth and seventh surfaces. See
+  `video-pipeline.md` §7 for the fan-out rules and why each needed its own column.
+
+Enabled in prod the same day: `VIDEO_SUBJECT_VISUALS_ENABLED`, `VIDEO_MUSIC_BED_ENABLED`,
+`VIDEO_IMAGE_MOTION_ENABLED`, `VIDEO_FOOTAGE_ENABLED`, `VIDEO_TIKTOK_ENABLED`
+(`PUBLIC_TO_EVERYONE`, DrJ's call), `VIDEO_X_ENABLED`.
+
+**Unverified at end of day:** no render has happened since any of it was switched
+on — the 12/12 daily cap was spent on old-code output. TikTok and X have both
+executed **zero** posts; their upload paths are written from documentation and
+have never run. `VIDEO_IMAGE_ZOOM` (6%) is still un-eyeballed.
+
+**Found in passing, unaddressed, and bigger than anything above:** `news.db` is
+**18.6 GB**. A backup takes ~25 minutes, needs 18.6 GB of free space, and failed
+once today at 7.9 GB. That constrains every recovery option, including the COW
+restore point this project's own workflow requires before event-table migrations.
+
 ## Open items — roughly in priority order
 
 <!-- J Loop status markers: [queued] available · [proposed] awaiting DrJ approval ·
