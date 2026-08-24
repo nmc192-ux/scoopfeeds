@@ -59,6 +59,21 @@ const getPDS = () => (process.env.BLUESKY_PDS_URL || "https://bsky.social").trim
 const getHandle = () => (process.env.BLUESKY_HANDLE || "").trim();
 const getAppPassword = () => (process.env.BLUESKY_APP_PASSWORD || "").trim();
 
+/**
+ * The account's PDS DID, from its DID document.
+ *
+ * `did:web:<host>` of the AtprotoPersonalDataServer service entry. Not
+ * derivable from BLUESKY_PDS_URL: that is the entryway (bsky.social) which
+ * every account logs in through, while the PDS that actually holds the repo is
+ * assigned per account.
+ */
+function pdsDidFrom(didDoc) {
+  const svc = (didDoc?.service || []).find(x => x?.type === "AtprotoPersonalDataServer");
+  const ep = svc?.serviceEndpoint;
+  if (!ep) return null;
+  try { return "did:web:" + new URL(ep).host; } catch { return null; }
+}
+
 let session = null; // { did, accessJwt, refreshJwt, createdAt, handle }
 
 export function isBlueskyConfigured() {
@@ -69,6 +84,12 @@ function _loadSessionFromDisk() {
   try {
     if (!existsSync(SESSION_PATH)) return null;
     const raw = JSON.parse(readFileSync(SESSION_PATH, "utf8"));
+    // A session written before the pdsDid fix has no audience to sign video
+    // uploads with. Treat it as unusable so the next call creates a fresh one
+    // (createSession returns the DID document) rather than reviving a session
+    // that can log in fine and fail every upload — which is exactly the failure
+    // mode this fix exists to end.
+    if (raw && raw.pdsDid === undefined) return null;
     if (raw?.accessJwt && raw?.refreshJwt && raw?.did) {
       // Reject if handles differ AND neither could be a custom-domain alias of
       // the other. Same DID = same account regardless of handle string, so we
@@ -250,6 +271,11 @@ async function _createSession({ ignoreCooldown = false } = {}) {
       accessJwt:  out.accessJwt,
       refreshJwt: out.refreshJwt,
       handle:     getHandle(),
+      // THE PDS THIS ACCOUNT ACTUALLY LIVES ON, not the entryway we log in
+      // through. getPDS() is bsky.social for everyone; the real host is in the
+      // DID document and differs per account (ours is jellybaby.us-east...).
+      // The video service needs it — see uploadVideo.
+      pdsDid:     pdsDidFrom(out.didDoc),
       createdAt:  Date.now(),
     };
     _persistSession(next);
@@ -637,10 +663,39 @@ export async function postVideoToBluesky({ text, filePath, aspectRatio = null, d
   // Through authed() so an ExpiredToken here gets the same recovery as any
   // other PDS call — this is the first request of the cycle for this client and
   // therefore the most likely one to meet a two-hour-old accessJwt.
+  // THE AUDIENCE IS THE PDS, NOT THE VIDEO SERVICE.
+  //
+  // This read `aud: VIDEO_SERVICE_DID()` — the audience Bluesky's own video
+  // documentation specified — and it failed 116 consecutive times over weeks
+  // with a 401 nobody read:
+  //
+  //   invalid token audience "did:web:video.bsky.app", should be the user's
+  //   PDS DID "did:web:jellybaby.us-east.host.bsky.network"
+  //
+  // The endpoint is still video.bsky.app and the method is still
+  // com.atproto.repo.uploadBlob; only the audience moved. Established by
+  // probing all four combinations against the live service (2026-08-24): only
+  // aud=<PDS DID> + lxm=uploadBlob returns 200 and a jobId. aud=video service
+  // gives the error above; lxm=app.bsky.video.uploadVideo is rejected in turn
+  // for the method rather than the audience.
+  //
+  // BLUESKY_VIDEO_SERVICE_DID is left in place but is no longer the audience —
+  // it stays only so an override can still redirect the SERVICE, which is what
+  // it was really for.
+  const aud = s.pdsDid;
+  if (!aud) {
+    // Loudly, rather than falling back to the value that produced 116 silent
+    // failures. A missing DID document is a different problem and deserves to
+    // look like one.
+    throw new Error(
+      "bluesky video: could not determine the account's PDS DID from its DID document — " +
+      "the service-auth audience would be wrong and every upload would 401"
+    );
+  }
   const auth = await authed("com.atproto.server.getServiceAuth", {
     method: "GET",
     query: {
-      aud: VIDEO_SERVICE_DID(),
+      aud,
       lxm: "com.atproto.repo.uploadBlob",
       exp: String(Math.floor(Date.now() / 1000) + 30 * 60),
     },
@@ -690,3 +745,6 @@ export async function postVideoToBluesky({ text, filePath, aspectRatio = null, d
     seconds: secs,
   };
 }
+
+/** Exported for test: the audience derivation that 116 failures turned on. */
+export const _internals = { pdsDidFrom };
