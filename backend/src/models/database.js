@@ -2465,6 +2465,28 @@ export function markVideoBluesky(articleId, { status, postId = null, error = nul
 }
 
 /**
+ * TikTok posts in a ROLLING 24h, for VIDEO_TIKTOK_MAX_PER_DAY.
+ *
+ * Rolling, not calendar, for the same reason as every other channel: a midnight
+ * reset lets a quiet day burst.
+ */
+export function countTikTokPostsSince(sinceMs) {
+  return getDb().prepare(`
+    SELECT COUNT(*) AS n FROM video_posts
+    WHERE tiktok_status = 'posted' AND published_at > ?
+  `).get(sinceMs).n;
+}
+
+export function markVideoTikTok(articleId, { status, postId = null, error = null }) {
+  getDb().prepare(`
+    UPDATE video_posts SET
+      tiktok_status = ?, tiktok_post_id = ?, tiktok_error = ?, updated_at = ?
+    WHERE article_id = ?
+  `).run(status, postId, error ? String(error).slice(0, 500) : null, Date.now(), articleId);
+  return getVideoPost(articleId);
+}
+
+/**
  * Is a URL-fetch publish still in flight for this article?
  *
  * Read by sweepVideos so the 48h MP4 sweep cannot delete a file Meta has not
