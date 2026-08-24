@@ -280,6 +280,67 @@ simply have been almost nothing to extract from.
   remaining candidate. Uploads cost 1,600 units of 10,000/day, **shared with
   YouTube ingestion**.
 
+### The fan-out, as of 2026-08-24
+
+One render, **seven surfaces**. Every cross-post obeys the same three rules,
+and each rule was bought:
+
+| Channel | Flag | Delivery | Migration |
+|---|---|---|---|
+| YouTube | — | the publish itself | — |
+| Facebook (feed) | `VIDEO_FACEBOOK_ENABLED` | native bytes | 023 |
+| Facebook Reels | `VIDEO_FACEBOOK_REELS_ENABLED` | native bytes | 023 |
+| Instagram Reels | `VIDEO_INSTAGRAM_REELS_ENABLED` | Meta FETCHES a URL | 024 |
+| Threads | `VIDEO_THREADS_ENABLED` | Meta FETCHES a URL | 024 |
+| Bluesky | `VIDEO_BLUESKY_ENABLED` | raw bytes | 026 |
+| TikTok | `VIDEO_TIKTOK_ENABLED` | raw bytes | 028 |
+| X | `VIDEO_X_ENABLED` | raw bytes | 029 |
+
+1. **Never throws, never retries into the publish.** The YouTube video is live
+   and irreversible before any of these run. A cross-post failure must not reach
+   `markVideoFailed` (which would make the article selectable again and publish a
+   SECOND YouTube video) or `isQuotaExceeded` (which would abort the cycle over
+   someone else's throttling).
+2. **A column per channel, not a shared ledger.** Every re-entry guard is
+   `video_posts.<channel>_status`. This is what stops the Instagram double-post
+   (#46) recurring, and it is why TikTok got migration 028 even though
+   `videoPublisher` had posted there for months via the generic
+   `recordSocialPost`: an append-only ledger records what happened but cannot
+   cheaply answer "has this article already been posted?".
+3. **`pending` only for URL-FETCH channels.** Instagram and Threads hand Meta a
+   URL and Meta collects it later, which opens a window where the 48h sweep could
+   delete a file mid-publish. Bluesky, TikTok and X upload the bytes in-band, so
+   the file is irrelevant once the call returns. `hasPendingUrlFetchPublish` is
+   deliberately NOT widened for them — its name is the contract.
+
+**TikTok** (`VIDEO_TIKTOK_ENABLED`, dark) — `privacy_level` was a hardcoded
+`SELF_ONLY` and the comment beside it read as caution. It was not: an *unaudited*
+client is REFUSED any other value. The app was approved, `creator_info` now
+offers `PUBLIC_TO_EVERYONE`, and the value moved into `VIDEO_TIKTOK_PRIVACY` —
+defaulting to `SELF_ONLY`, because an approval that makes something possible is
+not an instruction to do it. An unrecognised value falls back to private rather
+than being passed through: an env var one character wrong must not be why
+something goes public.
+
+**X** (`VIDEO_X_ENABLED`, dark) — **posts carry no link, and that is the whole
+design.** X went pay-per-use in Feb 2026: `$0.015` a post, or **`$0.20` if it
+contains a link**. At this cadence that is $4.70/month against $63, and X
+downranks link posts anyway. The site lives in the profile bio.
+`xClient.assertNoLink` REFUSES a link at the call boundary rather than trusting
+callers, because a post with a link succeeds identically to one without — the
+difference appears only on a bill. X is therefore the one channel that does not
+use `buildDescriptionCredit`; the publisher is NAMED instead, with
+`xSafePublisher` stripping a trailing TLD so a real masthead like
+**Investing.com** is credited as "Investing" rather than billed as a link.
+Auth is OAuth **1.0a**, not 2.0: OAuth-2 refresh tokens rotate on every use and
+must be persisted before the next call, and this runs in three containers off
+one env file.
+
+**Bluesky cannot take long-form.** Its ceiling is **3 minutes / 100MB**
+(`BLUESKY_VIDEO_MAX_SECS`), confirmed current 2026-08. The automated shorts run
+60–100s and fit comfortably; the video-factory films run 7–10 minutes and never
+will. A link card is the only route for those, and is not built.
+
 **Facebook cross-post** (`VIDEO_FACEBOOK_ENABLED`, ships dark)
 
 - Every published video is also uploaded **natively** to the page —
