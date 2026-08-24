@@ -143,7 +143,18 @@ function cacheDir() {
   return dir;
 }
 
-const cacheKey = (q) => createHash("sha1").update(String(q).toLowerCase().trim()).digest("hex").slice(0, 16);
+// BUMP THIS WHENEVER THE CACHED RECORD'S SHAPE CHANGES.
+//
+// Caught in testing: `screenCredit` was added, and a cache entry written an hour
+// earlier came back without it. The reader fell back to the long credit, which
+// is exactly the field that overruns the wordmark — so the bug the new field
+// fixes would have persisted for a day, on some videos and not others, with
+// nothing in the log to say why. A cache keyed only on the question cannot
+// notice that the answer's shape has changed.
+const CACHE_VERSION = 2;
+
+const cacheKey = (q) => createHash("sha1")
+  .update(`v${CACHE_VERSION}:${String(q).toLowerCase().trim()}`).digest("hex").slice(0, 16);
 
 function cacheRead(q) {
   if (!(CACHE_HOURS > 0)) return undefined;
@@ -258,6 +269,7 @@ async function nasaCandidates(query) {
         // mount fetch runs in production and would otherwise go in the clear.
         imageUrl: String(orig).replace(/^http:\/\//i, "https://"),
         credit: d.center ? `NASA / ${d.center}` : "NASA",
+        screenCredit: d.center ? `NASA / ${d.center}` : "NASA",
         sourceUrl: d.nasa_id ? `https://images.nasa.gov/details/${encodeURIComponent(d.nasa_id)}` : null,
         licence: "Public domain — US Government work (17 U.S.C. §105)",
         source: "NASA", title: d.title || null,
@@ -280,6 +292,9 @@ async function nasaCandidates(query) {
 // documented shape and it fails closed. Stated plainly rather than implied,
 // because "implemented" and "works" are different claims. A free key is
 // self-signup at api.dvidshub.net; the first real run is its first test.
+const DOW_DISCLAIMER =
+  "The appearance of U.S. Department of War (DoW) visual information does not imply or constitute DoW endorsement.";
+
 const US_BRANCH = /^(Army|Navy|Air Force|Marines|Marine Corps|Coast Guard|Space Force|DoD)\b/i;
 
 async function dvidsCandidates(query) {
@@ -315,9 +330,29 @@ async function dvidsCandidates(query) {
       if (!url || !/^https?:\/\//i.test(url)) return null;
       return {
         imageUrl: String(url).replace(/^http:\/\//i, "https://"),
+        // TWO FORMS, BOTH TRUE, BECAUSE THEY GO TO DIFFERENT PLACES.
+        //
+        // The full credit names the photographer and belongs in the
+        // description, where there is room and where crediting a named person
+        // for their work is the decent thing to do.
+        //
+        // The corner badge is a different surface: it was sized for "REUTERS",
+        // and "AIR FORCE / DVIDS · SSGT STACEY THORNBURG" rendered straight
+        // through the SCOOPFEEDS wordmark. Truncating a credit risks
+        // misattributing it, so the short form is composed rather than cut —
+        // still an accurate statement of the source, just not the whole one.
         credit: `${it.branch} / DVIDS${it.credit ? ` · ${it.credit}` : ""}`,
+        screenCredit: `${it.branch} / DVIDS`,
         sourceUrl: it.url || null,
         licence: "Public domain — US Government work (17 U.S.C. §105)",
+        // DVIDS' OWN TERMS ASK FOR THIS, and §105 does not cover it.
+        // dvidshub.net/about/copyright: "All users of DoW VI must display this
+        // non-DoW endorsement disclaimer". News use is explicitly authorised
+        // ("historical and newsworthy purposes"), the disclaimer is REQUIRED for
+        // commercial use and REQUESTED otherwise — and a monetised channel is
+        // not the place to argue the difference. So it travels with the asset
+        // rather than being someone's job to remember.
+        disclaimer: DOW_DISCLAIMER,
         source: "DVIDS", title: it.title || null,
         date: String(it.date_published || it.date || "").slice(0, 10) || null,
       };
@@ -379,4 +414,24 @@ export async function findFootageStill({ subject, title } = {}) {
     ? `🎬 footage: "${query.slice(0, 60)}" → ${hit.source} · ${String(hit.title).slice(0, 60)} · ${hit.credit}`
     : `🎬 footage: "${query.slice(0, 60)}" → no verified match`);
   return hit;
+}
+
+// ─── what the description has to say ────────────────────────────────────────
+
+/**
+ * Credit lines for every piece of footage a video used.
+ *
+ * Public domain does not mean unattributed. NASA asks for credit as a courtesy
+ * and we give it; DVIDS attaches an actual condition, and a condition that only
+ * gets met when someone remembers is not met. De-duplicated, because one video
+ * can draw several stills from the same source and the disclaimer is a
+ * statement about the channel, not about each picture.
+ */
+export function footageCreditLines(footage = []) {
+  const items = (footage || []).filter(f => f && f.credit);
+  if (!items.length) return [];
+  const credits = [...new Set(items.map(f =>
+    `Imagery: ${f.credit}${f.licence ? ` — ${f.licence}` : ""}${f.sourceUrl ? ` ${f.sourceUrl}` : ""}`))];
+  const disclaimers = [...new Set(items.map(f => f.disclaimer).filter(Boolean))];
+  return [...credits, ...disclaimers];
 }
