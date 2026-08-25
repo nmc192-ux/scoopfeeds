@@ -623,18 +623,29 @@ export function startScheduler() {
     // used to sit here and is what took social down. Not 17,47: minute 17
     // carries runWelcomeSequenceCycle, which the first pass of this map missed.
     scheduleCron("15,45 * * * *", () => runDispatch(() => dispatchSocialCycle(), "social posting"));
-    // :10 and :40 — two of the seven minutes in the hour with NOTHING else on
-    // them. Chosen by enumerating every registered cron rather than by picking
-    // a round number: my first attempt was :05/:35 and the collision guard
-    // rejected it for sharing with runWatchlistPushCycle, which runs IN
-    // PROCESS. A dispatch cron sharing a minute with in-process work is how
-    // ingestion died for 43 hours — the blocked event loop pushes node-cron's
-    // next tick outside its one-second window and the drift never recovers.
-    scheduleCron("10,40 * * * *", () => runDispatch(() => dispatchXTextCycle(), "x text posts"));
     logger.info(`📣 Social posting cron registered (15,45 — independent of ingestion) — platforms=${listEnabledPlatforms().length}`);
   } else {
     logger.info("📣 Social posting cron NOT registered (ENABLE_AUTO_SOCIAL=false)");
   }
+  // ─── X text posts ───────────────────────────────────────────────────────
+  //
+  // OUTSIDE the ENABLE_AUTO_SOCIAL block, and that placement is the whole
+  // point of this line existing separately. It was first written just below the
+  // social cron, inside that conditional — and ENABLE_AUTO_SOCIAL=false in
+  // production, so it silently never registered. The boot log said "38 crons
+  // registered" and this was not among them.
+  //
+  // ENABLE_AUTO_SOCIAL governs the article-card social publisher, which is a
+  // different system with different credentials and its own reasons for being
+  // off. X text posting has its own switch, X_TEXT_POST_ENABLED, checked inside
+  // the cycle. One feature, one gate.
+  //
+  // :10 and :40 — two of the seven free minutes in the hour, chosen by
+  // enumerating every registered cron. The first attempt was :05/:35, which the
+  // collision guard rejected for sharing with runWatchlistPushCycle: a dispatch
+  // cron sharing a minute with in-process work is how ingestion died for 43
+  // hours.
+  scheduleCron("10,40 * * * *", () => runDispatch(() => dispatchXTextCycle(), "x text posts"));
   scheduleCron("9 * * * *",     () => runDispatch(() => dispatchVideoCycle(), "video ingestion"));
   scheduleCron("6,22,36,52 * * * *", () => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"));
   scheduleCron("28 * * * *",   () => runDispatch(() => dispatchEventsCycle(), "events refresh"));
