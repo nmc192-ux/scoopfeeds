@@ -1641,17 +1641,6 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             CHANNEL_BUDGET_MS(), "instagram-reel");
           if (igReel && igReel.status !== "off") produced.instagramReel = igReel;
 
-          // ─── Threads ─────────────────────────────────────────────────────
-          // LAST, deliberately: its mandatory ~30s wait makes it the longest of
-          // the four, and everything ahead of it should already be published
-          // before this job spends half a minute asleep.
-          const th = await withDeadline(
-            _videoToThreads(article, {
-            filePath: video.path, title, attribution,
-            spec: r.spec, slides: video.slides, now, footage: video.footage,
-          }),
-            CHANNEL_BUDGET_MS(), "threads");
-          if (th && th.status !== "off") produced.threads = th;
 
           // ─── Bluesky ─────────────────────────────────────────────────────
           // AFTER Threads, so the two slowest sit at the end: Threads sleeps
@@ -1691,6 +1680,29 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
           }),
             CHANNEL_BUDGET_MS(), "x");
           if (xp && xp.status !== "off") produced.x = xp;
+
+          // ─── Threads ─────────────────────────────────────────────────────
+          // GENUINELY LAST NOW. The comment here always said "LAST,
+          // deliberately" because Threads sleeps ~30s unconditionally — but
+          // Bluesky, TikTok and X were each added AFTER it, so the slowest and
+          // least reliable channel had drifted into the middle of the queue.
+          //
+          // On 2026-08-25 that cost a whole render: Threads went `pending` and
+          // never returned, and Bluesky / TikTok / X — two of which had been
+          // proven working by direct posts minutes earlier — were never
+          // attempted. Ordering is not cosmetic here: whatever stalls first
+          // takes everything behind it, so the known-slow channel belongs at
+          // the back where it can only cost itself.
+          // LAST, deliberately: its mandatory ~30s wait makes it the longest of
+          // the four, and everything ahead of it should already be published
+          // before this job spends half a minute asleep.
+          const th = await withDeadline(
+            _videoToThreads(article, {
+            filePath: video.path, title, attribution,
+            spec: r.spec, slides: video.slides, now, footage: video.footage,
+          }),
+            CHANNEL_BUDGET_MS(), "threads");
+          if (th && th.status !== "off") produced.threads = th;
         } catch (fbErr) {
           logger.error(
             `🚨 facebook cross-post threw past its own guard for ${article.id} — this is a code ` +
