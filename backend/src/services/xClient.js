@@ -230,7 +230,12 @@ export function fitPost(text, max = 280) {
   return units.length <= max ? s : units.slice(0, max - 1).join("").trimEnd() + "…";
 }
 
-export async function postToX({ text, filePath = null, onStep = () => {} } = {}) {
+/**
+ * `replyToId` chains a post onto another, which is how a thread is built. X has
+ * no thread endpoint: each part is an ordinary post whose reply target is the
+ * previous part's id.
+ */
+export async function postToX({ text, filePath = null, replyToId = null, onStep = () => {} } = {}) {
   if (!isXConfigured()) throw new Error("X not configured (X_API_KEY / X_API_SECRET / X_ACCESS_TOKEN / X_ACCESS_SECRET)");
   const body = fitPost(assertNoLink(text));
 
@@ -238,7 +243,9 @@ export async function postToX({ text, filePath = null, onStep = () => {} } = {})
   if (filePath) mediaIds = [await uploadVideo(filePath, { onStep })];
 
   onStep("post");
-  const payload = mediaIds ? { text: body, media: { media_ids: mediaIds } } : { text: body };
+  const payload = { text: body };
+  if (mediaIds) payload.media = { media_ids: mediaIds };
+  if (replyToId) payload.reply = { in_reply_to_tweet_id: String(replyToId) };
   const res = await xJson(TWEETS, {
     body: JSON.stringify(payload),
     headers: { "Content-Type": "application/json" },

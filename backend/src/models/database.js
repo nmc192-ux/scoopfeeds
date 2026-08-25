@@ -2344,6 +2344,55 @@ export function rejectStalePending(cutoffMs) {
   `).run(cutoffMs).changes;
 }
 
+/**
+ * Fresh pending posts, whole articles at a time, oldest-thread-part first.
+ *
+ * WHY FRESHNESS IS A HARD FILTER AND NOT A SORT. 785 posts were generated in
+ * one day and 1,203 sit pending; posting the backlog would be both a bill and a
+ * spam flag, and a six-hour-old take on a news story is worthless anyway. An
+ * item that ages out is left for the existing stale sweep to reject.
+ *
+ * Threads are returned complete or not at all — a half-posted thread reads
+ * worse than none, and the parts must go out in order to chain.
+ */
+export function listFreshPendingXPosts({ sinceMs, articleLimit = 3 } = {}) {
+  return getDb().prepare(`
+    WITH fresh AS (
+      SELECT article_id, MAX(generated_at) AS latest
+      FROM x_post_queue
+      WHERE status = 'pending' AND generated_at >= ?
+      GROUP BY article_id
+      ORDER BY latest DESC
+      LIMIT ?
+    )
+    SELECT q.id, q.article_id, q.post_text, q.post_type, q.thread_group_id,
+           q.thread_position, q.thread_total, q.generated_at, a.title AS article_title
+    FROM x_post_queue q
+    JOIN fresh f ON f.article_id = q.article_id
+    LEFT JOIN articles a ON a.id = q.article_id
+    WHERE q.status = 'pending' AND q.generated_at >= ?
+    ORDER BY f.latest DESC, q.thread_position ASC, q.id ASC
+  `).all(sinceMs, articleLimit, sinceMs);
+}
+
+/** pending -> posted. Guarded on 'pending' so a concurrent digest cannot double-post. */
+export function markXPostsPosted(ids, timestamp = Date.now()) {
+  if (!Array.isArray(ids) || !ids.length) return 0;
+  const ph = ids.map(() => "?").join(",");
+  return getDb().prepare(`
+    UPDATE x_post_queue SET status = 'posted', marked_posted_at = ?
+    WHERE id IN (${ph}) AND status = 'pending'
+  `).run(timestamp, ...ids).changes;
+}
+
+/** Text posts published in a rolling window — the spend cap reads this. */
+export function countXTextPostsSince(sinceMs) {
+  return getDb().prepare(`
+    SELECT COUNT(*) AS n FROM x_post_queue
+    WHERE status = 'posted' AND marked_posted_at > ?
+  `).get(sinceMs).n;
+}
+
 // ─── video_posts (§6.1) ──────────────────────────────────────────────────────
 //
 // One row per article, permanently. See migration 022 for why these are never
@@ -2475,6 +2524,29 @@ export function countTikTokPostsSince(sinceMs) {
     SELECT COUNT(*) AS n FROM video_posts
     WHERE tiktok_status = 'posted' AND published_at > ?
   `).get(sinceMs).n;
+}
+
+/**
+ * Entities for one article, most-mentioned first, for hashtag selection.
+ *
+ * QID-resolved only: the unresolved surfaces are the noisy half ("China,",
+ * "Iran's"). Even the resolved ones need the title filter in xHashtags — this
+ * query is where the data comes from, not where it is judged.
+ */
+export function getArticleEntitiesForTagging(articleId, limit = 12) {
+  try {
+    return getDb().prepare(`
+      SELECT e.label, e.surface, e.entity_type, COUNT(*) AS mentions
+      FROM article_entities e
+      WHERE e.article_id = ? AND e.qid IS NOT NULL
+      GROUP BY e.qid
+      ORDER BY mentions DESC
+      LIMIT ?
+    `).all(articleId, limit);
+  } catch {
+    // A missing table must not cost a post. No entities means no tags.
+    return [];
+  }
 }
 
 export function markVideoX(articleId, { status, postId = null, error = null }) {
