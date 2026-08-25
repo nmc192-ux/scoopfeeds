@@ -34,7 +34,7 @@ const _satori = dep("satori");
 const satori = _satori.default ?? _satori;
 const { Resvg } = dep("@resvg/resvg-js");
 import { readFileSync, writeFileSync } from "fs";
-import { clamp01, seg, ease, at, enter } from "./anim.mjs";
+import { clamp01, at, enter } from "./anim.mjs";
 import { GEO, geoSvg } from "./mapGeo.mjs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -155,13 +155,23 @@ const source = (text, p) =>
  * on a different figure than the author wrote.
  */
 const rollFigure = (figure, k) => {
-  const m = String(figure).match(/^(.*?)(-?\d[\d,]*(?:\.\d+)?)(.*)$/s);
+  // AT k=1 THE AUTHORED STRING WINS, UNCONDITIONALLY. Reconstruction can
+  // never be trusted to round-trip every grouping convention ("12,40,000"
+  // is a real figure on an India story and regroups Western; "007" loses
+  // its zeros) — and k=1 is the held frame the viewer actually reads.
+  if (k >= 1) return figure;
+  // The number never ends on a comma — "1,240, AND RISING" captures "1,240",
+  // not "1,240,".
+  const m = String(figure).match(/^(.*?)(-?\d(?:[\d,]*\d)?(?:\.\d+)?)(.*)$/s);
   if (!m) return figure;
   const raw = m[2];
   const decimals = (raw.split(".")[1] || "").length;
   const value = parseFloat(raw.replace(/,/g, "")) * k;
   let out = value.toFixed(decimals);
-  if (raw.includes(",")) {
+  // Mid-roll grouping is only re-applied when the author grouped Western —
+  // any other convention rolls ungrouped and lands verbatim via the k=1
+  // short-circuit above.
+  if (/^-?\d{1,3}(,\d{3})+$/.test(raw.split(".")[0])) {
     const [int, frac] = out.split(".");
     out = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (frac ? "." + frac : "");
   }
@@ -773,7 +783,9 @@ ${paths.filter((q) => q.s.hot).map((q) => `<path d="${q.d}" fill="none" stroke="
       // Optional geography behind the stages. A pipeline is a ROUTE, and the
       // whole point of the bypass chapter is WHERE it goes — abstract boxes
       // can't carry that. Held well back so the stages stay the reading layer.
-      ...(map ? [hsvg(mapSvg(map, p), {
+      ...(map ? [hsvg(geoSvg(GEO[map] ?? (() => {
+        throw new Error(`pipeline: unknown map variant "${map}". Registry has: ${Object.keys(GEO).join(", ")}`);
+      })(), p, C), {
         position: "absolute", left: 0, top: 210, width: 1920, height: 840,
         opacity: (0.62 * at(p, 0.02, 0.30)).toFixed(3),
       })] : []),

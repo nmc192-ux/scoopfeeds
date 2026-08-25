@@ -28,7 +28,7 @@
 // Every segment is encoded with identical codecs/rate so the concat demuxer can
 // join them without re-encoding the whole film.
 
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import { execFile, spawnSync } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -169,16 +169,21 @@ async function shotStill(p) {
       + `fps=${FPS},${GRADES[grade] || GRADES.default},format=yuv420p,`
       + `trim=duration=${seconds},setpts=PTS-STARTPTS[v]`;
   } else if (p.fg) {
-    // Two-layer parallax: bg gets the house Ken Burns (parallax REPLACES a
-    // still's motion, never stacks on it), fg is a cutout drifting the other
-    // way. Filter graph built in parallax.mjs so it is testable on its own.
+    // Two-layer parallax: bg keeps the house Ken Burns, fg is a cutout
+    // drifting the other way — the relative motion is the depth cue.
+    // Filter graph built in parallax.mjs so it is testable on its own.
     args.push("-loop", "1", "-framerate", String(FPS), "-i", image);
-    args.push("-loop", "1", "-framerate", String(FPS), "-i", p.fg);
+    // No -loop on the cutout: overlay's eof_action=repeat holds the single
+    // decoded+scaled frame instead of re-decoding the PNG every output frame.
+    args.push("-i", p.fg);
     const kenChain = kenFilter(ken || "in", frames, zoom0 || 1.0);
+    const ph = p.parallaxPhase;
     v = parallaxFilter({
       kenChain, frames, seconds,
       dx: p.parallax?.shift, anchor: p.parallax?.anchor,
       fgH: p.parallax?.scale ? Math.round(1080 * FG_HEIGHT_FRAC * p.parallax.scale) : undefined,
+      phaseStart: ph ? Math.round(ph.start * FPS) : 0,
+      phaseTotal: ph ? Math.max(2, Math.round(ph.total * FPS)) : null,
     });
   } else {
     args.push("-loop", "1", "-framerate", String(FPS), "-i", image);
@@ -209,7 +214,7 @@ async function shotCard(p) {
     const last = hadPayoff
       ? path.join(dir, `p${String(payN - 1).padStart(3, "0")}.png`)
       : path.join(dir, `e${String(enterN - 1).padStart(3, "0")}.png`);
-    return shotStill({ ...p, image: last, ken: null, clip: null });
+    return shotStill({ ...p, image: last, ken: null, clip: null, fg: null, parallax: null });
   }
 
   const hold1 = Math.max(0.04, revealAt - ENTER_SECS);
@@ -325,10 +330,17 @@ async function main() {
     const ins = insList[0];
 
     // Parallax declarations are validated here, at plan time, so a bad beat
-    // names itself before an hour of rendering — not during it.
+    // names itself before an hour of rendering — not during it. The validator
+    // is shown the FOOTAGE-table entry too: footage arrives via FOOTAGE[id],
+    // not only via the beat's own `footage` field, and a parallax silently
+    // losing to the footage branch is exactly the failure this check exists
+    // to catch. The cutout file is stat'ed now for the same reason — a typo'd
+    // key otherwise dies mid-build as a raw ffmpeg "No such file".
     if (v.parallax) {
-      const perrs = validateParallax(v);
+      const perrs = validateParallax({ ...v, footage: v.footage || (fo ? fo.file : undefined) });
       if (perrs.length) throw new Error(`beat ${id}: ${perrs.join("; ")}`);
+      const fgPath = P(`out/photos/${v.parallax.fg}.png`);
+      if (!existsSync(fgPath)) throw new Error(`beat ${id}: parallax cutout missing: ${fgPath}`);
     }
     const base = {
       beat: id, text: take.text, audio: take.file, audioLead: lead,
@@ -363,6 +375,9 @@ async function main() {
       const fr = MAIN_FRAMING[mainNth % MAIN_FRAMING.length];
       const f = { ...base, kind: "still", ...extra,
                   clipIn: (fo ? fo.in : 0) + mainUsed,
+                  // Parallax drift phase, in seconds of the WHOLE beat — the
+                  // same continuity idea as clipIn advancing above.
+                  parallaxPhase: v.parallax ? { start: mainUsed, total: seconds } : undefined,
                   punch: fo ? fr.punch : undefined, pan: fo ? fr.pan : undefined };
       mainUsed += extra.seconds;
       mainNth += 1;

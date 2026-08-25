@@ -36,7 +36,7 @@ Both are in `assets/fonts/`.
 | `stat` | one number with a label |
 | `bars` | a small comparison, 2-5 bars |
 | `equation` | A vs B, two paths |
-| `map` | schematic geography — `variant: hormuz \| saudi \| uae` |
+| `map` | schematic geography — registry `variant` (hormuz, drc, saudi, uae) or inline `geo: {…}` data |
 | `linechart` | a value over time, plotted on a real axis |
 | `ledger` | a list revealed row by row |
 | `doc` | a captured source screenshot with measured highlights |
@@ -69,7 +69,9 @@ when showing a bypass — a bypass is only legible next to what it bypasses.
 grammar (`drawPath`, `flowDot`, `pulseMarker`, `regionFill`, `blockMark`, …);
 a map card takes `variant` (the shipped registry) or inline `geo: {…}` data —
 a new story's geography is authored, not engineered. Colours in map data are
-palette TOKENS resolved at render, so a map cannot drift off this palette.
+palette TOKENS resolved at render; an unknown string passes through as a
+literal (validateGeo does not check colours), so token names are a convention
+the review enforces, not the renderer.
 `validateGeo` rejects bad data naming the element and field; nothing repairs.
 
 ## Motion opt-ins
@@ -82,7 +84,7 @@ the animation may change the road, never the destination.
 |---|---|---|
 | `roll: true` | `stat` | the figure COUNTS to its value over the entrance; prefix, decimals and comma grouping preserved; settles before `PAYOFF_P` |
 | `wipe: true` | `equation` | terms UNCOVER left-to-right instead of fading up; same windows |
-| `parallax: {fg, shift?, scale?, anchor?}` | photo beats | two-layer collage motion: bg keeps the house Ken Burns, the transparent-PNG cutout drifts the other way. REPLACES the still's motion, never stacks on footage. Validated at plan time (`parallax.mjs`). Costs ~1.5× a plain still shot to encode |
+| `parallax: {fg, shift?, scale?, anchor?}` | photo beats | two-layer collage motion: bg keeps the house Ken Burns, the transparent-PNG cutout drifts the other way. REPLACES the still's motion, never stacks on footage. Validated at plan time (`parallax.mjs`). Costs ~1.5× a plain still shot to encode (measured 2026-08-25, 8s shot, MacBook: 1.08s vs 0.72s — re-measure on the prod host in #75) |
 
 The `doc` card's highlight sweep is not in this table because it is not an
 opt-in — measured-rect sweeps have been the default since the card shipped.

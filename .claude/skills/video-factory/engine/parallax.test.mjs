@@ -56,7 +56,9 @@ test("a parallax shot renders, is the right shape, and actually moves", async ()
   const filter = parallaxFilter({ kenChain: KEN, frames: FRAMES, seconds: SECONDS });
   await ff([
     "-loop", "1", "-framerate", String(FPS), "-i", BG,
-    "-loop", "1", "-framerate", String(FPS), "-i", FG,
+    // Single-frame fg, exactly as build.mjs feeds it — eof_action=repeat in
+    // the filter is what holds it for the whole shot.
+    "-i", FG,
     "-filter_complex", filter, "-map", "[v]", "-an", "-t", String(SECONDS),
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
     "-r", String(FPS), out,
@@ -81,7 +83,7 @@ test("dx direction and anchor land in the filter graph", () => {
   assert.match(f, /-?\(W-w\)\/2-−?-60\.0|\(W-w\)\/2--60\.0/, "centred drift offset for dx=-120");
   assert.match(f, /y='\(H-h\)\/2'/, "center anchor");
   const g = parallaxFilter({ kenChain: KEN, frames: 24, seconds: 2 });
-  assert.match(g, new RegExp(`\\+${DX_DEFAULT}\\*n/24`), "default drift rate");
+  assert.match(g, new RegExp(`\\+${DX_DEFAULT}\\*\\(0\\+n\\)/24`), "default drift rate, phase 0");
   assert.match(g, /y='H-h'/, "default bottom anchor");
 });
 
@@ -91,4 +93,20 @@ test("validateParallax rejects the beats that would fail an hour into a render",
   assert.match(validateParallax({ photo: "P_X", footage: "F_Y", parallax: { fg: "P_CUT" } }).join(";"), /cannot run over footage/);
   assert.match(validateParallax({ photo: "P_X", parallax: {} }).join(";"), /fg .* required/);
   assert.match(validateParallax({ photo: "P_X", parallax: { fg: "P_CUT", anchor: "top" } }).join(";"), /anchor/);
+});
+
+test("fragment phase: drift continues across split encodes instead of snapping back", () => {
+  // A split beat encodes fragments separately and overlay's n restarts at 0.
+  // The phase offset makes fragment 2's first frame continue exactly where
+  // fragment 1's last frame left off.
+  const f1 = parallaxFilter({ kenChain: KEN, frames: 48, seconds: 4, dx: 72, phaseStart: 0, phaseTotal: 96 });
+  const f2 = parallaxFilter({ kenChain: KEN, frames: 48, seconds: 4, dx: 72, phaseStart: 48, phaseTotal: 96 });
+  assert.match(f1, /\(0\+n\)\/96/, "fragment 1 starts at phase 0 of the beat");
+  assert.match(f2, /\(48\+n\)\/96/, "fragment 2 resumes at frame 48 of the beat");
+  assert.match(f1, /eof_action=repeat/, "single-frame fg is held, not re-decoded");
+});
+
+test("validateParallax rejects card beats — the frozen path must never see a cutout", () => {
+  const errs = validateParallax({ card: "stat", photo: "P_BG", parallax: { fg: "P_CUT" } });
+  assert.match(errs.join(";"), /cannot run on a card beat/);
 });

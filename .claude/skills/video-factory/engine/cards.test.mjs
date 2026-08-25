@@ -70,3 +70,16 @@ test("wipe: terms uncover left-to-right, converging on the fade version's final 
   assert.notEqual(mid, PLAIN["equation@0.18"], "mid-entrance, the wipe must differ from the fade");
   assert.equal(end, PLAIN["equation@1"], "at p=1 the wipe and the fade must be pixel-identical");
 });
+
+test("roll: grouping conventions the regroup cannot round-trip land verbatim at p=1", async () => {
+  // "12,40,000" (Indian grouping), a figure with a trailing clause comma, and
+  // a leading-zero figure — reconstruction mangles all three, so at p=1 the
+  // authored string short-circuits past reconstruction entirely. Verified by
+  // pixel identity with the roll-less render.
+  for (const figure of ["12,40,000", "1,240, AND RISING", "007"]) {
+    const key = figure.replace(/[^a-z0-9]/gi, "");
+    const a = await render({ card: "stat", figure, label: "x", roll: true }, `grp-roll-${key}`, 1.0);
+    const b = await render({ card: "stat", figure, label: "x" }, `grp-plain-${key}`, 1.0);
+    assert.equal(a, b, `"${figure}" with roll:true must land pixel-identical at p=1`);
+  }
+});

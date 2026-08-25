@@ -32,7 +32,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import { ffmpegPath, P, loadStoryboard, projectSlug } from "./_deps.mjs";
-import { arcAt, applyReveal } from "./arc.mjs";
+import { arcAt, applyReveal, envelope, sortArc } from "./arc.mjs";
 const { STORYBOARD, TITLE_SEGMENT, REVEAL } = await loadStoryboard();
 const SLUG = projectSlug();
 
@@ -95,16 +95,8 @@ export function chapterTimes() {
 // arcAt / applyReveal live in arc.mjs — pure points-in/points-out, so the
 // reveal shaping is testable without a project directory or audio synthesis.
 
-/** Piecewise-linear envelope as an ffmpeg expression over `t`. */
-function envelope(points) {
-  let expr = String(points[points.length - 1][1]);
-  for (let i = points.length - 2; i >= 0; i--) {
-    const [t0, v0] = points[i], [t1, v1] = points[i + 1];
-    const lerp = `(${v0}+(${v1 - v0})*(t-${f(t0)})/${f(Math.max(0.01, t1 - t0))})`;
-    expr = `if(lt(t,${f(t1)}),${lerp},${expr})`;
-  }
-  return expr;
-}
+// envelope() lives in arc.mjs with arcAt — one module, both interpretations
+// of a points list, so they cannot silently disagree.
 
 /**
  * The arrangement. Values are gain multipliers, not dB.
@@ -121,11 +113,14 @@ export function intensityPoints(m) {
   // A generic arc is the honest fallback, and it says so.
   if (c.length !== 6) {
     console.log(`intensityPoints: ${c.length} chapters (arc is written for 6) — using the generic arc`);
-    return [
+    // sortArc: a chapter starting before 16s (or within 4s of the outro)
+    // otherwise lands its points out of order, and envelope's if-chain
+    // silently shadows everything after the inversion.
+    return sortArc([
       [0, 0.55], [12, 0.72],
       ...c.flatMap((T, i) => [[T - 4, i ? 0.85 : 0.72], [T, i === c.length - 1 ? 0.92 : 0.85]]),
       [m.outro - 4, 0.92], [m.outro, 0.80], [m.total, 0.80],
-    ];
+    ]);
   }
   const R = 4;            // ramp seconds either side of a change
   return [
@@ -147,7 +142,13 @@ export async function buildBed(seconds, out, { arc = null, chapters = null } = {
   // Component gates. 0.4s ramps: instant enough to read as an arrangement
   // change, soft enough not to click.
   const gate = (pts) => envelope(pts);
-  const c = chapters;
+  // The kick/hat/arp gates hard-index the six-chapter structure (c[4] is THE
+  // TURN). intensityPoints already degrades for other counts; these gates
+  // must degrade WITH it, or c[5] is undefined and the expressions go NaN —
+  // which ffmpeg does not report, it just never opens the gate. Risers and
+  // booms below map over whatever chapters exist and stay on.
+  const c = chapters && chapters.length === 6 ? chapters : null;
+  if (chapters && !c) console.log(`buildBed: ${chapters.length} chapters — kick/hat/arp gates default to ON (arrangement is written for 6)`);
   const R2 = 0.4;
   const kickGate = c ? gate([[0,0],[c[0]-R2,0],[c[0],1],[c[3+1]-R2,1],[c[4],0],[c[4]+24,0],[c[4]+24+2,0.0],[c[5]-R2,0],[c[5],1],[seconds,1]]) : "1";
   const hatGate  = c ? gate([[0,0],[c[2]-R2,0],[c[2],1],[c[4]-R2,1],[c[4],0],[c[5]-R2,0],[c[5],1],[seconds,1]]) : "1";
@@ -175,10 +176,10 @@ export async function buildBed(seconds, out, { arc = null, chapters = null } = {
   const arcExpr = arc ? envelope(arc) : "1";
 
   // Risers: filtered noise swelling for 2.6s INTO each chapter, cut at the bar.
-  const riserEnv = c ? c.map((T) =>
+  const riserEnv = chapters ? chapters.map((T) =>
     `if(between(t,${f(T - 2.6)},${f(T)}),pow((t-${f(T - 2.6)})/2.6,2),0)`).join("+") : "0";
   // Booms: a 46 Hz thump AT each chapter start, 1.2s decay.
-  const boomExpr = c ? c.map((T) =>
+  const boomExpr = chapters ? chapters.map((T) =>
     `if(gte(t,${f(T)}),0.85*sin(2*PI*46*(t-${f(T)}))*exp(-4.5*(t-${f(T)})),0)`).join("+") : "0";
 
   await ff([
@@ -252,6 +253,12 @@ async function main() {
   // Nothing here models the timeline — that bug was already paid for once.
   if (REVEAL != null) {
     const tReveal = m.cues[REVEAL - 1];
+    // A REVEAL past the last cue (typo, or the beat was renumbered after the
+    // export was written, or its take emitted no cue) must name itself HERE —
+    // not surface as a bare TypeError after the film is already rendered.
+    if (tReveal === undefined) {
+      throw new Error(`REVEAL beat ${REVEAL} has no SRT cue (film has ${m.cues.length}) — fix the storyboard's REVEAL export`);
+    }
     arc = applyReveal(arc, tReveal);
     console.log(`reveal     : beat ${REVEAL} at ${tReveal.toFixed(1)}s — bed drops to 0.18 under it`);
   } else {

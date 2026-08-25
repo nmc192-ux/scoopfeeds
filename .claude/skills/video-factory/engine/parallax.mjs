@@ -3,10 +3,11 @@
 // motion" rather than "graded photo with a zoom" — the depth cue is the
 // RELATIVE motion, so the drifts are opposed and both kept small.
 //
-// The rules it inherits (docs/video-pipeline.md §2, house-style.md):
-//   - Parallax REPLACES the still's Ken Burns as its motion, it does not
-//     stack on top of it. Double motion under text someone is reading is the
-//     exact failure the keyframe design removed.
+// The rules it inherits (references/house-style.md):
+//   - The background KEEPS the house Ken Burns; the cutout's opposed drift is
+//     added over it — that relative motion IS the effect. What parallax must
+//     never do is run on top of footage or under card text: it is a photo
+//     beat's one motion treatment, and validateParallax enforces exactly that.
 //   - Kept modest: the foreground drifts DX_DEFAULT px across the whole shot
 //     and the background keeps the standard 0.16 zoom span. A parallax you
 //     notice as an effect has already failed.
@@ -35,17 +36,25 @@ export const FG_HEIGHT_FRAC = 0.92; // fg height as a fraction of the 1080 frame
  * @param {"bottom"|"center"} [o.anchor]  fg vertical anchor
  * @returns {string} filter_complex mapping [0:v] bg + [1:v] fg → [v]
  */
-export function parallaxFilter({ kenChain, frames, seconds, dx = DX_DEFAULT, fgH, anchor = "bottom" }) {
+export function parallaxFilter({ kenChain, frames, seconds, dx = DX_DEFAULT, fgH, anchor = "bottom",
+                                 phaseStart = 0, phaseTotal = null }) {
   if (!kenChain || !frames || !seconds) throw new Error("parallaxFilter: kenChain, frames, seconds required");
   const H = Math.round(fgH ?? 1080 * FG_HEIGHT_FRAC);
-  // Drift is centred: the cutout sits dx/2 off-centre at frame 0 and crosses
-  // to dx/2 the other side by the last frame, so the composition is balanced
-  // at the shot's midpoint — where the viewer's eye settles.
-  const x = `(W-w)/2-${(dx / 2).toFixed(1)}+${dx}*n/${frames}`;
+  // Drift is centred over the BEAT, not the fragment: a beat split into
+  // fragments (readability splits, insert cutaways) encodes each fragment
+  // separately, and the overlay's n restarts at 0 per encode. Without the
+  // phase offset the cutout snapped back to -dx/2 at every internal cut — a
+  // repeating twitch instead of one continuous drift. phaseStart/phaseTotal
+  // are in FRAMES of the whole beat.
+  const total = phaseTotal ?? frames;
+  const x = `(W-w)/2-${(dx / 2).toFixed(1)}+${dx}*(${phaseStart}+n)/${total}`;
   const y = anchor === "center" ? "(H-h)/2" : "H-h";
+  // The fg input is a single decoded frame (no -loop on input 1);
+  // eof_action=repeat holds it, so the cutout is not re-decoded and
+  // re-scaled on every output frame of the shot.
   return `[0:v]${kenChain}[bg];`
     + `[1:v]scale=-2:${H}[fg];`
-    + `[bg][fg]overlay=x='${x}':y='${y}',format=yuv420p,`
+    + `[bg][fg]overlay=x='${x}':y='${y}':eof_action=repeat,format=yuv420p,`
     + `trim=duration=${seconds},setpts=PTS-STARTPTS[v]`;
 }
 
@@ -57,6 +66,7 @@ export function validateParallax(beat) {
   const errs = [];
   const px = beat.parallax;
   if (!px) return errs;
+  if (beat.card) errs.push("parallax cannot run on a card beat — the frozen-card path would composite the cutout over the finished card");
   if (!beat.photo) errs.push("parallax needs a `photo` background on the same beat");
   if (beat.footage || beat.clip) errs.push("parallax replaces a still's motion — it cannot run over footage");
   if (!px.fg) errs.push("parallax.fg (cutout key) is required");

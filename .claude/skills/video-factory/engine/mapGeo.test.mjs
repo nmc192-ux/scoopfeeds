@@ -121,3 +121,34 @@ test("geoSvg refuses an invalid spec instead of drawing part of it", () => {
     /invalid geo spec/,
   );
 });
+
+test("validateGeo requires every field geoSvg dereferences — no undefined attrs", () => {
+  const errs = validateGeo({ bg: "#000", elements: [
+    { el: "path", d: "M0,0 L1,1", stroke: "landEdge" },                    // no fill
+    { el: "regionFill", clip: { d: "M0,0 L1,1" }, color: "alertDim" },     // no clip.id, no x
+    { el: "line", a: [0, 0], b: [1, 1] },                                  // no color
+  ] });
+  assert.match(errs.join("\n"), /elements\[0\].*"fill"/);
+  assert.match(errs.join("\n"), /elements\[1\].*"x"/);
+  assert.match(errs.join("\n"), /elements\[1\].*clip needs "id"/);
+  assert.match(errs.join("\n"), /elements\[2\].*"color"/);
+  // And the point of it: valid shipped data still renders zero "undefined".
+  const svg = geoSvg(GEO.drc, 0.5, { landEdge: "#2c261d", alert: "#e0452b", alertDim: "#6b1f14", lime: "#dde706" });
+  assert.equal((svg.match(/undefined/g) || []).length, 0);
+});
+
+test("the pipeline card's map background renders through the geo registry", async () => {
+  // THE MISSED CALL SITE. The map refactor converted the map card but left
+  // pipeline's background calling the deleted mapSvg — a ReferenceError on
+  // any beat using the documented `map` option. This test is the coverage
+  // that was absent.
+  const spec = { card: "pipeline", kicker: "ROUTE", title: "Around the strait",
+    stages: [{ name: "LOAD" }, { name: "PIPE" }, { name: "SHIP" }], map: "saudi" };
+  const withMap = await render(spec, "pipeline-map", 0.8);
+  const without = await render({ ...spec, map: undefined }, "pipeline-nomap", 0.8);
+  assert.notEqual(withMap, without, "the map background must actually draw");
+  await assert.rejects(
+    () => renderCard({ ...spec, map: "atlantis" }, path.join(TMP, "p.png"), 0.8),
+    /pipeline: unknown map variant "atlantis".*hormuz/s,
+  );
+});
