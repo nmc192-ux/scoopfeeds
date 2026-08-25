@@ -133,71 +133,88 @@ export function xSafePublisher(name) {
 
 // ─── chunked video upload ───────────────────────────────────────────────────
 
-const CHUNK = 1024 * 1024; // 1MB — the size X's own example uses; APPEND caps at 5MB.
+// APPEND accepts up to 5MB; 4MB keeps a margin and turns a 47MB render into 12
+// requests instead of 47.
+const CHUNK = 4 * 1024 * 1024;
 
-async function xFetch(url, { method = "POST", query = {}, body = null, headers = {} } = {}) {
+/**
+ * THE CHUNKED UPLOAD USES DEDICATED ENDPOINTS, NOT command= ON /2/media/upload.
+ *
+ * The first implementation followed the v1.1-shaped documentation — one URL,
+ * `command=INIT|APPEND|FINALIZE` as a QUERY parameter — and X rejected every
+ * call with a message that says exactly what is wrong if you read it:
+ *
+ *     "The query parameter [command] is not one of []"
+ *
+ * An empty allowed-set: that endpoint takes no query parameters at all. Four
+ * shapes were probed against the live API before this was rewritten:
+ *
+ *   /2/media/upload?command=INIT           -> 400, query parameter not allowed
+ *   /2/media/upload  (multipart body)      -> 400, "Missing media field" (that
+ *                                             is the SIMPLE upload, not chunked)
+ *   /2/media/upload  (form-urlencoded)     -> 400, same as the first
+ *   /2/media/upload/initialize (JSON body) -> 200 + media id                ✓
+ *
+ * Verified end to end on a real 47MB render: initialize 200, all 12 appends
+ * accepted, finalize 200 with processing_info, and STATUS reporting
+ * state=succeeded.
+ *
+ * STATUS is the one call that DOES take query parameters, on the base path.
+ * That asymmetry is not a mistake here — it is what the API does.
+ */
+async function xJson(url, { method = "POST", query = {}, body = null, headers = {} } = {}) {
   const qs = new URLSearchParams(query).toString();
-  const full = qs ? `${url}?${qs}` : url;
-  const res = await fetch(full, {
+  const res = await fetch(qs ? `${url}?${qs}` : url, {
     method,
     headers: { Authorization: oauthHeader(method, url, query, creds()), ...headers },
     body,
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(120_000),
   });
   const text = await res.text();
   let json = null;
   try { json = JSON.parse(text); } catch { /* X returns HTML on some errors */ }
-  if (!res.ok) {
-    throw new Error(`X ${method} ${url.replace(API, "")} ${res.status}: ${(text || "").slice(0, 300)}`);
-  }
+  if (!res.ok) throw new Error(`X ${method} ${url.replace(API, "")} ${res.status}: ${(text || "").slice(0, 300)}`);
   return json;
 }
 
-/**
- * Upload an MP4 and return its media_id.
- *
- * INIT / APPEND / FINALIZE, then POLL — the poll is not optional. FINALIZE
- * returns before X has transcoded the video, and attaching a media_id that is
- * still processing produces a post with no video on it.
- */
 export async function uploadVideo(filePath, { onStep = () => {} } = {}) {
   if (!existsSync(filePath)) throw new Error(`X upload: file not found at ${filePath}`);
   const bytes = readFileSync(filePath);
   const total = statSync(filePath).size;
 
-  onStep("init");
-  const init = await xFetch(UPLOAD, {
-    query: { command: "INIT", media_type: "video/mp4", total_bytes: String(total), media_category: "tweet_video" },
+  onStep("initialize");
+  const init = await xJson(`${API}/2/media/upload/initialize`, {
+    body: JSON.stringify({ media_type: "video/mp4", total_bytes: total, media_category: "tweet_video" }),
+    headers: { "Content-Type": "application/json" },
   });
-  const mediaId = init?.data?.id || init?.media_id_string || init?.data?.media_id_string;
-  if (!mediaId) throw new Error(`X upload INIT returned no media id: ${JSON.stringify(init).slice(0, 200)}`);
+  const mediaId = init?.data?.id;
+  if (!mediaId) throw new Error(`X initialize returned no media id: ${JSON.stringify(init).slice(0, 200)}`);
 
   for (let i = 0, off = 0; off < total; i++, off += CHUNK) {
-    const slice = bytes.subarray(off, Math.min(off + CHUNK, total));
     const form = new FormData();
-    form.append("media", new Blob([slice]));
+    form.append("segment_index", String(i));
+    // The filename is required — an unnamed part is not treated as a file.
+    form.append("media", new Blob([bytes.subarray(off, Math.min(off + CHUNK, total))]), "chunk");
     onStep(`append ${i + 1}`);
-    await xFetch(UPLOAD, {
-      query: { command: "APPEND", media_id: mediaId, segment_index: String(i) },
-      body: form,
-    });
+    await xJson(`${API}/2/media/upload/${mediaId}/append`, { body: form });
   }
 
   onStep("finalize");
-  const fin = await xFetch(UPLOAD, { query: { command: "FINALIZE", media_id: mediaId } });
+  const fin = await xJson(`${API}/2/media/upload/${mediaId}/finalize`);
 
-  // POLL. `processing_info` is absent when the media is already usable.
-  let info = fin?.data?.processing_info || fin?.processing_info;
+  // POLL. finalize returns before transcoding completes, and attaching a
+  // media_id that is still processing produces a post with no video on it.
+  let info = fin?.data?.processing_info;
   const deadline = Date.now() + 5 * 60_000;
   while (info && info.state !== "succeeded") {
     if (info.state === "failed") {
       throw new Error(`X video processing failed: ${JSON.stringify(info.error || info).slice(0, 200)}`);
     }
-    if (Date.now() > deadline) throw new Error("X video processing did not finish within 5 minutes");
+    if (Date.now() > deadline) throw new Error(`X video processing did not finish within 5 minutes (media ${mediaId})`);
     await new Promise(r => setTimeout(r, Math.max(1, info.check_after_secs || 5) * 1000));
     onStep(`processing ${info.state || "?"}`);
-    const st = await xFetch(UPLOAD, { method: "GET", query: { command: "STATUS", media_id: mediaId } });
-    info = st?.data?.processing_info || st?.processing_info;
+    const st = await xJson(`${API}/2/media/upload`, { method: "GET", query: { command: "STATUS", media_id: mediaId } });
+    info = st?.data?.processing_info;
   }
   return mediaId;
 }
@@ -222,7 +239,7 @@ export async function postToX({ text, filePath = null, onStep = () => {} } = {})
 
   onStep("post");
   const payload = mediaIds ? { text: body, media: { media_ids: mediaIds } } : { text: body };
-  const res = await xFetch(TWEETS, {
+  const res = await xJson(TWEETS, {
     body: JSON.stringify(payload),
     headers: { "Content-Type": "application/json" },
   });
