@@ -390,11 +390,13 @@ export async function choosePhotoUnderlay({
   _buildMount = buildMount, _findFootageStill = findFootageStill, _footageEnabled = footageEnabled,
   _log = logger,
 } = {}) {
-  const none = { underlayPath: null, imageCredit: null, imageDate: null, footage: null };
+  const none = { underlayPath: null, imageCredit: null, imageDate: null, footage: null,
+                 imageUrl: null, pickedBy: "none" };
 
   if (ordinal === 0 && article?.image_url) {
     const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: article.id });
-    if (p) return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null, footage: null };
+    if (p) return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null,
+                    footage: null, imageUrl: article.image_url, pickedBy: "article-photo" };
   }
 
   if (_footageEnabled()) {
@@ -414,7 +416,8 @@ export async function choosePhotoUnderlay({
           `${imageDate ? `DATED ${imageDate} · ` : ""}${found.sourceUrl || found.imageUrl}`
         );
         // The badge gets the short form; the description gets the whole one.
-        return { underlayPath: p, imageCredit: found.screenCredit || found.credit, imageDate, footage: found };
+        return { underlayPath: p, imageCredit: found.screenCredit || found.credit, imageDate,
+                 footage: found, imageUrl: found.imageUrl, pickedBy: `footage:${found.source}` };
       }
     }
   }
@@ -423,7 +426,8 @@ export async function choosePhotoUnderlay({
     const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: `${article.id}-${ordinal}` });
     if (p) {
       _log.info(`🎬 slide ${slideIndex} photo: no footage for photo card #${ordinal + 1} — reusing the article photo on mount "${mount}"`);
-      return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null, footage: null };
+      return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null,
+               footage: null, imageUrl: article.image_url, pickedBy: "article-photo-reused" };
     }
   }
 
@@ -502,12 +506,29 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
             imageCredit = chosen.imageCredit;
             imageDate = chosen.imageDate;
             if (chosen.footage) footageUsed.push(chosen.footage);
+            // WHAT PICTURE THIS SLIDE GOT, AND WHY.
+            //
+            // Extracting choosePhotoUnderlay for testability (#63) deleted the
+            // one line that recorded this, and the loss was invisible until a
+            // published short carried an obviously wrong image and there was
+            // nothing in the log to say where it came from. Nothing downstream
+            // can see a photograph; this pairing — the spec's DECLARED subject
+            // beside the URL actually used — is the only place a mismatch is
+            // visible at all.
+            logger.info(
+              `🎬 slide ${i} photo [${chosen.pickedBy}]: subject "${card.subject ?? "(none declared)"}" ` +
+              `→ ${chosen.imageCredit || "uncredited"} · ${String(chosen.imageUrl || "NO IMAGE").slice(0, 110)}`
+            );
           } else if (wants === "map") {
             underlayPath = buildMapPng({
               codes: card.codes, exception: card.exception ?? null,
               out: path.join(svWork, "map.png"), work: svWork,
             });
             if (underlayPath) imageCredit = "NATURAL EARTH";
+            logger.info(
+              `🎬 slide ${i} map: codes ${JSON.stringify(card.codes ?? [])}` +
+              `${card.exception ? ` except ${card.exception}` : ""} → ${underlayPath ? "drawn" : "NOT DRAWN"}`
+            );
           }
           if (!underlayPath) {
             logger.warn(`🎬 slide ${i} (${card.t}): no ${wants} could be built — rendering the type alone`);

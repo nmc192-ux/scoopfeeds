@@ -107,7 +107,12 @@ test("a failed footage mount does not report footage as used", async () => {
 
 test("an article with no photograph and no footage renders bare, uncredited", async () => {
   const r = await run({ article: { ...ARTICLE, image_url: null }, _findFootageStill: async () => null });
-  assert.deepEqual(r, { underlayPath: null, imageCredit: null, imageDate: null, footage: null });
+  assert.deepEqual(r, {
+    underlayPath: null, imageCredit: null, imageDate: null, footage: null,
+    // Reported even when nothing was found, so the log can say so — a slide
+    // that silently got no picture is how a bad image went undiagnosable.
+    imageUrl: null, pickedBy: "none",
+  });
 });
 
 // ─── dating archive material ────────────────────────────────────────────────
@@ -137,4 +142,21 @@ test("the article's own photograph is never dated", async () => {
   const r = await run({ ordinal: 0 });
   assert.equal(r.imageCredit, "Reuters");
   assert.equal(r.imageDate, null);
+});
+
+test("the choice reports WHAT it picked, so a wrong picture is diagnosable", async () => {
+  // Extracting this function for testability (#63) deleted the only log line
+  // that recorded which image a slide received. The loss was invisible until a
+  // published short carried an obviously wrong picture and nothing said where
+  // it came from.
+  const first = await run({ ordinal: 0 });
+  assert.equal(first.pickedBy, "article-photo");
+  assert.equal(first.imageUrl, ARTICLE.image_url);
+
+  const later = await run({ ordinal: 1 });
+  assert.equal(later.pickedBy, "footage:DVIDS");
+  assert.equal(later.imageUrl, FOOTAGE.imageUrl);
+
+  const reused = await run({ ordinal: 1, _footageEnabled: () => false });
+  assert.equal(reused.pickedBy, "article-photo-reused");
 });
