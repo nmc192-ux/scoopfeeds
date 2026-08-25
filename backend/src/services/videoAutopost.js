@@ -42,7 +42,7 @@ import {
   markVideoThreads, countThreadsPostsSince,
   markVideoBluesky, countBlueskyPostsSince,
   markVideoTikTok, countTikTokPostsSince,
-  markVideoX, countXPostsSince,
+  markVideoX, countXPostsSince, getArticleEntitiesForTagging,
 } from "../models/database.js";
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
 import {
@@ -68,6 +68,7 @@ import { findFootageStill, footageEnabled, footageCreditLines, footageDateLabel 
 import { withDeadline } from "./httpRetry.js";
 import { isTikTokConfigured, uploadToTikTok, tiktokPrivacyLevel } from "./tiktokClient.js";
 import { isXConfigured, postToX, fitPost, xSafePublisher } from "./xClient.js";
+import { hashtagsFor, withHashtags } from "./xHashtags.js";
 import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
@@ -791,11 +792,19 @@ export async function videoToX(article, {
     // "Investing.com" is a real masthead here, and X bills any dotted name as a
     // link. Strip the TLD rather than lose the channel for that publisher.
     const who = xSafePublisher(attribution?.publisher);
-    const text = fitPost([title, who ? `Source: ${who}` : ""].filter(Boolean).join("\n\n"));
+    // ONE OR TWO TAGS, OR NONE. Measured: 1-2 earn ~21% more engagement than
+    // none, 3+ costs ~17%, 5+ up to 40% of reach. Both must be specific — X
+    // ranks on the text now, so a generic tag buys nothing and still pays the
+    // penalty. See xHashtags for why they are filtered through the title.
+    const tags = hashtagsFor({ title, entities: getArticleEntitiesForTagging(article.id) });
+    const text = withHashtags(
+      fitPost([title, who ? `Source: ${who}` : ""].filter(Boolean).join("\n\n"), 280 - 40),
+      tags);
 
     const { id, url } = await postToX({ filePath, text });
     markVideoX(article.id, { status: "posted", postId: id });
-    logger.info(`\u{1D54F} X CROSS-POSTED ${id} (${posted24h + 1}/${max} today) — ${url}`);
+    logger.info(`\u{1D54F} X CROSS-POSTED ${id} (${posted24h + 1}/${max} today)` +
+      `${tags.length ? ` tags=${tags.join(" ")}` : " no tags"} — ${url}`);
     return { status: "posted", id, url };
 
   } catch (err) {

@@ -2477,6 +2477,29 @@ export function countTikTokPostsSince(sinceMs) {
   `).get(sinceMs).n;
 }
 
+/**
+ * Entities for one article, most-mentioned first, for hashtag selection.
+ *
+ * QID-resolved only: the unresolved surfaces are the noisy half ("China,",
+ * "Iran's"). Even the resolved ones need the title filter in xHashtags — this
+ * query is where the data comes from, not where it is judged.
+ */
+export function getArticleEntitiesForTagging(articleId, limit = 12) {
+  try {
+    return getDb().prepare(`
+      SELECT e.label, e.surface, e.entity_type, COUNT(*) AS mentions
+      FROM article_entities e
+      WHERE e.article_id = ? AND e.qid IS NOT NULL
+      GROUP BY e.qid
+      ORDER BY mentions DESC
+      LIMIT ?
+    `).all(articleId, limit);
+  } catch {
+    // A missing table must not cost a post. No entities means no tags.
+    return [];
+  }
+}
+
 export function markVideoX(articleId, { status, postId = null, error = null }) {
   getDb().prepare(`
     UPDATE video_posts SET
