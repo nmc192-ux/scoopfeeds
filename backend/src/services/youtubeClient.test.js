@@ -157,3 +157,116 @@ test("a FRESH disk entry is adopted without a refresh — the cross-process path
     assert.deepEqual(seen, ["Bearer from-another-process"]);
   } finally { globalThis.fetch = real; }
 });
+
+// ─── Captions ─────────────────────────────────────────────────────────────────
+//
+// captions.insert needs youtube.force-ssl, which the shipped refresh token did
+// not carry. The load-bearing behaviour is that a missing scope is detected
+// BEFORE the insert: the call costs 400 quota units whether it succeeds or
+// 403s, and it is drawn from the same 10,000/day budget six uploads already
+// take 9,600 from. An implementation that "just tries it and handles the 403"
+// passes any test that only checks the thrown type — CAPTIONS ENDPOINT IS NOT
+// TOUCHED WHEN THE SCOPE IS MISSING is the one that fails on it.
+
+const FORCE_SSL = "https://www.googleapis.com/auth/youtube.force-ssl";
+
+/** stub() plus a tokeninfo route, so scope can be varied per test. */
+function stubCaptions({ scopes = [], insertStatus = 200, insertBody = { id: "cap-1" } } = {}) {
+  const calls = { token: 0, tokeninfo: 0, insert: 0 };
+  let lastInsert = null;
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.includes("oauth2.googleapis.com/tokeninfo")) {
+      calls.tokeninfo++;
+      return { ok: true, status: 200, json: async () => ({ scope: scopes.join(" ") }) };
+    }
+    if (u.includes("oauth2.googleapis.com/token")) {
+      calls.token++;
+      return { ok: true, status: 200, json: async () => ({ access_token: `token-${calls.token}`, expires_in: 3600 }) };
+    }
+    if (u.includes("/captions")) {
+      calls.insert++;
+      lastInsert = init;
+      return { ok: insertStatus < 400, status: insertStatus, json: async () => insertBody };
+    }
+    return { ok: true, status: 200, json: async () => ({ items: [] }) };
+  };
+  return { calls, restore: () => { globalThis.fetch = real; }, insert: () => lastInsert };
+}
+
+/** A throwaway .srt on disk — uploadCaptions stats the path before anything else. */
+async function srtFixture() {
+  const { writeFileSync } = await import("node:fs");
+  const f = path.join(process.env.SCOOP_PERSISTENT_DATA_DIR, "t.srt");
+  writeFileSync(f, "1\n00:00:00,000 --> 00:00:02,000\nStrait of Hormuz — café\n");
+  return f;
+}
+
+test("captions: a missing scope throws YouTubeScopeError and spends NO quota", async () => {
+  const client = await freshClient();
+  const srt = await srtFixture();
+  const { calls, restore } = stubCaptions({ scopes: [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly",
+  ] });
+  try {
+    await assert.rejects(
+      () => client.uploadCaptions({ videoId: "vid1", filePath: srt }),
+      (e) => e.name === "YouTubeScopeError" && /force-ssl/.test(e.message),
+    );
+    assert.equal(calls.insert, 0,
+      "the captions endpoint must NOT be called when the scope is absent — that call costs 400 units");
+    assert.equal(calls.tokeninfo, 1, "the scope is read from tokeninfo, which is free");
+  } finally { restore(); }
+});
+
+test("captions: with force-ssl the SRT bytes are sent as multipart/related", async () => {
+  const client = await freshClient();
+  const srt = await srtFixture();
+  const { calls, restore, insert } = stubCaptions({ scopes: [FORCE_SSL] });
+  try {
+    const out = await client.uploadCaptions({ videoId: "vid1", filePath: srt, language: "en" });
+    assert.equal(out.captionId, "cap-1");
+    assert.equal(calls.insert, 1);
+
+    const init = insert();
+    assert.match(init.headers["Content-Type"], /^multipart\/related; boundary=/);
+    const sent = Buffer.from(init.body).toString("utf8");
+    assert.match(sent, /"videoId":"vid1"/, "the metadata part names the video");
+    assert.match(sent, /Strait of Hormuz — café/,
+      "the SRT bytes ride in the second part, UTF-8 intact");
+  } finally { restore(); }
+});
+
+test("captions: a 403 that SURVIVES the scope check is not blamed on the scope", async () => {
+  // Quota exhaustion and a not-owned video both 403 here. Reporting those as
+  // "re-mint your token" sends the reader to re-run an OAuth flow that fixes
+  // nothing — the ambiguity this whole preflight exists to remove.
+  const client = await freshClient();
+  const srt = await srtFixture();
+  const { restore } = stubCaptions({
+    scopes: [FORCE_SSL], insertStatus: 403,
+    insertBody: { error: { message: "The request cannot be completed because you have exceeded your quota." } },
+  });
+  try {
+    await assert.rejects(
+      () => client.uploadCaptions({ videoId: "vid1", filePath: srt }),
+      (e) => e.name !== "YouTubeScopeError" && /quota/i.test(e.message),
+    );
+  } finally { restore(); }
+});
+
+test("captions: hasCaptionScope answers false rather than throwing when tokeninfo dies", async () => {
+  const client = await freshClient();
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("oauth2.googleapis.com/token") && !String(url).includes("tokeninfo")) {
+      return { ok: true, status: 200, json: async () => ({ access_token: "t", expires_in: 3600 }) };
+    }
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+  try {
+    assert.equal(await client.hasCaptionScope(), false);
+  } finally { globalThis.fetch = real; }
+});

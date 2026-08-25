@@ -218,8 +218,8 @@ The short version:
   expected ID and refuse on mismatch.
 - **Verify by reading state back.** An upload response saying `publishAt` was
   accepted is not proof it stuck; re-query the object.
-- YouTube: `publishAt` must go **inside** `videos.insert`. The token cannot
-  `videos.update`.
+- YouTube: `publishAt` must go **inside** `videos.insert`. Keep it there even
+  once the token can `videos.update` — see `references/platform-apis.md`.
 - Facebook: `published=false` + `scheduled_publish_time`. The **disk-cache
   token outranks env** — load it the same way `facebookClient` does.
 - Instagram: **cannot schedule at all** and **cannot accept uploaded bytes**.
@@ -231,8 +231,12 @@ The short version:
   currently fail with error 2207077; Reels work, and a Story failure is caught
   so it cannot take the Reels down with it.
 
-**Captions are manual.** The token carries `upload` + `readonly`, so
-`captions.insert` is unavailable — upload `out/<slug>.srt` in Studio by hand.
+**Captions upload automatically**, from the SRT `build.mjs` emits — the real
+shot timeline, not a re-transcription. This needs `youtube.force-ssl`, which
+`scripts/youtube-auth.mjs` now requests; **a token minted before that still
+carries the old scopes and must be re-minted.** `publish-all.mjs` checks the
+scope for free before spending the 400 units, and downgrades to "do it in
+Studio" on any failure rather than failing the publish.
 
 **Disclosure follows the film, not habit.** `publish-all.mjs` prints the
 synthetic-content instruction from `publish.json`. If the film contains no AI

@@ -289,3 +289,114 @@ export async function setYouTubePrivacy(videoId, privacyStatus = "private") {
   }
   return { videoId, privacyStatus };
 }
+
+// ─── Captions ─────────────────────────────────────────────────────────────────
+//
+// captions.insert needs the `youtube.force-ssl` scope. The original token was
+// minted with `youtube.upload` + `youtube.readonly` only, which is why every
+// film so far shipped with the SRT uploaded by hand in Studio.
+//
+// Re-mint with `node scripts/youtube-auth.mjs` (it now requests force-ssl) and
+// replace YOUTUBE_REFRESH_TOKEN. Until that happens every function below fails
+// with a NAMED error rather than a bare 403 — a scope failure and a bad
+// credential are indistinguishable from the status code alone, and this
+// codebase has already paid for that ambiguity once.
+
+export const CAPTIONS_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl";
+const CAPTIONS_UPLOAD = "https://www.googleapis.com/upload/youtube/v3/captions";
+
+/** Error thrown when the live token cannot reach a captions endpoint. */
+export class YouTubeScopeError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "YouTubeScopeError";
+    this.missingScope = CAPTIONS_SCOPE;
+  }
+}
+
+/**
+ * Scopes actually granted to the current access token, straight from Google.
+ *
+ * Asked BEFORE uploading rather than inferred from a failure: captions.insert
+ * costs 400 quota units whether it succeeds or 403s, and the budget is 10,000
+ * a day shared with uploads and ingestion. tokeninfo is free.
+ */
+export async function getTokenScopes() {
+  const accessToken = await _getAccessToken();
+  const res = await fetch(
+    `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`
+  );
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`YouTube tokeninfo ${res.status}: ${JSON.stringify(body).slice(0, 200)}`);
+  return String(body.scope || "").split(/\s+/).filter(Boolean);
+}
+
+/** True when the live token can write captions. Never throws — returns false. */
+export async function hasCaptionScope() {
+  try {
+    return (await getTokenScopes()).includes(CAPTIONS_SCOPE);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Upload an SRT as a caption track on an existing video.
+ *
+ * Params:
+ *   videoId  — the target video
+ *   filePath — absolute path to a .srt (YouTube sniffs the format from content)
+ *   language — BCP-47 tag, default "en"
+ *   name     — track name shown in the caption picker, default "English"
+ *   isDraft  — true leaves the track unpublished; default false (live)
+ *
+ * Returns { captionId, videoId, language, name }.
+ * Costs 400 quota units.
+ */
+export async function uploadCaptions({ videoId, filePath, language = "en", name = "English", isDraft = false } = {}) {
+  if (!isYouTubeConfigured()) throw new Error("YouTube not configured");
+  if (!videoId) throw new Error("uploadCaptions: videoId required");
+  if (!filePath || !existsSync(filePath)) throw new Error(`uploadCaptions: file not found at ${filePath}`);
+
+  if (!(await hasCaptionScope())) {
+    throw new YouTubeScopeError(
+      `YouTube captions need the ${CAPTIONS_SCOPE} scope, which this refresh token does not carry. ` +
+      `Re-run backend/scripts/youtube-auth.mjs and replace YOUTUBE_REFRESH_TOKEN.`
+    );
+  }
+
+  const accessToken = await _getAccessToken();
+  const metadata = { snippet: { videoId, language, name, isDraft: Boolean(isDraft) } };
+
+  // Hand-built multipart/related: the caption body is uploaded as bytes, so a
+  // string template would corrupt any non-ASCII in the transcript.
+  const boundary = `scoopfeeds-${Math.random().toString(36).slice(2)}`;
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`),
+    Buffer.from(JSON.stringify(metadata)),
+    Buffer.from(`\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`),
+    readFileSync(filePath),
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+
+  const res = await fetch(`${CAPTIONS_UPLOAD}?part=snippet&uploadType=multipart`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": `multipart/related; boundary=${boundary}`,
+      "Content-Length": String(body.length),
+    },
+    body,
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = out?.error?.message || JSON.stringify(out).slice(0, 300);
+    // A 403 that survived the scope preflight is something else — quota, or a
+    // video the channel does not own. Say so instead of blaming the scope.
+    throw new Error(`YouTube captions.insert ${res.status}: ${msg}`);
+  }
+  if (!out.id) throw new Error("YouTube captions.insert: response missing caption id");
+
+  logger.info(`💬 YouTube captions uploaded for ${videoId}: ${out.id} (${language})`);
+  return { captionId: out.id, videoId, language, name };
+}

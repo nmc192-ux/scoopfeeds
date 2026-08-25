@@ -15,14 +15,29 @@ different page returns the right name happily.
 
 ## YouTube
 
-**Token scopes are `youtube.upload` + `youtube.readonly` only.** Consequences:
+**Token scopes: check before assuming.** `backend/scripts/youtube-auth.mjs` now
+requests `youtube.force-ssl` alongside upload + readonly, but **a token minted
+before that change carries the old two and must be re-minted** — the script
+change does not widen a token already in `YOUTUBE_REFRESH_TOKEN`.
 
-- `videos.update` is **forbidden**. `publishAt` must be set **inside**
-  `videos.insert` (`status.privacyStatus=private` + `status.publishAt`), which
-  `youtube.upload` permits.
-- `captions.insert` is impossible. SRT must be uploaded by hand in Studio.
-- `setYouTubePrivacy()` in `backend/src/services/youtubeClient.js` will 403.
-- `thumbnails.set` works (channel is phone-verified).
+Read the live scopes rather than guessing:
+
+```bash
+node -e "import('./src/services/youtubeClient.js').then(m=>m.getTokenScopes()).then(console.log)"
+```
+
+| Call | upload + readonly | + force-ssl |
+|---|---|---|
+| `videos.insert` (with inline `publishAt`) | works | works |
+| `thumbnails.set` | works (channel is phone-verified) | works |
+| `captions.insert` | **403** | works |
+| `videos.update` / `setYouTubePrivacy()` | **403** | works |
+
+`publishAt` is still set **inside** `videos.insert` regardless of scope. That is
+not a workaround to unwind once force-ssl lands: reading back what YouTube
+accepted at insert is strictly better than a second call that can partially
+apply, and `videos.update` replaces the whole `status` part rather than patching
+it (see the comment on `setYouTubePrivacy`).
 
 `uploadToYouTube()` in the production client has no `publishAt` parameter, so a
 scheduled upload needs its own resumable insert. Do not widen the live
@@ -33,8 +48,14 @@ appends `#Shorts` to a 7-minute film.
 
 Read back `status.publishAt` from the insert response; do not assume it stuck.
 
+**Captions upload automatically** when the token carries force-ssl.
+`publish-all.mjs` scope-checks via the free `tokeninfo` endpoint, then posts the
+SRT as `multipart/related`; on any failure it warns and tells you to do that one
+in Studio, but never fails the publish — the film is already live by then.
+Budget **400 quota units** per track on top of the 1,600/upload.
+
 **Manual afterwards:** tick "Altered or synthetic content" if any AI imagery is
-used, and upload captions.
+used. That flag has no API surface at all.
 
 ## Facebook
 
