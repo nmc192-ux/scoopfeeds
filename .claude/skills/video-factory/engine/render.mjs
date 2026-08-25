@@ -36,6 +36,7 @@ const { Resvg } = dep("@resvg/resvg-js");
 import { readFileSync, writeFileSync } from "fs";
 import { clamp01, at, enter } from "./anim.mjs";
 import { GEO, geoSvg } from "./mapGeo.mjs";
+import { assertVerbatim } from "./statement.mjs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -353,6 +354,68 @@ const CARDS = {
       ]),
     ]),
   ], p),
+
+  /**
+   * A captured statement (tweet), rendered as evidence (#82).
+   *
+   * NOT a screenshot and NOT X's trade dress: a house-styled quotation card
+   * in the same register as `quote` — but its content comes ONLY from the
+   * evidence archive (out/evidence/<id>.json, written by captureStatement).
+   * There is no path from a found image to this card, on purpose.
+   *
+   * VERBATIM IS ENFORCED IN THE CARD. A spec may carry display `text` (only
+   * to control line breaks); collapsed whitespace must byte-match the
+   * archive or the render throws. The archive is the record; edit nothing.
+   *
+   * spec: { statement: <archived record>, text?, sinceDeleted? }
+   */
+  tweet: ({ statement, text, sinceDeleted }, p) => {
+    if (!statement || !statement.id || statement.text === undefined) {
+      throw new Error('tweet card: `statement` must be an archived record from captureStatement — '
+        + 'evidence enters only through the archive');
+    }
+    const shown = text ?? statement.text;
+    // Line breaks are presentation; words are not. Compare with whitespace
+    // collapsed, and throw through assertVerbatim on any word-level drift.
+    const collapse = (t) => t.replace(/\s+/g, " ").trim();
+    if (collapse(shown) !== collapse(statement.text)) assertVerbatim(shown, statement);
+    const lines = shown.split("\n");
+    const big = shown.length < 160;
+    const date = statement.createdAt
+      ? new Date(statement.createdAt).toLocaleDateString("en-GB",
+          { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).toUpperCase()
+      : null;
+    return frame([
+      ...(date ? [eyebrow(date, p)] : []),
+      col({ flexGrow: 1, justifyContent: "center" }, [
+        h("div", {
+          fontFamily: "Anton", fontSize: 110, color: C.lime, lineHeight: 0.7, marginBottom: 16,
+          ...enter(p, 0.02, 0.18, 18),
+        }, "\u201C"),
+        ...lines.map((t, i) => h("div", {
+          fontFamily: "Inter", fontWeight: 700, fontSize: big ? 58 : 44, color: C.white,
+          lineHeight: 1.3, maxWidth: 1520,
+          ...enter(p, 0.08 + i * 0.05, 0.40 + i * 0.05, 24),
+        }, t)),
+        row({ marginTop: 44, alignItems: "center", ...enter(p, 0.46, 0.72, 18) }, [
+          h("div", { width: 70, height: 6, backgroundColor: C.lime, marginRight: 24 }),
+          col({}, [
+            h("div", { fontFamily: "Inter", fontWeight: 700, fontSize: 32, color: C.white },
+              statement.name || statement.handle || "UNATTRIBUTED"),
+            ...(statement.handle ? [h("div", {
+              fontFamily: "Inter", fontWeight: 600, fontSize: 26, color: C.dim, marginTop: 6,
+            }, `@${statement.handle} \u00b7 statement on X`)] : []),
+          ]),
+        ]),
+        ...(sinceDeleted ? [h("div", {
+          fontFamily: "Inter", fontWeight: 700, fontSize: 26, color: C.alert, marginTop: 30,
+          letterSpacing: 2, textTransform: "uppercase",
+          ...enter(p, 0.60, 0.84, 14),
+        }, "This post has since been deleted")] : []),
+      ]),
+      source(`@${statement.handle || "?"} on X \u00b7 archived ${String(statement.fetchedAt).slice(0, 10)}`, p),
+    ], p);
+  },
 
   /**
    * A schematic map. The film's single most-requested missing piece: a viewer

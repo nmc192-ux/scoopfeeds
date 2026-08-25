@@ -88,6 +88,7 @@ ffmpeg/satori for every script (see `references/gotchas.md`).
 | 3 | Storyboard | *authored* | `storyboard.mjs` |
 | 4 | Source screenshots | author `docs.json`, then `node engine/capture-measured.mjs` | `out/docs/*.png` + `rects.json` |
 | 5 | Footage + stills | *acquired* | `out/footage/`, `out/photos/` |
+| 5b | Statements + cutouts | `node engine/statement.mjs` capture; registry keys | `out/evidence/*.json`, registry `uses` |
 | 6 | Narration | `node engine/narrate.mjs` | `out/audio/b*.mp3`, `takes.json` |
 | 7 | Render + assemble | `node engine/build.mjs` | film + **`out/<slug>.srt`** |
 | 8 | Music | `node engine/music.mjs` | scored film |

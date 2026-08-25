@@ -99,6 +99,46 @@ const AIGC_STAMP = "**AI-generated content present in this project.**";
   }
 }
 
+// ── evidence re-verification gate (#82) ───────────────────────────────────
+// The film has sat private since the render. A statement quoted in it can be
+// deleted or edited in that window, and a deletion is an EDITORIAL EVENT, not
+// a shrug: publishing a film that quotes a since-deleted post as current is a
+// false claim about the record. Every archived statement is re-fetched here,
+// BEFORE any upload.
+//
+// Default is HOLD. `--evidence-ok` proceeds anyway, and is the deliberate
+// call for the case where the deletion is itself the story (the card has a
+// "since deleted" state for exactly that) — it must be a human's decision,
+// so it is a flag, never a fallback.
+{
+  const evidenceDir = P("out/evidence");
+  if (existsSync(evidenceDir)) {
+    const { readdirSync } = await import("fs");
+    const { verifyStatement } = await import(
+      new URL("./statement.mjs", import.meta.url).href);
+    const ids = readdirSync(evidenceDir).filter((f) => f.endsWith(".json"));
+    const problems = [];
+    for (const f of ids) {
+      const rec = JSON.parse(readFileSync(path.join(evidenceDir, f), "utf8"));
+      const v = await verifyStatement(rec);
+      if (v.status !== "ok") problems.push({ id: rec.id, url: rec.url, ...v });
+    }
+    if (ids.length) {
+      console.log(`evidence gate: ${ids.length} statement(s) re-verified, ${problems.length} problem(s)`);
+    }
+    if (problems.length && !process.argv.includes("--evidence-ok")) {
+      console.error("");
+      console.error("REFUSING: quoted statements changed since capture.");
+      for (const p of problems) console.error(`  ${p.status.toUpperCase()}  ${p.id}  ${p.url}`);
+      console.error("");
+      console.error("A deletion is an editorial event. Either re-cut the film, or re-run with");
+      console.error("--evidence-ok if the deletion is the story (the tweet card has a");
+      console.error("'since deleted' state for that, and the film should be using it).");
+      process.exit(1);
+    }
+  }
+}
+
 const FILM = P(CFG.film);
 const THUMB = P(CFG.thumb);
 const SRT = CFG.srt ? P(CFG.srt) : null;
