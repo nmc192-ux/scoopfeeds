@@ -34,6 +34,8 @@ const _satori = dep("satori");
 const satori = _satori.default ?? _satori;
 const { Resvg } = dep("@resvg/resvg-js");
 import { readFileSync, writeFileSync } from "fs";
+import { clamp01, seg, ease, at, enter } from "./anim.mjs";
+import { GEO, geoSvg } from "./mapGeo.mjs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -95,151 +97,16 @@ const himg = (srcPath, style) => ({ type: "img", props: { src: dataUri(srcPath),
 const hsvg = (svg, style) => ({ type: "img", props: {
   src: `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`, style } });
 
-/**
- * Schematic maps.
- *
- * SHAPES ONLY — no <text>. satori hands its fonts to its own layout engine,
- * not to images it rasterises, so <text> inside a nested SVG renders as
- * nothing at all (silently: the map came out as unlabelled blobs). Every label
- * is an absolutely-positioned div in the card, in viewBox coordinates.
- *
- * Deliberately schematic, not traced coastline: the film needs the viewer to
- * understand a CHOKEPOINT — two landmasses, one gap — in about two seconds.
- * A faithful outline at 1600px reads as a smudge. Every variant is drawn to
- * real relative geography (Iran north, Musandam poking north to pinch the
- * strait, Gulf west, Gulf of Oman east) but simplified to legible shapes.
- */
-function mapSvg(variant, p = 1, opts = {}) {
-  const W = 1600, H = 700;
-  const g = (id, a, b) => `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">`
-    + `<stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient>`;
-
-  if (variant === "hormuz") {
-    const reveal = at(p, 0.10, 0.55);
-    const pulse = at(p, 0.55, 0.95);
-    const IRAN = "M0,0 H1600 V96 C1460,120 1330,168 1218,236 C1150,278 1096,318 1058,352 "
-      + "L946,372 C742,352 548,296 336,268 C224,253 112,246 0,244 Z";
-    // Musandam is the whole reason the strait is narrow — draw it as a spur.
-    const ARABIA = "M0,700 H1600 V636 C1498,616 1400,578 1312,532 C1256,502 1206,466 1166,428 "
-      + "L1122,392 C1104,376 1086,382 1072,404 L1040,456 C1000,514 940,554 856,584 "
-      + "C660,634 372,644 176,660 C104,666 48,672 0,678 Z";
-    const routeLen = 1500;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-<defs>${g("w", "#12222c", "#0a1319")}${g("l", "#1d1811", "#12100c")}</defs>
-<rect width="${W}" height="${H}" fill="url(#w)"/>
-<path d="${IRAN}" fill="url(#l)" stroke="${C.landEdge}" stroke-width="3"/>
-<path d="${ARABIA}" fill="url(#l)" stroke="${C.landEdge}" stroke-width="3"/>
-<path d="M60,300 C300,318 620,352 860,392 C960,408 1030,404 1096,380 C1210,338 1360,286 1540,250"
-      fill="none" stroke="${C.lime}" stroke-width="6" stroke-dasharray="${routeLen}"
-      stroke-dashoffset="${(1 - reveal) * routeLen}" opacity="0.95" stroke-linecap="round"/>
-<circle cx="1090" cy="384" r="${26 + pulse * 20}" fill="none" stroke="${C.lime}"
-        stroke-width="4" opacity="${(0.9 * (1 - pulse)).toFixed(3)}"/>
-<circle cx="1090" cy="384" r="14" fill="${C.lime}" opacity="${pulse.toFixed(3)}"/>
-</svg>`;
-  }
-
-  // ── DRC / GREAT LAKES — REAL GEOMETRY ──────────────────────────────────
-  // Country outlines are Natural Earth 1:110m (public domain), projected
-  // equirectangular into this viewBox with the aspect preserved, and the marked
-  // places are real coordinates: Bunia 1.56N 30.25E, Goma -1.68 29.22E,
-  // Bukavu -2.51 28.86E, Mongbwalu 1.94N 30.03E. The first version of this card
-  // was a hand-drawn blob; on a film about a specific outbreak in specific
-  // provinces, an invented coastline is not good enough.
-  if (variant === "drc") {
-    const spread = at(p, 0.16, 0.72);
-    const pin = at(p, 0.55, 0.92);
-    const NEIGH = ["M1146.8,248.3L1078.9,250.9L1042.3,250.5L1030.6,254.5L1010.7,264.8L1002.6,261.4L1002.9,236.2L1010.7,223.5L1012.5,196.8L1019.5,181.3L1032.3,163.9L1045.1,155.0L1055.8,143.2L1042.4,138.7L1044.5,99.7L1044.5,99.7L1058.2,90.6L1079.4,98.1L1106.2,90.3L1129.7,90.3L1150.2,75.0L1166.0,98.1L1169.9,114.9L1184.5,153.1L1172.4,177.4L1156.0,199.5L1146.5,213.0L1146.8,248.3Z","M1030.6,254.5L1043.9,273.3L1041.9,292.9L1032.3,297.1L1032.3,297.1L1014.6,294.9L1004.4,313.9L984.2,311.3L987.2,293.1L991.8,290.5L993.1,270.7L1002.6,261.4L1010.7,264.8L1030.6,254.5Z","M1032.3,297.1L1034.3,310.3L1041.4,317.8L1041.7,328.6L1033.5,335.6L1020.5,353.0L1008.5,365.1L994.7,366.7L992.5,326.5L984.2,311.3L1004.4,313.9L1014.6,294.9L1032.3,297.1Z","M1146.8,248.3L1152.4,252.0L1273.3,319.9L1275.6,339.2L1323.4,372.6L1308.0,413.6L1310.0,432.5L1331.3,444.7L1332.3,453.3L1323.2,473.5L1325.1,483.6L1322.9,499.5L1334.5,520.4L1348.3,553.3L1360.6,560.6L1360.6,560.6L1334.0,579.9L1297.6,592.8L1277.6,592.3L1265.7,602.3L1242.5,603.2L1233.8,607.4L1193.7,598.0L1168.7,600.7L1159.3,555.3L1148.0,539.8L1141.3,530.6L1108.6,524.4L1089.7,514.3L1068.5,508.7L1055.3,503.2L1041.3,494.7L1041.3,494.7L1023.3,452.7L1004.0,434.0L997.3,414.7L1000.7,397.3L994.7,366.7L1008.5,365.1L1020.5,353.0L1033.5,335.6L1041.7,328.6L1041.4,317.8L1034.3,310.3L1032.3,297.1L1032.3,297.1L1041.9,292.9L1043.9,273.3L1030.6,254.5L1042.3,250.5L1078.9,250.9L1146.8,248.3Z","M1044.5,99.7L1015.1,77.5L1007.2,63.3L988.6,70.4L973.2,68.2L964.3,73.8L949.3,69.7L929.1,42.2L923.8,31.6L898.9,18.4L890.4,-1.6L876.6,-16.0L854.1,-33.3L853.8,-44.2L835.6,-57.6L812.9,-70.7L823.1,-74.3L834.6,-80.6L843.2,-110.3L852.3,-125.8L876.4,-130.4L882.1,-121.2L899.2,-101.8L908.4,-98.9L920.4,-104.6L944.5,-103.5L949.0,-96.6L982.2,-96.6L983.4,-103.5L1000.5,-109.8L1004.0,-119.5L1016.6,-126.4L1044.6,-106.9L1061.8,-110.3L1078.4,-134.4L1096.7,-152.7L1093.8,-172.7L1085.8,-182.4L1105.8,-184.2L1108.1,-191.6L1123.6,-189.3L1119.6,-164.7L1123.6,-140.7L1140.7,-127.5L1144.7,-116.1L1144.2,-99.5L1148.8,-98.8L1149.2,-72.8L1144.2,-62.6L1126.5,-61.8L1115.1,-42.8L1135.6,-40.4L1152.5,-24.2L1158.3,-10.9L1173.6,-3.1L1193.3,33.1L1170.7,55.1L1150.2,75.0L1129.7,90.3L1106.2,90.3L1079.4,98.1L1058.2,90.6L1044.5,99.7Z","M929.1,42.2L918.1,45.7L896.8,45.0L871.7,41.5L859.3,44.3L854.3,52.4L843.5,53.4L830.4,46.4L793.2,63.0L778.0,59.7L773.5,62.2L763.5,82.4L738.6,75.9L714.3,72.6L693.0,60.3L665.6,48.9L647.7,59.7L634.8,76.6L631.8,99.9L610.3,98.0L587.8,92.4L567.9,110.1L550.4,141.1L546.9,131.4L545.4,116.2L530.2,105.5L517.9,88.3L515.0,76.3L499.3,58.9L502.0,49.0L498.6,34.9L501.2,9.1L509.2,3.1L526.0,-30.7L553.5,-33.2L559.7,-41.8L565.2,-41.2L573.5,-33.6L615.5,-46.4L629.7,-59.4L647.0,-71.0L643.7,-82.8L653.1,-85.8L685.3,-83.8L716.7,-99.2L740.8,-135.6L757.7,-149.1L778.8,-154.7L782.6,-140.5L801.8,-119.6L801.9,-106.0L796.5,-92.2L798.6,-81.8L810.2,-72.2L835.6,-57.6L853.8,-44.2L854.1,-33.3L876.6,-16.0L890.4,-1.6L898.9,18.4L923.8,31.6L929.1,42.2Z","M1041.3,494.7L1055.3,503.2L1068.5,508.7L1089.7,514.3L1108.6,524.4L1124.4,539.2L1132.9,567.5L1127.2,576.6L1120.5,603.6L1126.9,631.2L1116.4,642.8L1106.3,673.8L1123.8,682.4L1022.6,709.9L1025.8,733.6L1000.6,738.2L981.6,751.4L977.5,763.0L965.6,765.6L936.6,793.0L918.1,814.6L906.9,815.4L896.1,811.5L858.8,807.9L852.8,805.4L852.6,802.6L839.4,795.1L817.8,793.2L790.5,800.8L768.7,779.9L746.3,752.7L747.8,646.6L817.2,647.0L814.4,635.5L819.3,623.0L813.5,607.4L817.3,591.2L813.7,580.9L825.2,581.7L827.2,592.1L842.8,591.3L863.9,594.4L875.1,609.5L901.8,614.1L922.1,603.6L929.6,621.1L955.2,625.7L967.5,640.0L981.1,658.3L1006.7,658.6L1003.9,622.6L994.7,628.7L971.4,615.7L962.4,609.8L966.5,576.3L972.5,536.9L965.0,522.2L974.5,500.9L983.4,496.9L1028.2,491.3L1041.3,494.7Z","M427.4,420.0L441.2,415.5L450.8,416.1L462.5,412.1L560.9,412.6L569.1,437.4L578.7,457.4L586.3,468.2L599.1,485.6L621.1,482.9L632.1,478.2L650.6,482.9L655.6,474.6L663.9,455.2L684.6,453.9L686.4,448.1L703.4,448.0L700.5,460.0L740.9,459.7L741.5,480.7L748.3,493.5L743.4,513.6L745.8,534.1L757.0,546.5L755.2,586.2L763.4,583.1L777.9,583.9L798.6,578.9L813.7,580.9L817.3,591.2L813.5,607.4L819.3,623.0L814.4,635.5L817.2,647.0L747.8,646.6L746.3,752.7L768.7,779.9L790.5,800.8L729.2,814.4L648.5,809.6L625.4,793.7L490.3,795.1L485.3,797.4L465.4,782.4L443.8,781.4L423.8,787.1L407.8,793.4L404.7,772.4L409.3,743.1L420.8,712.6L422.5,698.3L433.3,668.3L441.3,654.6L460.4,632.8L471.1,618.0L474.6,593.3L472.9,574.4L462.9,562.5L454.0,542.2L445.8,522.2L447.6,515.3L457.9,502.1L447.8,469.9L440.9,447.6L424.2,426.5L427.4,420.0Z"];
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-<defs>${g("wd", "#12222c", "#0a1319")}${g("ld", "#1d1811", "#12100c")}</defs>
-<rect width="${W}" height="${H}" fill="#080d11"/>
-${NEIGH.map((d) => `<path d="${d}" fill="#100d08" stroke="#241f17" stroke-width="2" opacity="0.6"/>`).join("")}
-<path d="M994.7,366.7L1000.7,397.3L997.3,414.7L1004.0,434.0L1023.3,452.7L1041.3,494.7L1041.3,494.7L1028.2,491.3L983.4,496.9L974.5,500.9L965.0,522.2L972.5,536.9L966.5,576.3L962.4,609.8L971.4,615.7L994.7,628.7L1003.9,622.6L1006.7,658.6L981.1,658.3L967.5,640.0L955.2,625.7L929.6,621.1L922.1,603.6L901.8,614.1L875.1,609.5L863.9,594.4L842.8,591.3L827.2,592.1L825.2,581.7L813.7,580.9L798.6,578.9L777.9,583.9L763.4,583.1L755.2,586.2L757.0,546.5L745.8,534.1L743.4,513.6L748.3,493.5L741.5,480.7L740.9,459.7L700.5,460.0L703.4,448.0L686.4,448.1L684.6,453.9L663.9,455.2L655.6,474.6L650.6,482.9L632.1,478.2L621.1,482.9L599.1,485.6L586.3,468.2L578.7,457.4L569.1,437.4L560.9,412.6L462.5,412.1L450.8,416.1L441.2,415.5L427.4,420.0L422.7,409.7L431.2,406.1L432.3,391.6L437.7,383.0L449.9,376.0L458.6,379.4L470.0,366.7L488.2,367.0L490.3,376.4L502.8,382.3L522.4,361.5L541.8,345.2L550.2,334.5L549.1,307.1L563.6,274.7L578.8,257.5L600.8,241.5L604.6,230.8L605.5,218.6L610.9,207.0L609.1,188.1L613.3,158.6L619.8,137.8L629.8,120.0L631.8,99.9L634.8,76.6L647.7,59.7L665.6,48.9L693.0,60.3L714.3,72.6L738.6,75.9L763.5,82.4L773.5,62.2L778.0,59.7L793.2,63.0L830.4,46.4L843.5,53.4L854.3,52.4L859.3,44.3L871.7,41.5L896.8,45.0L918.1,45.7L929.1,42.2L949.3,69.7L964.3,73.8L973.2,68.2L988.6,70.4L1007.2,63.3L1015.1,77.5L1044.5,99.7L1044.5,99.7L1042.4,138.7L1055.8,143.2L1045.1,155.0L1032.3,163.9L1019.5,181.3L1012.5,196.8L1010.7,223.5L1002.9,236.2L1002.6,261.4L993.1,270.7L991.8,290.5L987.2,293.1L984.2,311.3L992.5,326.5L994.7,366.7Z" fill="url(#ld)" stroke="${C.landEdge}" stroke-width="3.5"/>
-<clipPath id="drcclip"><path d="M994.7,366.7L1000.7,397.3L997.3,414.7L1004.0,434.0L1023.3,452.7L1041.3,494.7L1041.3,494.7L1028.2,491.3L983.4,496.9L974.5,500.9L965.0,522.2L972.5,536.9L966.5,576.3L962.4,609.8L971.4,615.7L994.7,628.7L1003.9,622.6L1006.7,658.6L981.1,658.3L967.5,640.0L955.2,625.7L929.6,621.1L922.1,603.6L901.8,614.1L875.1,609.5L863.9,594.4L842.8,591.3L827.2,592.1L825.2,581.7L813.7,580.9L798.6,578.9L777.9,583.9L763.4,583.1L755.2,586.2L757.0,546.5L745.8,534.1L743.4,513.6L748.3,493.5L741.5,480.7L740.9,459.7L700.5,460.0L703.4,448.0L686.4,448.1L684.6,453.9L663.9,455.2L655.6,474.6L650.6,482.9L632.1,478.2L621.1,482.9L599.1,485.6L586.3,468.2L578.7,457.4L569.1,437.4L560.9,412.6L462.5,412.1L450.8,416.1L441.2,415.5L427.4,420.0L422.7,409.7L431.2,406.1L432.3,391.6L437.7,383.0L449.9,376.0L458.6,379.4L470.0,366.7L488.2,367.0L490.3,376.4L502.8,382.3L522.4,361.5L541.8,345.2L550.2,334.5L549.1,307.1L563.6,274.7L578.8,257.5L600.8,241.5L604.6,230.8L605.5,218.6L610.9,207.0L609.1,188.1L613.3,158.6L619.8,137.8L629.8,120.0L631.8,99.9L634.8,76.6L647.7,59.7L665.6,48.9L693.0,60.3L714.3,72.6L738.6,75.9L763.5,82.4L773.5,62.2L778.0,59.7L793.2,63.0L830.4,46.4L843.5,53.4L854.3,52.4L859.3,44.3L871.7,41.5L896.8,45.0L918.1,45.7L929.1,42.2L949.3,69.7L964.3,73.8L973.2,68.2L988.6,70.4L1007.2,63.3L1015.1,77.5L1044.5,99.7L1044.5,99.7L1042.4,138.7L1055.8,143.2L1045.1,155.0L1032.3,163.9L1019.5,181.3L1012.5,196.8L1010.7,223.5L1002.9,236.2L1002.6,261.4L993.1,270.7L991.8,290.5L987.2,293.1L984.2,311.3L992.5,326.5L994.7,366.7Z"/></clipPath>
-<g clip-path="url(#drcclip)">
-  <rect x="958" y="0" width="${W}" height="${H}" fill="${C.alertDim}"
-        opacity="${spread.toFixed(3)}"/>
-  <rect x="958" y="0" width="3" height="${H}" fill="${C.alert}"
-        opacity="${(spread * 0.9).toFixed(3)}"/>
-</g>
-<circle cx="990.7" cy="272.7" r="7" fill="${C.alert}" opacity="${at(p, 0.34, 0.62).toFixed(2)}"/>
-<circle cx="978.7" cy="300.3" r="7" fill="${C.alert}" opacity="${at(p, 0.42, 0.70).toFixed(2)}"/>
-<circle cx="1025" cy="164.7" r="${11 + pin * 13}" fill="none" stroke="${C.lime}"
-        stroke-width="3.5" opacity="${(0.9 * (1 - pin)).toFixed(3)}"/>
-<circle cx="1025" cy="164.7" r="8" fill="${C.lime}" opacity="${pin.toFixed(3)}"/>
-</svg>`;
-  }
-
-  // ── BYPASS MAPS ────────────────────────────────────────────────────────
-  // Both bypass variants draw on ONE regional base, not two invented country
-  // blobs. The first attempt drew Saudi and the UAE as separate rounded shapes
-  // with a straight line across them: unrecognisable as geography, and the
-  // "animation" was a single dash-reveal. Sharing a base means the viewer reads
-  // chapter 03 against the map they already learned in chapter 01, the strait
-  // stays on screen so a BYPASS is legibly a bypass, and the route animates as
-  // flow — a pulse travelling the pipe — rather than a line being drawn.
-  const REGION_IRAN = "M900,0 H1600 V132 C1470,150 1352,190 1250,244 "
-    + "C1182,280 1132,318 1094,352 L1000,286 C946,214 902,120 900,0 Z";
-  const REGION_ARABIA = "M0,330 C170,296 392,276 632,296 C830,312 966,348 1064,404 "
-    + "L1124,446 C1186,494 1266,534 1366,562 C1444,584 1522,596 1600,602 "
-    + "V700 H0 Z";
-  const REGION_GULF = "M0,160 C226,128 486,128 726,174 C904,206 1014,270 1082,358 "
-    + "L1014,404 C922,348 800,316 640,300 C404,280 182,298 0,330 Z";
-
-  const straitX = 1092, straitY = 372;
-  const flow = at(p, 0.16, 0.70);
-  const blocked = at(p, 0.52, 0.86);
-  // The chokepoint stays marked and struck through: the whole claim of this
-  // chapter is that the route AVOIDS it.
-  const blockMark = `
-<circle cx="${straitX}" cy="${straitY}" r="30" fill="none" stroke="${C.alert}" stroke-width="6"
-        opacity="${blocked.toFixed(2)}"/>
-<line x1="${straitX - 20}" y1="${straitY - 20}" x2="${straitX + 20}" y2="${straitY + 20}"
-      stroke="${C.alert}" stroke-width="6" stroke-linecap="round" opacity="${blocked.toFixed(2)}"/>
-<line x1="${straitX + 20}" y1="${straitY - 20}" x2="${straitX - 20}" y2="${straitY + 20}"
-      stroke="${C.alert}" stroke-width="6" stroke-linecap="round" opacity="${blocked.toFixed(2)}"/>`;
-
-  // Straight segments, so the travelling pulse interpolates exactly.
-  const R = variant === "saudi"
-    ? { a: [966, 470], b: [148, 578], len: 826 }
-    : { a: [1040, 528], b: [1378, 452], len: 346 };
-  const [ax, ay] = R.a, [bx2, by2] = R.b;
-  const dotX = ax + (bx2 - ax) * flow, dotY = ay + (by2 - ay) * flow;
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-<defs>${g("w2", "#12222c", "#0a1319")}${g("l4", "#1d1811", "#12100c")}</defs>
-<rect width="${W}" height="${H}" fill="#080d11"/>
-<path d="${REGION_GULF}" fill="url(#w2)"/>
-<path d="${REGION_IRAN}" fill="url(#l4)" stroke="${C.landEdge}" stroke-width="3"/>
-<path d="${REGION_ARABIA}" fill="url(#l4)" stroke="${C.landEdge}" stroke-width="3"/>
-<line x1="${ax}" y1="${ay}" x2="${bx2}" y2="${by2}" stroke="${C.track}" stroke-width="11"
-      stroke-linecap="round" opacity="0.5"/>
-<line x1="${ax}" y1="${ay}" x2="${bx2}" y2="${by2}" stroke="${C.lime}" stroke-width="11"
-      stroke-linecap="round" stroke-dasharray="${R.len}"
-      stroke-dashoffset="${((1 - flow) * R.len).toFixed(0)}"/>
-<circle cx="${ax}" cy="${ay}" r="16" fill="${C.lime}" opacity="${at(p, 0.08, 0.26).toFixed(2)}"/>
-<circle cx="${bx2}" cy="${by2}" r="16" fill="${C.lime}" opacity="${at(p, 0.58, 0.78).toFixed(2)}"/>
-<circle cx="${dotX.toFixed(1)}" cy="${dotY.toFixed(1)}" r="12" fill="${C.white}"
-        opacity="${(flow > 0.03 && flow < 0.98 ? 0.95 : 0).toFixed(2)}"/>
-${blockMark}
-</svg>`;
-}
+// Schematic maps are DATA now — see mapGeo.mjs for the element grammar and
+// the shipped variants. The renderer keeps two rules from the hardcoded era:
+// SHAPES ONLY (satori renders <text> in nested SVGs as nothing, silently), and
+// labels are positioned divs in the card, in viewBox coordinates.
 
 const col = (style, children) => h("div", { display: "flex", flexDirection: "column", ...style }, children);
 const row = (style, children) => h("div", { display: "flex", flexDirection: "row", ...style }, children);
 
-// ─── Animation primitives ───────────────────────────────────────────────────
-
-const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
-const seg = (p, a, b) => clamp01((p - a) / (b - a));
-/** easeOutCubic — fast arrival, soft settle. Reads as intent, not drift. */
-const ease = (x) => 1 - Math.pow(1 - x, 3);
-const at = (p, a, b) => ease(seg(p, a, b));
-
-/** Standard entrance: fade up with a short rise. */
-const enter = (p, a, b, rise = 26) => {
-  const k = at(p, a, b);
-  return { opacity: k, transform: `translateY(${((1 - k) * rise).toFixed(2)}px)` };
-};
+// Animation primitives (clamp01/seg/ease/at/enter) come from anim.mjs — shared
+// with mapGeo.mjs so maps and cards ease identically.
 
 // ─── Chrome ─────────────────────────────────────────────────────────────────
 
@@ -452,40 +319,21 @@ const CARDS = {
    * A schematic map. The film's single most-requested missing piece: a viewer
    * who cannot picture the chokepoint cannot feel any number about it.
    */
-  map: ({ kicker, title, variant = "hormuz", note, src, pin }, p) => {
-    const L = {
-      hormuz: [
-        { t: "IRAN", x: 150, y: 108, s: 40, c: C.sub, a: [0.02, 0.20] },
-        { t: "SAUDI ARABIA \u00b7 UAE", x: 250, y: 590, s: 34, c: C.sub, a: [0.06, 0.24], w: 640 },
-        { t: "OMAN", x: 1240, y: 572, s: 30, c: C.dim, a: [0.10, 0.30] },
-        { t: "PERSIAN GULF", x: 330, y: 424, s: 30, c: C.dim, a: [0.14, 0.34], w: 500 },
-        { t: "GULF OF OMAN", x: 1270, y: 162, s: 30, c: C.dim, a: [0.18, 0.38], w: 500 },
-        { t: pin || "STRAIT OF HORMUZ", x: 830, y: 250, s: 44, c: C.lime, a: [0.55, 0.90], f: "Anton", w: 700 },
-      ],
-      drc: [
-        { t: "DEM. REP. CONGO", x: 505, y: 392, s: 30, c: C.dim, a: [0.02, 0.20], w: 460 },
-        { t: "UGANDA", x: 1076, y: 210, s: 24, c: C.sub, a: [0.10, 0.32], w: 260 },
-        { t: "ITURI", x: 1042, y: 140, s: 26, c: C.lime, a: [0.52, 0.86], w: 260 },
-        { t: "NORTH KIVU", x: 1006, y: 262, s: 22, c: C.alert, a: [0.34, 0.66], w: 300 },
-        { t: "SOUTH KIVU", x: 994, y: 306, s: 22, c: C.alert, a: [0.42, 0.74], w: 300 },
-      ],
-      saudi: [
-        { t: "IRAN", x: 1230, y: 60, s: 34, c: C.dim, a: [0.02, 0.20] },
-        { t: "SAUDI ARABIA", x: 400, y: 636, s: 34, c: C.dim, a: [0.04, 0.24], w: 640 },
-        { t: "PERSIAN GULF", x: 430, y: 214, s: 28, c: C.dim, a: [0.06, 0.26], w: 480 },
-        { t: "GULF COAST", x: 906, y: 402, s: 28, c: C.sub, a: [0.10, 0.30], w: 420 },
-        { t: "RED SEA", x: 90, y: 606, s: 28, c: C.sub, a: [0.58, 0.78], w: 400 },
-        { t: "HORMUZ \u2014 BYPASSED", x: 1146, y: 350, s: 28, c: C.alert, a: [0.56, 0.88], w: 460 },
-      ],
-      uae: [
-        { t: "IRAN", x: 1230, y: 60, s: 34, c: C.dim, a: [0.02, 0.20] },
-        { t: "UAE", x: 900, y: 640, s: 34, c: C.dim, a: [0.04, 0.24] },
-        { t: "PERSIAN GULF", x: 430, y: 214, s: 28, c: C.dim, a: [0.06, 0.26], w: 480 },
-        { t: "HABSHAN", x: 946, y: 560, s: 28, c: C.sub, a: [0.10, 0.30], w: 400 },
-        { t: "FUJAIRAH", x: 1300, y: 486, s: 28, c: C.sub, a: [0.58, 0.78], w: 400 },
-        { t: "HORMUZ \u2014 BYPASSED", x: 1146, y: 320, s: 28, c: C.alert, a: [0.56, 0.88], w: 460 },
-      ],
-    }[variant] || [];
+  map: ({ kicker, title, variant = "hormuz", geo, note, src, pin }, p) => {
+    // `geo` (inline data in the mapGeo.mjs grammar) outranks `variant` (the
+    // shipped registry). A new story's geography is authored as data — the
+    // engine is not edited per film any more.
+    const G = geo || GEO[variant];
+    if (!G) {
+      throw new Error(`map: unknown variant "${variant}" and no geo supplied. `
+        + `Registry has: ${Object.keys(GEO).join(", ")} — or pass geo: {…} (see mapGeo.mjs).`);
+    }
+    // Colour tokens in label data resolve against the house palette, exactly
+    // like the map's own elements. `pinnable` marks the one label whose text
+    // the spec's `pin` field may replace (the strait callout).
+    const L = (G.labels || []).map((d) => ({
+      ...d, t: d.pinnable && pin ? pin : d.t, c: C[d.c] ?? d.c,
+    }));
     return frame([
       ...(kicker ? [eyebrow(kicker, p)] : []),
       ...(title ? [h("div", {
@@ -494,7 +342,7 @@ const CARDS = {
       }, title)] : []),
       col({ flexGrow: 1, justifyContent: "center" }, [
         h("div", { display: "flex", position: "relative", width: 1600, height: 700 }, [
-          hsvg(mapSvg(variant, p), {
+          hsvg(geoSvg(G, p, C), {
             position: "absolute", left: 0, top: 0, width: 1600, height: 700,
             opacity: at(p, 0.02, 0.18),
           }),
