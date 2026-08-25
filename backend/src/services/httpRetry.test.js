@@ -166,3 +166,44 @@ test("the last channel does not get the whole remainder to itself", () => {
   const late  = channelBudget({ jobStartedAt: 0, channelsRemaining: 1, now: 60_000, lockMs: 600_000 });
   assert.ok(early < late, "an early channel must reserve time for the ones behind it");
 });
+
+// ─── one channel's timeout is not every channel's ───────────────────────────
+
+test("a channel that times out does not take the ones behind it", async () => {
+  // #85 gave each cross-post a budget so a stall could not starve the rest. It
+  // fired and made things worse: withDeadline REJECTS, the six calls shared one
+  // try/catch, and the rejection skipped every channel after it.
+  //
+  // Observed on the 18:51Z render — Facebook and its Reel posted, the budget
+  // fired 15 minutes later, "threw past its own guard" was logged, and Threads,
+  // Bluesky, TikTok and X were never attempted.
+  const ran = [];
+  const chain = async () => {
+    // Mirrors the shape of the real loop: each channel guarded on its own.
+    for (const [label, fn] of [
+      ["facebook", async () => { ran.push("facebook"); return { status: "posted" }; }],
+      ["bluesky",  async () => { ran.push("bluesky"); await new Promise(() => {}); }],   // hangs
+      ["x",        async () => { ran.push("x"); return { status: "posted" }; }],
+    ]) {
+      try { await withDeadline(fn(), 30, label); } catch { /* per channel, by design */ }
+    }
+  };
+  await chain();
+  assert.deepEqual(ran, ["facebook", "bluesky", "x"],
+    "x must still run after bluesky exhausts its budget");
+});
+
+test("the shared catch would have swallowed the rest — proving the shape matters", async () => {
+  // The same three channels inside ONE try/catch: the failure mode being fixed.
+  const ran = [];
+  try {
+    for (const [label, fn] of [
+      ["facebook", async () => { ran.push("facebook"); }],
+      ["bluesky",  async () => { ran.push("bluesky"); await new Promise(() => {}); }],
+      ["x",        async () => { ran.push("x"); }],
+    ]) {
+      await withDeadline(fn(), 30, label);
+    }
+  } catch { /* one catch for all — the bug */ }
+  assert.deepEqual(ran, ["facebook", "bluesky"], "x never ran — this is what shipped");
+});

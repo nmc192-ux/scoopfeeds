@@ -656,6 +656,37 @@ export function channelBudget({ jobStartedAt, channelsRemaining, now = Date.now(
   return Math.max(0, Math.min(CHANNEL_BUDGET_MS(), share));
 }
 
+/**
+ * ONE CHANNEL'S TIMEOUT MUST NOT BE EVERY CHANNEL'S TIMEOUT.
+ *
+ * #85 gave each cross-post a budget derived from the remaining lock, so a stall
+ * could not starve the ones behind it. It fired, and made things worse:
+ * `withDeadline` REJECTS, the six calls share one try/catch, and the rejection
+ * landed in that shared catch — skipping every channel after it. Exactly the
+ * failure the budget existed to prevent, now triggered by the budget.
+ *
+ * Observed on the 18:51Z render: Facebook and its Reel posted, the budget fired
+ * fifteen minutes later, "facebook cross-post threw past its own guard" was
+ * logged, and Threads, Bluesky, TikTok and X were never attempted.
+ *
+ * So the catch belongs around EACH channel, not around the group. This wrapper
+ * never throws: a timeout or a stray error becomes a recorded failure for that
+ * channel and the chain continues. The shared catch stays, but now only a
+ * genuine code defect can reach it.
+ */
+async function runChannel(label, budgetMs, mark, fn) {
+  try {
+    return await withDeadline(fn(), budgetMs, label);
+  } catch (err) {
+    logger.error(`🚨 ${label} cross-post abandoned — the YouTube video is published and unaffected, ` +
+      `and the remaining channels still run. ${err.message.slice(0, 200)}`);
+    try { mark?.(err); } catch (dbErr) {
+      logger.error(`🚨 ${label}: could not record the failure either: ${dbErr.message}`);
+    }
+    return { status: "failed", error: err.message };
+  }
+}
+
 // ─── TikTok ─────────────────────────────────────────────────────────────────
 
 const VIDEO_TIKTOK_MAX_PER_DAY = () =>
@@ -1657,34 +1688,34 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
         // DO NOT remove this try/catch, and do not move the cross-post above
         // markVideoPublished.
         try {
-          const fb = await withDeadline(
-            _crossPostToFacebook(article, {
+          const fb = await runChannel("facebook", channelBudget({ jobStartedAt, channelsRemaining: 7 }),
+            (err) => markVideoFacebook(article.id, { status: "failed", error: err.message }),
+            () => _crossPostToFacebook(article, {
             filePath: video.path, title, attribution, spec: r.spec, slides: video.slides, now, footage: video.footage,
-          }),
-            channelBudget({ jobStartedAt, channelsRemaining: 7 }), "facebook");
+          }));
           if (fb && fb.status !== "off") produced.facebook = fb;
 
           // ─── Facebook REEL ───────────────────────────────────────────────
           // A second, independent surface on the same MP4. Same guarded scope
           // and the same never-throws contract as the feed cross-post above,
           // for the same three reasons. Default OFF.
-          const reel = await withDeadline(
-            _reelToFacebook(article, {
+          const reel = await runChannel("facebook-reel", channelBudget({ jobStartedAt, channelsRemaining: 6 }),
+            (err) => markVideoFacebook(article.id, { status: "failed", error: err.message }),
+            () => _reelToFacebook(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
-          }),
-            channelBudget({ jobStartedAt, channelsRemaining: 6 }), "facebook-reel");
+          }));
           if (reel && reel.status !== "off") produced.facebookReel = reel;
 
           // ─── Instagram Reel ──────────────────────────────────────────────
           // URL-fetch surface: Meta pulls the MP4 from our own server. Same
           // guarded scope and never-throws contract as the two above.
-          const igReel = await withDeadline(
-            _reelToInstagram(article, {
+          const igReel = await runChannel("instagram-reel", channelBudget({ jobStartedAt, channelsRemaining: 5 }),
+            (err) => markVideoInstagram(article.id, { status: "failed", error: err.message }),
+            () => _reelToInstagram(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
-          }),
-            channelBudget({ jobStartedAt, channelsRemaining: 5 }), "instagram-reel");
+          }));
           if (igReel && igReel.status !== "off") produced.instagramReel = igReel;
 
 
@@ -1695,12 +1726,12 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
           //
           // Raw-bytes upload, so unlike Instagram and Threads this leaves no
           // URL for the sweep to race — see migration 026.
-          const bs = await withDeadline(
-            _videoToBluesky(article, {
+          const bs = await runChannel("bluesky", channelBudget({ jobStartedAt, channelsRemaining: 4 }),
+            (err) => markVideoBluesky(article.id, { status: "failed", error: err.message }),
+            () => _videoToBluesky(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
-          }),
-            channelBudget({ jobStartedAt, channelsRemaining: 4 }), "bluesky");
+          }));
           if (bs && bs.status !== "off") produced.bluesky = bs;
 
           // ─── TikTok ──────────────────────────────────────────────────────
@@ -1708,23 +1739,23 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
           // the chain and inside the same guard: every channel above it has
           // already recorded its own outcome, so a throw here (which its own
           // try/catch should make impossible) cannot undo any of them.
-          const tt = await withDeadline(
-            _videoToTikTok(article, {
+          const tt = await runChannel("tiktok", channelBudget({ jobStartedAt, channelsRemaining: 3 }),
+            (err) => markVideoTikTok(article.id, { status: "failed", error: err.message }),
+            () => _videoToTikTok(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
-          }),
-            channelBudget({ jobStartedAt, channelsRemaining: 3 }), "tiktok");
+          }));
           if (tt && tt.status !== "off") produced.tiktok = tt;
 
           // ─── X ───────────────────────────────────────────────────────────
           // Raw bytes again, so no sweep race — see migration 029. The caption
           // carries NO link: $0.015 a post against $0.20 with one.
-          const xp = await withDeadline(
-            _videoToX(article, {
+          const xp = await runChannel("x", channelBudget({ jobStartedAt, channelsRemaining: 2 }),
+            (err) => markVideoX(article.id, { status: "failed", error: err.message }),
+            () => _videoToX(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
-          }),
-            channelBudget({ jobStartedAt, channelsRemaining: 2 }), "x");
+          }));
           if (xp && xp.status !== "off") produced.x = xp;
 
           // ─── Threads ─────────────────────────────────────────────────────
@@ -1742,12 +1773,12 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
           // LAST, deliberately: its mandatory ~30s wait makes it the longest of
           // the four, and everything ahead of it should already be published
           // before this job spends half a minute asleep.
-          const th = await withDeadline(
-            _videoToThreads(article, {
+          const th = await runChannel("threads", channelBudget({ jobStartedAt, channelsRemaining: 1 }),
+            (err) => markVideoThreads(article.id, { status: "failed", error: err.message }),
+            () => _videoToThreads(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
-          }),
-            channelBudget({ jobStartedAt, channelsRemaining: 1 }), "threads");
+          }));
           if (th && th.status !== "off") produced.threads = th;
         } catch (fbErr) {
           logger.error(
