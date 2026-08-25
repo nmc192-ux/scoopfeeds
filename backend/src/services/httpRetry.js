@@ -104,3 +104,45 @@ export async function withNetworkRetry(fn, { attempts = 3, label = "request", ba
   }
   throw last;
 }
+
+// ─── deadlines ──────────────────────────────────────────────────────────────
+
+/**
+ * The default every outbound call should have had.
+ *
+ * Node's fetch has NO timeout. Four of six social clients called it with no
+ * AbortSignal, so a connection that stalls parks that call forever — and
+ * because the cross-posts run in sequence, one stall starves every channel
+ * after it. Observed 2026-08-25: a video published, Facebook posted, Instagram
+ * went `pending`, and Threads / Bluesky / TikTok / X were never attempted at
+ * all. The worker was not deadlocked; it moved on to other cron work and left
+ * that chain parked.
+ */
+export const FETCH_TIMEOUT_MS = Number.parseInt(process.env.SOCIAL_FETCH_TIMEOUT_MS || "60000", 10);
+
+export const fetchTimeout = (ms = FETCH_TIMEOUT_MS) => AbortSignal.timeout(ms);
+
+/**
+ * A hard ceiling on one channel, so it cannot consume another's turn.
+ *
+ * Per-call timeouts are necessary and not sufficient: a client that makes
+ * fifteen bounded calls in a poll loop can still run for minutes. This bounds
+ * the WHOLE attempt. It rejects rather than resolving, so the caller's existing
+ * never-throws guard records a failure for that channel and the chain proceeds
+ * to the next one — which is the behaviour that was missing.
+ */
+export async function withDeadline(promise, ms, label = "channel") {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, rej) => {
+        timer = setTimeout(() => rej(new Error(
+          `${label}: exceeded its ${Math.round(ms / 1000)}s budget — abandoned so the remaining channels still run`
+        )), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}

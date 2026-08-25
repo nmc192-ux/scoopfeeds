@@ -90,3 +90,42 @@ test("a server answer is never retried, even when it mentions the network", () =
   const f = new Error("fetch failed downstream"); f.status = 502;
   assert.equal(isTransientNetworkError(f), false);
 });
+
+// ─── deadlines ──────────────────────────────────────────────────────────────
+
+import { withDeadline, fetchTimeout, FETCH_TIMEOUT_MS } from "./httpRetry.js";
+
+test("a channel that overruns is abandoned so the next one still runs", async () => {
+  // The failure this exists for: a video published, Facebook posted, Instagram
+  // went `pending` on a fetch with NO timeout, and Threads / Bluesky / TikTok /
+  // X were never attempted at all. The worker was not deadlocked — it moved on
+  // and left that chain parked forever.
+  const forever = new Promise(() => {});
+  await assert.rejects(
+    () => withDeadline(forever, 40, "instagram-reel"),
+    (e) => {
+      assert.match(e.message, /instagram-reel/);
+      assert.match(e.message, /remaining channels still run/);
+      return true;
+    });
+});
+
+test("a channel inside its budget is untouched", async () => {
+  assert.equal(await withDeadline(Promise.resolve("posted"), 5000, "x"), "posted");
+});
+
+test("a channel's own error passes through, not the deadline's", async () => {
+  // The deadline must not mask a real failure with a timeout message.
+  await assert.rejects(
+    () => withDeadline(Promise.reject(new Error("400 Authentication Error")), 5000, "threads"),
+    /400 Authentication Error/);
+});
+
+test("every outbound call gets a signal by default", () => {
+  // Node's fetch has NO timeout. Four of six social clients called it without
+  // one, which is how a stalled connection parked an entire cross-post chain.
+  const s = fetchTimeout();
+  assert.ok(s instanceof AbortSignal);
+  assert.equal(s.aborted, false);
+  assert.ok(FETCH_TIMEOUT_MS >= 1000, "a sub-second default would fail real uploads");
+});
