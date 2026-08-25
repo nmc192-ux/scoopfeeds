@@ -129,3 +129,40 @@ test("every outbound call gets a signal by default", () => {
   assert.equal(s.aborted, false);
   assert.ok(FETCH_TIMEOUT_MS >= 1000, "a sub-second default would fail real uploads");
 });
+
+// ─── the budget must fit the lock ───────────────────────────────────────────
+
+import { channelBudget } from "./videoAutopost.js";
+
+test("a channel gets a share of what is LEFT, not a fixed five minutes", () => {
+  // #74 gave every channel 5 minutes and it never fired once. The channel
+  // budget starts when the CHANNEL starts; the BullMQ lock starts when the JOB
+  // starts, and the render burns 4-5 minutes of it first. The lock always won,
+  // and BullMQ abandons a lost-lock job silently — no rejection, no catch.
+  const lockMs = 600_000, jobStartedAt = 0;
+  // 4 minutes into a 10-minute lock, 6 channels still to run.
+  const b = channelBudget({ jobStartedAt, channelsRemaining: 6, now: 240_000, lockMs });
+  assert.ok(b > 0, "there is still time, so the budget must be positive");
+  assert.ok(b * 6 <= lockMs - 240_000, "six channels must fit in the time that remains");
+});
+
+test("no time left means zero, not a budget it cannot honour", () => {
+  // Starting work that cannot finish is how a channel ends up `pending`
+  // forever. Zero is the honest answer.
+  assert.equal(channelBudget({ jobStartedAt: 0, channelsRemaining: 3, now: 599_000, lockMs: 600_000 }), 0);
+  assert.equal(channelBudget({ jobStartedAt: 0, channelsRemaining: 3, now: 900_000, lockMs: 600_000 }), 0);
+});
+
+test("the per-channel ceiling still applies when there is plenty of time", () => {
+  // A long lock must not hand one channel twenty minutes.
+  const b = channelBudget({ jobStartedAt: 0, channelsRemaining: 1, now: 0, lockMs: 60 * 60_000 });
+  assert.ok(b <= 300_000, "the configured ceiling must still cap it");
+});
+
+test("the last channel does not get the whole remainder to itself", () => {
+  // Divided by channels REMAINING, so the early ones cannot starve the late
+  // ones — the failure that left Bluesky, TikTok and X never attempted.
+  const early = channelBudget({ jobStartedAt: 0, channelsRemaining: 6, now: 60_000, lockMs: 600_000 });
+  const late  = channelBudget({ jobStartedAt: 0, channelsRemaining: 1, now: 60_000, lockMs: 600_000 });
+  assert.ok(early < late, "an early channel must reserve time for the ones behind it");
+});
