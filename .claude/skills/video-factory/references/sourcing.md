@@ -25,7 +25,7 @@ disclosing it in the description and the Facebook caption.
 
 ## Source screenshots — measure, never guess
 
-`engine/capture-measured.mjs` asks the browser for geometry instead of guessing
+`backend/src/services/longform/engine/capture-measured.mjs` asks the browser for geometry instead of guessing
 crops and highlight boxes:
 
 1. Find the **container** element and screenshot exactly its bounding box plus
@@ -43,7 +43,7 @@ Range search only looks inside the chosen element. Raise `minW`/`minH`.
 ## Statements and personality imagery (#82)
 
 See `house-style.md` §Evidence for the full rules. In short: statements enter
-only through `engine/statement.mjs` (never a found screenshot), render
+only through `backend/src/services/longform/engine/statement.mjs` (never a found screenshot), render
 verbatim or throw, need their parent when they are replies, and are
 re-verified before publish. Personality cutouts, landmarks and flags come from
 the repo-level registries in `assets/evidence-assets/`, where an entry cannot
@@ -68,7 +68,7 @@ Enforced, not aspirational (`docs/agentic-workflow.md` §5):
 ## footage-search.mjs — finding real footage without stealing it
 
 ```bash
-node engine/footage-search.mjs "strait of hormuz" "persian gulf tanker"
+node backend/src/services/longform/engine/footage-search.mjs "strait of hormuz" "persian gulf tanker"
 ```
 
 Searches DVIDS, NASA, Wikimedia Commons, Internet Archive and YouTube's

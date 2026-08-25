@@ -1,24 +1,29 @@
 // Dependency resolution for engine scripts.
 //
-// The engine lives in the skill directory, which has NO node_modules. Scripts
-// are invoked BY PATH from a per-video working directory, so
-// createRequire(import.meta.url) — which resolves relative to the script — looks
-// in the skill dir and fails. Resolve against the backend's real node_modules
-// instead, falling back to the working directory so a project that vendors its
-// own copy still wins.
+// Scripts are invoked BY PATH from a per-video working directory, so resolution
+// must not depend on the caller's cwd alone. The working directory wins first
+// (a project may vendor its own copy), then the backend's real node_modules —
+// which the engine now sits inside, so this resolves without any symlink.
 import { createRequire } from "module";
 import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import path from "path";
 
-// REPO_ROOT is DERIVED, never hardcoded. The engine lives at
-// <repo>/.claude/skills/video-factory/engine, so the repo is four levels up.
-// Seven absolute paths to one developer's checkout used to be baked in here and
-// across the engine, which meant the skill worked on exactly one machine at
-// exactly one path — clone the repo anywhere else and nothing resolved.
-export const REPO_ROOT = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)), "../../../..");
-export const BACKEND = path.join(REPO_ROOT, "backend");
+// BACKEND is DERIVED, never hardcoded, and it is now the anchor rather than
+// REPO_ROOT. The engine lives at <repo>/backend/src/services/longform/engine,
+// so backend is four levels up and the repo is five.
+//
+// DERIVE FROM THE NEAREST STABLE ANCHOR, NOT BY COUNTING TO THE TOP. The engine
+// moved from .claude/skills/video-factory/engine into the backend so it would
+// ship in the production image; every path that counted levels to the repo root
+// silently pointed somewhere else afterwards, and the first symptom was
+// `cannot resolve "@ffmpeg-installer/ffmpeg"` — a dependency error for what was
+// really a relocation. Anchoring on backend/ (which holds node_modules, assets
+// and .env — everything the engine actually needs) means a future move inside
+// the backend costs one constant, not an audit.
+const ENGINE_DIR = path.dirname(fileURLToPath(import.meta.url));
+export const BACKEND = path.resolve(ENGINE_DIR, "../../../..");
+export const REPO_ROOT = path.resolve(BACKEND, "..");
 export const FRONTEND = path.join(REPO_ROOT, "frontend");
 /** backend/.env then ~/.scoopfeeds.env — the order src/config/env.js uses. */
 export const ENV_FILES = [path.join(BACKEND, ".env"), `${process.env.HOME}/.scoopfeeds.env`];
@@ -52,10 +57,24 @@ export const dep = resolverFor;
 // doing so wrote audio into the skill folder and made cross-file imports
 // resolve to the engine instead of the project's storyboard.
 import { pathToFileURL } from "url";
+// PROJECT WORKING DIRECTORIES MUST LIVE OUTSIDE THE DEPLOY DIRECTORY.
+// In production that means under SCOOP_PERSISTENT_DATA_DIR (/var/lib/scoop),
+// never inside /opt/scoopfeeds — a redeploy wipes the deploy directory, and
+// the same trap already cost this project its news.db once
+// (docs/reference/env_reference.md). Locally, cwd is the project as before.
+export const PROJECTS_ROOT = process.env.SCOOP_PERSISTENT_DATA_DIR
+  ? path.join(path.resolve(process.env.SCOOP_PERSISTENT_DATA_DIR), "longform")
+  : null;
+/** Resolve a project working directory by slug, honouring the rule above. */
+export const projectDir = (slug) =>
+  PROJECTS_ROOT ? path.join(PROJECTS_ROOT, slug) : path.resolve(process.cwd());
+
 export const PROJECT = process.cwd();
 export const P = (...a) => path.join(PROJECT, ...a);
-// Bundled assets ship with the skill, so these DO resolve from the engine.
-export const ASSETS = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../assets");
+// Fonts, the genscene manifest and the evidence-asset registries. These live in
+// backend/assets so they ship inside the production image — the skill's copies
+// were byte-identical, so nothing about rendering changed with the move.
+export const ASSETS = path.join(BACKEND, "assets");
 // storyboard.mjs is authored per video and lives in the project.
 export const loadStoryboard = () => import(pathToFileURL(P("storyboard.mjs")).href);
 

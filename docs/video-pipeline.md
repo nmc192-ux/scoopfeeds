@@ -21,7 +21,7 @@ different approval model. Confusing them is the most likely way to break either.
 | | **Automated shorts** (this note) | **Long-form explainers** |
 |---|---|---|
 | What | 60–100s clips from a news article | 7–10 min film + 5 vertical Shorts |
-| Code | `backend/src/services/video*.js` | `.claude/skills/video-factory/engine/` |
+| Code | `backend/src/services/video*.js` | `backend/src/services/longform/engine/` |
 | Cadence | hourly cron, up to 4/day | one per topic, hand-directed |
 | Runs | scheduler + worker, unattended | locally, agent-driven |
 | Cost | 1–4 cents each | ~$2 of ElevenLabs; renders free |

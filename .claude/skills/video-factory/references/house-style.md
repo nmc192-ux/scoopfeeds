@@ -66,7 +66,7 @@ Every label is an absolutely-positioned div in viewBox coordinates. Draw all
 maps in a film on ONE shared base, and keep the thing being avoided on screen
 when showing a bypass — a bypass is only legible next to what it bypasses.
 
-**Maps are data, not code.** `engine/mapGeo.mjs` defines a small element
+**Maps are data, not code.** `backend/src/services/longform/engine/mapGeo.mjs` defines a small element
 grammar (`drawPath`, `flowDot`, `pulseMarker`, `regionFill`, `blockMark`, …);
 a map card takes `variant` (the shipped registry) or inline `geo: {…}` data —
 a new story's geography is authored, not engineered. Colours in map data are
@@ -179,7 +179,7 @@ Procedural, built by `music.mjs` with ffmpeg `aevalsrc`. The design that works:
 - **The reveal drops the bed.** If the storyboard exports `REVEAL` (the beat
   number of the STORY SPINE's one remembered moment), the arc thins into it,
   drops to 0.18 ON it, holds ~2.6s, and swells out slightly hot
-  (`engine/arc.mjs::applyReveal`). Timed from the SRT — never a modelled
+  (`backend/src/services/longform/engine/arc.mjs::applyReveal`). Timed from the SRT — never a modelled
   timeline. No `REVEAL` export → arc untouched.
 - **Ducking**: `sidechaincompress` threshold 0.09, ratio 2.5.
 - **Chain order**: `loudnorm=I=-14:TP=-2.0:LRA=11` then `alimiter=limit=0.85`.

@@ -10,18 +10,23 @@ Shorts cut from it, a thumbnail, and scheduled posts on YouTube, Facebook and
 Instagram. Everything renders locally with ffmpeg and satori. No paid video
 generation.
 
-**The engine in `engine/` is reusable verbatim.** Only two files are written
+**The engine in `backend/src/services/longform/engine/` is reusable verbatim.** Only two files are written
 fresh per topic: `script.md` (the narration) and `storyboard.mjs` (what is on
 screen for each beat). Author those; do not rewrite the engine.
 
 ## Deployment
 
-**There is nothing to deploy to a server.** This is a project skill: it lives in
-the repo at `.claude/skills/video-factory/` and is active for anyone whose
-Claude Code session has this repo open. Merging the branch to `main` is the
-whole "release". It does **not** run on the VPS — it needs local ffmpeg, satori
-and Playwright, and every post is human-approved, which is the opposite of the
-unattended hourly loop in `backend/src/services/video*.js`.
+**The ENGINE now ships in the production image; the SKILL does not.** The engine
+lives at `backend/src/services/longform/engine/`, inside the backend build context, so it reaches the VPS with
+every deploy (#76). This file and `references/` remain a project skill under
+`.claude/skills/video-factory/`, active for anyone whose Claude Code session has
+the repo open — merging to `main` is still the whole "release" for them.
+
+What that does NOT mean: the pipeline is still **human-approved end to end**.
+Unattended long-form production is a separate, specced programme (#75-#80), not
+something this skill does today. And one step genuinely cannot run on the VPS —
+`capture-measured.mjs` needs Playwright/Chromium, deliberately absent from the
+image; it fails loudly rather than emitting empty highlights.
 
 Nothing in the engine is tied to a machine any more: `REPO_ROOT` is derived from
 the skill's own location, so any checkout path works. (Seven absolute paths to
@@ -34,14 +39,14 @@ one developer's home directory used to be baked in.)
 | `backend/node_modules` installed | ffmpeg, satori, resvg | `node -e "require('@ffmpeg-installer/ffmpeg')"` |
 | `frontend/node_modules` installed | Playwright, for source screenshots | `ls frontend/node_modules/playwright` |
 | `ELEVENLABS_API_KEY` | narration | in `backend/.env` or `~/.scoopfeeds.env` |
-| `YOUTUBE_*`, `FACEBOOK_PAGE_TOKEN` | scheduling | `node engine/publish-all.mjs` dry run prints both identities |
+| `YOUTUBE_*`, `FACEBOOK_PAGE_TOKEN` | scheduling | `node backend/src/services/longform/engine/publish-all.mjs` dry run prints both identities |
 | Node 18+ | engine is ESM | `node -v` |
 
 Verify a fresh machine in one command — it prints both platform identities and
 schedules nothing:
 
 ```bash
-cd <project> && node <skill>/engine/publish-all.mjs
+cd <project> && node <repo>/backend/src/services/longform/engine/publish-all.mjs
 ```
 
 **macOS-only:** `ig-setup.sh` uses `launchctl`. Instagram cannot schedule (no
@@ -60,7 +65,7 @@ because nobody searches for its subject. Craft does not rescue a topic nobody
 is looking for.
 
 ```bash
-node engine/demand.mjs "your candidate phrasing"
+node backend/src/services/longform/engine/demand.mjs "your candidate phrasing"
 ```
 
 This probes Google/YouTube autocomplete, which is a demand signal: a phrase
@@ -75,7 +80,7 @@ Scaffold the working directory — this creates the `node_modules` and `fonts`
 symlinks and verifies the toolchain resolves:
 
 ```bash
-bash engine/new-project.sh <slug> scratchpad
+bash backend/src/services/longform/engine/new-project.sh <slug> scratchpad
 ```
 
 **Never `npm install` into that directory.** It deletes the symlink and breaks
@@ -83,20 +88,20 @@ ffmpeg/satori for every script (see `references/gotchas.md`).
 
 | # | Step | Command | Produces |
 |---|---|---|---|
-| 1 | Demand check | `node engine/demand.mjs "<phrase>"` | title decision |
+| 1 | Demand check | `node backend/src/services/longform/engine/demand.mjs "<phrase>"` | title decision |
 | 2 | Research + script | *authored* | `script.md` |
 | 3 | Storyboard | *authored* | `storyboard.mjs` |
-| 4 | Source screenshots | author `docs.json`, then `node engine/capture-measured.mjs` | `out/docs/*.png` + `rects.json` |
+| 4 | Source screenshots | author `docs.json`, then `node backend/src/services/longform/engine/capture-measured.mjs` | `out/docs/*.png` + `rects.json` |
 | 5 | Footage + stills | *acquired* | `out/footage/`, `out/photos/` |
-| 5b | Statements + cutouts | `node engine/statement.mjs` capture; registry keys | `out/evidence/*.json`, registry `uses` |
-| 6 | Narration | `node engine/narrate.mjs` | `out/audio/b*.mp3`, `takes.json` |
-| 7 | Render + assemble | `node engine/build.mjs` | film + **`out/<slug>.srt`** |
-| 8 | Music | `node engine/music.mjs` | scored film |
-| 9 | Shorts | author `shorts.json`, then `node engine/shorts.mjs` | `out/shorts/*.mp4` |
+| 5b | Statements + cutouts | `node backend/src/services/longform/engine/statement.mjs` capture; registry keys | `out/evidence/*.json`, registry `uses` |
+| 6 | Narration | `node backend/src/services/longform/engine/narrate.mjs` | `out/audio/b*.mp3`, `takes.json` |
+| 7 | Render + assemble | `node backend/src/services/longform/engine/build.mjs` | film + **`out/<slug>.srt`** |
+| 8 | Music | `node backend/src/services/longform/engine/music.mjs` | scored film |
+| 9 | Shorts | author `shorts.json`, then `node backend/src/services/longform/engine/shorts.mjs` | `out/shorts/*.mp4` |
 | 10 | Thumbnail | *authored ffmpeg* | `out/THUMB.png` |
-| 11 | QC | `node engine/qc.mjs out/<slug>-scored.mp4` | gate report |
-| 12 | Publish YT + FB | author `publish.json`, then `node engine/publish-all.mjs --confirm` | scheduled posts |
-| 13 | Instagram | author `ig.json`, then `bash engine/ig-setup.sh <slug>` | armed poller |
+| 11 | QC | `node backend/src/services/longform/engine/qc.mjs out/<slug>-scored.mp4` | gate report |
+| 12 | Publish YT + FB | author `publish.json`, then `node backend/src/services/longform/engine/publish-all.mjs --confirm` | scheduled posts |
+| 13 | Instagram | author `ig.json`, then `bash backend/src/services/longform/engine/ig-setup.sh <slug>` | armed poller |
 
 ### The SRT is the timeline
 
@@ -194,7 +199,7 @@ Two rules that are load-bearing:
 
 ## Quality gates
 
-`node engine/qc.mjs` measures and prints these. Do not report a video as
+`node backend/src/services/longform/engine/qc.mjs` measures and prints these. Do not report a video as
 finished until they pass, and **report unmeasured items as "unverified", never
 as "passing"**.
 
