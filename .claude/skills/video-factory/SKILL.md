@@ -253,8 +253,13 @@ synthetic-content instruction from `publish.json`. If the film contains no AI
 imagery it says so explicitly — telling someone to tick that box on a film with
 no AI in it is itself a false disclosure.
 
-**DrJ approves every external post.** Build, verify, present the dry run, and
-wait. Never publish unasked.
+**DrJ approves every external post *from this skill*.** Build, verify, present
+the dry run, and wait. Never publish unasked.
+
+That rule is unchanged HERE. It does not apply to the separate unattended
+long-form loop (`backend/src/services/longform/`, #75-#80), which DrJ exempted
+on 2026-08-25 and which publishes with no ack before the slot. Two systems, two
+policies: if you are running `/video-factory`, you wait for DrJ.
 
 ## Reference files
 

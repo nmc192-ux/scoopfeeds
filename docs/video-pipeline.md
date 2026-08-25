@@ -22,6 +22,7 @@ different approval model. Confusing them is the most likely way to break either.
 |---|---|---|
 | What | 60–100s clips from a news article | 7–10 min film + 5 vertical Shorts |
 | Code | `backend/src/services/video*.js` | `backend/src/services/longform/engine/` |
+| Unattended? | yes, hourly | the ENGINE is human-driven; the separate `services/longform/` LOOP is unattended (#75-#80) |
 | Cadence | hourly cron, up to 4/day | one per topic, hand-directed |
 | Runs | scheduler + worker, unattended | locally, agent-driven |
 | Cost | 1–4 cents each | ~$2 of ElevenLabs; renders free |

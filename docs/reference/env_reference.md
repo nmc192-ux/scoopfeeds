@@ -612,3 +612,27 @@ The behaviour-critical gaps are now covered above and mirrored into `.env.exampl
 remaining undocumented names are third-party credentials and per-integration tuning
 (social posting, TTS/video, translation, affiliate IDs) — self-describing, and several are
 for features that are off. If you add a var, add it here **and** to `.env.example`.
+
+## Long-form autopost (#75-#80)
+
+The unattended 7-10 minute film loop. Separate from the shorts loop in every
+respect: its own table (`longform_posts`), its own cadence, its own gates.
+
+| Var | Code default | Prod | Reload | Notes |
+|---|---|---|---|---|
+| `LONGFORM_AUTOPOST_ENABLED` | unset (**off**) | unset | yes | Master switch. The only thing between built and live. Literal `"1"` — `"true"` and `"yes"` do NOT enable it. |
+| `LONGFORM_MAX_PER_WEEK` | `3` | unset | yes | **Rolling** 7-day cap, not calendar — a calendar week lets a quiet week burst. **`0` means zero** and pauses the channel without unsetting the master flag (`parseInt("0") \|\| 3` would have made this 3; see the comment in `longformCycle.js`). |
+| `LONGFORM_MIN_ARTICLES` | `8` | unset | yes | Depth floor. A film is not a long short. |
+| `LONGFORM_MIN_SOURCES` | `4` | unset | yes | Distinct sources. Ten articles from one wire are one article. |
+| `LONGFORM_MIN_SPAN_MS` | `3 days` | unset | yes | Durability floor — a one-day flash is not a story. |
+| `LONGFORM_MIN_DEMAND` | `6` | unset | yes | Search-demand floor. A topic below it is skipped with a logged reason, never forced. |
+| `LONGFORM_SCRIPT_ENABLED` | unset (**off**) | unset | yes | Dark ship for script generation. With it off the model is not called at all. |
+| `LONGFORM_SCRIPT_ATTEMPTS` | `2` | unset | yes | Bounded retries on STRUCTURAL problems only. An ungrounded figure is never retried into. |
+| `LONGFORM_STORYBOARD_ENABLED` | unset (**off**) | unset | yes | Dark ship for storyboard generation. |
+| `LONGFORM_STORYBOARD_ATTEMPTS` | `3` | unset | yes | Same bounded-retry contract as the script. |
+| `LONGFORM_RETAIN_REJECTED` | `3` | unset | yes | How many QC-rejected film directories to keep for diagnosis. Bounded so a run of failures cannot silently fill the volume. |
+
+**The approval-policy exception.** With `LONGFORM_AUTOPOST_ENABLED=1` this loop
+publishes with **no human ack before the publishAt slot** — DrJ's decision,
+2026-08-25, scoped to this loop only. See CLAUDE.md. What stands in for the ack
+is `longformQcGate.js`; treat changes to it as changes to a publishing control.
