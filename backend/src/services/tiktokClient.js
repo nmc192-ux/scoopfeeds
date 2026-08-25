@@ -34,6 +34,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
+import { fetchTimeout } from "./httpRetry.js";
 import { isTokenFresh } from "./tokenCache.js";
 
 const __dirname    = path.dirname(fileURLToPath(import.meta.url));
@@ -117,6 +118,7 @@ async function _refreshAccessToken() {
   if (!refreshToken) throw new Error("TIKTOK_REFRESH_TOKEN not set — cannot refresh");
 
   const res = await fetch(`${API_BASE}/v2/oauth/token/`, {
+    signal: fetchTimeout(),
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -208,6 +210,7 @@ export async function uploadToTikTok({ filePath, title, description = "", tags =
 
   // Step 1: Initialise the upload + get an upload URL.
   const initRes = await fetch(`${API_BASE}/v2/post/publish/video/init/`, {
+    signal: fetchTimeout(),
     method:  "POST",
     headers: {
       "Authorization": `Bearer ${accessToken}`,
@@ -243,7 +246,9 @@ export async function uploadToTikTok({ filePath, title, description = "", tags =
   if (!uploadUrl || !publishId) throw new Error("TikTok init upload: missing publish_id or upload_url");
 
   // Step 2: Upload the raw video bytes.
+  // The bytes themselves get a longer budget than a JSON call.
   const uploadRes = await fetch(uploadUrl, {
+    signal: fetchTimeout(5 * 60_000),
     method:  "PUT",
     headers: {
       "Content-Range": `bytes 0-${fileSizeBytes - 1}/${fileSizeBytes}`,
@@ -262,6 +267,7 @@ export async function uploadToTikTok({ filePath, title, description = "", tags =
   let videoId = null;
   for (let i = 0; i < maxAttempts; i++) {
     const pollRes = await fetch(`${API_BASE}/v2/post/publish/status/fetch/`, {
+      signal: fetchTimeout(),
       method:  "POST",
       headers: {
         "Authorization": `Bearer ${accessToken}`,

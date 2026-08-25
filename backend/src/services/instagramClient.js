@@ -37,7 +37,7 @@
 //   - Max size 8MB.
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { withNetworkRetry } from "./httpRetry.js";
+import { withNetworkRetry, fetchTimeout } from "./httpRetry.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
@@ -109,7 +109,7 @@ async function _call(pathPart, { method = "GET", params = {} } = {}) {
   const qs = new URLSearchParams({ ...params, access_token: t.accessToken });
   const url = `${API_BASE}${pathPart}?${qs.toString()}`;
   // Same class of loss as Threads: 3 Instagram cross-posts died on "fetch failed".
-  const res = await withNetworkRetry(() => fetch(url, { method }), { label: `instagram ${pathPart}` });
+  const res = await withNetworkRetry(() => fetch(url, { method, signal: fetchTimeout() }), { label: `instagram ${pathPart}` });
   const text = await res.text();
   let json = {};
   try { json = text ? JSON.parse(text) : {}; } catch {}

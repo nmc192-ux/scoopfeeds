@@ -12,6 +12,7 @@
 //     rate-limited far more leniently than createSession.
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync } from "fs";
+import { fetchTimeout } from "./httpRetry.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
@@ -176,7 +177,9 @@ async function call(path, { method = "POST", body, headers = {}, blob = null, qu
     init.headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
-  const res = await fetch(url, init);
+  // Node's fetch has no timeout; without this a stalled connection parks the
+  // whole cross-post chain and starves every channel after it.
+  const res = await fetch(url, { ...init, signal: fetchTimeout() });
   const text = await res.text();
   let json = {};
   try { json = text ? JSON.parse(text) : {}; } catch { /* keep raw */ }

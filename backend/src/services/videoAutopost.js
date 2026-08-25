@@ -65,6 +65,7 @@ import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
 import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
 import { buildMount, buildMapPng, MOUNT_NAMES } from "./videoSubjectVisual.js";
 import { findFootageStill, footageEnabled, footageCreditLines, footageDateLabel } from "./videoFootage.js";
+import { withDeadline } from "./httpRetry.js";
 import { isTikTokConfigured, uploadToTikTok, tiktokPrivacyLevel } from "./tiktokClient.js";
 import { isXConfigured, postToX, fitPost, xSafePublisher } from "./xClient.js";
 import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
@@ -603,6 +604,22 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
     releaseFrameDir(work);
   }
 }
+
+// ONE CHANNEL MAY NOT CONSUME ANOTHER'S TURN.
+//
+// The cross-posts run in sequence inside a single guard. On 2026-08-25 a video
+// published, Facebook posted, Instagram went `pending` on a fetch with no
+// timeout, and Threads / Bluesky / TikTok / X were NEVER ATTEMPTED. The worker
+// was not deadlocked — it moved on to other cron work and left that chain
+// parked forever, the row stuck `pending` and the MP4 pinned by the sweep guard.
+//
+// Per-call timeouts (added alongside this) are necessary and not sufficient: a
+// client making fifteen individually-bounded calls in a poll loop still runs for
+// minutes. This bounds the WHOLE attempt per channel. Exceeding it rejects, the
+// channel's own never-throws guard records a failure, and the chain moves on —
+// which is the behaviour that was missing.
+const CHANNEL_BUDGET_MS = () =>
+  Math.max(30_000, Number.parseInt(process.env.VIDEO_CHANNEL_BUDGET_MS || "300000", 10));
 
 // ─── TikTok ─────────────────────────────────────────────────────────────────
 
@@ -1594,38 +1611,46 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
         // DO NOT remove this try/catch, and do not move the cross-post above
         // markVideoPublished.
         try {
-          const fb = await _crossPostToFacebook(article, {
+          const fb = await withDeadline(
+            _crossPostToFacebook(article, {
             filePath: video.path, title, attribution, spec: r.spec, slides: video.slides, now, footage: video.footage,
-          });
+          }),
+            CHANNEL_BUDGET_MS(), "facebook");
           if (fb && fb.status !== "off") produced.facebook = fb;
 
           // ─── Facebook REEL ───────────────────────────────────────────────
           // A second, independent surface on the same MP4. Same guarded scope
           // and the same never-throws contract as the feed cross-post above,
           // for the same three reasons. Default OFF.
-          const reel = await _reelToFacebook(article, {
+          const reel = await withDeadline(
+            _reelToFacebook(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
-          });
+          }),
+            CHANNEL_BUDGET_MS(), "facebook-reel");
           if (reel && reel.status !== "off") produced.facebookReel = reel;
 
           // ─── Instagram Reel ──────────────────────────────────────────────
           // URL-fetch surface: Meta pulls the MP4 from our own server. Same
           // guarded scope and never-throws contract as the two above.
-          const igReel = await _reelToInstagram(article, {
+          const igReel = await withDeadline(
+            _reelToInstagram(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
-          });
+          }),
+            CHANNEL_BUDGET_MS(), "instagram-reel");
           if (igReel && igReel.status !== "off") produced.instagramReel = igReel;
 
           // ─── Threads ─────────────────────────────────────────────────────
           // LAST, deliberately: its mandatory ~30s wait makes it the longest of
           // the four, and everything ahead of it should already be published
           // before this job spends half a minute asleep.
-          const th = await _videoToThreads(article, {
+          const th = await withDeadline(
+            _videoToThreads(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
-          });
+          }),
+            CHANNEL_BUDGET_MS(), "threads");
           if (th && th.status !== "off") produced.threads = th;
 
           // ─── Bluesky ─────────────────────────────────────────────────────
@@ -1635,10 +1660,12 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
           //
           // Raw-bytes upload, so unlike Instagram and Threads this leaves no
           // URL for the sweep to race — see migration 026.
-          const bs = await _videoToBluesky(article, {
+          const bs = await withDeadline(
+            _videoToBluesky(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
-          });
+          }),
+            CHANNEL_BUDGET_MS(), "bluesky");
           if (bs && bs.status !== "off") produced.bluesky = bs;
 
           // ─── TikTok ──────────────────────────────────────────────────────
@@ -1646,19 +1673,23 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
           // the chain and inside the same guard: every channel above it has
           // already recorded its own outcome, so a throw here (which its own
           // try/catch should make impossible) cannot undo any of them.
-          const tt = await _videoToTikTok(article, {
+          const tt = await withDeadline(
+            _videoToTikTok(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
-          });
+          }),
+            CHANNEL_BUDGET_MS(), "tiktok");
           if (tt && tt.status !== "off") produced.tiktok = tt;
 
           // ─── X ───────────────────────────────────────────────────────────
           // Raw bytes again, so no sweep race — see migration 029. The caption
           // carries NO link: $0.015 a post against $0.20 with one.
-          const xp = await _videoToX(article, {
+          const xp = await withDeadline(
+            _videoToX(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
-          });
+          }),
+            CHANNEL_BUDGET_MS(), "x");
           if (xp && xp.status !== "off") produced.x = xp;
         } catch (fbErr) {
           logger.error(

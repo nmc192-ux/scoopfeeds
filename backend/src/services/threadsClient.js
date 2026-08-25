@@ -20,7 +20,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "./logger.js";
-import { withNetworkRetry } from "./httpRetry.js";
+import { withNetworkRetry, fetchTimeout } from "./httpRetry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = path.resolve(__dirname, "../..");
@@ -114,7 +114,7 @@ async function call(pathPart, { method = "GET", params = {}, body } = {}) {
     init.body = JSON.stringify(body);
   }
   // Retry a dropped connection; never retry an answer the server gave.
-  const res = await withNetworkRetry(() => fetch(url, init), { label: `threads ${pathPart}` });
+  const res = await withNetworkRetry(() => fetch(url, { ...init, signal: fetchTimeout() }), { label: `threads ${pathPart}` });
   const text = await res.text();
   let json = {};
   try { json = text ? JSON.parse(text) : {}; } catch {}
