@@ -147,6 +147,27 @@ const source = (text, p) =>
     color: C.faint, opacity: at(p, 0.75, 1),
   }, text);
 
+/**
+ * Roll a figure string toward its value: "$1,240" at k=0.5 → "$620".
+ * The number is found once (first numeric run, sign included); everything
+ * around it is carried verbatim. Decimals and comma grouping mirror the
+ * authored string, and k=1 reproduces it exactly — the roll may never land
+ * on a different figure than the author wrote.
+ */
+const rollFigure = (figure, k) => {
+  const m = String(figure).match(/^(.*?)(-?\d[\d,]*(?:\.\d+)?)(.*)$/s);
+  if (!m) return figure;
+  const raw = m[2];
+  const decimals = (raw.split(".")[1] || "").length;
+  const value = parseFloat(raw.replace(/,/g, "")) * k;
+  let out = value.toFixed(decimals);
+  if (raw.includes(",")) {
+    const [int, frac] = out.split(".");
+    out = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (frac ? "." + frac : "");
+  }
+  return m[1] + out + m[3];
+};
+
 // ─── Card types ─────────────────────────────────────────────────────────────
 
 const CARDS = {
@@ -188,8 +209,16 @@ const CARDS = {
     ]),
   ], p),
 
-  /** One figure, large. The workhorse. */
-  stat: ({ kicker, figure, unit, label, src }, p) => {
+  /** One figure, large. The workhorse.
+   *
+   * `roll: true` makes the figure COUNT to its value over the entrance,
+   * settling on the exact authored string at the same moment the fade does
+   * (k = 1 at p = 0.30), so it cannot straddle PAYOFF_P. The authored string
+   * is the contract: prefix, decimals and thousands grouping are preserved,
+   * and a figure with no number in it ("NO DEAL") is left alone. Opt-in —
+   * existing films render byte-identically without it.
+   */
+  stat: ({ kicker, figure, unit, label, src, roll }, p) => {
     const k = at(p, 0.05, 0.30);
     return frame([
       ...(kicker ? [eyebrow(kicker, p)] : []),
@@ -198,7 +227,7 @@ const CARDS = {
           h("div", {
             fontFamily: "Anton", fontSize: 300, color: C.lime, lineHeight: 0.95, letterSpacing: -2,
             opacity: k, transform: `translateY(${((1 - k) * 30).toFixed(2)}px)`,
-          }, figure),
+          }, roll ? rollFigure(figure, k) : figure),
           ...(unit ? [h("div", {
             fontFamily: "Anton", fontSize: 96, color: C.lime, marginLeft: 20,
             ...enter(p, 0.16, 0.40, 18),
@@ -560,24 +589,36 @@ ${paths.filter((q) => q.s.hot).map((q) => `<path d="${q.d}" fill="none" stroke="
    * half-built and then jumped. That is what "the equation errs as it appears"
    * looks like. Same rule applies to every card in HAS_PAYOFF.
    */
-  equation: ({ kicker, numerator, denominator, result, note, flipped }, p) => frame([
+  equation: ({ kicker, numerator, denominator, result, note, flipped, wipe }, p) => {
+    // `wipe: true` reveals each term left-to-right — a cover in the ground
+    // colour retreats off it — instead of the fade-and-rise. Same windows,
+    // so nothing straddles PAYOFF_P, and at p=1 the frame is pixel-identical
+    // to the fade version (the cover has zero width). The device reads as
+    // the equation being UNCOVERED, which suits before/after comparisons.
+    const term = (text, a, b) => wipe
+      ? h("div", { display: "flex", position: "relative" }, [
+          h("div", { fontFamily: "Anton", fontSize: 66, color: C.white, lineHeight: 1.1 }, text),
+          h("div", {
+            position: "absolute", right: 0, top: 0, height: "100%",
+            width: `${((1 - at(p, a, b)) * 100).toFixed(2)}%`, backgroundColor: C.base,
+          }),
+        ])
+      : h("div", {
+          fontFamily: "Anton", fontSize: 66, color: C.white, lineHeight: 1.1,
+          ...enter(p, a, b, 18),
+        }, text);
+    return frame([
     ...(kicker ? [eyebrow(kicker, p, flipped ? C.lime : C.dim)] : []),
     col({ flexGrow: 1, justifyContent: "center" }, [
       row({ alignItems: "center" }, [
         col({ alignItems: "center" }, [
-          h("div", {
-            fontFamily: "Anton", fontSize: 66, color: C.white, lineHeight: 1.1,
-            ...enter(p, 0.02, 0.14, 18),
-          }, numerator),
+          term(numerator, 0.02, 0.14),
           // The rule draws left-to-right between the terms.
           h("div", {
             width: Math.round(720 * at(p, 0.10, 0.24)), height: 8,
             backgroundColor: C.lime, margin: "22px 0",
           }),
-          h("div", {
-            fontFamily: "Anton", fontSize: 66, color: C.white, lineHeight: 1.1,
-            ...enter(p, 0.16, 0.30, 18),
-          }, denominator),
+          term(denominator, 0.16, 0.30),
         ]),
         h("div", {
           fontFamily: "Anton", fontSize: 90, color: C.track, margin: "0 56px",
@@ -595,7 +636,8 @@ ${paths.filter((q) => q.s.hot).map((q) => `<path d="${q.d}" fill="none" stroke="
         ...enter(p, 0.70, 0.94, 18),
       }, note)] : []),
     ]),
-  ], p),
+  ], p);
+  },
 
   /**
    * A REAL screenshot of a cited source, presented as evidence.
