@@ -1,7 +1,14 @@
 # Dependencies
-node_modules/
-frontend/node_modules/
-backend/node_modules/
+# NO TRAILING SLASH, deliberately. A trailing slash matches a DIRECTORY only,
+# so a symlink named node_modules slipped straight past these rules and was
+# committed to main (308b092) pointing at an absolute path on one developer's
+# Mac — a self-referential loop there, dangling everywhere else. Pulling it
+# REPLACED the real 323-package directory and broke every local require until
+# npm ci was re-run. Production survived only because .dockerignore excludes it
+# and the image builds its own.
+node_modules
+frontend/node_modules
+backend/node_modules
 
 # Build output
 frontend/dist/
