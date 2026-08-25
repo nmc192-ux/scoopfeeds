@@ -189,6 +189,22 @@ papered over; sampling or truncation is stated. No silent caps.
 **DrJ approves every irreversible action** — merge to main, prod deploy, migration, external
 post, credential use. Agents never deploy to prod. Build, verify, and present; don't ship.
 
+**ONE SCOPED EXCEPTION, decided by DrJ 2026-08-25: the long-form autopost loop.**
+When `LONGFORM_AUTOPOST_ENABLED=1`, that loop selects a topic, writes, renders,
+gates and publishes a film **without a human ack before the publishAt slot**
+(#75-#80). The exception covers *that loop only*. Everything else in this list
+is unchanged, and the `/video-factory` skill remains human-approved end to end.
+
+What stands in for the approval is `services/longform/longformQcGate.js`:
+publishing is reachable only through `publishIfPassed()`, an unmeasured gate is
+a FAILURE rather than a pass, and the AI-provenance disclosure chain is checked
+in **both** directions across all four surfaces. That file is the highest-
+consequence code in the repo — a published film cannot be quietly corrected,
+because the subscriber notification has already gone out. Review it as such.
+
+The loop is off unless the flag is literally `"1"`, and `LONGFORM_MAX_PER_WEEK=0`
+pauses it without unsetting the flag.
+
 ## Gotchas
 
 - **Env loading**: `src/config/env.js` reads `backend/.env` then `~/.scoopfeeds.env`, and
