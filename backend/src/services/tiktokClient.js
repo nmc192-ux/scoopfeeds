@@ -53,8 +53,27 @@ const getRefreshToken = () => (process.env.TIKTOK_REFRESH_TOKEN || "").trim();
 const getOpenId       = () => (process.env.TIKTOK_OPEN_ID       || "").trim();
 const getHandle       = () => (process.env.TIKTOK_HANDLE        || "").trim();
 
+/**
+ * CONFIGURED MEANS "CAN OBTAIN A TOKEN", NOT "ALREADY HOLDS ONE".
+ *
+ * This required TIKTOK_ACCESS_TOKEN and TIKTOK_OPEN_ID — neither of which is a
+ * thing anyone sets, because this client MINTS an access token from the refresh
+ * token and caches it. The result was a permanent "tiktok not configured" skip
+ * on a correctly-credentialled account: the check asked for the output of the
+ * step it was gating.
+ *
+ * Found in production after the channel was enabled: every video recorded
+ * `tiktok_status='skipped'`, reason "tiktok not configured", with the client
+ * key, secret and refresh token all present.
+ *
+ * The real precondition is the refresh triple. An access token or open id in
+ * the environment still counts — some deployments pin them — but neither is
+ * required.
+ */
 export function isTikTokConfigured() {
-  return Boolean(getClientKey() && getAccessToken() && getOpenId());
+  const canMint = getClientKey() && getClientSecret() && getRefreshToken();
+  const alreadyHas = getClientKey() && getAccessToken() && getOpenId();
+  return Boolean(canMint || alreadyHas);
 }
 
 // ─── Token management ────────────────────────────────────────────────────────

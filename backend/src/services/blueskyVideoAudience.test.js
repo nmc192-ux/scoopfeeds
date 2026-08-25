@@ -29,3 +29,17 @@ test("a DID document without a PDS entry yields null, not a guess", { skip: !pds
   assert.equal(pdsDidFrom(null), null);
   assert.equal(pdsDidFrom({ service: [{ type: "AtprotoPersonalDataServer", serviceEndpoint: "not a url" }] }), null);
 });
+
+test("the PDS DID survives a session refresh", { skip: !pdsDidFrom }, () => {
+  // refreshSession returns no DID document. The first fix set pdsDid only on
+  // the createSession path, so the very next refresh erased it and every
+  // upload threw "could not determine the account's PDS DID" — the fix shipped
+  // and changed nothing. Refresh is the COMMON path: it is preferred over
+  // createSession to stay under Bluesky's 30-per-5-minutes limit.
+  const prev = { did: "did:plc:x", pdsDid: "did:web:pds.example", refreshJwt: "r" };
+  const carried = pdsDidFrom(undefined) || prev.pdsDid || null;
+  assert.equal(carried, "did:web:pds.example");
+  // And a refresh that DOES return one takes precedence over the stale value.
+  const fresh = pdsDidFrom({ service: [{ type: "AtprotoPersonalDataServer", serviceEndpoint: "https://new.host" }] }) || prev.pdsDid;
+  assert.equal(fresh, "did:web:new.host");
+});

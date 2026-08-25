@@ -204,6 +204,14 @@ async function _refreshSession(prev) {
       accessJwt:  out.accessJwt,
       refreshJwt: out.refreshJwt || prev.refreshJwt,
       handle:     getHandle(),
+      // CARRIED FORWARD, because refreshSession does not return a DID document.
+      // Rebuilding the session without this silently erased the video upload
+      // audience on every refresh — which is most cycles, since refresh is
+      // preferred over createSession to stay under the 30/5min limit. The fix
+      // that added pdsDid shipped and changed nothing for exactly this reason:
+      // the createSession path set it, and the refresh path threw it away
+      // minutes later.
+      pdsDid:     pdsDidFrom(out.didDoc) || prev.pdsDid || null,
       createdAt:  Date.now(),
     };
     _persistSession(next);

@@ -68,3 +68,28 @@ test("the channel is off unless explicitly enabled", async () => {
     });
   }
 });
+
+test("configured means CAN GET a token, not already holds one", async () => {
+  // The check demanded TIKTOK_ACCESS_TOKEN and TIKTOK_OPEN_ID — the OUTPUT of
+  // the refresh step it was gating. In production every video skipped with
+  // "tiktok not configured" while the client key, secret and refresh token
+  // were all present and valid.
+  const { isTikTokConfigured } = await import("./tiktokClient.js");
+  const keys = ["TIKTOK_CLIENT_KEY","TIKTOK_CLIENT_SECRET","TIKTOK_REFRESH_TOKEN","TIKTOK_ACCESS_TOKEN","TIKTOK_OPEN_ID"];
+  const prev = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+  const set = (o) => { for (const k of keys) delete process.env[k];
+                       for (const [k,v] of Object.entries(o)) process.env[k] = v; };
+  try {
+    set({ TIKTOK_CLIENT_KEY:"k", TIKTOK_CLIENT_SECRET:"s", TIKTOK_REFRESH_TOKEN:"r" });
+    assert.equal(isTikTokConfigured(), true, "the refresh triple must count as configured");
+    set({ TIKTOK_CLIENT_KEY:"k", TIKTOK_ACCESS_TOKEN:"a", TIKTOK_OPEN_ID:"o" });
+    assert.equal(isTikTokConfigured(), true, "a pinned access token must still count");
+    set({ TIKTOK_CLIENT_KEY:"k" });
+    assert.equal(isTikTokConfigured(), false, "a key alone is not configured");
+    set({});
+    assert.equal(isTikTokConfigured(), false);
+  } finally {
+    for (const k of keys) delete process.env[k];
+    for (const [k,v] of Object.entries(prev)) if (v !== undefined) process.env[k] = v;
+  }
+});
