@@ -493,6 +493,7 @@ updated with it; the table below is **parsed and asserted** by
 | `dispatchVideoCycle` | `9 * * * *` | `scheduler.js` |
 | `dispatchVideoRenderCycle` | `39 * * * *` | `scheduler.js` |
 | `dispatchSocialCycle` | `*/30` | host crontab — `ENABLE_AUTO_SOCIAL=false` skips the `15,45` node-cron |
+| `dispatchXTextCycle` | `10,40 * * * *` | `scheduler.js` |
 
 <!-- cron-map:end -->
 
