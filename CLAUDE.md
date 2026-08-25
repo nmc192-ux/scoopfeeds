@@ -220,10 +220,18 @@ post, credential use. Agents never deploy to prod. Build, verify, and present; d
 
 `video-factory` — long-form video production and cross-platform scheduling.
 Invoke with `/video-factory`, or just ask for a video on a topic. Authors only
-`script.md` and `storyboard.mjs` per video; the engine is reused verbatim. Never
-`npm install` into a video working directory — `node_modules` there is a symlink
-to the backend's and npm replaces it, breaking ffmpeg and satori for every
-script in the folder.
+`script.md` and `storyboard.mjs` per video; the engine is reused verbatim.
+
+**The engine lives at `backend/src/services/longform/engine/`, not in the skill.** It was moved there so it
+ships in the production image; the skill directory keeps only `SKILL.md` and
+`references/`. Its own suites run with
+`node --test backend/src/services/longform/engine/<name>.test.mjs`, and
+`backend/src/services/longform/deployment.test.js` is in the standard backend
+run — it pins the path contract that a relocation silently breaks.
+
+Never `npm install` into a video working directory — `node_modules` there is a
+symlink to the backend's and npm replaces it, breaking ffmpeg and satori for
+every script in the folder.
 
 ## The J Loop (`.claude/skills/`)
 

@@ -32,7 +32,7 @@ enforces the whitelist.
 
 ## Credit discipline — reuse first, generate last
 
-- **Search the library before every generation**: `node engine/genscene.mjs
+- **Search the library before every generation**: `node backend/src/services/longform/engine/genscene.mjs
   find "<concept words>"`. A near-match beats a new 30-credit clip; scenes are
   deliberately story-agnostic so "document tears" serves any collapsed deal.
 - **Preflight cost** (`get_cost: true`) before submitting; gemini_omni 10s ≈ 30
@@ -70,7 +70,7 @@ the composition is the content; generate per-aspect.
 ## Using a scene in a project
 
 ```bash
-node engine/genscene.mjs use <slug>     # from the project directory
+node backend/src/services/longform/engine/genscene.mjs use <slug>     # from the project directory
 ```
 
 Copies the clip into `out/footage/GS_*.mp4` (ordinary INSERTS/FOOTAGE plumbing

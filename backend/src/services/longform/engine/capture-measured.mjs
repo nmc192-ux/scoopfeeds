@@ -27,8 +27,29 @@ import { P, FRONTEND } from "./_deps.mjs";
 import { pathToFileURL } from "url";
 // Playwright ships with the FRONTEND workspace, not the backend, and is loaded
 // by derived path so this works from any checkout location.
-const { chromium } = await import(
-  pathToFileURL(path.join(FRONTEND, "node_modules/playwright/index.mjs")).href);
+// CHROMIUM IS NOT IN THE PRODUCTION IMAGE — this step is LOCAL-ONLY (v1).
+//
+// Playwright ships with the FRONTEND workspace, and the runtime stage of the
+// Dockerfile copies only frontend/dist; `playwright install --with-deps
+// chromium` runs nowhere. Adding a browser to a node:20-bookworm-slim image
+// costs ~400 MB and an ongoing CVE surface, to produce ONE card type.
+//
+// So source screenshots stay a supervised-only step for now. The rule is that
+// it must FAIL LOUDLY here rather than emit an empty rects.json — a doc card
+// silently rendering with no highlights is the failure this whole measured-
+// rects design exists to prevent, and on an unattended run nobody would see it.
+//
+// To change the decision: add `RUN npx playwright install --with-deps chromium`
+// to the runtime stage and copy frontend/node_modules, then delete this guard.
+const PLAYWRIGHT = path.join(FRONTEND, "node_modules/playwright/index.mjs");
+if (!existsSync(PLAYWRIGHT)) {
+  throw new Error(
+    "capture-measured: Playwright is not installed (looked in " + PLAYWRIGHT + ").\n" +
+    "Source screenshots are a LOCAL-ONLY step — Chromium is deliberately not in the\n" +
+    "production image. Run this on a machine with `npm ci --prefix frontend`, or\n" +
+    "author the film without doc cards. This never emits an empty rects.json.");
+}
+const { chromium } = await import(pathToFileURL(PLAYWRIGHT).href);
 const OUT = P("out/docs");
 mkdirSync(OUT, { recursive: true });
 

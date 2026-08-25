@@ -1,6 +1,6 @@
 # Quality gates
 
-`node engine/qc.mjs <film.mp4>` measures these from the artifact.
+`node backend/src/services/longform/engine/qc.mjs <film.mp4>` measures these from the artifact.
 
 ## Gates
 

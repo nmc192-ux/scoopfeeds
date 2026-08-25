@@ -218,7 +218,7 @@ run re-synthesises every beat at full API cost.
 
 ## Cards and narration had nothing enforcing their correspondence
 
-Same root cause, other half. `engine/align.mjs` prints every beat's narration
+Same root cause, other half. `backend/src/services/longform/engine/align.mjs` prints every beat's narration
 beside the card that plays over it and fails on the structural errors: a beat
 with no card, a card with no beat, a `FOOTAGE`/`INSERTS` key pointing at a beat
 that is not a footage beat. It cannot judge whether card 9 is *about* line 9 —
