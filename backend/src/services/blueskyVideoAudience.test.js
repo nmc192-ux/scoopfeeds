@@ -43,3 +43,17 @@ test("the PDS DID survives a session refresh", { skip: !pdsDidFrom }, () => {
   const fresh = pdsDidFrom({ service: [{ type: "AtprotoPersonalDataServer", serviceEndpoint: "https://new.host" }] }) || prev.pdsDid;
   assert.equal(fresh, "did:web:new.host");
 });
+
+test("a job is read whether the service wraps it or not", async () => {
+  // uploadVideo returns { did, jobId, state } FLAT. The code read
+  // up.jobStatus.jobId, so a successful upload was rejected with "returned no
+  // jobId" — and the error printed the jobId it had just been handed.
+  const { jobOf } = (await import("./blueskyClient.js"))._internals;
+  assert.equal(jobOf({ did: "d", jobId: "da6q", state: "JOB_STATE_CREATED" }).jobId, "da6q");
+  assert.equal(jobOf({ jobStatus: { jobId: "w1", state: "JOB_STATE_COMPLETED" } }).jobId, "w1");
+  assert.equal(jobOf({ jobStatus: { state: "JOB_STATE_FAILED", error: "x" } }).state, "JOB_STATE_FAILED");
+  // Nothing usable stays nothing — the caller's "no jobId" error must still fire.
+  assert.deepEqual(jobOf({}), {});
+  assert.deepEqual(jobOf(null), {});
+  assert.deepEqual(jobOf({ unrelated: 1 }), {});
+});

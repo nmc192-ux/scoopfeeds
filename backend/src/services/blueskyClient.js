@@ -578,6 +578,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * Poll getJobStatus until the transcode completes, fails, or the deadline
  * passes. Returns the blob ref for the embed.
  */
+/**
+ * The job status, wrapped or flat.
+ *
+ * uploadVideo returns { did, jobId, state } at the TOP LEVEL. This code read
+ * `up.jobStatus.jobId`, so a successful upload was rejected with "returned no
+ * jobId" — and the error printed the jobId it had just been given. getJobStatus
+ * is read the same way and gets the same treatment, because a shape that moved
+ * once on one endpoint will have moved on its sibling.
+ *
+ * Both forms are accepted rather than swapping one guess for another: the
+ * lexicon documents `jobStatus`, the service currently answers flat, and being
+ * wrong in either direction costs another silent channel outage.
+ */
+function jobOf(res) {
+  if (res?.jobStatus?.jobId || res?.jobStatus?.state) return res.jobStatus;
+  if (res?.jobId || res?.state) return res;
+  return {};
+}
+
 async function _awaitVideoJob(jobId, serviceToken) {
   const timeoutMs = BLUESKY_VIDEO_POLL_TIMEOUT_MS();
   const intervalMs = BLUESKY_VIDEO_POLL_INTERVAL_MS();
@@ -592,7 +611,7 @@ async function _awaitVideoJob(jobId, serviceToken) {
       query: { jobId },
       headers: { Authorization: `Bearer ${serviceToken}` },
     });
-    const js = out?.jobStatus || {};
+    const js = jobOf(out);
     if (js.state) lastState = js.state;
 
     if (js.state === "JOB_STATE_COMPLETED") {
@@ -719,7 +738,7 @@ export async function postVideoToBluesky({ text, filePath, aspectRatio = null, d
     blob: { data: bytes, contentType: "video/mp4" },
   });
 
-  const job = up?.jobStatus || {};
+  const job = jobOf(up);
   if (!job.jobId) throw new Error(`bluesky video: uploadVideo returned no jobId (${JSON.stringify(up).slice(0, 200)})`);
 
   // An already-complete job comes back immediately when the same bytes were
@@ -755,4 +774,4 @@ export async function postVideoToBluesky({ text, filePath, aspectRatio = null, d
 }
 
 /** Exported for test: the audience derivation that 116 failures turned on. */
-export const _internals = { pdsDidFrom };
+export const _internals = { pdsDidFrom, jobOf };
