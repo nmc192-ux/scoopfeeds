@@ -40,6 +40,16 @@ text and highlighted navigation chrome instead of the sentence.
 If a phrase returns zero rects, the container climb stopped too early — the
 Range search only looks inside the chosen element. Raise `minW`/`minH`.
 
+## Statements and personality imagery (#82)
+
+See `house-style.md` §Evidence for the full rules. In short: statements enter
+only through `engine/statement.mjs` (never a found screenshot), render
+verbatim or throw, need their parent when they are replies, and are
+re-verified before publish. Personality cutouts, landmarks and flags come from
+the repo-level registries in `assets/evidence-assets/`, where an entry cannot
+exist without an allowlisted license — and paid editorial licenses (Getty, AP)
+are deliberately not on that list.
+
 ## Honesty
 
 Enforced, not aspirational (`docs/agentic-workflow.md` §5):

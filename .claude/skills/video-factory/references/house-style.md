@@ -43,6 +43,7 @@ Both are in `assets/fonts/`.
 | `dotgrid` | proportion of a hundred |
 | `pipeline` | ordered stages |
 | `quote` | attributed words |
+| `tweet` | a captured statement, verbatim from the evidence archive |
 | `outro` | the sign-off |
 
 **Entrance and payoff.** Cards in `HAS_PAYOFF` split at `PAYOFF_P = 0.35`: the
@@ -95,6 +96,48 @@ opt-in — measured-rect sweeps have been the default since the card shipped.
 
 **Earn-render.** A section renders only when it has real data. An absent element
 is correct; placeholders are not.
+
+## Evidence
+
+A principal's post is a **dated declaration** — the register the films already
+use. It is also the most forgeable, deletable, context-collapsible artifact in
+journalism, so:
+
+- **`statement.mjs` is the only door.** There is deliberately no code path from
+  a found screenshot image to a `tweet` card. `captureStatement` fetches the
+  live endpoints (syndication primary, oEmbed fallback — both free, no auth)
+  and archives the raw responses to `out/evidence/<id>.json` as provenance.
+- **X is evidence, never discovery.** Topics come from the event graph and
+  `demand.mjs`. The paid X search API buys nothing the graph does not already
+  provide, and is not used.
+- **Verbatim or nothing.** The card renders from the archive and re-checks it:
+  display text may re-break lines, a single changed word throws. No
+  paraphrase, no composite, no reconstruction.
+- **A reply needs its parent.** Capture the parent first and pass its id;
+  a reply quoted out of its thread misrepresents it and is rejected.
+- **Re-verified before publish.** `publish-all.mjs` re-fetches every archived
+  statement before any upload and REFUSES on deleted/changed. `--evidence-ok`
+  overrides, for the case where the deletion is the story — the card has a
+  "since deleted" state for exactly that.
+- **The card is not X's trade dress.** It is a house quotation card carrying
+  verbatim content, attribution, the post date, and the archive date.
+
+### Imagery: the rights-clean registries
+
+Personality cutouts, landmarks and flags live in repo-level registries
+(`assets/evidence-assets/`, beside genscenes) and amortize the same way — one
+registered portrait serves every film that person appears in, and `uses`
+tracks it.
+
+**The license field is the gate.** Allowed: `public-domain` (US federal —
+White House, Congress, State, DVIDS, NASA), `cc-by` / `cc-by-sa` (attribution
+mandatory, so `author` is required), `handout`. Getty/AP/agency editorial
+licenses are structurally absent — adding one is a deliberate commit, not a
+looser string. Nothing registers a promise: the file must exist.
+
+`sourcing.md`'s rule is unchanged — every person on screen is real imagery or
+inside a cited source. A cutout is a real licensed photo with its background
+removed, which complies; synthetic humans never do.
 
 ## Rhythm
 

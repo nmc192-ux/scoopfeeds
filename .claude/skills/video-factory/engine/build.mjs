@@ -37,6 +37,9 @@ import { createRequire } from "module";
 import { renderCard, HAS_PAYOFF, PAYOFF_P } from "./render.mjs";
 import { ffmpegPath, P, loadStoryboard, projectSlug } from "./_deps.mjs";
 import { parallaxFilter, validateParallax, FG_HEIGHT_FRAC } from "./parallax.mjs";
+import { loadStatement } from "./statement.mjs";
+import { useAsset, licenseLines } from "./assetRegistry.mjs";
+import { ASSETS } from "./_deps.mjs";
 const { STORYBOARD, TITLE_SEGMENT, FOOTAGE, GRADES, INSERTS, DOCS } = await loadStoryboard();
 const SLUG = projectSlug();
 
@@ -315,6 +318,10 @@ async function main() {
   // rendered, and for a video whose ending lands in the last few beats, that
   // is losing the ending.
   const BEAT_COUNT = Math.max(...takes.map((t) => (typeof t.id === "number" ? t.id : 0)));
+  // Provenance collected across the film, written to LICENSES.md below.
+  const usedStatements = new Map();
+  const usedAssets = new Map();
+
   for (let id = 1; id <= BEAT_COUNT; id++) {
     const v0 = STORYBOARD[id], take = byId.get(id), fo = FOOTAGE[id];
     const v = v0.doc ? { ...DOCS[v0.doc] } : v0;   // doc beats are cards
@@ -329,6 +336,23 @@ async function main() {
     const insList = (INSERTS[id] || []).slice().sort((a, b) => a.at - b.at);
     const ins = insList[0];
 
+    // A statement beat resolves from the evidence ARCHIVE at plan time. The
+    // storyboard names an id; loadStatement throws if it was never captured,
+    // so a film cannot reach the renderer holding evidence that does not
+    // exist. The card re-checks verbatim on every frame.
+    if (v.card === "tweet" && v.statementId) {
+      v.statement = loadStatement(v.statementId, { P });
+      usedStatements.set(v.statementId, v.statement);
+    }
+
+    // Registry-backed cutouts resolve (and amortize) at plan time too — an
+    // unregistered key names the registry here rather than dying in ffmpeg.
+    if (v.parallax?.cutout) {
+      const a = useAsset(ASSETS, "cutout", v.parallax.cutout);
+      v.parallax = { ...v.parallax, resolvedFg: a.absPath };
+      usedAssets.set(a.key, a);
+    }
+
     // Parallax declarations are validated here, at plan time, so a bad beat
     // names itself before an hour of rendering — not during it. The validator
     // is shown the FOOTAGE-table entry too: footage arrives via FOOTAGE[id],
@@ -337,9 +361,11 @@ async function main() {
     // to catch. The cutout file is stat'ed now for the same reason — a typo'd
     // key otherwise dies mid-build as a raw ffmpeg "No such file".
     if (v.parallax) {
-      const perrs = validateParallax({ ...v, footage: v.footage || (fo ? fo.file : undefined) });
+      const perrs = validateParallax({ ...v,
+        footage: v.footage || (fo ? fo.file : undefined),
+        parallax: { ...v.parallax, fg: v.parallax.fg || v.parallax.cutout } });
       if (perrs.length) throw new Error(`beat ${id}: ${perrs.join("; ")}`);
-      const fgPath = P(`out/photos/${v.parallax.fg}.png`);
+      const fgPath = v.parallax.resolvedFg || P(`out/photos/${v.parallax.fg}.png`);
       if (!existsSync(fgPath)) throw new Error(`beat ${id}: parallax cutout missing: ${fgPath}`);
     }
     const base = {
@@ -348,7 +374,7 @@ async function main() {
       clip: fo ? P(`out/footage/${fo.file}.mp4`) : null,
       clipIn: fo ? fo.in : 0, grade: fo ? fo.grade : null, crop: fo ? fo.crop : null,
       ken: v.photo && !fo ? v.ken : null,
-      fg: v.parallax ? P(`out/photos/${v.parallax.fg}.png`) : null,
+      fg: v.parallax ? (v.parallax.resolvedFg || P(`out/photos/${v.parallax.fg}.png`)) : null,
       parallax: v.parallax || null,
     };
 
@@ -576,6 +602,34 @@ async function main() {
   // BEATS — a beat holds several shots, so it reported a 7.39s median against a
   // film whose real median shot was 5.34s, and failed a gate the film passed.
   // Emit the plan so nothing downstream has to guess it. Same lesson as the SRT.
+  // ── evidence provenance ───────────────────────────────────────────────
+  // A rights or authenticity question must be answerable from the project
+  // directory without re-deriving anything, so every statement quoted and
+  // every registry asset used is appended to LICENSES.md in its existing
+  // format. Written BEFORE shots.json so a crash mid-write still leaves the
+  // trail for what was already planned.
+  if (usedStatements.size || usedAssets.size) {
+    const lic = P("out/footage/LICENSES.md");
+    mkdirSync(path.dirname(lic), { recursive: true });
+    const lines = ["", "## Evidence (#82)", ""];
+    if (usedStatements.size) {
+      lines.push("### Statements — verbatim, archived at capture time", "");
+      for (const s of usedStatements.values()) {
+        lines.push(`- **${s.id}** — @${s.handle}${s.name ? ` (${s.name})` : ""}`
+          + `${s.createdAt ? `, posted ${String(s.createdAt).slice(0, 10)}` : ""}`
+          + ` — archived ${String(s.fetchedAt).slice(0, 10)} — ${s.url}`
+          + `${s.parent ? ` — reply to ${s.parent}` : ""}`);
+      }
+      lines.push("");
+    }
+    if (usedAssets.size) {
+      lines.push("### Imagery — rights-clean registry assets", "");
+      lines.push(...licenseLines([...usedAssets.values()]), "");
+    }
+    writeFileSync(lic, (existsSync(lic) ? readFileSync(lic, "utf8") : "") + lines.join("\n"));
+    console.log(`   provenance: ${usedStatements.size} statement(s), ${usedAssets.size} asset(s) → out/footage/LICENSES.md`);
+  }
+
   writeFileSync(P("out/shots.json"), JSON.stringify(
     plan.map((p) => ({ beat: p.beat, kind: p.kind, seconds: +p.seconds.toFixed(3) })), null, 1));
 
