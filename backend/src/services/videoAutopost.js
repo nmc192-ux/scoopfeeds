@@ -621,6 +621,40 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
 const CHANNEL_BUDGET_MS = () =>
   Math.max(30_000, Number.parseInt(process.env.VIDEO_CHANNEL_BUDGET_MS || "300000", 10));
 
+/**
+ * THE CHANNEL BUDGET MUST FIT INSIDE WHAT IS LEFT OF THE JOB'S LOCK.
+ *
+ * #74 gave each channel five minutes and it never fired once. The reason is
+ * that the two clocks were never reconciled:
+ *
+ *   - the channel budget starts when THE CHANNEL starts
+ *   - the BullMQ lock (QUEUE_LOCK_MS_VIDEO_RENDER, 10 min) starts when THE JOB
+ *     starts, and the render burns four to five minutes of it before a single
+ *     cross-post begins
+ *
+ * So on 2026-08-25: published at 16:40 after ~4 minutes, Facebook and Instagram
+ * posted, Threads began around 16:44 with a budget due to expire at 16:49 — and
+ * the lock expired first. BullMQ abandons the promise on a lost lock: no
+ * rejection, no catch, no log. Threads stayed `pending` and Bluesky, TikTok and
+ * X were never attempted, which is precisely what the budget existed to prevent.
+ *
+ * A fixed budget cannot solve this, because the right number depends on how long
+ * the render took. So the remaining time is DIVIDED among the channels that have
+ * not run yet, and a safety margin is held back so the job can still record its
+ * outcome and release the lock cleanly.
+ */
+const LOCK_MS = () => Math.max(60_000, Number.parseInt(process.env.QUEUE_LOCK_MS_VIDEO_RENDER || "600000", 10));
+const LOCK_SAFETY_MS = 45_000;
+
+export function channelBudget({ jobStartedAt, channelsRemaining, now = Date.now(), lockMs = LOCK_MS() }) {
+  const left = jobStartedAt + lockMs - LOCK_SAFETY_MS - now;
+  const share = Math.floor(left / Math.max(1, channelsRemaining));
+  // Never negative, never longer than the configured per-channel ceiling. A
+  // floor of zero is meaningful: it means there is no time left and the channel
+  // should fail immediately rather than start work it cannot finish.
+  return Math.max(0, Math.min(CHANNEL_BUDGET_MS(), share));
+}
+
 // ─── TikTok ─────────────────────────────────────────────────────────────────
 
 const VIDEO_TIKTOK_MAX_PER_DAY = () =>
@@ -1536,6 +1570,9 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
         continue;
       }
 
+      // The job clock. `now` is bound once at cycle entry, which is what the
+      // BullMQ lock is measured from — not from when a channel starts.
+      const jobStartedAt = now;
       let video;
       rec.stage = "produce";
       try {
@@ -1615,7 +1652,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             _crossPostToFacebook(article, {
             filePath: video.path, title, attribution, spec: r.spec, slides: video.slides, now, footage: video.footage,
           }),
-            CHANNEL_BUDGET_MS(), "facebook");
+            channelBudget({ jobStartedAt, channelsRemaining: 7 }), "facebook");
           if (fb && fb.status !== "off") produced.facebook = fb;
 
           // ─── Facebook REEL ───────────────────────────────────────────────
@@ -1627,7 +1664,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
           }),
-            CHANNEL_BUDGET_MS(), "facebook-reel");
+            channelBudget({ jobStartedAt, channelsRemaining: 6 }), "facebook-reel");
           if (reel && reel.status !== "off") produced.facebookReel = reel;
 
           // ─── Instagram Reel ──────────────────────────────────────────────
@@ -1638,7 +1675,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
           }),
-            CHANNEL_BUDGET_MS(), "instagram-reel");
+            channelBudget({ jobStartedAt, channelsRemaining: 5 }), "instagram-reel");
           if (igReel && igReel.status !== "off") produced.instagramReel = igReel;
 
 
@@ -1654,7 +1691,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
           }),
-            CHANNEL_BUDGET_MS(), "bluesky");
+            channelBudget({ jobStartedAt, channelsRemaining: 4 }), "bluesky");
           if (bs && bs.status !== "off") produced.bluesky = bs;
 
           // ─── TikTok ──────────────────────────────────────────────────────
@@ -1667,7 +1704,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
           }),
-            CHANNEL_BUDGET_MS(), "tiktok");
+            channelBudget({ jobStartedAt, channelsRemaining: 3 }), "tiktok");
           if (tt && tt.status !== "off") produced.tiktok = tt;
 
           // ─── X ───────────────────────────────────────────────────────────
@@ -1678,7 +1715,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
           }),
-            CHANNEL_BUDGET_MS(), "x");
+            channelBudget({ jobStartedAt, channelsRemaining: 2 }), "x");
           if (xp && xp.status !== "off") produced.x = xp;
 
           // ─── Threads ─────────────────────────────────────────────────────
@@ -1701,7 +1738,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
           }),
-            CHANNEL_BUDGET_MS(), "threads");
+            channelBudget({ jobStartedAt, channelsRemaining: 1 }), "threads");
           if (th && th.status !== "off") produced.threads = th;
         } catch (fbErr) {
           logger.error(
