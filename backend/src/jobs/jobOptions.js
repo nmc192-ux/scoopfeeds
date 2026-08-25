@@ -25,6 +25,7 @@ export const JOB_NAMES = {
   articlesEnrichBatch: "articles.enrich.batch",
   videoRenderCycle: "video.render.cycle",
   socialPostAll: "social.post.all",
+  xTextPost: "x.text.post",
   // Heavy in-process cycles moved OFF the scheduler — see the collision note
   // in scheduler.js. Each blocked the event loop the cron timers live on.
   analysisRefresh: "analysis.refresh",
@@ -41,6 +42,7 @@ export const JOB_IDS = {
   [JOB_NAMES.articlesEnrichBatch]: "articles-enrich-batch-singleton",
   [JOB_NAMES.videoRenderCycle]: "video-render-cycle-singleton",
   [JOB_NAMES.socialPostAll]: "social-post-all-singleton",
+  [JOB_NAMES.xTextPost]: "x-text-post-singleton",
   [JOB_NAMES.analysisRefresh]: "analysis-refresh-singleton",
   [JOB_NAMES.eventsRefresh]: "events-refresh-singleton",
   [JOB_NAMES.marketsPolymarket]: "markets-polymarket-singleton",

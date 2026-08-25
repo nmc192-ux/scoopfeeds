@@ -16,6 +16,7 @@ import {
 import { sweepAtStartup } from "../services/videoArtifacts.js";
 import { runVideoRenderCycle } from "../services/videoAutopost.js";
 import { runSocialCycleWithTimeout } from "../services/socialPublisher.js";
+import { runXTextCycle } from "../services/xTextPoster.js";
 import { withJobRunLogging } from "./jobLogger.js";
 import { queueConcurrency, queueLockDuration, DEFAULT_LOCK_MS, JOB_NAMES, QUEUE_NAMES, BULLMQ_PREFIX } from "./jobOptions.js";
 import { assertRedisAvailable, assertRedisStartup, closeRedisConnections, createRedisConnection } from "./redis.js";
@@ -149,6 +150,21 @@ try {
       JOB_NAMES.socialPostAll,
       queueConcurrency.social,
       async () => runSocialCycleWithTimeout()
+    );
+    // X TEXT POSTS. On the social queue rather than a new one: it is outbound
+    // social I/O with the same shape, and a queue of its own would need its own
+    // lock duration, concurrency and diagnostics for no gain.
+    //
+    // It is a SEPARATE JOB, not folded into runSocialCycleWithTimeout, because
+    // the two have different caps, different failure modes and different spend.
+    // Folding them would mean one channel's stall taking the other's turn —
+    // which is exactly the fault that cost four channels a render on
+    // 2026-08-25.
+    registerWorker(
+      QUEUE_NAMES.social,
+      JOB_NAMES.xTextPost,
+      queueConcurrency.social,
+      async () => runXTextCycle()
     );
     // ─── The four cycles that used to block the scheduler's event loop ──────
     //

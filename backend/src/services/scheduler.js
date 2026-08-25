@@ -158,6 +158,16 @@ const dispatchSocialCycle = () => dispatchCycle({
   inProcess: () => runSocialCycleWithTimeout(), label: "social posting",
 });
 
+// X text posts. Queued like everything else so the worker owns the outbound
+// call and the singleton jobId gives it the same dedup as its neighbours.
+// `inProcess: null` deliberately: there is no degraded mode where the scheduler
+// posts to X itself, because that is the process whose blocked event loop
+// caused the 2026-08 cron outage.
+const dispatchXTextCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.social, job: JOB_NAMES.xTextPost,
+  inProcess: null, label: "x text posts",
+});
+
 // ─── The four cycles that used to run IN THIS PROCESS ───────────────────────
 //
 // THIS IS THE FIX FOR THE OUTAGE, NOT A TIDY-UP. Each of these did real work —
@@ -613,6 +623,14 @@ export function startScheduler() {
     // used to sit here and is what took social down. Not 17,47: minute 17
     // carries runWelcomeSequenceCycle, which the first pass of this map missed.
     scheduleCron("15,45 * * * *", () => runDispatch(() => dispatchSocialCycle(), "social posting"));
+    // :10 and :40 — two of the seven minutes in the hour with NOTHING else on
+    // them. Chosen by enumerating every registered cron rather than by picking
+    // a round number: my first attempt was :05/:35 and the collision guard
+    // rejected it for sharing with runWatchlistPushCycle, which runs IN
+    // PROCESS. A dispatch cron sharing a minute with in-process work is how
+    // ingestion died for 43 hours — the blocked event loop pushes node-cron's
+    // next tick outside its one-second window and the drift never recovers.
+    scheduleCron("10,40 * * * *", () => runDispatch(() => dispatchXTextCycle(), "x text posts"));
     logger.info(`📣 Social posting cron registered (15,45 — independent of ingestion) — platforms=${listEnabledPlatforms().length}`);
   } else {
     logger.info("📣 Social posting cron NOT registered (ENABLE_AUTO_SOCIAL=false)");
