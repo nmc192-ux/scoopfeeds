@@ -36,6 +36,7 @@ import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import { renderCard, HAS_PAYOFF, PAYOFF_P } from "./render.mjs";
 import { ffmpegPath, P, loadStoryboard, projectSlug } from "./_deps.mjs";
+import { parallaxFilter, validateParallax, FG_HEIGHT_FRAC } from "./parallax.mjs";
 const { STORYBOARD, TITLE_SEGMENT, FOOTAGE, GRADES, INSERTS, DOCS } = await loadStoryboard();
 const SLUG = projectSlug();
 
@@ -167,6 +168,18 @@ async function shotStill(p) {
       + `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,`
       + `fps=${FPS},${GRADES[grade] || GRADES.default},format=yuv420p,`
       + `trim=duration=${seconds},setpts=PTS-STARTPTS[v]`;
+  } else if (p.fg) {
+    // Two-layer parallax: bg gets the house Ken Burns (parallax REPLACES a
+    // still's motion, never stacks on it), fg is a cutout drifting the other
+    // way. Filter graph built in parallax.mjs so it is testable on its own.
+    args.push("-loop", "1", "-framerate", String(FPS), "-i", image);
+    args.push("-loop", "1", "-framerate", String(FPS), "-i", p.fg);
+    const kenChain = kenFilter(ken || "in", frames, zoom0 || 1.0);
+    v = parallaxFilter({
+      kenChain, frames, seconds,
+      dx: p.parallax?.shift, anchor: p.parallax?.anchor,
+      fgH: p.parallax?.scale ? Math.round(1080 * FG_HEIGHT_FRAC * p.parallax.scale) : undefined,
+    });
   } else {
     args.push("-loop", "1", "-framerate", String(FPS), "-i", image);
     const vf = ken ? kenFilter(ken, frames, zoom0 || 1.0) : `scale=1920:1080,format=yuv420p`;
@@ -311,12 +324,20 @@ async function main() {
     const insList = (INSERTS[id] || []).slice().sort((a, b) => a.at - b.at);
     const ins = insList[0];
 
+    // Parallax declarations are validated here, at plan time, so a bad beat
+    // names itself before an hour of rendering — not during it.
+    if (v.parallax) {
+      const perrs = validateParallax(v);
+      if (perrs.length) throw new Error(`beat ${id}: ${perrs.join("; ")}`);
+    }
     const base = {
       beat: id, text: take.text, audio: take.file, audioLead: lead,
       image: v.photo ? P(`out/photos/${v.photo}.png`) : null,
       clip: fo ? P(`out/footage/${fo.file}.mp4`) : null,
       clipIn: fo ? fo.in : 0, grade: fo ? fo.grade : null, crop: fo ? fo.crop : null,
       ken: v.photo && !fo ? v.ken : null,
+      fg: v.parallax ? P(`out/photos/${v.parallax.fg}.png`) : null,
+      parallax: v.parallax || null,
     };
 
     // MAIN FOOTAGE CONTINUES ACROSS ITS OWN CUTAWAYS. Every non-insert fragment
