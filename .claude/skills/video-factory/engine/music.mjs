@@ -32,7 +32,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import { ffmpegPath, P, loadStoryboard, projectSlug } from "./_deps.mjs";
-const { STORYBOARD, TITLE_SEGMENT } = await loadStoryboard();
+import { arcAt, applyReveal } from "./arc.mjs";
+const { STORYBOARD, TITLE_SEGMENT, REVEAL } = await loadStoryboard();
 const SLUG = projectSlug();
 
 const FFMPEG = ffmpegPath;
@@ -87,8 +88,12 @@ export function chapterTimes() {
     chapters: CH.map((id) => cues[id - 1]),
     outro: total - outroLen,
     total,
+    cues,
   };
 }
+
+// arcAt / applyReveal live in arc.mjs — pure points-in/points-out, so the
+// reveal shaping is testable without a project directory or audio synthesis.
 
 /** Piecewise-linear envelope as an ffmpeg expression over `t`. */
 function envelope(points) {
@@ -110,6 +115,18 @@ function envelope(points) {
  */
 export function intensityPoints(m) {
   const c = m.chapters;   // [ch1..ch6] start times
+  // The shaped arc below is written for the six-chapter structure. A film
+  // with a different count used to index past the array and feed NaN into
+  // the ffmpeg volume expression — which does not error, it goes silent.
+  // A generic arc is the honest fallback, and it says so.
+  if (c.length !== 6) {
+    console.log(`intensityPoints: ${c.length} chapters (arc is written for 6) — using the generic arc`);
+    return [
+      [0, 0.55], [12, 0.72],
+      ...c.flatMap((T, i) => [[T - 4, i ? 0.85 : 0.72], [T, i === c.length - 1 ? 0.92 : 0.85]]),
+      [m.outro - 4, 0.92], [m.outro, 0.80], [m.total, 0.80],
+    ];
+  }
   const R = 4;            // ramp seconds either side of a change
   return [
     [0, 0.55],                       // cold open: restrained, let $70 land
@@ -228,9 +245,18 @@ export async function scoreFilm(filmIn, bed, filmOut) {
 async function main() {
   const m = chapterTimes();
   const seconds = Number(process.argv[2] || m.total);
-  const arc = intensityPoints(m);
+  let arc = intensityPoints(m);
   console.log("chapters at:", m.chapters.map((x) => x.toFixed(0) + "s").join(", "));
-  console.log("arc points :", arc.length, "| turn drops to 0.40 at", m.chapters[4].toFixed(0) + "s");
+  if (m.chapters.length === 6) console.log("arc points :", arc.length, "| turn drops to 0.40 at", m.chapters[4].toFixed(0) + "s");
+  // The reveal comes from the storyboard (STORY SPINE), timed by the SRT.
+  // Nothing here models the timeline — that bug was already paid for once.
+  if (REVEAL != null) {
+    const tReveal = m.cues[REVEAL - 1];
+    arc = applyReveal(arc, tReveal);
+    console.log(`reveal     : beat ${REVEAL} at ${tReveal.toFixed(1)}s — bed drops to 0.18 under it`);
+  } else {
+    console.log("reveal     : storyboard exports no REVEAL — arc unchanged");
+  }
   const bed = await buildBed(seconds, P("out/bed.wav"), { arc, chapters: m.chapters });
   console.log("bed:", bed);
   const scored = await scoreFilm(P(`out/${SLUG}.mp4`), bed, P(`out/${SLUG}-scored.mp4`));

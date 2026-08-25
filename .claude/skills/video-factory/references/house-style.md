@@ -65,6 +65,28 @@ Every label is an absolutely-positioned div in viewBox coordinates. Draw all
 maps in a film on ONE shared base, and keep the thing being avoided on screen
 when showing a bypass — a bypass is only legible next to what it bypasses.
 
+**Maps are data, not code.** `engine/mapGeo.mjs` defines a small element
+grammar (`drawPath`, `flowDot`, `pulseMarker`, `regionFill`, `blockMark`, …);
+a map card takes `variant` (the shipped registry) or inline `geo: {…}` data —
+a new story's geography is authored, not engineered. Colours in map data are
+palette TOKENS resolved at render, so a map cannot drift off this palette.
+`validateGeo` rejects bad data naming the element and field; nothing repairs.
+
+## Motion opt-ins
+
+Each is opt-in per beat/spec, proven pixel-identical to the pre-existing look
+when not used, and each must land on exactly the authored content at p=1 —
+the animation may change the road, never the destination.
+
+| Opt-in | Where | What it does |
+|---|---|---|
+| `roll: true` | `stat` | the figure COUNTS to its value over the entrance; prefix, decimals and comma grouping preserved; settles before `PAYOFF_P` |
+| `wipe: true` | `equation` | terms UNCOVER left-to-right instead of fading up; same windows |
+| `parallax: {fg, shift?, scale?, anchor?}` | photo beats | two-layer collage motion: bg keeps the house Ken Burns, the transparent-PNG cutout drifts the other way. REPLACES the still's motion, never stacks on footage. Validated at plan time (`parallax.mjs`). Costs ~1.5× a plain still shot to encode |
+
+The `doc` card's highlight sweep is not in this table because it is not an
+opt-in — measured-rect sweeps have been the default since the card shipped.
+
 **Loss recolours, it does not vanish.** A dot removed from a dotgrid reads as
 "never there"; the claim is almost always "these are the loss". Recolour to
 `alert` instead.
@@ -109,6 +131,11 @@ Procedural, built by `music.mjs` with ffmpeg `aevalsrc`. The design that works:
 - **Chapter gates**: kick, hats and a second arp enter and leave across chapters
   so the bed has an arc. Risers into chapters, a boom on each chapter start.
 - **Intensity arc**: drop to ~0.40 at the turn, rebuild after.
+- **The reveal drops the bed.** If the storyboard exports `REVEAL` (the beat
+  number of the STORY SPINE's one remembered moment), the arc thins into it,
+  drops to 0.18 ON it, holds ~2.6s, and swells out slightly hot
+  (`engine/arc.mjs::applyReveal`). Timed from the SRT — never a modelled
+  timeline. No `REVEAL` export → arc untouched.
 - **Ducking**: `sidechaincompress` threshold 0.09, ratio 2.5.
 - **Chain order**: `loudnorm=I=-14:TP=-2.0:LRA=11` then `alimiter=limit=0.85`.
   The limiter is LAST.
