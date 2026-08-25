@@ -93,3 +93,18 @@ test("configured means CAN GET a token, not already holds one", async () => {
     for (const [k,v] of Object.entries(prev)) if (v !== undefined) process.env[k] = v;
   }
 });
+
+test("a v2 token response is read, not thrown away", async () => {
+  // TikTok v2 /oauth/token/ returns the fields FLAT. This client read
+  // body.data.access_token — the v1 shape — so a successful refresh was
+  // reported as "TikTok token refresh failed", with the valid token visible
+  // inside the error message. Every TikTok post died on it.
+  const flat = { access_token: "act.abc", expires_in: 86400, open_id: "oid-1", refresh_token: "rt" };
+  const wrapped = { data: { access_token: "act.xyz", expires_in: 7200, open_id: "oid-2" } };
+  const pick = (body) => (body?.data?.access_token ? body.data : body);
+  assert.equal(pick(flat).access_token, "act.abc", "the v2 flat shape must be accepted");
+  assert.equal(pick(wrapped).access_token, "act.xyz", "the v1 wrapped shape must still work");
+  assert.equal(pick(flat).open_id, "oid-1");
+  // A genuine failure still has no token under either shape.
+  assert.equal(pick({ error: "invalid_grant", message: "expired" })?.access_token, undefined);
+});

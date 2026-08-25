@@ -127,13 +127,21 @@ async function _refreshAccessToken() {
     }).toString(),
   });
   const body = await res.json();
-  if (!res.ok || !body.data?.access_token) {
-    throw new Error(`TikTok token refresh failed: ${body.message || JSON.stringify(body).slice(0, 200)}`);
+  // FLAT, NOT WRAPPED. TikTok's v2 /oauth/token/ returns the token fields at the
+  // top level: { access_token, expires_in, open_id, refresh_token, ... }. Only
+  // v1 nested them under `data`, and this was written to the v1 shape — so a
+  // PERFECTLY SUCCESSFUL refresh was read as a failure and thrown, with the
+  // valid token printed inside the error message. Every TikTok post failed on
+  // it. Both shapes are accepted now so a future move back is not another
+  // outage.
+  const d = body?.data?.access_token ? body.data : body;
+  if (!res.ok || !d?.access_token) {
+    throw new Error(`TikTok token refresh failed: ${body.message || body.error_description || JSON.stringify(body).slice(0, 200)}`);
   }
   const tok = {
-    accessToken: body.data.access_token,
-    expiresAt:   Date.now() + (body.data.expires_in - 60) * 1000,
-    openId:      body.data.open_id || getOpenId(),
+    accessToken: d.access_token,
+    expiresAt:   Date.now() + ((d.expires_in || 86400) - 60) * 1000,
+    openId:      d.open_id || getOpenId(),
   };
   _writeCached(tok);
   return tok.accessToken;
