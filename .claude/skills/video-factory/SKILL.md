@@ -131,6 +131,10 @@ writing a single beat.**
 State all four at the top of `script.md` as a `STORY SPINE` block, so the
 storyboard can serve them instead of decorating beats individually.
 
+The storyboard may `export const REVEAL = <beat>` naming the spine's reveal
+beat; `music.mjs` reads it and drops the bed under that moment (see
+`references/house-style.md` §Music). Optional — no export, no change.
+
 ## Per-project data files
 
 Three small files live in the project root, not the engine, because they are

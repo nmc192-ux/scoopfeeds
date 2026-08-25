@@ -28,7 +28,7 @@
 // Every segment is encoded with identical codecs/rate so the concat demuxer can
 // join them without re-encoding the whole film.
 
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
 import { execFile, spawnSync } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -36,6 +36,7 @@ import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import { renderCard, HAS_PAYOFF, PAYOFF_P } from "./render.mjs";
 import { ffmpegPath, P, loadStoryboard, projectSlug } from "./_deps.mjs";
+import { parallaxFilter, validateParallax, FG_HEIGHT_FRAC } from "./parallax.mjs";
 const { STORYBOARD, TITLE_SEGMENT, FOOTAGE, GRADES, INSERTS, DOCS } = await loadStoryboard();
 const SLUG = projectSlug();
 
@@ -167,6 +168,23 @@ async function shotStill(p) {
       + `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,`
       + `fps=${FPS},${GRADES[grade] || GRADES.default},format=yuv420p,`
       + `trim=duration=${seconds},setpts=PTS-STARTPTS[v]`;
+  } else if (p.fg) {
+    // Two-layer parallax: bg keeps the house Ken Burns, fg is a cutout
+    // drifting the other way — the relative motion is the depth cue.
+    // Filter graph built in parallax.mjs so it is testable on its own.
+    args.push("-loop", "1", "-framerate", String(FPS), "-i", image);
+    // No -loop on the cutout: overlay's eof_action=repeat holds the single
+    // decoded+scaled frame instead of re-decoding the PNG every output frame.
+    args.push("-i", p.fg);
+    const kenChain = kenFilter(ken || "in", frames, zoom0 || 1.0);
+    const ph = p.parallaxPhase;
+    v = parallaxFilter({
+      kenChain, frames, seconds,
+      dx: p.parallax?.shift, anchor: p.parallax?.anchor,
+      fgH: p.parallax?.scale ? Math.round(1080 * FG_HEIGHT_FRAC * p.parallax.scale) : undefined,
+      phaseStart: ph ? Math.round(ph.start * FPS) : 0,
+      phaseTotal: ph ? Math.max(2, Math.round(ph.total * FPS)) : null,
+    });
   } else {
     args.push("-loop", "1", "-framerate", String(FPS), "-i", image);
     const vf = ken ? kenFilter(ken, frames, zoom0 || 1.0) : `scale=1920:1080,format=yuv420p`;
@@ -196,7 +214,7 @@ async function shotCard(p) {
     const last = hadPayoff
       ? path.join(dir, `p${String(payN - 1).padStart(3, "0")}.png`)
       : path.join(dir, `e${String(enterN - 1).padStart(3, "0")}.png`);
-    return shotStill({ ...p, image: last, ken: null, clip: null });
+    return shotStill({ ...p, image: last, ken: null, clip: null, fg: null, parallax: null });
   }
 
   const hold1 = Math.max(0.04, revealAt - ENTER_SECS);
@@ -311,12 +329,27 @@ async function main() {
     const insList = (INSERTS[id] || []).slice().sort((a, b) => a.at - b.at);
     const ins = insList[0];
 
+    // Parallax declarations are validated here, at plan time, so a bad beat
+    // names itself before an hour of rendering — not during it. The validator
+    // is shown the FOOTAGE-table entry too: footage arrives via FOOTAGE[id],
+    // not only via the beat's own `footage` field, and a parallax silently
+    // losing to the footage branch is exactly the failure this check exists
+    // to catch. The cutout file is stat'ed now for the same reason — a typo'd
+    // key otherwise dies mid-build as a raw ffmpeg "No such file".
+    if (v.parallax) {
+      const perrs = validateParallax({ ...v, footage: v.footage || (fo ? fo.file : undefined) });
+      if (perrs.length) throw new Error(`beat ${id}: ${perrs.join("; ")}`);
+      const fgPath = P(`out/photos/${v.parallax.fg}.png`);
+      if (!existsSync(fgPath)) throw new Error(`beat ${id}: parallax cutout missing: ${fgPath}`);
+    }
     const base = {
       beat: id, text: take.text, audio: take.file, audioLead: lead,
       image: v.photo ? P(`out/photos/${v.photo}.png`) : null,
       clip: fo ? P(`out/footage/${fo.file}.mp4`) : null,
       clipIn: fo ? fo.in : 0, grade: fo ? fo.grade : null, crop: fo ? fo.crop : null,
       ken: v.photo && !fo ? v.ken : null,
+      fg: v.parallax ? P(`out/photos/${v.parallax.fg}.png`) : null,
+      parallax: v.parallax || null,
     };
 
     // MAIN FOOTAGE CONTINUES ACROSS ITS OWN CUTAWAYS. Every non-insert fragment
@@ -342,6 +375,9 @@ async function main() {
       const fr = MAIN_FRAMING[mainNth % MAIN_FRAMING.length];
       const f = { ...base, kind: "still", ...extra,
                   clipIn: (fo ? fo.in : 0) + mainUsed,
+                  // Parallax drift phase, in seconds of the WHOLE beat — the
+                  // same continuity idea as clipIn advancing above.
+                  parallaxPhase: v.parallax ? { start: mainUsed, total: seconds } : undefined,
                   punch: fo ? fr.punch : undefined, pan: fo ? fr.pan : undefined };
       mainUsed += extra.seconds;
       mainNth += 1;
