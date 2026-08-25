@@ -241,6 +241,61 @@ results.youtube.push({ kind: "longform", ...film, url: filmUrl });
   }
 }
 
+// ── captions ──────────────────────────────────────────────────────────────
+// The SRT build.mjs emits is the real shot timeline (§"The SRT is the
+// timeline"), so it is the correct caption track — not a re-transcription.
+//
+// Scope-checked BEFORE the call, not after: captions.insert spends 400 quota
+// units whether it succeeds or 403s, against the same 10,000/day budget the
+// six uploads above already draw 9,600 from. tokeninfo is free.
+//
+// A caption failure NEVER fails the publish. The film is uploaded and
+// scheduled by this point; captions are additive and can be fixed in Studio.
+if (SRT && existsSync(SRT)) {
+  try {
+    const t = await ytToken();
+    const info = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(t)}`
+    ).then((r) => r.json()).catch(() => ({}));
+    const scopes = String(info.scope || "").split(/\s+/).filter(Boolean);
+
+    if (!scopes.includes("https://www.googleapis.com/auth/youtube.force-ssl")) {
+      throw new Error(
+        "token lacks youtube.force-ssl — re-run backend/scripts/youtube-auth.mjs " +
+        "and replace YOUTUBE_REFRESH_TOKEN"
+      );
+    }
+
+    const boundary = `scoopfeeds-${Math.random().toString(36).slice(2)}`;
+    const meta = { snippet: { videoId: film.id, language: CFG.youtube.captionLanguage || "en",
+                              name: CFG.youtube.captionName || "English", isDraft: false } };
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`),
+      Buffer.from(JSON.stringify(meta)),
+      Buffer.from(`\r\n--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`),
+      readFileSync(SRT),
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+
+    const r = await fetch("https://www.googleapis.com/upload/youtube/v3/captions?part=snippet&uploadType=multipart", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${t}`,
+                 "Content-Type": `multipart/related; boundary=${boundary}`,
+                 "Content-Length": String(body.length) },
+      body,
+    });
+    const cb = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`${r.status}: ${(cb?.error?.message || JSON.stringify(cb)).slice(0, 200)}`);
+    console.log(`   captions: uploaded ${cb.id} (${meta.snippet.language})`);
+    results.youtube.push({ kind: "captions", id: cb.id, videoId: film.id });
+  } catch (e) {
+    console.log(`   captions: FAILED — ${e.message}`);
+    results.warnings.push(`captions not uploaded: ${e.message} — upload ${path.basename(SRT)} in Studio`);
+  }
+} else {
+  results.warnings.push("no SRT in publish.json — the film ships without captions");
+}
+
 for (const s of SHORTS) {
   const f = path.join(SHORTS_DIR, s.file);
   const desc = `${s.desc}\n\nFull explainer: ${filmUrl}\n\nhttps://scoopfeeds.com\n\n#Shorts`;
@@ -330,8 +385,17 @@ if (CFG.syntheticContent) {
 } else {
   console.log("  1. Do NOT tick 'Altered or synthetic content' — this film uses no AI-generated imagery.");
 }
-console.log(`  2. Upload captions: ${SRT || "(none)"}`);
-console.log("     (captions.insert needs the youtube.force-ssl scope; this token has upload+readonly only)");
+// Captions are attempted automatically above. Only mention Studio when that
+// attempt actually failed — a standing "upload the captions by hand" line
+// trains the reader to ignore it on the runs where it is real.
+const capFailed = results.warnings.some((w) => w.startsWith("captions not uploaded"));
+if (capFailed) {
+  console.log(`  2. Upload captions BY HAND: ${SRT || "(none)"} — the automatic attempt failed above.`);
+} else if (SRT) {
+  console.log("  2. Captions: uploaded automatically. Nothing to do.");
+} else {
+  console.log("  2. Captions: no SRT was configured in publish.json.");
+}
 if (results.warnings.length) {
   console.log("\nWARNINGS:");
   for (const w of results.warnings) console.log("  •", w);

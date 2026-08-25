@@ -42,9 +42,18 @@ Then re-run: node backend/scripts/youtube-auth.mjs
 
 const PORT         = 8085;
 const REDIRECT_URI = `http://localhost:${PORT}/callback`;
+// force-ssl is what makes captions.insert and videos.update reachable. The
+// original token carried upload+readonly only, so every film's SRT had to be
+// uploaded by hand in Studio and setYouTubePrivacy() 403'd — the recovery path
+// documented in video-pipeline.md §6.3 could not actually run.
+//
+// force-ssl is a SUPERSET of upload and of readonly. The narrower two are kept
+// in the list only so the consent screen names what is being granted; dropping
+// them changes nothing about the resulting token.
 const SCOPES       = [
   "https://www.googleapis.com/auth/youtube.upload",
   "https://www.googleapis.com/auth/youtube.readonly",
+  "https://www.googleapis.com/auth/youtube.force-ssl",
 ].join(" ");
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth?" + new URLSearchParams({
@@ -137,6 +146,10 @@ Access token (expires in ~1h, auto-refreshed by server):
   ${tokens.access_token?.slice(0, 40)}…
 
 Done! YouTube Shorts auto-posting is now enabled.
+
+This token carries youtube.force-ssl, so captions.insert and videos.update work.
+Verify after deploying:
+  node -e "import('./src/services/youtubeClient.js').then(m=>m.getTokenScopes()).then(console.log)"
 `);
 
 } catch (err) {
