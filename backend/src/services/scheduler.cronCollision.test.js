@@ -327,3 +327,25 @@ test("the render dispatch sits in a worker-quiet minute, away from the promoter"
     assert.ok(gap >= 3, `render at :${minute} is only ${gap} min from the promoter at :${p}`);
   }
 });
+
+test("the X text cron is registered regardless of ENABLE_AUTO_SOCIAL", () => {
+  // It was first written inside the ENABLE_AUTO_SOCIAL block, and that flag is
+  // false in production — so it silently never registered. The boot log said
+  // "38 crons registered" and this was not among them, while the feature, the
+  // worker processor and the documented flag all existed.
+  //
+  // ENABLE_AUTO_SOCIAL governs the article-card publisher: a different system,
+  // different credentials, its own reasons for being off. X text posting has
+  // its own switch inside the cycle. One feature, one gate.
+  const src = readFileSync(new URL("./scheduler.js", import.meta.url), "utf8");
+  const line = src.indexOf('dispatchXTextCycle(), "x text posts"');
+  assert.ok(line > 0, "the X text cron must be registered somewhere");
+
+  const gate = src.indexOf("ENABLE_AUTO_SOCIAL ?? \"true\"");
+  const gateEnd = src.indexOf("Social posting cron NOT registered", gate);
+  assert.ok(gate > 0 && gateEnd > gate, "expected the social gate block to be findable");
+  assert.ok(
+    line < gate || line > gateEnd,
+    "the X text cron sits inside the ENABLE_AUTO_SOCIAL block, which is false in prod — it will never register"
+  );
+});
