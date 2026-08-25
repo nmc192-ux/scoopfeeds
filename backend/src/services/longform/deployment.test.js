@@ -37,7 +37,16 @@ test("BACKEND and REPO_ROOT resolve to the real directories", async () => {
     `REPO_ROOT does not point at the repo root (got ${REPO_ROOT})`);
   // No developer's home directory may be baked in — the regression that made
   // the engine work on exactly one machine at exactly one path.
-  assert.doesNotMatch(BACKEND, /\/Users\/[^/]+\//, "an absolute home path leaked into BACKEND");
+  //
+  // CHECK THE SOURCE, NOT THE RUNTIME VALUE. A correctly DERIVED path contains
+  // the home directory whenever the repo lives under one, so asserting on
+  // `BACKEND` itself passed only because this first ran from a worktree in
+  // /private/tmp — a location-dependent test that would have gone on hiding
+  // the very thing it was written to catch.
+  const depsSrc = readFileSync(new URL(`${ENGINE}/_deps.mjs`, import.meta.url), "utf8");
+  const hardcoded = depsSrc.match(/["'`]\/(?:Users|home)\/[^"'`\n]+/g);
+  assert.equal(hardcoded, null,
+    `a hardcoded absolute home path is baked into _deps.mjs: ${hardcoded?.join(", ")}`);
 });
 
 test("dep() resolves the render toolchain from the engine's new home", async () => {
