@@ -110,6 +110,75 @@ export function stripOwnLink(text) {
     .trim();
 }
 
+/**
+ * SPLIT, DON'T CUT.
+ *
+ * The first version fitted every post to 280 characters and dropped whatever
+ * did not finish inside it. DrJ: "can we not add follow-up posts where the
+ * principal post is longer and truncating it would not yield the actual or
+ * meaningful sense." Correct. X threads natively, a chain outperforms a
+ * truncated single, and losing the back half of a story to a character limit is
+ * a self-inflicted wound.
+ *
+ * Packs whole SENTENCES into parts. A sentence is never broken across two posts
+ * unless it alone exceeds the limit, in which case it wraps at a word boundary
+ * — mid-word is never acceptable, and mid-sentence only when the alternative is
+ * nothing at all.
+ *
+ * Each part costs $0.015 and counts against X_TEXT_MAX_PER_DAY, so a long story
+ * spends more of the day's budget than a short one. That is the right trade —
+ * it is the same story either way — and it is why the caller still refuses to
+ * BEGIN a chain that does not fit the budget that remains.
+ */
+export function splitForThread(text, limit = 280) {
+  const body = String(text || "").trim();
+  if (!body) return [];
+  const g = (s) => [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(s)].length;
+  if (g(body) <= limit) return [body];
+
+  const pieces = body.match(/[^.!?\n]+(?:[.!?]+["')\]]?|\n+|$)/g) || [body];
+  const parts = [];
+  let cur = "";
+  const flush = () => { if (cur.trim()) parts.push(cur.trim()); cur = ""; };
+
+  for (let piece of pieces) {
+    piece = piece.replace(/\s+$/, " ");
+    if (g(piece.trim()) > limit) {
+      // One sentence longer than an entire post. Wrap at word boundaries.
+      flush();
+      let line = "";
+      for (const w of piece.trim().split(/\s+/)) {
+        if (line && g(line + " " + w) > limit) { parts.push(line); line = w; }
+        else line = line ? line + " " + w : w;
+      }
+      if (line) cur = line + " ";
+      continue;
+    }
+    if (cur && g((cur + piece).trim()) > limit) flush();
+    cur += piece;
+  }
+  flush();
+  return parts;
+}
+
+/**
+ * Numbering, but only where it earns its characters.
+ *
+ * Two posts read as a thread without being told. Three or more benefit from
+ * knowing where they are and that there IS an end. The composer's own "(1/3)"
+ * markers are stripped first, because our re-split changes the count and a
+ * wrong marker is worse than none.
+ */
+export function numberThread(parts) {
+  if (parts.length < 3) return parts;
+  return parts.map((p, i) => `${p} (${i + 1}/${parts.length})`);
+}
+
+/** The composer's part markers, which our re-split invalidates. */
+export function stripPartMarkers(text) {
+  return String(text || "").replace(/\s*\(\d+\/\d+\)\s*$/g, "").trim();
+}
+
 /** Thread parts grouped and ordered; singles as groups of one. */
 export function groupPosts(rows) {
   const groups = new Map();
@@ -185,39 +254,61 @@ export async function runXTextCycle({ now = Date.now(), deps = {} } = {}) {
     });
     const publisher = parts[0].source_name || null;
 
+    // PLAN THE WHOLE CHAIN BEFORE POSTING ANY OF IT.
+    //
+    // Splitting can turn one queue row into several posts, so the post count is
+    // not known until the text is built. Planning first means the budget check
+    // sees the REAL number and a chain is never started that cannot finish —
+    // a half-posted thread is the one outcome worse than a delayed one.
+    const planned = [];
+    for (let i = 0; i < parts.length; i++) {
+      // RECOMPOSED, not merely stripped. These were written for a human to
+      // paste, where the link carried the attribution AND the "read the rest".
+      // Order matters: drop the link, then the composer's generic tag block,
+      // then its part markers (our re-split invalidates them), then any
+      // sentence cut for a link that no longer exists.
+      let body = completeSentencesOnly(
+        stripPartMarkers(stripComposerTags(stripOwnLink(parts[i].post_text))));
+      if (!body) {
+        // The composer itself stored a fragment — threading cannot recover text
+        // it never kept. Drop this part; the thread ends earlier and still
+        // reads. If it is the OPENING part there is no post to make at all.
+        logger.info(`𝕏 text: dropping part ${i + 1}/${parts.length} — the composer stored nothing complete`);
+        if (i === 0) { planned.length = 0; break; }
+        continue;
+      }
+      // Source on the very first post only: repeated down a chain it is noise.
+      if (planned.length === 0) body = addSource(body, publisher);
+      // Reserve room on the opener for the tags appended after the split.
+      for (const chunk of splitForThread(body, planned.length === 0 ? 280 - 40 : 280)) {
+        planned.push({ text: chunk, id: parts[i].id });
+      }
+    }
+    if (!planned.length) continue;
+
+    // Tags ride the opener, after splitting, so they cannot push a chunk over.
+    planned[0].text = withHashtags(planned[0].text, tags);
+    const numbered = numberThread(planned.map(x => x.text));
+    numbered.forEach((t, i) => { planned[i].text = t; });
+
+    if (already + posted + planned.length > max) {
+      logger.info(`𝕏 text: a ${planned.length}-post chain does not fit the remaining budget ` +
+        `(${already + posted}/${max}) — left for the next cycle`);
+      continue;
+    }
+
     let replyToId = null;
     const doneIds = [];
     try {
-      for (let i = 0; i < parts.length; i++) {
-        // RECOMPOSED, not merely stripped. These were written for a human to
-        // paste, where the link carried the attribution AND the "read the
-        // rest". Removing it leaves a truncated fragment with no source — which
-        // is what shipped, and what DrJ read back: no source, incomplete, cut
-        // off. Order matters: drop the link, then the composer's generic tag
-        // block, then any sentence that was cut for the link that no longer
-        // exists.
-        let body = completeSentencesOnly(stripComposerTags(stripOwnLink(parts[i].post_text)));
-        if (!body) {
-          // Nothing was finished. A thread part that says nothing complete is
-          // dropped; the thread simply ends earlier and still reads. If it is
-          // the OPENING part there is no post to make at all.
-          logger.info(`𝕏 text: dropping part ${i + 1}/${parts.length} — nothing complete once the link was removed`);
-          if (i === 0) { doneIds.length = 0; break; }
-          continue;
-        }
-        // The source and tags go on the FIRST part only. Repeating tags down a
-        // thread pays the multi-tag penalty several times, and a source line on
-        // every part is noise.
-        if (i === 0) body = addSource(body, publisher);
-        const text = i === 0 ? withHashtags(fitPost(body, 280 - 40), tags) : fitPost(body, 280);
-        const res = await _postToX({ text, replyToId });
+      for (const step of planned) {
+        const res = await _postToX({ text: step.text, replyToId });
         replyToId = res.id;
-        doneIds.push(parts[i].id);
+        if (!doneIds.includes(step.id)) doneIds.push(step.id);
         posted += 1;
       }
       _mark(doneIds, now);
-      results.push({ ids: doneIds, url: `https://x.com/i/status/${replyToId}`, parts: parts.length });
-      logger.info(`𝕏 TEXT POSTED ${parts.length === 1 ? "single" : parts.length + "-part thread"}` +
+      results.push({ ids: doneIds, url: `https://x.com/i/status/${replyToId}`, posts: planned.length });
+      logger.info(`𝕏 TEXT POSTED ${planned.length === 1 ? "single" : planned.length + "-post thread"}` +
         `${tags.length ? ` tags=${tags.join(" ")}` : ""} (${already + posted}/${max} today)`);
     } catch (err) {
       // Whatever went out stays marked, so a retry cannot repeat it. The rest of

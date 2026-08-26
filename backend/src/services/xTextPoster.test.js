@@ -179,3 +179,63 @@ test("no publisher means no dangling label", () => {
   assert.equal(addSource("Headline", null), "Headline");
   assert.equal(addSource("Headline", ""), "Headline");
 });
+
+// ─── split, don't cut ───────────────────────────────────────────────────────
+//
+// DrJ: "can we not add follow-up posts where the principal post is longer and
+// truncating it would not yield the actual or meaningful sense." X threads
+// natively; losing the back half of a story to a character limit is a
+// self-inflicted wound.
+
+import { splitForThread, numberThread, stripPartMarkers } from "./xTextPoster.js";
+
+const graphemes = (s) => [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(s)].length;
+
+test("long prose becomes a chain, and nothing is lost", () => {
+  const long = "Volkswagen bosses face a decisive vote today at Wolfsburg. The works council has demanded guarantees on three plants and a pay settlement that management says it cannot fund. Analysts expect a compromise on two of the three, with the Osnabrück site left open until the spring. A failure to agree would be the first open breach between the board and labour since 2016.";
+  const parts = splitForThread(long);
+  assert.ok(parts.length > 1, "should have split");
+  for (const p of parts) assert.ok(graphemes(p) <= 280, "every part must fit");
+  // Every sentence survives somewhere — that is the whole point.
+  for (const sentence of ["decisive vote today", "cannot fund", "left open until the spring", "first open breach"]) {
+    assert.ok(parts.some(p => p.includes(sentence)), `lost: ${sentence}`);
+  }
+});
+
+test("a sentence is never broken across two posts", () => {
+  const t = "First sentence here. Second sentence is quite a lot longer and carries the detail. Third one closes it out.";
+  for (const p of splitForThread(t, 60)) {
+    // Each part ends at a terminator, or is a wrapped over-long sentence.
+    assert.ok(/[.!?]$/.test(p) || graphemes(p) >= 40, `broke mid-sentence: "${p}"`);
+  }
+});
+
+test("a single sentence longer than a post wraps at a word, never mid-word", () => {
+  const monster = "The " + "consequential ".repeat(40) + "decision.";
+  const parts = splitForThread(monster);
+  assert.ok(parts.length > 1);
+  for (const p of parts) {
+    assert.ok(graphemes(p) <= 280);
+    assert.ok(!/\S$/.test(p) || !p.endsWith("consequen"), "must not cut inside a word");
+  }
+  assert.ok(parts.join(" ").includes("decision."), "the end of the sentence survives");
+});
+
+test("short text is left as one post", () => {
+  assert.deepEqual(splitForThread("Short and complete."), ["Short and complete."]);
+  assert.deepEqual(splitForThread(""), []);
+});
+
+test("numbering appears only when it earns its characters", () => {
+  assert.deepEqual(numberThread(["a"]), ["a"], "a single post is not 1/1");
+  assert.deepEqual(numberThread(["a", "b"]), ["a", "b"], "two read as a thread already");
+  assert.deepEqual(numberThread(["a", "b", "c"]), ["a (1/3)", "b (2/3)", "c (3/3)"]);
+});
+
+test("the composer's own part markers are removed before we re-split", () => {
+  // Ours would otherwise disagree with theirs, and a wrong marker is worse
+  // than none.
+  assert.equal(stripPartMarkers("🤖 Taking your temperature from the inside (1/3)"),
+               "🤖 Taking your temperature from the inside");
+  assert.equal(stripPartMarkers("No marker here"), "No marker here");
+});
