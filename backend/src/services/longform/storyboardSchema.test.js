@@ -225,3 +225,9 @@ test("a numeric chapter n is coerced to a padded string — satori refuses a num
   assert.equal(out.STORYBOARD[1].n, "01",
     "n: 1 fails the whole build inside satori; n: \"01\" is also the house numeral style");
 });
+
+test("a present geo must parse — a region-code string satisfied variant-or-geo and died in the build", () => {
+  const badGeo = ok({ beats: { 1: { card: "map", geo: "AU-NSW" } } });
+  assert.match(validateStoryboard(badGeo).join("\n"), /geo geo: not an object/,
+    "a region-code string is not the mapGeo grammar");
+});

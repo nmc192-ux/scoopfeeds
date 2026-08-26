@@ -127,6 +127,10 @@ slide deck — aim for a footage beat at least every 8-10 beats when keys exist:
   statements: ${statements.join(", ") || "(none)"}
 
 HARD RULES
+- MAP CARDS: use one ONLY if you can author the full "geo" spec in the mapGeo
+  element grammar (paths, dots, lines with real coordinates). Never use the
+  "variant" registry — those are OTHER films' geography, and a wrong-place map
+  publishes silently. If you cannot author geo, use a different card.
 - GROUNDING: every figure must appear in the SOURCES below. Invent nothing. If
   a number cannot be sourced, leave it out — a film that omits a figure is
   correct; one that invents a figure is not publishable.

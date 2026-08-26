@@ -26,6 +26,8 @@
  */
 
 /** Card types the renderer actually exports. Anything else is a typo. */
+import { validateGeo } from "./engine/mapGeo.mjs";
+
 export const CARD_TYPES = Object.freeze([
   "title", "chapter", "stat", "bars", "outro", "quote", "tweet", "map",
   "linechart", "multiline", "equation", "doc", "dotgrid", "pipeline",
@@ -147,6 +149,15 @@ export function validateStoryboard(doc, { statementIds = [] } = {}) {
     }
     for (const f of spec.req) {
       if (b[f] === undefined) errs.push(`${at} (${b.card}): missing required field "${f}"`);
+    }
+    // A PRESENT geo must parse. The variant-or-geo rule below already forces
+    // a map to name its geography, but a truthy geo of the wrong SHAPE
+    // ("geo": "AU-NSW", a region code) satisfied it and died in geoSvg 45
+    // segments into the build — validateGeo was written "so the storyboard
+    // schema can call it long before a render is attempted", and nothing
+    // here called it.
+    if (b.card === "map" && b.geo !== undefined) {
+      for (const e of validateGeo(b.geo)) errs.push(`${at} (map): geo ${e}`);
     }
     const allowed = new Set(["card", ...spec.req, ...spec.opt]);
     for (const f of Object.keys(b)) {
