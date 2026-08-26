@@ -37,6 +37,7 @@ import { createRequire } from "module";
 import { renderCard, HAS_PAYOFF, PAYOFF_P } from "./render.mjs";
 import { ffmpegPath, P, loadStoryboard, projectSlug } from "./_deps.mjs";
 import { parallaxFilter, validateParallax, FG_HEIGHT_FRAC } from "./parallax.mjs";
+import { srtTime } from "./srtTime.mjs";
 import { loadStatement } from "./statement.mjs";
 import { useAsset, licenseLines } from "./assetRegistry.mjs";
 import { ASSETS } from "./_deps.mjs";
@@ -257,11 +258,8 @@ async function pool(items, n, fn) {
   return out;
 }
 
-function srtTime(t) {
-  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60);
-  const s = Math.floor(t % 60), ms = Math.round((t - Math.floor(t)) * 1000);
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
-}
+// srtTime lives in srtTime.mjs — build.mjs runs a film build on import, so
+// nothing defined inside it is reachable from a test.
 
 /** Render the frame sequence for one card into `dir`. */
 async function renderCardFrames(spec, dir, payoff) {
