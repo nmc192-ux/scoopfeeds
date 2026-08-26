@@ -31,19 +31,28 @@ export async function demand(seed, ds = "yt") {
   return { seed, direct: base.length, breadth: set.size, top: base.slice(0, 6) };
 }
 
-const SEEDS = process.argv.slice(2);
-if (!SEEDS.length) { console.log("usage: node demand.mjs <phrase> [phrase...]"); process.exit(0); }
+// CLI ENTRY, GUARDED. This block used to run at module top level, so any
+// attempt to `import { demand }` executed the CLI — printing a usage message
+// and exiting. That made the exported function unreachable from the
+// production demand gate, which is the whole reason it is exported. Every
+// other engine script guards its entry this way (see music.mjs).
+async function main() {
+  const SEEDS = process.argv.slice(2);
+  if (!SEEDS.length) { console.log("usage: node demand.mjs <phrase> [phrase...]"); process.exit(0); }
 
-console.log("phrase".padEnd(38), "direct".padStart(7), "breadth".padStart(8), "  top completions");
-console.log("-".repeat(120));
-for (const s of SEEDS) {
-  const d = await demand(s);
-  const flag = d.direct === 0 ? "  ← DEAD" : d.direct >= 8 ? "  ← strong" : "";
-  console.log(
-    s.slice(0, 37).padEnd(38),
-    String(d.direct).padStart(7),
-    String(d.breadth).padStart(8),
-    "  " + d.top.slice(0, 3).join(" | ").slice(0, 62) + flag
-  );
-  await sleep(140);
+  console.log("phrase".padEnd(38), "direct".padStart(7), "breadth".padStart(8), "  top completions");
+  console.log("-".repeat(120));
+  for (const s of SEEDS) {
+    const d = await demand(s);
+    const flag = d.direct === 0 ? "  ← DEAD" : d.direct >= 8 ? "  ← strong" : "";
+    console.log(
+      s.slice(0, 37).padEnd(38),
+      String(d.direct).padStart(7),
+      String(d.breadth).padStart(8),
+      "  " + d.top.slice(0, 3).join(" | ").slice(0, 62) + flag
+    );
+    await sleep(140);
+  }
 }
+
+if (import.meta.url === `file://${process.argv[1]}`) main();
