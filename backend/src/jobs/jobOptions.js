@@ -9,6 +9,9 @@ export const QUEUE_NAMES = {
   ingestion: "ingestion",
   video: "video",              // YouTube INGESTION (fetchAllYouTube) — not rendering
   videoRender: "video_render", // the autopost loop: spec → render → upload
+  longform: "longform",        // the 7-10 minute film loop (#75-#80) — separate
+                               // queue so a film render cannot occupy the
+                               // shorts loop's only slot
   social: "social",            // outbound posting to bluesky/threads/fb/ig/li/pinterest
   enrichment: "enrichment",
   analysis: "analysis",
@@ -20,6 +23,7 @@ export const QUEUE_NAMES = {
 };
 
 export const JOB_NAMES = {
+  longformCycle: "longform:cycle",
   newsIngestAll: "news.ingest.all",
   videosIngestAll: "videos.ingest.all",
   articlesEnrichBatch: "articles.enrich.batch",
@@ -41,6 +45,7 @@ export const JOB_IDS = {
   [JOB_NAMES.videosIngestAll]: "videos-ingest-all-singleton",
   [JOB_NAMES.articlesEnrichBatch]: "articles-enrich-batch-singleton",
   [JOB_NAMES.videoRenderCycle]: "video-render-cycle-singleton",
+  [JOB_NAMES.longformCycle]: "longform-cycle-singleton",
   [JOB_NAMES.socialPostAll]: "social-post-all-singleton",
   [JOB_NAMES.xTextPost]: "x-text-post-singleton",
   [JOB_NAMES.analysisRefresh]: "analysis-refresh-singleton",
@@ -121,6 +126,18 @@ export const queueLockDuration = {
   [QUEUE_NAMES.video]:        parseIntEnv("QUEUE_LOCK_MS_VIDEO", 2 * 60_000),
   [QUEUE_NAMES.enrichment]:   parseIntEnv("QUEUE_LOCK_MS_ENRICHMENT", 2 * 60_000),
   [QUEUE_NAMES.videoRender]:  parseIntEnv("QUEUE_LOCK_MS_VIDEO_RENDER", 10 * 60_000),
+  // 30 MIN. A full bundle — 71 cards of satori+resvg, a 9-minute encode, five
+  // Shorts and the music bed — was MEASURED at ~10.3 minutes of CPU on the
+  // prod host (2x EPYC 9354P) while it was IDLE (#75). Under contention with
+  // the shorts loop it will be slower, so the lock is set at roughly 3x the
+  // measured figure rather than at the measurement.
+  //
+  // Getting this wrong is not a slow job, it is a DUPLICATE FILM: BullMQ
+  // declares a job whose lock lapses to be stalled and re-runs it, and a
+  // second published film is a subscriber notification that cannot be
+  // recalled. The re-entry claim in longformCycle.js would catch most of
+  // that, but the lock is what stops the render happening twice at all.
+  [QUEUE_NAMES.longform]:     parseIntEnv("QUEUE_LOCK_MS_LONGFORM", 30 * 60_000),
   [QUEUE_NAMES.social]:       parseIntEnv("QUEUE_LOCK_MS_SOCIAL", 2 * 60_000),
   [QUEUE_NAMES.analysis]:     parseIntEnv("QUEUE_LOCK_MS_ANALYSIS", 2 * 60_000),
   // 10 MIN, RAISED FROM 2 (2026-08-13). events-promote-singleton kept logging
@@ -170,6 +187,12 @@ export const queueConcurrency = {
   // STRICTLY 1. A render is minutes of ffmpeg and the daily cap is a global
   // count — two concurrent cycles would both read "under cap" and both publish.
   videoRender: parseIntEnv("QUEUE_CONCURRENCY_VIDEO_RENDER", 1),
+  // STRICTLY 1, for the same reason as videoRender AND one more: the rolling
+  // weekly cap is a global count, so two concurrent cycles would both read
+  // "under cap" and both publish a film. For a 60s clip a duplicate is
+  // embarrassing; for a film it is a second subscriber notification that
+  // cannot be recalled.
+  longform: parseIntEnv("QUEUE_CONCURRENCY_LONGFORM", 1),
   // STRICTLY 1. socialPublisher's single-flight guard is PROCESS-LOCAL, so a
   // second concurrent consumer would not see it and both would post.
   social: parseIntEnv("QUEUE_CONCURRENCY_SOCIAL", 1),

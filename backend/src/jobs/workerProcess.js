@@ -15,6 +15,7 @@ import {
 } from "../services/scheduler.js";
 import { sweepAtStartup } from "../services/videoArtifacts.js";
 import { runVideoRenderCycle } from "../services/videoAutopost.js";
+import { longformCycleJob } from "../services/longform/runLongformCycle.js";
 import { runSocialCycleWithTimeout } from "../services/socialPublisher.js";
 import { runXTextCycle } from "../services/xTextPoster.js";
 import { withJobRunLogging } from "./jobLogger.js";
@@ -131,6 +132,17 @@ try {
       JOB_NAMES.videoRenderCycle,
       queueConcurrency.videoRender,
       async (job) => runVideoRenderCycle(job.data || {})
+    );
+    // The long-form film loop (#75-#80). Its OWN queue, so a film render —
+    // ~10 minutes measured on this host — cannot occupy the shorts loop's
+    // single videoRender slot. The job itself never throws: a BullMQ retry
+    // would re-render and possibly re-publish a film, and a second subscriber
+    // notification cannot be recalled.
+    registerWorker(
+      QUEUE_NAMES.longform,
+      JOB_NAMES.longformCycle,
+      queueConcurrency.longform,
+      async (job) => longformCycleJob(job.data || {})
     );
     registerWorker(
       QUEUE_NAMES.enrichment,

@@ -150,6 +150,18 @@ const dispatchVideoRenderCycle = () => dispatchCycle({
   inProcess: null, label: "video autopost",
 });
 
+// The long-form film loop. Worker-only for the same reason as videoRender —
+// ffmpeg and satori need a process that can spawn — and on its OWN queue so a
+// ~10-minute film render cannot occupy the shorts loop's single slot.
+//
+// Enqueued FREQUENTLY and refused CHEAPLY: at 3 films a week most cycles do
+// nothing but read a rolling count and return. The gates live in the cycle,
+// not in the cron expression, so pausing is one env var rather than a deploy.
+const dispatchLongformCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.longform, job: JOB_NAMES.longformCycle,
+  inProcess: null, label: "longform film",
+});
+
 // Social posting: network I/O only, so it COULD run here — but it is queued
 // like the rest so the worker owns every outbound cycle and the singleton jobId
 // gives it the same dedup and diagnostics as its neighbours.
@@ -682,6 +694,21 @@ export function startScheduler() {
 // ingestion at :02 and :00 carries ten daily crons).
 scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "video autopost"));
   logger.info(`🎬 Video autopost cron registered (hourly; gates decide) — enabled=${process.env.VIDEO_AUTOPOST_ENABLED === "1"}`);
+
+  // LONG-FORM: every six hours at :53, not hourly.
+  //
+  // The cap is 3 films a WEEK, so 24 firings a day would be 165 cheap refusals
+  // for every film — the gates would work correctly and the log would be
+  // noise. Four a day is already far more opportunity than the cap can use,
+  // and it still catches a freed slot within six hours.
+  //
+  // :53 is one of only five minutes not already claimed (31, 53, 56, 58, 59);
+  // :31 and :58 are rejected above for their own reasons, and :53 keeps the
+  // ~10-minute render clear of the :00 daily-cron block. The contention guard
+  // inside the cycle is what actually protects the shorts loop — this choice
+  // just avoids starting in a crowd.
+  scheduleCron("53 */6 * * *", () => runDispatch(() => dispatchLongformCycle(), "longform film"));
+  logger.info(`🎬 Long-form cron registered (every 6h; gates decide) — enabled=${process.env.LONGFORM_AUTOPOST_ENABLED === "1"}`);
 
   const inProcessVideoEnabled = String(process.env.ENABLE_INPROCESS_VIDEO_CRON || "").toLowerCase() === "true";
   if (inProcessVideoEnabled) {

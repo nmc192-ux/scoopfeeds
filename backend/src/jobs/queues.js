@@ -8,6 +8,7 @@ const queueDefinitions = {
   ingestionQueue: QUEUE_NAMES.ingestion,
   videoQueue: QUEUE_NAMES.video,
   videoRenderQueue: QUEUE_NAMES.videoRender,
+  longformQueue: QUEUE_NAMES.longform,
   socialQueue: QUEUE_NAMES.social,
   enrichmentQueue: QUEUE_NAMES.enrichment,
   analysisQueue: QUEUE_NAMES.analysis,
