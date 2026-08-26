@@ -92,3 +92,25 @@ test("no tags means the caption is returned untouched", () => {
   assert.equal(withHashtags("Just the headline", []), "Just the headline");
   assert.equal(withHashtags("Just the headline"), "Just the headline");
 });
+
+test("a partial name match is not a mention", () => {
+  // Live dry run produced #AmericanEnglish on "Canada's retaliation tests the
+  // limit of American power under Trump" — the entity "American English"
+  // matched on its first word. A wrong tag is worse than no tag.
+  const tags = hashtagsFor({
+    title: "Canada's retaliation tests the limit of American power under Trump",
+    entities: [
+      { label: "Canada", entity_type: "place" },
+      { label: "American English", entity_type: "org" },
+    ],
+  });
+  assert.deepEqual(tags, ["#Canada"]);
+});
+
+test("a multi-word name still matches when the headline says all of it", () => {
+  const tags = hashtagsFor({
+    title: "New Zealand tightens visa rules for seasonal workers",
+    entities: [{ label: "New Zealand", entity_type: "place" }],
+  });
+  assert.deepEqual(tags, ["#NewZealand"]);
+});

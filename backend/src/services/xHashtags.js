@@ -108,10 +108,17 @@ export function hashtagsFor({ title = "", entities = [], max = 2 } = {}) {
     const name = e?.label || e?.surface;
     if (!name) continue;
     const canon = canonical(name);
-    // THE FILTER THAT MAKES THIS USABLE: the headline has to have named it.
-    const probe = String(canon).replace(/['’]s\b/gi, "").toLowerCase();
-    const at = hay.indexOf(probe.split(/\s+/)[0]);
-    if (at < 0 || probe.split(/\s+/)[0].length < 3) continue;
+    // THE FILTER THAT MAKES THIS USABLE: the headline has to have named it —
+    // the WHOLE name, not its first word.
+    //
+    // Matching on the first word alone produced #AmericanEnglish on a story
+    // headlined "Canada's retaliation tests the limit of American power":
+    // the entity "American English" matched on "american". A partial match is
+    // not a mention, and a wrong tag is worse than no tag.
+    const probe = String(canon).replace(/['’]s\b/gi, "").toLowerCase().trim();
+    if (probe.length < 3) continue;
+    const at = hay.indexOf(probe);
+    if (at < 0) continue;
     const tag = toTag(canon);
     if (!tag || isGeneric(tag) || seen.has(tag.toLowerCase())) continue;
     seen.add(tag.toLowerCase());

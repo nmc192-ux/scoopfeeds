@@ -55,7 +55,12 @@ const ARTICLES_PER_CYCLE = () => Math.max(1, Number.parseInt(process.env.X_TEXT_
  */
 export function stripComposerTags(text) {
   return String(text || "")
-    .replace(/^[ \t]*(#[\w]+[ \t]*){2,}$/gim, "")   // a line that is only tags
+    // A line that is ONLY hashtags — one or more. The first version required
+    // two, so a lone "#ScoopFeeds" survived, and because it sat AFTER the
+    // composer's "…" it also hid the truncation from completeSentencesOnly and
+    // pushed the Source line into the middle of the post. One stray tag broke
+    // three things.
+    .replace(/^[ \t]*(?:#[\w]+[ \t]*)+$/gim, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

@@ -239,3 +239,23 @@ test("the composer's own part markers are removed before we re-split", () => {
                "🤖 Taking your temperature from the inside");
   assert.equal(stripPartMarkers("No marker here"), "No marker here");
 });
+
+test("a lone hashtag line is stripped, and stops hiding a truncation", () => {
+  // Live dry run: "…profits r…\n\n#ScoopFeeds". The stripper required two tags,
+  // so the lone one survived — which also placed it AFTER the ellipsis, hiding
+  // the truncation from completeSentencesOnly and pushing Source into the
+  // middle of the post. One stray tag broke three things.
+  const raw = "📰 Cnooc's 1H Profit Rises After Iran War Boosted Oil Prices\n\nChina's biggest offshore driller said its first-half profits r…\n\n#ScoopFeeds";
+  const stripped = stripComposerTags(raw);
+  assert.ok(!/#ScoopFeeds/.test(stripped), "the lone tag must go");
+  assert.ok(/r…$/.test(stripped.trim()), "the truncation is now at the end where it can be detected");
+  assert.equal(completeSentencesOnly(stripped),
+    "", "nothing in it was finished, so the caller drops it");
+});
+
+test("a tag line among real text is removed without touching the text", () => {
+  const t = "Headline here\n\n#OnlyTag\n\nA complete sentence follows.";
+  const out = stripComposerTags(t);
+  assert.ok(!/#OnlyTag/.test(out));
+  assert.ok(out.includes("Headline here") && out.includes("A complete sentence follows."));
+});
