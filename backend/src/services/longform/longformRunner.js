@@ -102,6 +102,22 @@ export function writeProjectInputs({ dir, slug, title, script, board, licenses }
     ? board
     : { ...board, titleSegment: synthesizeTitleSegment({ title, spine: board.spine }) };
   writeFileSync(path.join(dir, "storyboard.json"), JSON.stringify(withTitle, null, 2));
+  // shorts.json is what shorts.mjs actually cuts from — the storyboard's
+  // shorts array never reaches the engine on its own (found when the first
+  // real render died at the shorts step, film already built). Names are
+  // index-prefixed and filename-safe here because the engine names output
+  // files from them and the publish plan zips shorts back to their titles
+  // BY SORTED FILENAME: a model's display names ("The Svetofor Slip") sort
+  // alphabetically, not in film order, and every title would attach to the
+  // wrong file.
+  if (board.shorts?.length) {
+    writeFileSync(path.join(dir, "shorts.json"), JSON.stringify(
+      board.shorts.map((sh, i) => ({
+        ...sh,
+        name: `${String(i + 1).padStart(2, "0")}_${String(sh.name || sh.title || "short")
+          .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)}`,
+      })), null, 2));
+  }
   if (licenses) writeFileSync(path.join(dir, "out/footage/LICENSES.md"), licenses);
 }
 

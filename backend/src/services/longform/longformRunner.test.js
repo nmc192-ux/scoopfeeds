@@ -159,3 +159,17 @@ test("writeProjectInputs: a storyboard without a titleSegment gets the mechanica
   const w2 = JSON.parse(readFileSync(path.join(dir, "storyboard.json"), "utf8"));
   assert.deepEqual(w2.titleSegment, authored, "an authored title segment is never overwritten");
 });
+
+test("writeProjectInputs: shorts reach the engine as shorts.json, index-prefixed so sorted files match storyboard order", () => {
+  const dir = scaffoldProject("strait", { root: root() });
+  writeProjectInputs({ dir, slug: "strait", title: "T", script: SCRIPT,
+    board: { ...BOARD, shorts: [
+      { name: "The Svetofor Slip", from: 1, to: 4, title: "A", hook: "h" },
+      { name: "Moral Red Line", from: 17, to: 22, title: "B", hook: "h" },
+    ] } });
+  const shorts = JSON.parse(readFileSync(path.join(dir, "shorts.json"), "utf8"));
+  assert.deepEqual(shorts.map((s) => s.name), ["01_the-svetofor-slip", "02_moral-red-line"],
+    "display names sort alphabetically, not in film order — the index prefix is what keeps " +
+    "the publish plan's sorted-filename zip attached to the right titles");
+  assert.equal(shorts[1].to, 22, "the cut range survives the rename");
+});

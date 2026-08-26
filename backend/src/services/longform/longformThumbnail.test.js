@@ -14,8 +14,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 
 import {
-  validateThumbSpec, renderThumbnail, W, H, MAX_BYTES, REVIEW_WIDTH, MAX_HEADLINE_LINES,
-} from "./longformThumbnail.js";
+  validateThumbSpec, renderThumbnail, W, H, MAX_BYTES, REVIEW_WIDTH, MAX_HEADLINE_LINES, headlineLines } from "./longformThumbnail.js";
 
 const ok = (over = {}) => ({ lines: ["SEVEN WEEKS", "OF SILENCE"], accent: "NOBODY SAW IT",
                              sub: "DR Congo", plateFrom: "/tmp/footage.mp4", ...over });
@@ -88,4 +87,17 @@ test("every required dependency is named when absent", async () => {
     delete args[missing];
     await assert.rejects(() => renderThumbnail(args), new RegExp(`${missing} is required`));
   }
+});
+
+test("headlineLines: a long spine question headlines as its main clause, inside the line budget", () => {
+  const lines = headlineLines("Who is really in control when AI generates content, shapes policy, and targets people?");
+  assert.deepEqual(lines, ["WHO IS REALLY IN", "CONTROL"],
+    "the subordinate clause is cut — a mid-clause fragment like 'CONTROL WHEN AI' is not a headline");
+  for (const l of lines) assert.ok(l.length <= 22, `${l} over the 22-char line rule`);
+});
+
+test("headlineLines: never emits more than the two-line maximum", () => {
+  const lines = headlineLines("AI Firms Debate Putting Cyber Tests Online After Model Hacks");
+  assert.ok(lines.length <= 2);
+  assert.deepEqual(lines, ["AI FIRMS DEBATE", "PUTTING CYBER TESTS"]);
 });
