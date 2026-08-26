@@ -60,6 +60,12 @@ export const CARD_SPECS = Object.freeze({
 
 /** The widest beat range a short may cut. See the shorts check below. */
 export const MAX_SHORT_BEATS = 10;
+/**
+ * The QC gate publishes nothing with fewer (longformQcGate GATES.minShorts).
+ * Enforced by the WRITER, not validateStoryboard: hand-authored films keep
+ * their cuts in shorts.json and validate storyboards with none.
+ */
+export const MIN_SHORTS = 3;
 
 /** Non-card beats: the imagery the film cuts to. */
 export const MEDIA_KINDS = Object.freeze(["footage", "photo"]);

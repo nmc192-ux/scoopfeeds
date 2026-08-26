@@ -34,7 +34,7 @@
 import { logger } from "./logger.js";
 import { callJson } from "../realityIndex/llmQueue.js";
 import {
-  validateStoryboard, validateSpine, CARD_TYPES, CARD_SPECS,
+  validateStoryboard, validateSpine, CARD_TYPES, CARD_SPECS, MIN_SHORTS,
 } from "./longform/longformStoryboardSchema.js";
 
 export const isLongformStoryboardEnabled = () =>
@@ -106,7 +106,7 @@ SHAPE
              "questionBeat": <n>, "answerBeat": <n> },
   "beats": { "1": {...}, "2": {...}, ... },   // contiguous from 1, no gaps
   "shorts": [ { "name", "from": <beat>, "to": <beat>, "title", "hook" } ],
-             // a short is a MOMENT of at most 10 beats, never a chapter
+             // 3 or 4 shorts, each a MOMENT of at most 10 beats, never a chapter
   "reveal": <beat number of the film's one remembered moment>
 }
 
@@ -208,7 +208,14 @@ export async function writeStoryboard({
     const schemaErrs = validateStoryboard(doc, { statementIds: mediaKeys.statements || [] });
     const spineErrs = validateSpine(doc);
     const groundErrs = ungroundedFigures(doc, sourceText);
-    const all = [...schemaErrs, ...spineErrs, ...groundErrs];
+    // The publish gate's shorts floor, enforced AT GENERATION: qcVerdict
+    // requires GATES.minShorts, and the storyboard that cut two shorts would
+    // have failed it only after the whole render was paid for. Writer-level,
+    // not schema-level — hand-authored films keep their cuts in shorts.json.
+    const shortsErrs = (doc.shorts || []).length < MIN_SHORTS
+      ? [`${(doc.shorts || []).length} short(s) (need >= ${MIN_SHORTS}) — the publish gate requires ${MIN_SHORTS}`]
+      : [];
+    const all = [...schemaErrs, ...spineErrs, ...groundErrs, ...shortsErrs];
 
     if (!all.length) {
       const n = Object.keys(doc.beats).length;

@@ -32,7 +32,10 @@ const goodDoc = (over = {}) => ({
     4: { card: "ledger", rows: [{ who: "IMO", what: "Declared it closed." }] },
     5: { card: "statement", lines: ["NOBODY CAN CLOSE THE COUNT."] },
   },
-  shorts: [{ name: "a", from: 1, to: 2, title: "T", hook: "H" }],
+  // Three: the writer enforces the publish gate's minShorts at generation.
+  shorts: [{ name: "a", from: 1, to: 2, title: "T", hook: "H" },
+           { name: "b", from: 1, to: 2, title: "T2", hook: "H2" },
+           { name: "c", from: 1, to: 2, title: "T3", hook: "H3" }],
   reveal: 5,
   ...over,
 });
