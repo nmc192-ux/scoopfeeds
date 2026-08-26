@@ -191,7 +191,7 @@ export async function demandGate(ev, { demandFn, min = MIN_DEMAND_BREADTH() } = 
  * @returns {Promise<{selected: object[], rejected: object[]}>}
  */
 export async function selectLongformTopics({
-  listEvents, demandFn, alreadyFilmed = new Set(), limit = 1, now = Date.now(),
+  listEvents, demandFn, sourceGate = null, alreadyFilmed = new Set(), limit = 1, now = Date.now(),
 } = {}) {
   if (!listEvents) throw new Error("selectLongformTopics: listEvents is required");
 
@@ -212,7 +212,14 @@ export async function selectLongformTopics({
 
   // Demand is checked ONLY on candidates that already pass depth — each check
   // is several network round trips, and a shallow story would be skipped
-  // regardless of how well it searches.
+  // regardless of how well it searches. The source gate runs LAST, per
+  // candidate, because it is the most expensive (full-text fetches).
+  //
+  // A FAILED GATE COSTS THE CANDIDATE, NEVER THE CYCLE. The loop walks the
+  // ranked list until `limit` topics pass everything; the cycle comes up
+  // empty only when the WHOLE list fails — and a topic that failed here is
+  // not claimed or retired, so it stays eligible and, since events accumulate
+  // articles over time, is often richer by the next cycle.
   const selected = [];
   for (const ev of ranked) {
     if (selected.length >= limit) break;
@@ -222,7 +229,16 @@ export async function selectLongformTopics({
       logger.info(`🎬 topic skipped — ${ev.title}: ${d.reason}`);
       continue;
     }
-    selected.push({ ...ev, demand: d });
+    let corpus = null;
+    if (sourceGate) {
+      const sg = await sourceGate(ev);
+      if (!sg.ok) {
+        rejected.push({ id: ev.id, title: ev.title, reason: sg.reason });
+        continue;   // the NEXT candidate gets its chance — this is the walk
+      }
+      corpus = sg.corpus;
+    }
+    selected.push({ ...ev, demand: d, ...(corpus ? { sourceCorpus: corpus } : {}) });
     logger.info(`🎬 topic selected — ${ev.title} (depth ${ev.score}, demand ${d.breadth} on "${d.phrase}")`);
   }
 
