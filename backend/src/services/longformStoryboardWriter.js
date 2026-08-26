@@ -106,6 +106,7 @@ SHAPE
              "questionBeat": <n>, "answerBeat": <n> },
   "beats": { "1": {...}, "2": {...}, ... },   // contiguous from 1, no gaps
   "shorts": [ { "name", "from": <beat>, "to": <beat>, "title", "hook" } ],
+             // a short is a MOMENT of at most 10 beats, never a chapter
   "reveal": <beat number of the film's one remembered moment>
 }
 
@@ -117,7 +118,9 @@ A beat is EXACTLY ONE of:
 CARD TYPES — use only these, and only these fields. An unknown field is rejected.
 ${cardReference()}
 
-MEDIA KEYS — reference only what exists:
+MEDIA KEYS — reference only what exists. USE the footage: several beats of
+real footage between card runs are what keep a card film from reading as a
+slide deck — aim for a footage beat at least every 8-10 beats when keys exist:
   footage:    ${footage.join(", ") || "(none)"}
   photos:     ${photos.join(", ") || "(none)"}
   docs:       ${docs.join(", ") || "(none)"}

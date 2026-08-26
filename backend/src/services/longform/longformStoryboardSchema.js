@@ -56,6 +56,9 @@ export const CARD_SPECS = Object.freeze({
   ledger:    { req: ["rows"],                                   opt: ["kicker", "title", "src"] },
 });
 
+/** The widest beat range a short may cut. See the shorts check below. */
+export const MAX_SHORT_BEATS = 10;
+
 /** Non-card beats: the imagery the film cuts to. */
 export const MEDIA_KINDS = Object.freeze(["footage", "photo"]);
 
@@ -174,6 +177,13 @@ export function validateStoryboard(doc, { statementIds = [] } = {}) {
   // means the author learns before a render, not after one.
   for (const [i, s] of (doc.shorts || []).entries()) {
     const at = `shorts[${i}]${s?.name ? ` (${s.name})` : ""}`;
+    // A short is a MOMENT, not a chapter. At the enforced beat granularity
+    // (~14 words ≈ 5-6s a beat), ten beats is the whole 59s budget; the
+    // first real storyboard cut 33-beat "shorts" that measured 150s+ and
+    // failed the duration gate after the render was paid for.
+    if (isNum(s?.from) && isNum(s?.to) && s.to - s.from + 1 > MAX_SHORT_BEATS) {
+      errs.push(`${at}: spans ${s.to - s.from + 1} beats (max ${MAX_SHORT_BEATS}) — a short is a moment, not a chapter; at ~5-6s a beat this cannot fit the 59s Shorts budget`);
+    }
     for (const f of ["name", "from", "to", "title", "hook"]) {
       if (s?.[f] === undefined) errs.push(`${at}: missing "${f}"`);
     }

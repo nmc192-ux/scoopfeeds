@@ -97,6 +97,16 @@ export function interpretStoryboard(doc, { P, loadStatement = null, strict = tru
       ...(f.crop ? { crop: f.crop } : {}),
     };
   }
+  // A beat's `footage: KEY` names the same key the footage table's `file`
+  // would — the table only adds refinements (in-point, grade, crop). Models
+  // emit the beat and skip the table, which is schema-legal and rendered as
+  // an ffmpeg command with an EMPTY input path (build.mjs reads only the
+  // table). Deriving the default entry is mechanical: key = file, in = 1,
+  // the same default the explicit path takes.
+  for (const [beat, b] of Object.entries(doc.beats || {})) {
+    const n = Number(beat);
+    if (b?.footage && !FOOTAGE[n]) FOOTAGE[n] = { file: b.footage, in: 1 };
+  }
 
   const PHOTOS = { ...(doc.photos || {}) };
 
