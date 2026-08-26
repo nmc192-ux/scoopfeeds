@@ -40,6 +40,17 @@ import { restatesAny } from "../textSimilarity.js";
 export const MIN_SOURCE_CHARS = () =>
   Number.parseInt(process.env.LONGFORM_MIN_SOURCE_CHARS || "", 10) || 8000;
 
+/**
+ * The corpus must also span DISTINCT SOURCES. Found on the first real run: a
+ * single 9,940-char OpenAI blog post cleared the char floor alone, and the
+ * mid-tranche stop then quit — selecting a topic whose entire grounding was
+ * ONE party's own account. Corroboration is what the depth gate selected the
+ * topic FOR; a corpus that loses it on the way to the prompt defeats the
+ * point. Chars measure volume; sources measure trust.
+ */
+export const MIN_CORPUS_SOURCES = () =>
+  Math.max(1, Number.parseInt(process.env.LONGFORM_MIN_CORPUS_SOURCES || "", 10) || 3);
+
 /** Ladder bounds: how many candidate articles each widening step may consider. */
 export const TRANCHES = Object.freeze([12, 24, 40]);
 
@@ -77,7 +88,8 @@ export function distinctSourcesFirst(articles = []) {
  * @returns {Promise<{ok, totalChars, corpus, sources, sourceText, fetched, duplicates, thin, reason?}>}
  */
 export async function assembleSourceCorpus({
-  articles = [], fetchFullText, floor = MIN_SOURCE_CHARS(), tranches = TRANCHES,
+  articles = [], fetchFullText, floor = MIN_SOURCE_CHARS(),
+  minSources = MIN_CORPUS_SOURCES(), tranches = TRANCHES,
 } = {}) {
   if (!fetchFullText) throw new Error("assembleSourceCorpus: fetchFullText is required");
 
@@ -113,16 +125,19 @@ export async function assembleSourceCorpus({
       totalChars += text.length;
       fetched++;
       // Stop MID-TRANCHE, not just between tranches: every fetch past the
-      // floor is a paid HTTP request buying nothing.
-      if (totalChars >= floor) break;
+      // floor is a paid HTTP request buying nothing. BOTH floors — a single
+      // long article meeting the char floor alone is one party's account,
+      // not a corpus.
+      if (totalChars >= floor && new Set(corpus.map((c) => c.source)).size >= minSources) break;
     }
-    if (totalChars >= floor) break;
+    if (totalChars >= floor && new Set(corpus.map((c) => c.source)).size >= minSources) break;
     if (Math.min(bound, ordered.length) >= ordered.length) break;  // nothing left to widen into
   }
 
-  const ok = totalChars >= floor;
+  const distinctSources = new Set(corpus.map((c) => c.source)).size;
+  const ok = totalChars >= floor && distinctSources >= minSources;
   const result = {
-    ok, totalChars, fetched, duplicates, thin, floor,
+    ok, totalChars, fetched, duplicates, thin, floor, distinctSources, minSources,
     corpus,
     // What the prompts consume: attributed source lines, and the raw text the
     // grounding screen checks figures against.
@@ -130,9 +145,12 @@ export async function assembleSourceCorpus({
     sourceText: corpus.map((c) => c.text).join("\n\n"),
   };
   if (!ok) {
+    const why = totalChars < floor
+      ? `${totalChars} chars (floor ${floor})`
+      : `only ${distinctSources} distinct source(s) (need ${minSources}) — one party's account is not a corpus`;
     result.reason =
-      `source corpus is ${totalChars} chars after ${fetched} fetched, ${duplicates} wire duplicate(s), ` +
-      `${thin} thin (floor ${floor}) — not groundable unattended; the topic stays eligible and may be richer next cycle`;
+      `source corpus: ${why} after ${fetched} fetched, ${duplicates} wire duplicate(s), ${thin} thin — ` +
+      `not groundable unattended; the topic stays eligible and may be richer next cycle`;
   }
   return result;
 }

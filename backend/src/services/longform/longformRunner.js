@@ -121,7 +121,7 @@ export function makeRenderStage({ dir, runEngine = engine }) {
  * @param {function} deps.publish   the publisher (called ONLY by publishIfPassed)
  */
 export async function runProduction(topic, {
-  root, search, download, publish, sources = [], sourceText = "",
+  root, search, download, publish, resolveDownload = null, sources = [], sourceText = "",
   runEngine = engine, now = Date.now(),
 } = {}) {
   const slug = topic?.slug || String(topic?.id || "film");
@@ -149,7 +149,8 @@ export async function runProduction(topic, {
     sources, sourceText, now, ffmpegPath,
 
     acquireMedia: makeAcquireMedia({
-      search, download, probe, destDir: path.join(dir, "out/footage"), want: 6, min: 3 }),
+      search, download, probe, resolveDownload,
+      destDir: path.join(dir, "out/footage"), want: 6, min: 3 }),
 
     // The render stage also writes the project inputs, because the engine
     // reads them from disk and they are only knowable once the script and

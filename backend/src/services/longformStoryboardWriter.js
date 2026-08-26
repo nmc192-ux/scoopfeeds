@@ -179,16 +179,20 @@ export async function writeStoryboard({
     const prompt = buildStoryboardPrompt({ script, spine, mediaKeys, sources, errors });
     let doc;
     try {
-      doc = await call(prompt, { task: "longform-storyboard", tier: "premium", priority: "low" });
+      // Same output-cap reasoning as the script writer: ~70 beats of card
+      // JSON does not fit the 2048-token default, and JSON-mode providers
+      // reject truncated output with an unhelpful 400.
+      doc = await call(prompt, { task: "longform-storyboard", tier: "premium", priority: "low", maxOutputTokens: 24_000, timeoutMs: 300_000 });
     } catch (e) {
       logger.warn(`🎬 ${slug}: storyboard call failed on attempt ${attempt}/${attempts} — ${e.message}`);
       doc = null;
     }
     if (!doc) {
-      // A null from callJson means disabled, over budget, or provider failure.
-      // None of those improve by asking again with the same prompt.
+      // A null is TRANSIENT more often than terminal — measured on the first
+      // real run (intermittent empty responses on the same prompt). It
+      // consumes an attempt, bounded by LONGFORM_STORYBOARD_ATTEMPTS.
       logger.warn(`🎬 ${slug}: no storyboard returned (attempt ${attempt}/${attempts})`);
-      return null;
+      continue;
     }
 
     const schemaErrs = validateStoryboard(doc, { statementIds: mediaKeys.statements || [] });

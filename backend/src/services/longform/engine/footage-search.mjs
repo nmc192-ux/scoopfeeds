@@ -38,13 +38,6 @@ for (const f of ENV_FILES) {
   }
 }
 
-const JSON_OUT = process.argv.includes("--json");
-const QUERIES = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-if (!QUERIES.length) {
-  console.error(`usage: node footage-search.mjs "<query>" ["<query>" …] [--json]`);
-  process.exit(1);
-}
-
 const results = [];
 const add = (r) => results.push(r);
 const iso = (d) => (d ? String(d).slice(0, 10) : null);
@@ -73,7 +66,8 @@ async function dvids(q) {
             licence: usGov
               ? "US Government work — public domain (17 U.S.C. §105)"
               : `credited to "${it.branch || "unknown"}" — NOT automatically public domain, read the asset credit`,
-            title: it.title, url: it.url, date: iso(it.date_published || it.date),
+            title: it.title, url: it.url, assetId: it.id, durationSec: it.duration,
+            date: iso(it.date_published || it.date),
             durationSec: it.duration ?? null,
             attribution: `${it.branch || "unknown"} / DVIDS${it.credit ? " · " + it.credit : ""}`,
             note: usGov ? null : "allied or contractor material can appear on DVIDS; verify before use",
@@ -174,34 +168,81 @@ async function youtubeCC(q) {
   } catch (e) { add({ source: "YouTube (CC-marked)", provenance: "unverified", error: e.message, query: q }); }
 }
 
-for (const q of QUERIES) {
-  await Promise.all([dvids(q), nasa(q), commons(q), archive(q), youtubeCC(q)]);
+/**
+ * Resolve a DVIDS search hit to a direct MP4 url.
+ *
+ * THE SEARCH RESULT'S `url` IS A WEB PAGE. The first real acquisition run
+ * downloaded fifteen HTML documents named .mp4 and probed them all as
+ * "no video dimensions" — the direct files live behind the asset-detail
+ * endpoint's `files[]`. Prefers the 1920x1080 variant over the 4K master:
+ * the render normalises to 1080 anyway, and the master runs to hundreds of
+ * megabytes per clip.
+ */
+export async function resolveDvidsDownload(assetId) {
+  const key = process.env.DVIDS_API_KEY;
+  if (!key || !assetId) return null;
+  const r = await fetch(`https://api.dvidshub.net/asset?id=${encodeURIComponent(assetId)}&api_key=${key}`);
+  if (!r.ok) return null;
+  const files = (await r.json())?.results?.files || [];
+  const mp4s = files.filter((f) => f.type === "video/mp4" && f.width >= 1920);
+  if (!mp4s.length) return null;
+  // Smallest file that still meets the floor — the 1080 variant, not the master.
+  mp4s.sort((a, b) => (a.size || Infinity) - (b.size || Infinity));
+  return { src: mp4s[0].src, width: mp4s[0].width, height: mp4s[0].height, size: mp4s[0].size };
 }
 
-const RANK = { verified: 0, declared: 1, unverified: 2 };
-results.sort((a, b) => (RANK[a.provenance] - RANK[b.provenance]) || String(b.date).localeCompare(String(a.date)));
-
-const out = P("out/footage-candidates.json");
-writeFileSync(out, JSON.stringify({ queries: QUERIES, searchedAt: new Date().toISOString(), results }, null, 2));
-
-if (JSON_OUT) { console.log(JSON.stringify(results, null, 2)); process.exit(0); }
-
-let last = null;
-for (const r of results) {
-  if (r.provenance !== last) {
-    const head = { verified: "VERIFIED — rights holder by construction, usable",
-                   declared: "DECLARED — explicit licence, check it covers commercial reuse",
-                   unverified: "UNVERIFIED — leads only, NOT usable as found" }[r.provenance];
-    console.log(`\n${head}\n${"─".repeat(head.length)}`);
-    last = r.provenance;
+/**
+ * Search every source for the given queries; returns candidates ranked by
+ * provenance (verified → declared → unverified).
+ *
+ * EXPORTED — this used to be CLI-only, with the driver running at module top
+ * level, so `import { searchFootage }` was impossible: the same CLI-on-import
+ * class demand.mjs had. The unattended acquirer (longformAcquire) is the
+ * consumer this export exists for.
+ */
+export async function searchFootage(queries = []) {
+  results.length = 0;
+  for (const q of queries) {
+    await Promise.all([dvids(q), nasa(q), commons(q), archive(q), youtubeCC(q)]);
   }
-  if (r.error) { console.log(`  ${r.source}: error — ${r.error}`); continue; }
-  const dur = r.durationSec ? ` [${r.durationSec}s]` : "";
-  console.log(`  ${(r.date || "—").padEnd(11)} ${r.source.padEnd(20)} ${String(r.title).slice(0, 52)}${dur}`);
-  console.log(`              ${r.licence}`);
-  if (r.note) console.log(`              ⚠ ${r.note}`);
+  const RANK = { verified: 0, declared: 1, unverified: 2 };
+  results.sort((a, b) => (RANK[a.provenance] - RANK[b.provenance]) || String(b.date).localeCompare(String(a.date)));
+  return [...results];
 }
-const n = (p) => results.filter((r) => r.provenance === p && !r.error).length;
-console.log(`\n${results.length} candidates — verified ${n("verified")}, declared ${n("declared")}, unverified ${n("unverified")}`);
-console.log(`written to ${out}`);
-console.log(`\nNothing was downloaded. Provenance is a human decision; this only assembles the evidence.`);
+
+async function main() {
+  const JSON_OUT = process.argv.includes("--json");
+  const QUERIES = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+  if (!QUERIES.length) {
+    console.error(`usage: node footage-search.mjs "<query>" ["<query>" …] [--json]`);
+    process.exit(1);
+  }
+  await searchFootage(QUERIES);
+
+  const out = P("out/footage-candidates.json");
+  writeFileSync(out, JSON.stringify({ queries: QUERIES, searchedAt: new Date().toISOString(), results }, null, 2));
+
+  if (JSON_OUT) { console.log(JSON.stringify(results, null, 2)); process.exit(0); }
+
+  let last = null;
+  for (const r of results) {
+    if (r.provenance !== last) {
+      const head = { verified: "VERIFIED — rights holder by construction, usable",
+                     declared: "DECLARED — explicit licence, check it covers commercial reuse",
+                     unverified: "UNVERIFIED — leads only, NOT usable as found" }[r.provenance];
+      console.log(`\n${head}\n${"─".repeat(head.length)}`);
+      last = r.provenance;
+    }
+    if (r.error) { console.log(`  ${r.source}: error — ${r.error}`); continue; }
+    const dur = r.durationSec ? ` [${r.durationSec}s]` : "";
+    console.log(`  ${(r.date || "—").padEnd(11)} ${r.source.padEnd(20)} ${String(r.title).slice(0, 52)}${dur}`);
+    console.log(`              ${r.licence}`);
+    if (r.note) console.log(`              ⚠ ${r.note}`);
+  }
+  const n = (p) => results.filter((r) => r.provenance === p && !r.error).length;
+  console.log(`\n${results.length} candidates — verified ${n("verified")}, declared ${n("declared")}, unverified ${n("unverified")}`);
+  console.log(`written to ${out}`);
+  console.log(`\nNothing was downloaded. Provenance is a human decision; this only assembles the evidence.`);
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) main();

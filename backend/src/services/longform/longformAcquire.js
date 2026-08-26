@@ -90,7 +90,7 @@ export function keyFor(candidate, index) {
  *   `candidates` are in the shape longformMediaGate.screenCandidate expects.
  */
 export async function acquireFootage({
-  search, download, probe, queries = [], destDir, want = 6,
+  search, download, probe, resolveDownload = null, queries = [], destDir, want = 6,
 } = {}) {
   if (!search || !download || !probe) throw new Error("acquireFootage: search, download and probe are required");
   if (!queries.length) throw new Error("acquireFootage: no search queries — a film needs something to look for");
@@ -107,7 +107,26 @@ export async function acquireFootage({
     if (why) { refused.push({ source: c.source, title: c.title, why }); continue; }
 
     const key = keyFor(c, candidates.length);
-    const url = c.download || c.url;
+    // A search hit's url is often a WEB PAGE (DVIDS is). The source-specific
+    // resolver turns it into a direct media url; a hit that cannot be
+    // resolved is refused rather than downloaded-and-probed as HTML.
+    let url = c.download || null;
+    if (!url && resolveDownload) {
+      try {
+        const r = await resolveDownload(c);
+        if (r?.src) url = r.src;
+      } catch (e) {
+        refused.push({ source: c.source, title: c.title, why: `download resolution failed: ${e.message}` });
+        continue;
+      }
+    }
+    if (!url) {
+      if (resolveDownload) {
+        refused.push({ source: c.source, title: c.title, why: "no direct media file could be resolved (page url only)" });
+        continue;
+      }
+      url = c.url;
+    }
     let file;
     try {
       file = await download(url, `${destDir}/${key}.mp4`);
@@ -152,11 +171,11 @@ export async function acquireFootage({
  * visibly cycles, and the storyboard was written against the keys this
  * returns. Better to abandon the topic than to ship a film that loops.
  */
-export function makeAcquireMedia({ search, download, probe, destDir, want = 6, min = 3 }) {
+export function makeAcquireMedia({ search, download, probe, resolveDownload = null, destDir, want = 6, min = 3 }) {
   return async ({ topic, script }) => {
     const queries = buildQueries(topic, script);
     const { candidates, refused } = await acquireFootage({
-      search, download, probe, queries, destDir, want });
+      search, download, probe, resolveDownload, queries, destDir, want });
     if (candidates.length < min) {
       throw new Error(
         `acquisition yielded ${candidates.length} usable clip(s), need ${min}. ` +
@@ -175,15 +194,32 @@ export function makeAcquireMedia({ search, download, probe, destDir, want = 6, m
  * entities the story is actually about.
  */
 export function buildQueries(topic = {}, script = null) {
+  // SHORT NOUN PHRASES, NOT SENTENCES — the same lesson the demand gate paid
+  // for: a headline is written to be read, a search query is typed. The first
+  // real run sent the full title and the entire through-line SENTENCE to
+  // DVIDS and got nothing usable back.
   const out = [];
-  const title = String(topic.title || "").trim();
-  if (title) out.push(title.replace(/[^\w\s]/g, "").trim());
   for (const k of (topic.keys || []).slice(0, 3)) {
     if (typeof k === "string" && k.trim()) out.push(k.trim());
   }
-  // The through-line object is the one concrete thing the film returns to, so
-  // it is the best single footage query the film can offer.
-  const through = script?.spine?.throughLine;
-  if (typeof through === "string" && through.trim()) out.push(through.trim());
-  return [...new Set(out.filter(Boolean))].slice(0, 4);
+  const words = String(topic.title || "").toLowerCase()
+    .replace(/[^\w\s]/g, " ").split(/\s+/)
+    .filter((w) => w.length > 2 && !QUERY_STOPWORDS.has(w));
+  for (let i = 0; i + 2 <= words.length && out.length < 5; i++) {
+    out.push(words.slice(i, i + 2).join(" "));
+  }
+  // The through-line contributes its NOUNS, not its sentence.
+  const through = String(script?.spine?.throughLine || "").toLowerCase()
+    .replace(/[^\w\s]/g, " ").split(/\s+/)
+    .filter((w) => w.length > 3 && !QUERY_STOPWORDS.has(w)).slice(0, 3);
+  if (through.length >= 2) out.push(through.slice(0, 2).join(" "));
+  return [...new Set(out.filter(Boolean))].slice(0, 5);
 }
+
+const QUERY_STOPWORDS = new Set([
+  "the", "a", "an", "is", "are", "was", "were", "how", "why", "what", "when",
+  "and", "or", "but", "to", "of", "in", "on", "at", "for", "with", "by",
+  "from", "as", "that", "this", "its", "it", "after", "before", "into",
+  "making", "makes", "harder", "easier", "single", "global", "every", "report",
+  "debate", "debates", "putting", "online",
+]);

@@ -11,7 +11,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  assembleSourceCorpus, makeSourceGate, distinctSourcesFirst, MIN_SOURCE_CHARS, TRANCHES,
+  assembleSourceCorpus, makeSourceGate, distinctSourcesFirst,
+  MIN_SOURCE_CHARS, MIN_CORPUS_SOURCES, TRANCHES,
 } from "./longformSourceText.js";
 import { selectLongformTopics } from "./longformTopicSelector.js";
 
@@ -91,7 +92,7 @@ test("a failed fetch falls back to stored content and never aborts the ladder", 
       if (a.title === "Story 1") throw new Error("timeout");
       return { text: body(2, 4500) };
     },
-    floor: 8000,
+    floor: 8000, minSources: 2,   // this test is about fetch-fallback, not the source floor
   });
   assert.equal(r.ok, true, "one dead fetch must not sink a topic whose other sources are fine");
 });
@@ -173,4 +174,37 @@ test("defaults are sane and env-tunable", () => {
   process.env.LONGFORM_MIN_SOURCE_CHARS = "12000";
   try { assert.equal(MIN_SOURCE_CHARS(), 12000); }
   finally { delete process.env.LONGFORM_MIN_SOURCE_CHARS; }
+});
+
+test("ONE LONG ARTICLE CANNOT CLEAR THE FLOOR ALONE — sources measure trust", async () => {
+  // Found on the first real run: a single 9,940-char OpenAI blog post met the
+  // char floor by itself and the ladder stopped — selecting a topic whose
+  // entire grounding was one party's own account of events.
+  const r = await assembleSourceCorpus({
+    articles: [art(1, { source_name: "OpenAI Blog" })],
+    fetchFullText: async () => ({ text: body(1, 12000) }),
+    floor: 8000, minSources: 3,
+  });
+  assert.equal(r.ok, false, "12k chars from one source is one account, not a corpus");
+  assert.equal(r.distinctSources, 1);
+  assert.match(r.reason, /one party's account is not a corpus/);
+});
+
+test("the ladder keeps fetching past the char floor until sources are met too", async () => {
+  let fetches = 0;
+  const r = await assembleSourceCorpus({
+    articles: [art(1), art(2), art(3), art(4)],
+    fetchFullText: async (a) => { fetches++; return { text: body(Number(a.title.slice(6)) + 1, 9000) }; },
+    floor: 8000, minSources: 3,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.distinctSources, 3, "kept going past the char floor to reach three sources");
+  assert.equal(fetches, 3, "and stopped the moment BOTH floors were met");
+});
+
+test("MIN_CORPUS_SOURCES is env-tunable and floors at 1", () => {
+  assert.equal(MIN_CORPUS_SOURCES(), 3);
+  process.env.LONGFORM_MIN_CORPUS_SOURCES = "5";
+  try { assert.equal(MIN_CORPUS_SOURCES(), 5); }
+  finally { delete process.env.LONGFORM_MIN_CORPUS_SOURCES; }
 });

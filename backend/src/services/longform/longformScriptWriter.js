@@ -118,7 +118,26 @@ export function renderScriptMarkdown(doc, { title = "" } = {}) {
   return lines.join("\n");
 }
 
-export function buildSpinePrompt({ event, sources }) {
+/**
+ * How much of the corpus each prompt carries. The corpus exists to be WRITTEN
+ * FROM — the first supervised run handed the writer only the event title and
+ * the source TITLES, kept the 19k-char corpus for the figure check alone, and
+ * the model responded to "give me a reveal" the only way it could: it invented
+ * an analyst, a report, and a model that hacked itself. Fiction, structurally
+ * perfect, zero figures — and every gate passed it. The corpus in the prompt
+ * is the fix; the caps keep the request inside provider context limits.
+ */
+const PROMPT_CORPUS_CHARS = 24_000;
+
+const NONFICTION_RULES = `- NONFICTION. This is journalism about a real news event, not a screenplay.
+  Every person, organisation, action and claim must come from the SOURCE TEXT.
+  Do not invent characters, scenes, documents, or hypothetical narratives and
+  present them as events. Composite characters ("an analyst opens a file") are
+  FICTION unless the sources describe that person doing that thing.
+- The reveal must be a REAL fact from the sources that recontextualises the
+  story — never a twist you authored.`;
+
+export function buildSpinePrompt({ event, sources, sourceText = "" }) {
   return `You are deciding the STORY SPINE for a 7-10 minute explainer film, BEFORE any narration is written.
 
 Return ONE JSON object and nothing else:
@@ -136,15 +155,20 @@ are what make it a film:
   recontextualises the opening, a scale change, a name.
 - ESCALATION: how each chapter raises the stakes on the last.
 
+${NONFICTION_RULES}
+
 STORY
 ${event?.title || ""}
 ${event?.summary || ""}
 
 SOURCES (the only permissible basis for any claim)
-${(sources || []).map((s, i) => `[${i + 1}] ${s}`).join("\n")}`;
+${(sources || []).map((s, i) => `[${i + 1}] ${s}`).join("\n")}
+
+SOURCE TEXT
+${String(sourceText).slice(0, PROMPT_CORPUS_CHARS)}`;
 }
 
-export function buildScriptPrompt({ event, spine, sources, errors = null }) {
+export function buildScriptPrompt({ event, spine, sources, sourceText = "", errors = null }) {
   const base = `Write the narration for a 7-10 minute explainer film, serving the SPINE below.
 
 Return ONE JSON object and nothing else:
@@ -157,9 +181,10 @@ Return ONE JSON object and nothing else:
 RULES
 - ${MIN_WORDS}-${MAX_WORDS} words TOTAL across all beats. This is a hard range.
 - One or two sentences per beat. A beat is what one shot illustrates.
-- GROUNDING: every figure must appear in the SOURCES. Invent nothing. If a
+- GROUNDING: every figure must appear in the SOURCE TEXT. Invent nothing. If a
   number cannot be sourced, leave it out — omitting a figure is correct;
   inventing one is not publishable.
+${NONFICTION_RULES}
 - The through-line object must RECUR and escalate across the film, not be
   named once.
 - Pose the question in the opening beats; answer it only in the closing beats.
@@ -175,7 +200,10 @@ ${event?.title || ""}
 ${event?.summary || ""}
 
 SOURCES
-${(sources || []).map((s, i) => `[${i + 1}] ${s}`).join("\n")}`;
+${(sources || []).map((s, i) => `[${i + 1}] ${s}`).join("\n")}
+
+SOURCE TEXT (write from this; claims not supported here may not appear)
+${String(sourceText).slice(0, PROMPT_CORPUS_CHARS)}`;
 
   if (!errors?.length) return base;
   return `${base}
@@ -205,16 +233,27 @@ export async function writeLongformScript({
 
   // 1. THE SPINE FIRST, in its own call. Asked for together, a model emits
   //    beats and then describes a spine it did not actually follow.
-  let spine;
-  try {
-    spine = await call(buildSpinePrompt({ event, sources }),
-      { task: "longform-spine", tier: "premium", priority: "low" });
-  } catch (e) {
-    logger.warn(`🎬 ${slug}: spine call failed — ${e.message}`);
-    return null;
+  // A NULL FROM THE PROVIDER IS TRANSIENT MORE OFTEN THAN TERMINAL. Measured
+  // on the first real run: two empty responses, then a good one, same prompt
+  // (an intermittent content-filter flinch on a security topic). So the spine
+  // gets a bounded retry rather than the film being abandoned on flake.
+  let spine = null;
+  for (let i = 1; i <= 3 && !spine?.throughLine; i++) {
+    try {
+      // The spine needs the same output budget as the script: hybrid
+      // reasoners burn ~15k tokens THINKING before the (small) JSON, and the
+      // default 2048 cap ends the response at finish_reason=length with
+      // empty content — measured the moment the corpus entered this prompt.
+      spine = await call(buildSpinePrompt({ event, sources, sourceText }),
+        { task: "longform-spine", tier: "premium", priority: "low",
+          maxOutputTokens: 24_000, timeoutMs: 300_000 });
+    } catch (e) {
+      logger.warn(`🎬 ${slug}: spine call failed (try ${i}/3) — ${e.message}`);
+    }
+    if (!spine?.throughLine && i < 3) logger.warn(`🎬 ${slug}: no usable spine (try ${i}/3) — retrying`);
   }
   if (!spine?.throughLine) {
-    logger.warn(`🎬 ${slug}: no usable spine returned — abandoning`);
+    logger.warn(`🎬 ${slug}: no usable spine after 3 tries — abandoning`);
     return null;
   }
   logger.info(`🎬 ${slug}: spine — through-line "${spine.throughLine}"`);
@@ -225,15 +264,25 @@ export async function writeLongformScript({
   for (let attempt = 1; attempt <= attempts; attempt++) {
     let doc;
     try {
-      doc = await call(buildScriptPrompt({ event, spine, sources, errors }),
-        { task: "longform-script", tier: "premium", priority: "low" });
+      // A film script CANNOT FIT THE DEFAULT OUTPUT CAP. llmQueue's handlers
+      // default maxOutputTokens to 2048; 1,200 words of narration as JSON is
+      // ~4k+ tokens — and current hybrid REASONING models (deepseek-v4) burn
+      // ~15k tokens thinking before emitting a word of content (measured:
+      // 60,291 reasoning chars for a 9,075-char script), so the budget covers
+      // both. JSON-mode providers 400 on output truncated
+      // mid-object (Groq: json_validate_failed, with an EMPTY failed_generation
+      // — nothing in the error says "too small a cap", found by reproducing).
+      doc = await call(buildScriptPrompt({ event, spine, sources, sourceText, errors }),
+        { task: "longform-script", tier: "premium", priority: "low", maxOutputTokens: 24_000, timeoutMs: 300_000 });
     } catch (e) {
       logger.warn(`🎬 ${slug}: script call failed on attempt ${attempt} — ${e.message}`);
       return null;
     }
     if (!doc) {
+      // Transient empties are real (see the spine note) — a null consumes an
+      // ATTEMPT now, not the whole film.
       logger.warn(`🎬 ${slug}: no script returned (attempt ${attempt}/${attempts})`);
-      return null;
+      continue;
     }
 
     const structural = validateScript(doc);
