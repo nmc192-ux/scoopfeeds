@@ -91,6 +91,35 @@ export function synthesizeTitleSegment({ title, spine }) {
   };
 }
 
+/**
+ * Cutaway inserts, synthesized for footage beats that have none.
+ *
+ * The rhythm gate (>= 8% of shots under 2s) is the house pacing standard,
+ * and the shipped hormuz film failed it the same way this pipeline's first
+ * QC-complete render did: every shot a long hold, 0% quick cuts. Its fix is
+ * written above its INSERTS table as a derivation rule — "every footage beat
+ * gets a brief cutaway to a DIFFERENT clip" (~1.3s, at 0.55 of the beat) —
+ * which makes the inserts mechanical, not editorial: same rule, applied by
+ * code instead of by hand. Model-authored inserts are kept verbatim.
+ */
+export function synthesizeInserts(board) {
+  const beats = board?.beats || {};
+  const footageBeats = Object.entries(beats)
+    .filter(([, b]) => b?.footage).map(([n, b]) => [Number(n), b.footage])
+    .sort((a, b) => a[0] - b[0]);
+  const keys = [...new Set(footageBeats.map(([, k]) => k))];
+  if (keys.length < 2) return board.inserts || {};
+  const inserts = { ...(board.inserts || {}) };
+  for (const [n, key] of footageBeats) {
+    if (inserts[n]) continue;
+    // The next DIFFERENT clip in rotation — a cutaway to the same clip is
+    // just the shot continuing.
+    const other = keys[(keys.indexOf(key) + 1) % keys.length];
+    inserts[n] = [{ at: 0.55, dur: 1.3, footage: other }];
+  }
+  return inserts;
+}
+
 /** Write the artifacts the engine reads: beats.json and storyboard.json. */
 export function writeProjectInputs({ dir, slug, title, script, board, licenses }) {
   writeFileSync(path.join(dir, "project.json"), JSON.stringify({ slug, title }, null, 2));
@@ -98,9 +127,11 @@ export function writeProjectInputs({ dir, slug, title, script, board, licenses }
   writeFileSync(path.join(dir, "beats.json"), JSON.stringify(
     (script.doc.beats || []).map((b, i) => ({ id: i + 1, text: b.text })), null, 2));
   // JSON, not a module. See the header.
-  const withTitle = board.titleSegment
-    ? board
-    : { ...board, titleSegment: synthesizeTitleSegment({ title, spine: board.spine }) };
+  const withTitle = {
+    ...board,
+    ...(board.titleSegment ? {} : { titleSegment: synthesizeTitleSegment({ title, spine: board.spine }) }),
+    inserts: synthesizeInserts(board),
+  };
   writeFileSync(path.join(dir, "storyboard.json"), JSON.stringify(withTitle, null, 2));
   // shorts.json is what shorts.mjs actually cuts from — the storyboard's
   // shorts array never reaches the engine on its own (found when the first

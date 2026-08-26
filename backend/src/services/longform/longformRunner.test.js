@@ -15,7 +15,7 @@ import { mkdtempSync, existsSync, readFileSync, mkdirSync, writeFileSync, readdi
 import os from "node:os";
 import path from "node:path";
 
-import { scaffoldProject, writeProjectInputs, makeRenderStage, synthesizeTitleSegment } from "./longformRunner.js";
+import { scaffoldProject, writeProjectInputs, makeRenderStage, synthesizeTitleSegment, synthesizeInserts } from "./longformRunner.js";
 
 const root = () => mkdtempSync(path.join(os.tmpdir(), "runner-"));
 
@@ -172,4 +172,20 @@ test("writeProjectInputs: shorts reach the engine as shorts.json, index-prefixed
     "display names sort alphabetically, not in film order — the index prefix is what keeps " +
     "the publish plan's sorted-filename zip attached to the right titles");
   assert.equal(shorts[1].to, 22, "the cut range survives the rename");
+});
+
+test("synthesizeInserts: every footage beat cuts away to a DIFFERENT clip; authored inserts survive", () => {
+  const board = { beats: {
+    1: { card: "stat", figure: "1", label: "x" },
+    3: { footage: "F_A" }, 8: { footage: "F_B" }, 12: { footage: "F_A" },
+  }, inserts: { 8: [{ at: 0.3, dur: 1.0, footage: "F_A" }] } };
+  const ins = synthesizeInserts(board);
+  assert.equal(ins[3][0].footage, "F_B", "cutaway is a different clip");
+  assert.equal(ins[12][0].footage, "F_B");
+  assert.deepEqual(ins[8], [{ at: 0.3, dur: 1.0, footage: "F_A" }], "authored insert kept verbatim");
+  assert.equal(ins[1], undefined, "card beats get no synthesized cutaway");
+});
+
+test("synthesizeInserts: a single-clip film gets none — a cutaway to the same clip is the shot continuing", () => {
+  assert.deepEqual(synthesizeInserts({ beats: { 3: { footage: "F_A" }, 8: { footage: "F_A" } } }), {});
 });
