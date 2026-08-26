@@ -192,7 +192,9 @@ export const UNWIRED_STAGES = Object.freeze({
   acquireMedia:
     "implemented in longformAcquire.makeAcquireMedia({ search, download, probe, destDir }). " +
     "Needs a DVIDS/NASA search client, an HTTP downloader and a destination directory. " +
-    "NOTE: DVIDS_API_KEY is not currently set on the VPS.",
+    "DVIDS_API_KEY IS set on the VPS and VIDEO_FOOTAGE_ENABLED=1 — the shorts loop already " +
+    "uses both, so the credential side of unattended acquisition is solved (verified in the " +
+    "worker container 2026-08-26).",
   render:
     "the engine renders (build.mjs / music.mjs / shorts.mjs) but is driven by path from a " +
     "project working directory; a caller must set that directory up first.",

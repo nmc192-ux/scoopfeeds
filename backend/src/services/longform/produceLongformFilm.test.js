@@ -66,7 +66,7 @@ test("THE UNIMPLEMENTED STAGES ARE INSPECTABLE WITHOUT RUNNING ANYTHING", () => 
     "acquireMedia is implemented now — it belongs in UNWIRED_STAGES, not MISSING");
   // "nobody wrote this" and "nobody plugged this in" must stay distinguishable.
   assert.ok(UNWIRED_STAGES.acquireMedia, "an implemented-but-unwired stage is listed separately");
-  assert.match(UNWIRED_STAGES.acquireMedia, /DVIDS_API_KEY is not currently set on the VPS/);
+  assert.match(UNWIRED_STAGES.acquireMedia, /DVIDS_API_KEY IS set on the VPS/);
   for (const { why } of missingCapabilities()) {
     assert.ok(why.length > 40, "each gap must explain itself, not just be listed");
   }
