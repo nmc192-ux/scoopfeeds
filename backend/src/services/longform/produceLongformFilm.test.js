@@ -62,12 +62,13 @@ const deps = (over = {}) => ({
 
 test("THE UNIMPLEMENTED STAGES ARE INSPECTABLE WITHOUT RUNNING ANYTHING", () => {
   const missing = missingCapabilities().map((m) => m.stage);
-  assert.deepEqual(missing.sort(), ["makeThumbnail"],
-    "acquireMedia is implemented now — it belongs in UNWIRED_STAGES, not MISSING");
+  assert.deepEqual(missing, [],
+    "every stage has an implementation now — what remains is wiring, in UNWIRED_STAGES");
+  assert.ok(UNWIRED_STAGES.makeThumbnail, "the thumbnail is implemented but needs a plate source");
   // "nobody wrote this" and "nobody plugged this in" must stay distinguishable.
   assert.ok(UNWIRED_STAGES.acquireMedia, "an implemented-but-unwired stage is listed separately");
   assert.match(UNWIRED_STAGES.acquireMedia, /DVIDS_API_KEY IS set on the VPS/);
-  for (const { why } of missingCapabilities()) {
+  for (const why of Object.values(UNWIRED_STAGES)) {
     assert.ok(why.length > 40, "each gap must explain itself, not just be listed");
   }
 });
