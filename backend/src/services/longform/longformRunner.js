@@ -57,6 +57,40 @@ export function scaffoldProject(slug, { root }) {
   return dir;
 }
 
+/**
+ * The title segment, synthesized MECHANICALLY when the storyboard has none.
+ *
+ * build.mjs refuses a storyboard without TITLE_SEGMENT — correctly, a film
+ * needs a title card — but the schema never asked the model for one, which
+ * the first real render found at the build step, after narration was paid
+ * for. The card is the film's title split across lines plus the spine's
+ * question: there is no creative decision in it, and the dossier-header rule
+ * applies — mechanical surfaces get mechanical content, not model prose.
+ */
+export function synthesizeTitleSegment({ title, spine }) {
+  const words = String(title || "").toUpperCase().replace(/[^\w\s'&-]/g, "").split(/\s+/).filter(Boolean);
+  // Widen until the whole title fits in three lines — a truncated title is
+  // not a title.
+  let lines = [];
+  for (let width = Math.max(20, Math.ceil(words.join(" ").length / 3) + 2); ; width += 2) {
+    lines = [];
+    for (const w of words) {
+      if (lines.length && (lines[lines.length - 1] + " " + w).length <= width) {
+        lines[lines.length - 1] += ` ${w}`;
+      } else lines.push(w);
+    }
+    if (lines.length <= 3) break;
+  }
+  return {
+    after: 2, seconds: 3.2,
+    spec: {
+      card: "title", kicker: "ScoopFeeds · Long-form",
+      lines,
+      ...(spine?.question ? { sub: spine.question } : {}),
+    },
+  };
+}
+
 /** Write the artifacts the engine reads: beats.json and storyboard.json. */
 export function writeProjectInputs({ dir, slug, title, script, board, licenses }) {
   writeFileSync(path.join(dir, "project.json"), JSON.stringify({ slug, title }, null, 2));
@@ -64,7 +98,10 @@ export function writeProjectInputs({ dir, slug, title, script, board, licenses }
   writeFileSync(path.join(dir, "beats.json"), JSON.stringify(
     (script.doc.beats || []).map((b, i) => ({ id: i + 1, text: b.text })), null, 2));
   // JSON, not a module. See the header.
-  writeFileSync(path.join(dir, "storyboard.json"), JSON.stringify(board, null, 2));
+  const withTitle = board.titleSegment
+    ? board
+    : { ...board, titleSegment: synthesizeTitleSegment({ title, spine: board.spine }) };
+  writeFileSync(path.join(dir, "storyboard.json"), JSON.stringify(withTitle, null, 2));
   if (licenses) writeFileSync(path.join(dir, "out/footage/LICENSES.md"), licenses);
 }
 

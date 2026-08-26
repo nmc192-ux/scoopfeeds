@@ -218,3 +218,10 @@ test("a tweet beat cannot be interpreted without the evidence archive", () => {
   assert.equal(out.STORYBOARD[1].statement.text, "archived words");
   assert.equal(out.STORYBOARD[1].statementId, undefined, "the id is replaced by the record");
 });
+
+test("a numeric chapter n is coerced to a padded string — satori refuses a numeric text child", () => {
+  const doc = { beats: { 1: { card: "chapter", n: 1, name: "The Phantom Think Tank" } } };
+  const out = interpretStoryboard(doc, { P, strict: false });
+  assert.equal(out.STORYBOARD[1].n, "01",
+    "n: 1 fails the whole build inside satori; n: \"01\" is also the house numeral style");
+});

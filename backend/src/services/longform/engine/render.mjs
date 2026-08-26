@@ -208,7 +208,10 @@ const CARDS = {
       h("div", {
         fontFamily: "Anton", fontSize: 240, color: C.recededFigure, lineHeight: 1,
         ...enter(p, 0.04, 0.28, 30),
-      }, n),
+        // String, always: satori treats a NUMERIC child as a multi-child node
+        // and demands display:flex — a storyboard emitting n: 1 instead of
+        // n: "01" failed the whole build here.
+      }, String(n)),
       h("div", {
         width: Math.round(180 * at(p, 0.18, 0.48)), height: 10,
         backgroundColor: C.lime, margin: "26px 0 34px",

@@ -122,6 +122,13 @@ export function interpretStoryboard(doc, { P, loadStatement = null, strict = tru
     if (out.src !== undefined) out.src = expand(out.src);
     if (out.note !== undefined) out.note = expand(out.note);
 
+    // House style writes chapter numerals as "01"; models emit n: 1. Satori
+    // additionally refuses a NUMERIC text child outright, so the coercion is
+    // correctness, the padding is style.
+    if (b.card === "chapter" && typeof out.n === "number") {
+      out.n = String(out.n).padStart(2, "0");
+    }
+
     // A tweet card carries the ARCHIVED RECORD, never free text — the card
     // itself re-checks the words against the archive on every frame.
     if (b.card === "tweet") {

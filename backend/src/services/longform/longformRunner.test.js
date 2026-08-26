@@ -15,7 +15,7 @@ import { mkdtempSync, existsSync, readFileSync, mkdirSync, writeFileSync, readdi
 import os from "node:os";
 import path from "node:path";
 
-import { scaffoldProject, writeProjectInputs, makeRenderStage } from "./longformRunner.js";
+import { scaffoldProject, writeProjectInputs, makeRenderStage, synthesizeTitleSegment } from "./longformRunner.js";
 
 const root = () => mkdtempSync(path.join(os.tmpdir(), "runner-"));
 
@@ -123,4 +123,39 @@ test("an engine step that fails propagates rather than continuing to the next", 
       return "";
     } })({ slug: "strait" }),
     /ffmpeg died/);
+});
+
+// ── the title segment, synthesized mechanically ──────────────────────────────
+// build.mjs refuses a storyboard without TITLE_SEGMENT, and the first real
+// render found that out after narration was paid for. The card is mechanical:
+// the film's title and the spine's question, no model prose.
+
+test("synthesizeTitleSegment: every word of the title survives, in at most three lines", () => {
+  const title = "AI Firms Debate Putting Cyber Tests Online After Model Hacks";
+  const t = synthesizeTitleSegment({ title, spine: { question: "Who decides?" } });
+  assert.equal(t.spec.card, "title");
+  assert.ok(t.spec.lines.length <= 3, "three lines maximum");
+  assert.equal(t.spec.lines.join(" "), title.toUpperCase(),
+    "a truncated title is not a title — the wrap widens instead of dropping words");
+  assert.equal(t.spec.sub, "Who decides?", "the sub is the spine's question");
+});
+
+test("synthesizeTitleSegment: no question means no sub, not an empty one", () => {
+  const t = synthesizeTitleSegment({ title: "Short Title" });
+  assert.equal(t.spec.sub, undefined);
+  assert.deepEqual(t.spec.lines, ["SHORT TITLE"]);
+});
+
+test("writeProjectInputs: a storyboard without a titleSegment gets the mechanical one; one with keeps its own", () => {
+  const dir = scaffoldProject("strait", { root: root() });
+  writeProjectInputs({ dir, slug: "strait", title: "The Strait", script: SCRIPT, board: BOARD });
+  const w = JSON.parse(readFileSync(path.join(dir, "storyboard.json"), "utf8"));
+  assert.ok(w.titleSegment?.spec?.lines?.length, "synthesized when absent");
+  assert.equal(w.titleSegment.spec.lines.join(" "), "THE STRAIT");
+
+  const authored = { after: 5, seconds: 3.2, spec: { card: "title", lines: ["OWN"] } };
+  writeProjectInputs({ dir, slug: "strait", title: "The Strait", script: SCRIPT,
+    board: { ...BOARD, titleSegment: authored } });
+  const w2 = JSON.parse(readFileSync(path.join(dir, "storyboard.json"), "utf8"));
+  assert.deepEqual(w2.titleSegment, authored, "an authored title segment is never overwritten");
 });
