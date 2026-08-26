@@ -630,6 +630,8 @@ respect: its own table (`longform_posts`), its own cadence, its own gates.
 | `LONGFORM_SCRIPT_ATTEMPTS` | `2` | unset | yes | Bounded retries on STRUCTURAL problems only. An ungrounded figure is never retried into. |
 | `LONGFORM_STORYBOARD_ENABLED` | unset (**off**) | unset | yes | Dark ship for storyboard generation. |
 | `LONGFORM_STORYBOARD_ATTEMPTS` | `3` | unset | yes | Same bounded-retry contract as the script. |
+| `QUEUE_CONCURRENCY_LONGFORM` | `1` | unset | restart | **STRICTLY 1.** The rolling weekly cap is a global count — two concurrent cycles would both read "under cap" and both publish a film. |
+| `QUEUE_LOCK_MS_LONGFORM` | `30 min` | unset | restart | ~3× the **measured** 10.3 min bundle render (#75), because that figure was taken on an idle box. Too short is not a slow job, it is a DUPLICATE FILM: BullMQ re-runs a job whose lock lapses. |
 | `LONGFORM_RETAIN_REJECTED` | `3` | unset | yes | How many QC-rejected film directories to keep for diagnosis. Bounded so a run of failures cannot silently fill the volume. |
 
 **The approval-policy exception.** With `LONGFORM_AUTOPOST_ENABLED=1` this loop
