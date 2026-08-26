@@ -57,15 +57,11 @@ export class NotImplementedError extends Error {
 const notImplemented = (stage, why) => async () => { throw new NotImplementedError(stage, why); };
 
 /** The stages with no implementation yet. Exported so a caller can see the list. */
-export const MISSING_STAGES = Object.freeze({
-  // acquireMedia is IMPLEMENTED — longformAcquire.makeAcquireMedia(). It is
-  // still not a default here, because it needs a search client, a downloader
-  // and a destination directory that only the caller can supply.
-  makeThumbnail:
-    "no generator exists. YouTube's auto-frame on a card-based film is usually a slab " +
-    "of text, and references/house-style.md §Thumbnail sets a standard that silently " +
-    "skipping this would fail invisibly.",
-});
+// EMPTY. Every stage now has an implementation; what remains is wiring, which
+// is UNWIRED_STAGES below. Keeping the two lists distinct matters: "nobody
+// wrote this" and "nobody plugged this in" are different problems with
+// different owners, and collapsing them hides whichever is real.
+export const MISSING_STAGES = Object.freeze({});
 
 /**
  * Produce one film. Returns the shape runLongformCycle expects, or throws a
@@ -198,4 +194,8 @@ export const UNWIRED_STAGES = Object.freeze({
   render:
     "the engine renders (build.mjs / music.mjs / shorts.mjs) but is driven by path from a " +
     "project working directory; a caller must set that directory up first.",
+  makeThumbnail:
+    "implemented in longformThumbnail.makeThumbnailStage({ outDir, ffmpegPath, fontsDir, " +
+    "satori, Resvg, plateFrom }). Needs a plate frame from the film's FOOTAGE — not from " +
+    "the film itself, which on a card-based film puts the headline over its own type.",
 });
