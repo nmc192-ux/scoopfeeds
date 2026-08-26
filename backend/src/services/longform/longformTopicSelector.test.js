@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 
 import {
   depthScore, depthGate, demandPhrases, demandGate, selectLongformTopics,
+  DEMAND_PHRASE_CAVEAT,
 } from "./longformTopicSelector.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -65,10 +66,18 @@ test("corroboration outranks volume in the score", () => {
 
 // ── Demand ──────────────────────────────────────────────────────────────────
 
-test("demand phrases are searchable, not headlines verbatim", () => {
-  const p = demandPhrases(ev({ title: "Iran Declares: Strait CLOSED!" }));
-  assert.ok(p[0] && !/[:!]/.test(p[0]), "punctuation stripped for a search phrase");
-  assert.equal(p[0], "iran declares strait closed");
+test("SHORT SEARCH PHRASES COME FIRST; the headline is a last resort", () => {
+  // Measured on a real event: the title "how ai is making cyberattacks harder
+  // to stop" returned ZERO completions while "ai hacking" returned 18. A
+  // headline is written to be read; a search phrase is typed. Testing only the
+  // headline reports no demand for stories that plainly have some.
+  const p = demandPhrases(ev({ title: "How AI Is Making Cyberattacks Harder to Stop" }));
+  assert.equal(p[0], "ai cyberattacks", "the shortest meaningful phrase is tried first");
+  assert.ok(p[p.length - 1].includes("how ai is making"), "the full headline is the last resort, not the first");
+  assert.ok(p.every((x) => !/[:!?]/.test(x)), "punctuation stripped");
+  // Entity keys, when the graph has them, outrank anything derived from prose.
+  const withKeys = demandPhrases(ev({ title: "Some Headline", keys: ["strait of hormuz"] }));
+  assert.equal(withKeys[0], "strait of hormuz");
 });
 
 test("DEMAND IS A HARD GATE — a dead phrase is skipped, never forced", async () => {
@@ -142,4 +151,12 @@ test("nothing qualifying returns empty rather than lowering the bar", async () =
     listEvents: () => [ev({ articles: 2, sources: 1 })], demandFn: demandOk, now: NOW,
   });
   assert.deepEqual(selected, [], "an empty cycle is correct; a forced film is not");
+});
+
+test("the generic-phrase limitation is recorded, not hidden", () => {
+  // Two real prod candidates passed demand on "ai firms" (breadth 49) — high
+  // because it is a broad category, not because anyone wants those stories.
+  // The gate answers "is there traffic in this space", not "will this film be
+  // found", and that difference must stay visible to whoever reads a verdict.
+  assert.match(DEMAND_PHRASE_CAVEAT, /generic phrase can clear the demand floor/);
 });

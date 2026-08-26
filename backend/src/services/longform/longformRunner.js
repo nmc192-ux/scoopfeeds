@@ -125,6 +125,12 @@ export async function runProduction(topic, {
   runEngine = engine, now = Date.now(),
 } = {}) {
   const slug = topic?.slug || String(topic?.id || "film");
+  // Selection's source gate already assembled the corpus (fetch-extract-
+  // discard); reuse it rather than fetching the same articles twice.
+  if (topic?.sourceCorpus) {
+    sources = sources.length ? sources : topic.sourceCorpus.sources;
+    sourceText = sourceText || topic.sourceCorpus.sourceText;
+  }
   const dir = scaffoldProject(slug, { root });
   logger.info(`🎬 ${slug}: project at ${dir}`);
 

@@ -90,15 +90,62 @@ export function depthGate(ev, { now = Date.now() } = {}) {
 export function demandPhrases(ev) {
   const title = String(ev?.title || "").trim();
   const out = [];
-  if (title) {
-    out.push(title.toLowerCase().replace(/[^\w\s]/g, "").trim());
-  }
-  // Entity-led phrasing from the signature keys, when present.
+
+  // Entity keys first when the graph has them — they ARE search phrases.
   for (const k of (ev?.keys || []).slice(0, 2)) {
     if (typeof k === "string" && k.trim()) out.push(k.toLowerCase().trim());
   }
-  return [...new Set(out.filter(Boolean))];
+
+  if (title) {
+    const clean = title.toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
+    const words = clean.split(" ").filter((w) => w && !STOPWORDS.has(w));
+    // SHORT PHRASES BEFORE THE FULL TITLE. Measured on a real event: the title
+    // "how ai is making cyberattacks harder to stop" returned ZERO completions
+    // while "ai hacking" returned 18 and "ai security" 61. A headline is
+    // written to be read, a search phrase is typed — they are different
+    // artifacts, and testing only the headline reports no demand for stories
+    // that plainly have some.
+    for (let n = 2; n <= 3 && n <= words.length; n++) {
+      for (let i = 0; i + n <= words.length && i < 3; i++) {
+        out.push(words.slice(i, i + n).join(" "));
+      }
+    }
+    if (words.length) out.push(words.slice(0, 4).join(" "));
+    out.push(clean);
+  }
+  return [...new Set(out.filter(Boolean))].slice(0, 8);
 }
+
+/**
+ * KNOWN LIMITATION, measured 2026-08-26 and deliberately not papered over.
+ *
+ * Short phrases are searchable, but a SHORT GENERIC one overstates a film's
+ * findability. Two real prod candidates passed demand on the phrase
+ * "ai firms" (breadth 49) — which is high because it is a broad category, not
+ * because anyone wants those particular stories. Any title beginning with two
+ * common words can clear the floor the same way.
+ *
+ * Not fixed here because the honest fix is a specificity measure (does the
+ * phrase's completion set actually relate to THIS story?), which needs its own
+ * design and calibration corpus. Until then the gate answers "is there search
+ * traffic in this space", not "will this film be found" — and a reviewer
+ * choosing a title should read the winning phrase, not just the verdict.
+ */
+export const DEMAND_PHRASE_CAVEAT =
+  "a short generic phrase can clear the demand floor without the film being findable";
+
+/**
+ * Words that carry no search intent. Deliberately small: an aggressive list
+ * strips the words that make a phrase specific.
+ */
+const STOPWORDS = new Set([
+  "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+  "how", "why", "what", "when", "where", "who", "which",
+  "to", "of", "in", "on", "at", "for", "with", "by", "from", "as",
+  "and", "or", "but", "if", "than", "then", "that", "this", "these", "those",
+  "it", "its", "has", "have", "had", "will", "would", "can", "could",
+  "making", "makes", "made", "harder", "easier", "new", "now", "more", "most",
+]);
 
 /**
  * Demand gate. `demandFn` is injected (engine/demand.mjs in production).
@@ -144,7 +191,7 @@ export async function demandGate(ev, { demandFn, min = MIN_DEMAND_BREADTH() } = 
  * @returns {Promise<{selected: object[], rejected: object[]}>}
  */
 export async function selectLongformTopics({
-  listEvents, demandFn, alreadyFilmed = new Set(), limit = 1, now = Date.now(),
+  listEvents, demandFn, sourceGate = null, alreadyFilmed = new Set(), limit = 1, now = Date.now(),
 } = {}) {
   if (!listEvents) throw new Error("selectLongformTopics: listEvents is required");
 
@@ -165,7 +212,14 @@ export async function selectLongformTopics({
 
   // Demand is checked ONLY on candidates that already pass depth — each check
   // is several network round trips, and a shallow story would be skipped
-  // regardless of how well it searches.
+  // regardless of how well it searches. The source gate runs LAST, per
+  // candidate, because it is the most expensive (full-text fetches).
+  //
+  // A FAILED GATE COSTS THE CANDIDATE, NEVER THE CYCLE. The loop walks the
+  // ranked list until `limit` topics pass everything; the cycle comes up
+  // empty only when the WHOLE list fails — and a topic that failed here is
+  // not claimed or retired, so it stays eligible and, since events accumulate
+  // articles over time, is often richer by the next cycle.
   const selected = [];
   for (const ev of ranked) {
     if (selected.length >= limit) break;
@@ -175,7 +229,16 @@ export async function selectLongformTopics({
       logger.info(`🎬 topic skipped — ${ev.title}: ${d.reason}`);
       continue;
     }
-    selected.push({ ...ev, demand: d });
+    let corpus = null;
+    if (sourceGate) {
+      const sg = await sourceGate(ev);
+      if (!sg.ok) {
+        rejected.push({ id: ev.id, title: ev.title, reason: sg.reason });
+        continue;   // the NEXT candidate gets its chance — this is the walk
+      }
+      corpus = sg.corpus;
+    }
+    selected.push({ ...ev, demand: d, ...(corpus ? { sourceCorpus: corpus } : {}) });
     logger.info(`🎬 topic selected — ${ev.title} (depth ${ev.score}, demand ${d.breadth} on "${d.phrase}")`);
   }
 

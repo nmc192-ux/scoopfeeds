@@ -242,12 +242,26 @@ export function getLongformHealth(db, { now = Date.now() } = {}) {
   const published = recentPublishTimes(db, { now });
   const last = db.prepare(
     "SELECT event_id, slug, status, stage, updated_at FROM longform_posts ORDER BY updated_at DESC LIMIT 1").get();
+  const hoursSince = published[0] ? Math.round((now - published[0]) / 3600000) : null;
+  const expectedSpacingH = Number.isFinite(minIntervalMs()) ? Math.round(minIntervalMs() / 3600000) : null;
+  // DROUGHT IS VISIBLE, NEVER SELF-CORRECTING. When the loop has gone more
+  // than twice the expected spacing without a film, that is surfaced here for
+  // a human to judge — the gates never lower themselves under pressure,
+  // because a gate that relaxes when starved is not a gate.
+  const drought = hoursSince !== null && expectedSpacingH !== null && hoursSince > expectedSpacingH * 2;
+  if (drought) {
+    logger.warn(
+      `🎬 longform DROUGHT — last film ${hoursSince}h ago against an expected ~${expectedSpacingH}h spacing. ` +
+      `The gates are refusing every candidate; review the rejection reasons rather than the thresholds first.`);
+  }
   return {
     enabled: isLongformAutopostEnabled(),
     publishedLast7d: published.length,
     maxPerWeek: MAX_PER_WEEK(),
     lastPublishedAt: published[0] ?? null,
-    hoursSinceLastPublish: published[0] ? Math.round((now - published[0]) / 3600000) : null,
+    hoursSinceLastPublish: hoursSince,
+    expectedSpacingHours: expectedSpacingH,
+    drought,
     lastRow: last ?? null,
   };
 }
