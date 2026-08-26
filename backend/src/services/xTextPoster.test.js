@@ -8,7 +8,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stripOwnLink, groupPosts, isComplete, runXTextCycle } from "./xTextPoster.js";
+import { stripOwnLink, groupPosts, isComplete, runXTextCycle, cardBytesFor } from "./xTextPoster.js";
 
 const withEnv = async (vars, fn) => {
   const prev = {};
@@ -258,4 +258,83 @@ test("a tag line among real text is removed without touching the text", () => {
   const out = stripComposerTags(t);
   assert.ok(!/#OnlyTag/.test(out));
   assert.ok(out.includes("Headline here") && out.includes("A complete sentence follows."));
+});
+
+// ─── the card on the opening post ──────────────────────────────────────────
+// A plain-text post next to Bluesky's picture-card version of the same story
+// is the visible difference the timeline shows. These pin the picture on, and
+// pin it to the OPENER only.
+
+const CARD_ENV = { X_TEXT_POST_ENABLED: "1", X_TEXT_MAX_PER_DAY: "20",
+  X_API_KEY: "k", X_API_SECRET: "s", X_ACCESS_TOKEN: "t", X_ACCESS_SECRET: "ts" };
+
+const threadRows = (n, articleId = "a1") => Array.from({ length: n }, (_, i) => ({
+  id: i + 1, article_id: articleId, article_title: "A council votes on the bypass",
+  source_name: "BBC News", thread_group_id: n > 1 ? "g" : null,
+  thread_position: n > 1 ? i + 1 : null, thread_total: n > 1 ? n : null,
+  post_text: `Part ${i + 1}. The council met on Tuesday and the vote carried by a wide margin.`,
+}));
+
+const cycleDeps = (extra = {}) => ({
+  _count: () => 0, _mark: () => {}, _entities: () => [],
+  _cardBytes: async () => Buffer.from("PNG-BYTES"), ...extra,
+});
+
+test("the opening post carries the card; the replies do not", async () => {
+  await withEnv(CARD_ENV, async () => {
+    const sent = [];
+    await runXTextCycle({ deps: cycleDeps({
+      _list: () => threadRows(3),
+      _postToX: async (a) => { sent.push(a); return { id: String(sent.length) }; },
+    })});
+    assert.ok(sent.length >= 2, `expected a chain, got ${sent.length} post(s)`);
+    assert.ok(sent[0].imageBytes, "the opener must carry the card");
+    for (const later of sent.slice(1)) {
+      assert.equal(later.imageBytes, null,
+        "a reply must not re-upload the card — the timeline already shows the opener's");
+    }
+  });
+});
+
+test("the card is rendered ONCE per chain, not once per post", async () => {
+  // Each upload is a network round trip and a rendered PNG; three of them for
+  // one story is how a thread turns into a timeout.
+  await withEnv(CARD_ENV, async () => {
+    let renders = 0;
+    await runXTextCycle({ deps: cycleDeps({
+      _list: () => threadRows(3),
+      _cardBytes: async () => { renders += 1; return Buffer.from("PNG"); },
+      _postToX: async () => ({ id: "1" }),
+    })});
+    assert.equal(renders, 1);
+  });
+});
+
+test("a card that cannot be rendered costs the picture, never the post", async () => {
+  await withEnv(CARD_ENV, async () => {
+    const sent = [];
+    const r = await runXTextCycle({ deps: cycleDeps({
+      _list: () => threadRows(1),
+      _cardBytes: async () => null,
+      _postToX: async (a) => { sent.push(a); return { id: "1" }; },
+    })});
+    assert.equal(r.posted, 1, "the post must still go out");
+    assert.equal(sent[0].imageBytes, null);
+  });
+});
+
+test("cardBytesFor swallows every failure and returns null", async () => {
+  // It sits on the publish path. Anything it throws would kill a post that the
+  // text was already fit and budgeted for.
+  const ready = () => true;
+  assert.equal(await cardBytesFor("x", { _ready: () => false, _article: () => { throw new Error("nope"); } }), null);
+  assert.equal(await cardBytesFor("x", { _ready: ready, _article: () => { throw new Error("db gone"); } }), null);
+  assert.equal(await cardBytesFor("x", { _ready: ready, _article: () => null, _card: async () => { throw new Error("unused"); } }), null);
+  assert.equal(await cardBytesFor("x", { _ready: ready, _article: () => ({ id: "x", title: "T" }),
+    _card: async () => { throw new Error("no fonts"); } }), null);
+  assert.equal(await cardBytesFor("x", { _ready: ready, _article: () => ({ id: "x", title: "T" }),
+    _card: async () => ({ buffer: Buffer.alloc(0) }) }), null, "an empty buffer is not a card");
+  const good = await cardBytesFor("x", { _ready: ready, _article: () => ({ id: "x", title: "T" }),
+    _card: async () => ({ buffer: Buffer.from("PNG") }) });
+  assert.equal(good.toString(), "PNG");
 });

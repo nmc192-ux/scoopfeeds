@@ -28,9 +28,11 @@ import { logger } from "./logger.js";
 import {
   listFreshPendingXPosts, markXPostsPosted, countXTextPostsSince,
   getArticleEntitiesForTagging,
+  getArticleById,
 } from "../models/database.js";
 import { isXConfigured, postToX, fitPost, xSafePublisher } from "./xClient.js";
 import { hashtagsFor, withHashtags } from "./xHashtags.js";
+import { ensureCard, isCardRendererReady } from "./cardRenderer.js";
 
 export const xTextEnabled = () => process.env.X_TEXT_POST_ENABLED === "1";
 
@@ -206,6 +208,31 @@ export function isComplete(parts) {
   return parts.every((p, i) => (p.thread_position ?? i + 1) === i + 1);
 }
 
+/**
+ * The picture that rides the opening post.
+ *
+ * Deliberately the SAME call the Bluesky path makes — `ensureCard(article,
+ * "og")` — so a story looks identical on both networks and the disk cache is
+ * shared rather than doubled. The card already carries the headline, the
+ * category, the photo and "Via <source>", which is why it also answers the
+ * attribution complaint on its own.
+ *
+ * NEVER throws. A missing font, a pruned article or a render failure costs the
+ * post its picture, not its existence.
+ */
+export async function cardBytesFor(articleId, { _article = getArticleById, _card = ensureCard, _ready = isCardRendererReady } = {}) {
+  try {
+    if (!_ready()) { logger.warn("𝕏 text: card renderer not ready — posting without a picture"); return null; }
+    const article = _article(articleId);
+    if (!article?.title) return null;
+    const card = await _card(article, "og");
+    return card?.buffer?.length ? card.buffer : null;
+  } catch (err) {
+    logger.warn(`𝕏 text: no card for ${articleId} — ${err.message.slice(0, 140)}`);
+    return null;
+  }
+}
+
 export async function runXTextCycle({ now = Date.now(), deps = {} } = {}) {
   const {
     _postToX = postToX,
@@ -213,6 +240,7 @@ export async function runXTextCycle({ now = Date.now(), deps = {} } = {}) {
     _mark = markXPostsPosted,
     _count = countXTextPostsSince,
     _entities = getArticleEntitiesForTagging,
+    _cardBytes = cardBytesFor,
   } = deps;
 
   if (!xTextEnabled()) return { status: "off" };
@@ -302,11 +330,20 @@ export async function runXTextCycle({ now = Date.now(), deps = {} } = {}) {
       continue;
     }
 
+    // Rendered once per chain, BEFORE the first post, and attached only to the
+    // opener: replies in a thread inherit the opener's card in the timeline, so
+    // repeating it down the chain buys nothing and costs an upload each time.
+    const imageBytes = await _cardBytes(parts[0].article_id);
+
     let replyToId = null;
     const doneIds = [];
     try {
       for (const step of planned) {
-        const res = await _postToX({ text: step.text, replyToId });
+        const res = await _postToX({
+          text: step.text,
+          replyToId,
+          imageBytes: replyToId === null ? imageBytes : null,
+        });
         replyToId = res.id;
         if (!doneIds.includes(step.id)) doneIds.push(step.id);
         posted += 1;
@@ -314,6 +351,7 @@ export async function runXTextCycle({ now = Date.now(), deps = {} } = {}) {
       _mark(doneIds, now);
       results.push({ ids: doneIds, url: `https://x.com/i/status/${replyToId}`, posts: planned.length });
       logger.info(`𝕏 TEXT POSTED ${planned.length === 1 ? "single" : planned.length + "-post thread"}` +
+        `${imageBytes ? " +card" : " (no card)"}` +
         `${tags.length ? ` tags=${tags.join(" ")}` : ""} (${already + posted}/${max} today)`);
     } catch (err) {
       // Whatever went out stays marked, so a retry cannot repeat it. The rest of

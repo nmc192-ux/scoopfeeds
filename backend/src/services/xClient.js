@@ -219,6 +219,28 @@ export async function uploadVideo(filePath, { onStep = () => {} } = {}) {
   return mediaId;
 }
 
+/**
+ * An image, in one call.
+ *
+ * Video needs the chunked dance — initialize / append / finalize / poll. An
+ * image does not: POST the bytes to /2/media/upload with a `media` part and it
+ * comes back with an id. That endpoint is the SIMPLE upload, which is why the
+ * first attempt at video against it returned "Missing media field in JSON".
+ *
+ * Verified live: a 567KB 1200x630 PNG returned 200 and a media id; X
+ * transcoded it to JPEG server-side, which is its business rather than ours.
+ */
+export async function uploadImage(bytes, { filename = "card.png", contentType = "image/png" } = {}) {
+  const url = `${API}/2/media/upload`;
+  const form = new FormData();
+  form.append("media", new Blob([bytes], { type: contentType }), filename);
+  form.append("media_category", "tweet_image");
+  const res = await xJson(url, { body: form });
+  const id = res?.data?.id;
+  if (!id) throw new Error(`X image upload returned no id: ${JSON.stringify(res).slice(0, 200)}`);
+  return id;
+}
+
 // ─── posting ────────────────────────────────────────────────────────────────
 
 /** 280 characters, counted in GRAPHEMES — an emoji is one character to X. */
@@ -235,12 +257,25 @@ export function fitPost(text, max = 280) {
  * no thread endpoint: each part is an ordinary post whose reply target is the
  * previous part's id.
  */
-export async function postToX({ text, filePath = null, replyToId = null, onStep = () => {} } = {}) {
+export async function postToX({ text, filePath = null, imageBytes = null, replyToId = null, onStep = () => {} } = {}) {
   if (!isXConfigured()) throw new Error("X not configured (X_API_KEY / X_API_SECRET / X_ACCESS_TOKEN / X_ACCESS_SECRET)");
   const body = fitPost(assertNoLink(text));
 
   let mediaIds = null;
   if (filePath) mediaIds = [await uploadVideo(filePath, { onStep })];
+  // A card for text posts — the same OG bytes Bluesky attaches to its link
+  // cards. Video posts already carry the video and never take one.
+  //
+  // A failed picture must not cost the post: an image-less post is worse than
+  // one with a card, a post that never happened is worse than both.
+  else if (imageBytes) {
+    try {
+      onStep("image");
+      mediaIds = [await uploadImage(imageBytes)];
+    } catch (err) {
+      logger.warn(`𝕏 card image skipped, posting text only — ${err.message.slice(0, 140)}`);
+    }
+  }
 
   onStep("post");
   const payload = { text: body };
