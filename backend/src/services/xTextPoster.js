@@ -147,7 +147,17 @@ export async function runXTextCycle({ now = Date.now(), deps = {} } = {}) {
     } catch (err) {
       // Whatever went out stays marked, so a retry cannot repeat it. The rest of
       // the thread is left pending rather than forced.
-      if (doneIds.length) _mark(doneIds, now);
+      //
+      // The mark is itself wrapped: it threw once (a status the CHECK
+      // constraint rejected), and because THIS call is the recovery path, its
+      // throw escaped the loop and killed the whole cycle after one post. A
+      // recovery path that can fail the same way as the thing it recovers from
+      // is not a recovery path.
+      try { if (doneIds.length) _mark(doneIds, now); }
+      catch (markErr) {
+        logger.error(`𝕏 text: posted ${doneIds.length} part(s) and could NOT record it — ` +
+          `they may be reposted. ${markErr.message.slice(0, 160)}`);
+      }
       logger.error(`𝕏 text post failed after ${doneIds.length}/${parts.length} part(s): ${err.message.slice(0, 200)}`);
     }
   }

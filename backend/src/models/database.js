@@ -2375,22 +2375,41 @@ export function listFreshPendingXPosts({ sinceMs, articleLimit = 3 } = {}) {
   `).all(sinceMs, articleLimit, sinceMs);
 }
 
-/** pending -> posted. Guarded on 'pending' so a concurrent digest cannot double-post. */
+/**
+ * pending -> marked_posted.
+ *
+ * 'marked_posted', NOT 'posted'. The column has a CHECK constraint admitting
+ * only pending | sent_in_digest | marked_posted | rejected, and this wrote
+ * 'posted' — so every UPDATE threw SQLITE_CONSTRAINT_CHECK **after** the post
+ * had already gone out to X.
+ *
+ * Three things followed, and the middle one is the serious one:
+ *   - the cycle died on the first item, so one post per run
+ *   - countXTextPostsSince counted a status that never existed, so the daily
+ *     CAP READ ZERO FOREVER and never applied
+ *   - rows stayed `pending`, so the same item was eligible again next cycle;
+ *     nothing was actually duplicated only because a newer article kept
+ *     arriving and outranking it
+ *
+ * Guarded on 'pending' so a concurrent digest cannot double-post.
+ */
+export const X_POST_STATUS_POSTED = "marked_posted";
+
 export function markXPostsPosted(ids, timestamp = Date.now()) {
   if (!Array.isArray(ids) || !ids.length) return 0;
   const ph = ids.map(() => "?").join(",");
   return getDb().prepare(`
-    UPDATE x_post_queue SET status = 'posted', marked_posted_at = ?
+    UPDATE x_post_queue SET status = ?, marked_posted_at = ?
     WHERE id IN (${ph}) AND status = 'pending'
-  `).run(timestamp, ...ids).changes;
+  `).run(X_POST_STATUS_POSTED, timestamp, ...ids).changes;
 }
 
 /** Text posts published in a rolling window — the spend cap reads this. */
 export function countXTextPostsSince(sinceMs) {
   return getDb().prepare(`
     SELECT COUNT(*) AS n FROM x_post_queue
-    WHERE status = 'posted' AND marked_posted_at > ?
-  `).get(sinceMs).n;
+    WHERE status = ? AND marked_posted_at > ?
+  `).get(X_POST_STATUS_POSTED, sinceMs).n;
 }
 
 // ─── video_posts (§6.1) ──────────────────────────────────────────────────────
