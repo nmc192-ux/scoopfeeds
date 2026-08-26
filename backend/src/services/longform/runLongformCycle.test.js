@@ -210,3 +210,46 @@ test("no qualifying topic is a normal outcome, not an error", async () => {
     assert.equal((await runLongformCycle(args)).skipped, "no-topic");
   });
 });
+
+// ── The publisher's ids are the only handle on a scheduled upload ───────────
+
+test("THE VIDEO ID COMES FROM THE PUBLISHER, not from the producer's placeholder", async () => {
+  // The producer cannot know the id — it does not exist until the upload
+  // returns. Recording its placeholder stored NULL and lost the only handle
+  // on a private, scheduled upload that does not appear in the public listing.
+  await withEnv("1", async () => {
+    const { db } = makeTestDb();
+    await runLongformCycle({
+      db, now: NOW,
+      selectTopics: async () => ({ selected: [TOPIC] }),
+      produce: async () => ({
+        slug: "strait", verdict: passing(),
+        youtubeId: null,                       // as the real producer sets it
+        privacyStatus: "private", publishAt: NOW + 86400000, shorts: [],
+        publish: async () => ({ youtubeId: "REAL_ID", privacyStatus: "private",
+                                publishAt: NOW + 86400000, shorts: [{ id: "s1" }] }),
+      }),
+    });
+    const row = db.prepare("SELECT youtube_id, privacy_status, shorts_json FROM longform_posts WHERE event_id='e1'").get();
+    assert.equal(row.youtube_id, "REAL_ID", "the id the publisher returned must be stored");
+    assert.equal(JSON.parse(row.shorts_json)[0].id, "s1");
+  });
+});
+
+test("a publisher returning no id still records PUBLISHED — it IS published", async () => {
+  // Claiming otherwise would let the next cycle film the same story again.
+  await withEnv("1", async () => {
+    const { db } = makeTestDb();
+    const r = await runLongformCycle({
+      db, now: NOW,
+      selectTopics: async () => ({ selected: [TOPIC] }),
+      produce: async () => ({
+        slug: "strait", verdict: passing(), publishAt: NOW + 1, privacyStatus: "private",
+        publish: async () => undefined,        // a publisher that reports nothing
+      }),
+    });
+    assert.equal(r.published, true);
+    const row = db.prepare("SELECT status FROM longform_posts WHERE event_id='e1'").get();
+    assert.equal(row.status, "published", "an unidentifiable film is still published");
+  });
+});

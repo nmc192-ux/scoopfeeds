@@ -270,6 +270,10 @@ export async function publishIfPassed({ slug = "untitled", verdict, publish, log
     return { published: false, verdict };
   }
   log(formatVerdict(slug, verdict));
-  await publish();
-  return { published: true, verdict };
+  // THE PUBLISHER'S RETURN VALUE IS CARRIED BACK, not discarded. Everything
+  // goes up PRIVATE with a publishAt, so the video id is the ONLY handle on it
+  // until the slot — a private upload does not appear in the channel's public
+  // listing, so an id lost here can only be recovered by re-querying the API.
+  const result = await publish();
+  return { published: true, verdict, result: result ?? null };
 }

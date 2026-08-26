@@ -113,7 +113,7 @@ export async function runLongformCycle({
     return { skipped: "no-verdict", eventId: String(topic.id) };
   }
 
-  const { published } = await publishIfPassed({
+  const { published, result } = await publishIfPassed({
     slug: out.slug || topic.slug,
     verdict: out.verdict,
     publish: out.publish,
@@ -128,13 +128,29 @@ export async function runLongformCycle({
     return { skipped: "qc-reject", eventId: String(topic.id), verdict: out.verdict };
   }
 
+  // WHAT THE PUBLISHER ACCEPTED, NOT WHAT WE SENT. The producer cannot know
+  // the video id — it does not exist until the upload returns — so recording
+  // its placeholder would store NULL and lose the only handle on a scheduled
+  // private upload. Fall back to the producer's values only for fields the
+  // publisher does not report.
+  const youtubeId = result?.youtubeId ?? out.youtubeId ?? null;
+  const publishAt = result?.publishAt ?? out.publishAt ?? null;
+  if (!youtubeId) {
+    // Published but unidentifiable. Record it as published — it IS published,
+    // and claiming otherwise would let the next cycle film it again — but say
+    // so loudly, because recovering the id means re-querying the API.
+    logger.error(
+      `🎬 ${out.slug || topic.slug}: PUBLISHED but the publisher returned no video id. ` +
+      `The upload is private until ${publishAt ?? "its slot"} and will not appear in the ` +
+      `channel's public listing — recover the id from the API before the slot.`);
+  }
   recordPublished(db, {
     eventId: String(topic.id),
-    youtubeId: out.youtubeId, privacyStatus: out.privacyStatus,
-    publishAt: out.publishAt, shorts: out.shorts, qc: out.verdict, now,
+    youtubeId, privacyStatus: result?.privacyStatus ?? out.privacyStatus,
+    publishAt, shorts: result?.shorts ?? out.shorts, qc: out.verdict, now,
   });
-  logger.info(`🎬 longform PUBLISHED — ${out.slug || topic.slug} (${out.youtubeId}), live at ${out.publishAt}`);
-  return { published: true, eventId: String(topic.id), youtubeId: out.youtubeId };
+  logger.info(`🎬 longform PUBLISHED — ${out.slug || topic.slug} (${youtubeId ?? "NO ID"}), live at ${publishAt}`);
+  return { published: true, eventId: String(topic.id), youtubeId };
 }
 
 /** The worker's entry point. Never throws — see the header. */
