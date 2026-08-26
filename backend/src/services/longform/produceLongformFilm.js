@@ -124,7 +124,14 @@ export async function produceLongformFilm(topic, {
 
   // ── 5. thumbnail ─────────────────────────────────────────────────────────
   stage("thumbnail");
-  const thumb = await makeThumbnail({ slug, film: art.film, title: topic?.title });
+  // The spine and the render artifacts both matter here: the headline comes
+  // from the spine's QUESTION (the title is what the video is called, the
+  // question is what makes someone click), and the plate must come from
+  // FOOTAGE rather than the film's own card frames.
+  const thumb = await makeThumbnail({
+    slug, title: topic?.title, spine: script.doc.spine,
+    film: art.film, plateFrom: art.plateFrom, assets: acq.assets,
+  });
 
   // ── 6. measure ───────────────────────────────────────────────────────────
   stage("measuring");
