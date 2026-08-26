@@ -185,7 +185,10 @@ export async function writeStoryboard({
       // Same output-cap reasoning as the script writer: ~70 beats of card
       // JSON does not fit the 2048-token default, and JSON-mode providers
       // reject truncated output with an unhelpful 400.
-      doc = await call(prompt, { task: "longform-storyboard", tier: "premium", priority: "low", maxOutputTokens: 24_000, timeoutMs: 300_000 });
+      // 32k, matching the script call: a 79-beat storyboard's JSON plus a
+      // hybrid reasoner's thinking measured over 24k (finish_reason=length,
+      // empty content, two attempts in a row).
+      doc = await call(prompt, { task: "longform-storyboard", tier: "premium", priority: "low", maxOutputTokens: 32_000, timeoutMs: 300_000 });
     } catch (e) {
       logger.warn(`🎬 ${slug}: storyboard call failed on attempt ${attempt}/${attempts} — ${e.message}`);
       doc = null;
@@ -220,7 +223,10 @@ export async function writeStoryboard({
       return null;
     }
 
-    logger.warn(`🎬 ${slug}: storyboard rejected on attempt ${attempt}/${attempts}, ${all.length} problem(s)`);
+    // The problems themselves — a count cannot tell a bad shorts span from a
+    // hallucinated figure, and an unattended cycle's log is all anyone gets.
+    logger.warn(`🎬 ${slug}: storyboard rejected on attempt ${attempt}/${attempts}, ${all.length} problem(s)\n  ` +
+      all.slice(0, 8).join("\n  "));
     errors = all.slice(0, 25);
   }
 
