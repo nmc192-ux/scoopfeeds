@@ -293,6 +293,15 @@ async function main() {
   // ── 1. animation frames for every card ──────────────────────────────────
   const cardJobs = Object.entries(STORYBOARD).filter(([, v]) => v.card || v.doc)
     .map(([id, v]) => ({ id: +id, spec: v.doc ? DOCS[v.doc] : v }));
+  // NAMED FAILURE, NOT A TypeError. A storyboard without a TITLE_SEGMENT
+  // (or with one missing `spec`) used to die here as "Cannot read properties
+  // of null (reading 'spec')" — 300 lines into a build, naming nothing an
+  // author could act on. Hit while rendering a real fixture film.
+  if (!TITLE_SEGMENT?.spec) {
+    throw new Error(
+      "storyboard: TITLE_SEGMENT is missing or has no `spec`. Every film needs a title " +
+      "card — export TITLE_SEGMENT = { after: <beat>, seconds: <n>, spec: { card: \"title\", ... } }.");
+  }
   cardJobs.push({ id: "title", spec: TITLE_SEGMENT.spec });
   cardJobs.push({ id: "outro", spec: { card: "outro" } });
 
