@@ -75,8 +75,38 @@ export const P = (...a) => path.join(PROJECT, ...a);
 // backend/assets so they ship inside the production image — the skill's copies
 // were byte-identical, so nothing about rendering changed with the move.
 export const ASSETS = path.join(BACKEND, "assets");
-// storyboard.mjs is authored per video and lives in the project.
-export const loadStoryboard = () => import(pathToFileURL(P("storyboard.mjs")).href);
+/**
+ * Load a project's storyboard.
+ *
+ * TWO FORMS, AND JSON WINS. A human-authored film supplies `storyboard.mjs`
+ * (an ES module the engine imports). A GENERATED film supplies
+ * `storyboard.json` — data validated by longformStoryboardSchema and turned
+ * into this same shape by storyboardInterpreter, which is a fixed file.
+ *
+ * Preferring JSON is what completes #77's promise: the unattended path emits
+ * DATA and no generated code is ever executed — not even a small shim that
+ * re-exports it. A shim would be the crack that lets model-written JavaScript
+ * back onto the worker.
+ */
+export const loadStoryboard = async () => {
+  const json = P("storyboard.json");
+  if (existsSync(json)) {
+    const [{ interpretStoryboard }, { loadStatement }] = await Promise.all([
+      import("../storyboardInterpreter.js"),
+      import("../../longform/statement.mjs").catch(() => ({ loadStatement: null })),
+    ]);
+    const doc = JSON.parse(readFileSync(json, "utf8"));
+    const out = interpretStoryboard(doc, { P, loadStatement: loadStatement || null });
+    for (const w of out.warnings || []) console.log(`storyboard: ${w}`);
+    return out;
+  }
+  const mjs = P("storyboard.mjs");
+  if (!existsSync(mjs)) {
+    throw new Error(
+      `no storyboard in ${P(".")}: expected storyboard.json (generated) or storyboard.mjs (authored)`);
+  }
+  return import(pathToFileURL(mjs).href);
+};
 
 // NOTE ON BARE IMPORTS
 // resolverFor() above only covers CommonJS require(). Bare *ESM* specifiers
