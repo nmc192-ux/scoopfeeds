@@ -29,7 +29,7 @@ import {
   listFreshPendingXPosts, markXPostsPosted, countXTextPostsSince,
   getArticleEntitiesForTagging,
 } from "../models/database.js";
-import { isXConfigured, postToX, fitPost } from "./xClient.js";
+import { isXConfigured, postToX, fitPost, xSafePublisher } from "./xClient.js";
 import { hashtagsFor, withHashtags } from "./xHashtags.js";
 
 export const xTextEnabled = () => process.env.X_TEXT_POST_ENABLED === "1";
@@ -45,6 +45,63 @@ const ARTICLES_PER_CYCLE = () => Math.max(1, Number.parseInt(process.env.X_TEXT_
  * genuinely quotes a URL is a different thing, and assertNoLink will refuse it
  * downstream rather than this silently rewriting it.
  */
+/**
+ * The composer's own hashtag block.
+ *
+ * xPostGenerator appends things like "#worldnews #global #ScoopFeeds" — three
+ * tags, all generic, which is the measured worst case: 1-2 specific tags earn
+ * ~21% over none, 3+ costs ~17%. They are removed and replaced with at most two
+ * drawn from the headline (see xHashtags).
+ */
+export function stripComposerTags(text) {
+  return String(text || "")
+    .replace(/^[ \t]*(#[\w]+[ \t]*){2,}$/gim, "")   // a line that is only tags
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Keep only what the composer finished saying.
+ *
+ *   "Hired as a civil servant under the agency's workforce directive to
+ *    restore core competencies by […]"
+ *
+ * That ellipsis was an invitation to click the link. With the link gone it is
+ * an unfinished sentence and nothing else — DrJ's reading of the live feed was
+ * "the story is incomplete and text is truncated", and this is the line that
+ * causes it.
+ *
+ * Trims to the last COMPLETE sentence rather than dropping the whole block, so
+ * a paragraph that happens to end mid-thought still contributes what it
+ * actually said. Returns "" when nothing was finished — the caller drops that
+ * part rather than publishing a fragment.
+ */
+export function completeSentencesOnly(text) {
+  const t = String(text || "").trim();
+  if (!/\[…\]|…\s*$|\.\.\.\s*$/.test(t)) return t;
+  // Cut everything from the truncation marker onward, then back up to the last
+  // sentence terminator. Quotes and brackets may follow the full stop.
+  const upto = t.split(/\s*(?:\[…\]|…|\.\.\.)/)[0];
+  const m = upto.match(/^[\s\S]*[.!?][")\]]?(?=\s|$)/);
+  return (m ? m[0] : "").trim();
+}
+
+/**
+ * Name the publisher.
+ *
+ * The composer never did: the link was the attribution. Reading these posts
+ * standalone, "the majority do not mention the source of the story" — and for a
+ * news account that is the credibility claim, not a footnote. xSafePublisher
+ * strips a trailing TLD so "Investing.com" does not read as a link to X's
+ * biller.
+ */
+export function addSource(text, publisher) {
+  const who = xSafePublisher(publisher);
+  if (!who) return text;
+  if (new RegExp(`source:\\s*${who.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(text)) return text;
+  return `${text}\n\nSource: ${who}`;
+}
+
 export function stripOwnLink(text) {
   return String(text || "")
     .replace(/https?:\/\/(?:www\.)?scoopfeeds\.com\/\S*/gi, "")
@@ -126,15 +183,33 @@ export async function runXTextCycle({ now = Date.now(), deps = {} } = {}) {
       title: parts[0].article_title || "",
       entities: _entities(parts[0].article_id),
     });
+    const publisher = parts[0].source_name || null;
 
     let replyToId = null;
     const doneIds = [];
     try {
       for (let i = 0; i < parts.length; i++) {
-        const body = fitPost(stripOwnLink(parts[i].post_text), 280 - 40);
-        // Tags go on the FIRST part only: repeating them down a thread is the
-        // multi-tag penalty paid several times over.
-        const text = i === 0 ? withHashtags(body, tags) : body;
+        // RECOMPOSED, not merely stripped. These were written for a human to
+        // paste, where the link carried the attribution AND the "read the
+        // rest". Removing it leaves a truncated fragment with no source — which
+        // is what shipped, and what DrJ read back: no source, incomplete, cut
+        // off. Order matters: drop the link, then the composer's generic tag
+        // block, then any sentence that was cut for the link that no longer
+        // exists.
+        let body = completeSentencesOnly(stripComposerTags(stripOwnLink(parts[i].post_text)));
+        if (!body) {
+          // Nothing was finished. A thread part that says nothing complete is
+          // dropped; the thread simply ends earlier and still reads. If it is
+          // the OPENING part there is no post to make at all.
+          logger.info(`𝕏 text: dropping part ${i + 1}/${parts.length} — nothing complete once the link was removed`);
+          if (i === 0) { doneIds.length = 0; break; }
+          continue;
+        }
+        // The source and tags go on the FIRST part only. Repeating tags down a
+        // thread pays the multi-tag penalty several times, and a source line on
+        // every part is noise.
+        if (i === 0) body = addSource(body, publisher);
+        const text = i === 0 ? withHashtags(fitPost(body, 280 - 40), tags) : fitPost(body, 280);
         const res = await _postToX({ text, replyToId });
         replyToId = res.id;
         doneIds.push(parts[i].id);

@@ -2366,7 +2366,8 @@ export function listFreshPendingXPosts({ sinceMs, articleLimit = 3 } = {}) {
       LIMIT ?
     )
     SELECT q.id, q.article_id, q.post_text, q.post_type, q.thread_group_id,
-           q.thread_position, q.thread_total, q.generated_at, a.title AS article_title
+           q.thread_position, q.thread_total, q.generated_at,
+           a.title AS article_title, a.source_name
     FROM x_post_queue q
     JOIN fresh f ON f.article_id = q.article_id
     LEFT JOIN articles a ON a.id = q.article_id

@@ -122,3 +122,60 @@ test("a mid-thread failure marks what went out and stops", async () => {
     assert.deepEqual(marked, [1], "what was published must never be re-published");
   });
 });
+
+// ─── post quality ───────────────────────────────────────────────────────────
+//
+// DrJ, reading the live feed: "Majority of the posts do not mention the source
+// of the story, story is incomplete and text is truncated." All three come from
+// one cause — the composer wrote for a human to PASTE, where the link carried
+// both the attribution and the "read the rest".
+
+import { stripComposerTags, completeSentencesOnly, addSource } from "./xTextPoster.js";
+
+test("the composer's generic tag block is removed", () => {
+  // "#worldnews #global #ScoopFeeds" is three generic tags — measured worst
+  // case: 1-2 specific tags earn ~21% over none, 3+ costs ~17%.
+  const t = "🌍 Guinea's president dismisses 173 soldiers\n\n#worldnews #global #ScoopFeeds";
+  const out = stripComposerTags(t);
+  assert.ok(!/#worldnews|#global|#ScoopFeeds/.test(out));
+  assert.ok(out.startsWith("🌍 Guinea"));
+});
+
+test("a hashtag inside a sentence is not mistaken for a tag block", () => {
+  const t = "Traders watched #Nvidia all morning and the price held.";
+  assert.equal(stripComposerTags(t), t);
+});
+
+test("an unfinished sentence is trimmed back to what was actually said", () => {
+  assert.equal(
+    completeSentencesOnly("VW bosses face a decisive vote today. The outcome will shape the plant by […]"),
+    "VW bosses face a decisive vote today.");
+  assert.equal(completeSentencesOnly("Complete already."), "Complete already.");
+});
+
+test("a part with nothing complete yields empty, so the caller can drop it", () => {
+  // The real one, verbatim from the queue. With the link gone it says nothing.
+  assert.equal(
+    completeSentencesOnly("Hired as a civil servant under the agency's workforce directive to restore core competencies by […]"),
+    "");
+});
+
+test("the publisher is named, because the link no longer does it", () => {
+  const out = addSource("🌍 Guinea's president dismisses 173 soldiers", "BBC World");
+  assert.match(out, /Source: BBC World$/);
+});
+
+test("a publisher that looks like a domain is still safe to name", () => {
+  // "Source: Investing.com" is a $0.20 post by X's billing.
+  assert.match(addSource("Markets moved", "Investing.com"), /Source: Investing$/);
+});
+
+test("the source is not repeated if it is already there", () => {
+  const once = addSource("Headline\n\nSource: Reuters", "Reuters");
+  assert.equal((once.match(/Source:/g) || []).length, 1);
+});
+
+test("no publisher means no dangling label", () => {
+  assert.equal(addSource("Headline", null), "Headline");
+  assert.equal(addSource("Headline", ""), "Headline");
+});
