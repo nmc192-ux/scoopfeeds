@@ -16,7 +16,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  produceLongformFilm, missingCapabilities, NotImplementedError, MISSING_STAGES,
+  produceLongformFilm, missingCapabilities, NotImplementedError,
+  MISSING_STAGES, UNWIRED_STAGES,
 } from "./produceLongformFilm.js";
 
 const TOPIC = { id: "e1", slug: "strait", title: "The strait", summary: "A summary." };
@@ -61,7 +62,11 @@ const deps = (over = {}) => ({
 
 test("THE UNIMPLEMENTED STAGES ARE INSPECTABLE WITHOUT RUNNING ANYTHING", () => {
   const missing = missingCapabilities().map((m) => m.stage);
-  assert.deepEqual(missing.sort(), ["acquireMedia", "makeThumbnail"]);
+  assert.deepEqual(missing.sort(), ["makeThumbnail"],
+    "acquireMedia is implemented now — it belongs in UNWIRED_STAGES, not MISSING");
+  // "nobody wrote this" and "nobody plugged this in" must stay distinguishable.
+  assert.ok(UNWIRED_STAGES.acquireMedia, "an implemented-but-unwired stage is listed separately");
+  assert.match(UNWIRED_STAGES.acquireMedia, /DVIDS_API_KEY IS set on the VPS/);
   for (const { why } of missingCapabilities()) {
     assert.ok(why.length > 40, "each gap must explain itself, not just be listed");
   }

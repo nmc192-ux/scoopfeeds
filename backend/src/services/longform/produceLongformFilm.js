@@ -58,11 +58,9 @@ const notImplemented = (stage, why) => async () => { throw new NotImplementedErr
 
 /** The stages with no implementation yet. Exported so a caller can see the list. */
 export const MISSING_STAGES = Object.freeze({
-  acquireMedia:
-    "engine/footage-search.mjs finds candidates but nothing downloads them. A stub " +
-    "returning no media would yield a film of cards over silence AND a LICENSES.md " +
-    "asserting empty provenance, which the disclosure chain would faithfully derive " +
-    "a disclosure from — worse than failing.",
+  // acquireMedia is IMPLEMENTED — longformAcquire.makeAcquireMedia(). It is
+  // still not a default here, because it needs a search client, a downloader
+  // and a destination directory that only the caller can supply.
   makeThumbnail:
     "no generator exists. YouTube's auto-frame on a card-based film is usually a slab " +
     "of text, and references/house-style.md §Thumbnail sets a standard that silently " +
@@ -184,3 +182,20 @@ export async function produceLongformFilm(topic, {
 export function missingCapabilities() {
   return Object.entries(MISSING_STAGES).map(([stage, why]) => ({ stage, why }));
 }
+
+/**
+ * Stages that HAVE an implementation but still need wiring by the caller.
+ * Separate from MISSING_STAGES so "nobody wrote this" and "nobody plugged this
+ * in" cannot be confused for one another.
+ */
+export const UNWIRED_STAGES = Object.freeze({
+  acquireMedia:
+    "implemented in longformAcquire.makeAcquireMedia({ search, download, probe, destDir }). " +
+    "Needs a DVIDS/NASA search client, an HTTP downloader and a destination directory. " +
+    "DVIDS_API_KEY IS set on the VPS and VIDEO_FOOTAGE_ENABLED=1 — the shorts loop already " +
+    "uses both, so the credential side of unattended acquisition is solved (verified in the " +
+    "worker container 2026-08-26).",
+  render:
+    "the engine renders (build.mjs / music.mjs / shorts.mjs) but is driven by path from a " +
+    "project working directory; a caller must set that directory up first.",
+});
