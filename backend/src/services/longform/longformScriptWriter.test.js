@@ -50,12 +50,18 @@ const withEnv = async (on, fn) => {
   }
 };
 
-/** Model stub: first call returns the spine, later calls the script. */
-const stub = (script, spine = SPINE) => {
+/**
+ * Model stub: spine call → spine, groundedness call → clean verdict,
+ * anything else → the script. The groundedness judge runs on every
+ * structurally accepted script, so a stub that answered it with a script
+ * document would read as "no usable verdict" and abandon the film.
+ */
+const stub = (script, spine = SPINE, groundedness = { unsupported: [] }) => {
   const calls = [];
   const fn = async (prompt) => {
     calls.push(prompt);
     if (/STORY SPINE for a 7-10 minute/.test(prompt)) return spine;
+    if (/fact-checking a news-film narration/.test(prompt)) return groundedness;
     return typeof script === "function" ? script(calls.length) : script;
   };
   fn.calls = calls;
@@ -78,9 +84,10 @@ test("THE SPINE IS A SEPARATE CALL, MADE FIRST", async () => {
     const call = stub(goodDoc());
     const out = await writeLongformScript({ event: EVENT, sources: SOURCES, sourceText: SOURCE_TEXT, call });
     assert.ok(out);
-    assert.equal(call.calls.length, 2, "one spine call, then one script call");
+    assert.equal(call.calls.length, 5, "one spine call, one script call, three groundedness judges");
     assert.match(call.calls[0], /STORY SPINE for a 7-10 minute/, "the FIRST call decides the spine");
     assert.match(call.calls[1], /SPINE \(decided; serve it\)/, "the second call is given it to serve");
+    assert.match(call.calls[2], /fact-checking a news-film narration/, "an accepted script is judged before it is returned");
   });
 });
 
@@ -158,9 +165,10 @@ test("structural problems ARE retried, with the exact messages fed back", async 
     const out = await writeLongformScript({
       event: EVENT, sources: SOURCES, sourceText: SOURCE_TEXT, call });
     assert.ok(out, "the retry succeeded");
-    assert.equal(call.calls.length, 3, "spine + two script attempts");
+    assert.equal(call.calls.length, 6, "spine + two script attempts + the three-judge panel on the accepted one");
     assert.match(call.calls[2], /A PREVIOUS ATTEMPT WAS REJECTED/);
     assert.match(call.calls[2], /answerBeat 3 of 50 is not in the closing/);
+    assert.match(call.calls[3], /fact-checking a news-film narration/);
   });
 });
 
