@@ -24,6 +24,14 @@ backend/data/
 backend/data/prod-live.db
 backend/data/prod-live.db-*
 backend/data/.prod-live.pull.*
+# Stock footage library (scripts/stock-acquire.mjs): downloaded provider clips,
+# their treated renditions, and manifest.json. Binaries acquired on demand and
+# re-acquirable from the manifest's provenance — only the taxonomy, the scripts,
+# the tests and the manifest SCHEMA are committed. Already covered by
+# backend/data/ above, called out separately so the rule survives anyone ever
+# narrowing that line: a few hundred graded clips is GBs, and committing one is
+# not obviously wrong until the clone is.
+backend/data/stock-library/
 
 # Claude Code internal worktrees
 .claude/worktrees/

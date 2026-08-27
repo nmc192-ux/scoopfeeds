@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "note": "Subject-class taxonomy for the stock library (brief docs/briefs/stock-library-builder.md §4). This file is DATA, not code: adding a class must never require a code change. Every class needs at least one entry in `queries`. `editorial` records the SUBJECT-not-EVENT constraint for that class and is read by humans during curation, not by the acquire script.",
+  "classes": [
+    {
+      "id": "ports",
+      "label": "Ports",
+      "priority": 1,
+      "queries": ["container port", "harbour cranes", "container terminal", "container yard"],
+      "tags": ["ports", "logistics", "trade"],
+      "editorial": "Infrastructure only. Never a port that reads as the specific port in the story."
+    },
+    {
+      "id": "ships",
+      "label": "Ships",
+      "priority": 2,
+      "queries": ["cargo ship at sea", "container ship", "freight ship aerial"],
+      "tags": ["shipping", "logistics", "trade"],
+      "editorial": "Generic vessels. No identifiable hull markings or company liveries where avoidable."
+    },
+    {
+      "id": "flag-china",
+      "label": "Flag — China",
+      "priority": 3,
+      "queries": ["china flag waving", "chinese flag"],
+      "tags": ["flag", "china"],
+      "editorial": "Cutaway only. A flag stands for the state as subject, never for an event."
+    },
+    {
+      "id": "flag-us",
+      "label": "Flag — United States",
+      "priority": 3,
+      "queries": ["american flag waving", "united states flag"],
+      "tags": ["flag", "us"],
+      "editorial": "Cutaway only. A flag stands for the state as subject, never for an event."
+    },
+    {
+      "id": "flag-russia",
+      "label": "Flag — Russia",
+      "priority": 3,
+      "queries": ["russia flag waving", "russian flag"],
+      "tags": ["flag", "russia"],
+      "editorial": "Cutaway only. A flag stands for the state as subject, never for an event."
+    },
+    {
+      "id": "flag-india",
+      "label": "Flag — India",
+      "priority": 3,
+      "queries": ["india flag waving", "indian flag"],
+      "tags": ["flag", "india"],
+      "editorial": "Cutaway only. A flag stands for the state as subject, never for an event."
+    },
+    {
+      "id": "flag-pakistan",
+      "label": "Flag — Pakistan",
+      "priority": 3,
+      "queries": ["pakistan flag waving", "pakistani flag"],
+      "tags": ["flag", "pakistan"],
+      "editorial": "Cutaway only. Acquired like any other flag class — Rule 0 gating happens at publish, not in the library (brief §4)."
+    },
+    {
+      "id": "flag-ukraine",
+      "label": "Flag — Ukraine",
+      "priority": 3,
+      "queries": ["ukraine flag waving", "ukrainian flag"],
+      "tags": ["flag", "ukraine"],
+      "editorial": "Cutaway only. A flag stands for the state as subject, never for an event."
+    },
+    {
+      "id": "flag-israel",
+      "label": "Flag — Israel",
+      "priority": 3,
+      "queries": ["israel flag waving", "israeli flag"],
+      "tags": ["flag", "israel"],
+      "editorial": "Cutaway only. A flag stands for the state as subject, never for an event."
+    },
+    {
+      "id": "flag-iran",
+      "label": "Flag — Iran",
+      "priority": 3,
+      "queries": ["iran flag waving", "iranian flag"],
+      "tags": ["flag", "iran"],
+      "editorial": "Cutaway only. A flag stands for the state as subject, never for an event."
+    },
+    {
+      "id": "flag-eu",
+      "label": "Flag — European Union",
+      "priority": 3,
+      "queries": ["european union flag waving", "eu flag"],
+      "tags": ["flag", "eu"],
+      "editorial": "Cutaway only. A flag stands for the bloc as subject, never for an event."
+    },
+    {
+      "id": "flag-uk",
+      "label": "Flag — United Kingdom",
+      "priority": 3,
+      "queries": ["union jack waving", "british flag"],
+      "tags": ["flag", "uk"],
+      "editorial": "Cutaway only. A flag stands for the state as subject, never for an event."
+    },
+    {
+      "id": "datacentre",
+      "label": "Data centre",
+      "priority": 4,
+      "queries": ["data center server racks", "server room", "data centre cooling aisle"],
+      "tags": ["datacentre", "compute", "infrastructure"],
+      "editorial": "Racks and aisles. No operator faces, no on-screen customer branding."
+    },
+    {
+      "id": "chip-fab",
+      "label": "Chip fabrication",
+      "priority": 5,
+      "queries": ["semiconductor cleanroom", "silicon wafer handling", "microchip manufacturing"],
+      "tags": ["semiconductors", "manufacturing"],
+      "editorial": "Cleanroom and wafer detail. Suited figures are fine only when unidentifiable."
+    },
+    {
+      "id": "trading-floor",
+      "label": "Trading floor / markets",
+      "priority": 6,
+      "queries": ["stock market screens", "financial ticker display", "trading floor screens"],
+      "tags": ["markets", "finance"],
+      "editorial": "Screens and tickers. NO identifiable faces (brief §4). Never a chart a viewer could read as this story's data."
+    },
+    {
+      "id": "launch",
+      "label": "Rocket launch",
+      "priority": 7,
+      "queries": ["rocket launch", "launchpad", "rocket liftoff"],
+      "tags": ["space", "launch"],
+      "editorial": "Generic launch imagery. Never a launch a viewer could mistake for the specific one in the story."
+    },
+    {
+      "id": "parliament",
+      "label": "Parliament / government buildings",
+      "priority": 8,
+      "queries": ["parliament building exterior", "government building exterior", "empty parliament chamber"],
+      "tags": ["government", "institutions"],
+      "editorial": "Exteriors, and chambers only when empty or wide (brief §4). No identifiable politicians."
+    },
+    {
+      "id": "courtroom",
+      "label": "Courtroom",
+      "priority": 9,
+      "queries": ["courthouse exterior", "gavel closeup", "empty courtroom bench"],
+      "tags": ["justice", "legal"],
+      "editorial": "Exteriors and bench/gavel detail. NO identifiable people (brief §4)."
+    },
+    {
+      "id": "construction",
+      "label": "Construction",
+      "priority": 10,
+      "queries": ["construction crane", "construction site aerial", "building site"],
+      "tags": ["construction", "infrastructure"],
+      "editorial": "Sites and cranes. No identifiable workers in focus."
+    },
+    {
+      "id": "abstract-beds",
+      "label": "Abstract beds",
+      "priority": 11,
+      "queries": ["abstract texture loop", "slow moving abstract background", "dark ink texture"],
+      "tags": ["abstract", "texture", "bed"],
+      "editorial": "Slow texture loops to sit behind type. Must carry no subject a viewer could read as content."
+    }
+  ]
+}
