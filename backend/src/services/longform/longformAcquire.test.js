@@ -16,11 +16,17 @@ import {
 } from "./longformAcquire.js";
 import { screenCandidate } from "./longformMediaGate.js";
 
-const hit = (over = {}) => ({
-  source: "DVIDS", provenance: VERIFIED, title: "tanker at sea",
-  url: "https://dvidshub.net/video/1", download: "https://dvidshub.net/dl/1.mp4",
-  attribution: "US Navy / DVIDS", ...over,
-});
+// Distinct urls per hit: the acquirer dedups by media url (the same asset
+// arrives once per matching query in real results).
+let hitN = 0;
+const hit = (over = {}) => {
+  const n = ++hitN;
+  return {
+    source: "DVIDS", provenance: VERIFIED, title: "tanker at sea",
+    url: `https://dvidshub.net/video/${n}`, download: `https://dvidshub.net/dl/${n}.mp4`,
+    attribution: "US Navy / DVIDS", ...over,
+  };
+};
 
 const deps = (found, over = {}) => ({
   search: async () => found,
@@ -129,17 +135,24 @@ test("too few usable clips ABANDONS the topic rather than shipping a loop", asyn
 
 // ── Queries ─────────────────────────────────────────────────────────────────
 
-test("queries are SHORT NOUN PHRASES, never sentences — the demand gate's lesson", () => {
-  // The first real run sent the full title and the whole through-line
-  // sentence to DVIDS and got nothing usable back. A headline is written to
-  // be read; a search query is typed.
+test("queries come from the script's own motifs, as short phrases, never sentences", () => {
+  // The first published film searched headline bigrams and filled an
+  // AI-surveillance story with Army b-roll — the script said "facial
+  // recognition" over and over and nothing searched for it. A bigram
+  // recurring across three or more beats is the film's imagery vocabulary.
+  const beat = (t) => ({ text: t });
   const q = buildQueries(
     { title: "Iran Declares: Strait CLOSED!", keys: ["strait of hormuz"] },
-    { spine: { throughLine: "the ship that cannot move" } });
-  assert.equal(q[0], "strait of hormuz", "entity keys lead — they ARE queries");
+    { beats: [
+      beat("Cameras run facial recognition on every face in the crowd."),
+      beat("The facial recognition match is checked against a watchlist."),
+      beat("Police expand facial recognition to stadium gates."),
+      beat("A single sentence about something else entirely."),
+    ] });
+  assert.equal(q[0], "facial recognition", "a motif across 3+ beats leads the queries");
+  assert.ok(q.includes("strait of hormuz"), "entity keys still contribute");
   assert.ok(q.every((x) => x.split(" ").length <= 3), "no sentences: " + JSON.stringify(q));
-  assert.ok(q.some((x) => x.includes("ship")), "the through-line contributes its nouns");
-  assert.ok(q.length <= 5);
+  assert.ok(q.length <= 7);
 });
 
 test("a film with nothing to search for refuses rather than searching blindly", async () => {

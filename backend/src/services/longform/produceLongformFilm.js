@@ -143,6 +143,7 @@ export async function produceLongformFilm(topic, {
   // ── 7. the publish plan, with the disclosure DERIVED ─────────────────────
   const plan = buildPublishPlan({
     slug, title: topic?.title, description: topic?.summary || "",
+    sources,
     licensesText: acq.licenses,
     generatedScenes: acq.assets.filter((a) => a.synthetic).map((a) => a.key),
     shorts: (art.shortFiles || []).map((f, i) => ({
