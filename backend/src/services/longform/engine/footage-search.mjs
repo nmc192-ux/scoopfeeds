@@ -84,12 +84,19 @@ async function dvids(q) {
 
 async function nasa(q) {
   try {
-    const j = await (await fetch(`https://images-api.nasa.gov/search?q=${encodeURIComponent(q)}&media_type=image,video`)).json();
+    // VIDEO ONLY, and the href is a MANIFEST, not media. The old call mixed
+    // media_type=image in and put the collection.json href in `url` — every
+    // NASA hit the acquirer took downloaded a JSON manifest named .mp4 and
+    // was refused at probe ("no video dimensions"). Same class as the DVIDS
+    // page-url bug; resolveNasaDownload turns the manifest into a real file.
+    const j = await (await fetch(`https://images-api.nasa.gov/search?q=${encodeURIComponent(q)}&media_type=video`)).json();
     for (const it of (j.collection?.items || []).slice(0, 12)) {
       const d = it.data?.[0] || {};
       add({ source: "NASA", provenance: "verified",
             licence: "NASA media — public domain, no attribution required",
-            title: d.title, url: it.href, date: iso(d.date_created),
+            title: d.title,
+            url: `https://images.nasa.gov/details/${encodeURIComponent(d.nasa_id || "")}`,
+            manifestHref: it.href, date: iso(d.date_created),
             attribution: d.center ? `NASA / ${d.center}` : "NASA", query: q });
     }
   } catch (e) { add({ source: "NASA", provenance: "verified", error: e.message, query: q }); }
@@ -224,6 +231,43 @@ export async function resolveDvidsDownload(assetId) {
   // Smallest file that still meets the floor — the 1080 variant, not the master.
   mp4s.sort((a, b) => (a.size || Infinity) - (b.size || Infinity));
   return { src: mp4s[0].src, width: mp4s[0].width, height: mp4s[0].height, size: mp4s[0].size };
+}
+
+/**
+ * Resolve a NASA search hit to a direct MP4.
+ *
+ * The manifest lists renditions by suffix with no dimensions or sizes:
+ * ~orig (can be gigabytes for a town-hall recording), ~large (usually the
+ * 1080-class encode), then ~medium/~small/~mobile (below the film's 1920
+ * floor). Prefer ~large, fall back to ~orig; report content-length from a
+ * HEAD so the acquirer can refuse an unattended multi-gigabyte download
+ * BEFORE paying for it. The probe still owns the resolution verdict.
+ */
+export async function resolveNasaDownload(manifestHref) {
+  if (!manifestHref) return null;
+  const r = await fetch(manifestHref);
+  if (!r.ok) return null;
+  const files = (await r.json()).filter((f) => typeof f === "string" && f.endsWith(".mp4"));
+  const pick = files.find((f) => f.includes("~large.mp4")) || files.find((f) => f.includes("~orig.mp4"));
+  if (!pick) return null;
+  const src = pick.replace(/^http:/, "https:").replace(/ /g, "%20");
+  let size;
+  try {
+    const h = await fetch(src, { method: "HEAD" });
+    size = Number.parseInt(h.headers.get("content-length") || "", 10) || undefined;
+  } catch { /* size stays unknown; the cap check simply cannot apply */ }
+  return { src, size };
+}
+
+/**
+ * The per-source download dispatch — one place that knows which sources
+ * serve pages/manifests instead of media. Sources whose search results
+ * already carry a direct `download` (Pexels) never reach this.
+ */
+export async function resolveDownloadFor(c = {}) {
+  if (c.source === "DVIDS") return resolveDvidsDownload(c.assetId);
+  if (c.source === "NASA") return resolveNasaDownload(c.manifestHref);
+  return null;
 }
 
 /**

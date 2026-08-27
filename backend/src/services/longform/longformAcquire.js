@@ -47,6 +47,17 @@ export const UNVERIFIED = "unverified";
 const PD_SOURCES = new Set(["DVIDS", "NASA", "USGS"]);
 
 /**
+ * The largest file an unattended run may download for ONE clip. NASA ~orig
+ * renditions of hour-long recordings run to gigabytes; six of those in a
+ * cycle would exhaust the worker's disk for b-roll that gets six seconds of
+ * screen time. Resolvers report content-length when the host does; a clip
+ * whose size is unknown is NOT refused on size — the probe still owns the
+ * quality verdict, and honesty about what was measured cuts both ways.
+ */
+export const MAX_CLIP_BYTES = () =>
+  (Number.parseInt(process.env.LONGFORM_MAX_CLIP_MB || "", 10) || 500) * 1024 * 1024;
+
+/**
  * Stock libraries whose licence is the PLATFORM'S OWN, curated by it — the
  * grant does not rest on an uploader's tick-box claim. Approved for
  * unattended use by DrJ 2026-08-27 as a distinct tier; the allowlist is the
@@ -153,6 +164,11 @@ export async function acquireFootage({
     if (!url && resolveDownload) {
       try {
         const r = await resolveDownload(c);
+        if (r?.size && r.size > MAX_CLIP_BYTES()) {
+          refused.push({ source: c.source, title: c.title,
+            why: `file is ${(r.size / 1048576).toFixed(0)} MB (cap ${(MAX_CLIP_BYTES() / 1048576).toFixed(0)} MB) — too large to download unattended` });
+          continue;
+        }
         if (r?.src) url = r.src;
       } catch (e) {
         refused.push({ source: c.source, title: c.title, why: `download resolution failed: ${e.message}` });
