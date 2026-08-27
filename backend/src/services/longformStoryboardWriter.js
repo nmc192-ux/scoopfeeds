@@ -127,6 +127,9 @@ slide deck — aim for a footage beat at least every 8-10 beats when keys exist:
   statements: ${statements.join(", ") || "(none)"}
 
 HARD RULES
+- DOC CARDS: when docs keys exist, SHOW THE SOURCE — put a doc card near the
+  beat whose claim that source grounds. A film that cites on screen beats one
+  that asks to be trusted. Reference only the listed keys.
 - MAP CARDS: use one ONLY if you can author the full "geo" spec in the mapGeo
   element grammar (paths, dots, lines with real coordinates). Never use the
   "variant" registry — those are OTHER films' geography, and a wrong-place map
@@ -205,7 +208,10 @@ export async function writeStoryboard({
       continue;
     }
 
-    const schemaErrs = validateStoryboard(doc, { statementIds: mediaKeys.statements || [] });
+    const schemaErrs = validateStoryboard(doc, {
+      statementIds: mediaKeys.statements || [],
+      docKeys: mediaKeys.docs || [],
+    });
     const spineErrs = validateSpine(doc);
     const groundErrs = ungroundedFigures(doc, sourceText);
     // The publish gate's shorts floor, enforced AT GENERATION: qcVerdict

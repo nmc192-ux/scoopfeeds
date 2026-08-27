@@ -31,6 +31,7 @@ import { createRequire } from "module";
 import { logger } from "../logger.js";
 import { produceLongformFilm } from "./produceLongformFilm.js";
 import { makeAcquireMedia } from "./longformAcquire.js";
+import { makeCaptureDocs } from "./longformDocCapture.js";
 import { makeThumbnailStage } from "./longformThumbnail.js";
 
 const execFileP = promisify(execFile);
@@ -250,6 +251,10 @@ export async function runProduction(topic, {
     acquireMedia: makeAcquireMedia({
       search, download, probe, resolveDownload, relevanceScreen,
       destDir: path.join(dir, "out/footage"), want: 6, min: 3 }),
+
+    // Degrades to zero keys where Playwright is absent (the prod image, by
+    // decision) — a film without doc cards, said so in the log.
+    captureDocs: makeCaptureDocs({ dir, runEngine }),
 
     // The render stage also writes the project inputs, because the engine
     // reads them from disk and they are only knowable once the script and
