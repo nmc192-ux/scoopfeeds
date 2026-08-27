@@ -39,11 +39,20 @@ import { logger } from "../logger.js";
 
 /** Provenance tiers, in the order footage-search assigns them. */
 export const VERIFIED = "verified";
+export const PLATFORM = "platform";
 export const DECLARED = "declared";
 export const UNVERIFIED = "unverified";
 
 /** Sources whose licence is public domain by construction. */
 const PD_SOURCES = new Set(["DVIDS", "NASA", "USGS"]);
+
+/**
+ * Stock libraries whose licence is the PLATFORM'S OWN, curated by it — the
+ * grant does not rest on an uploader's tick-box claim. Approved for
+ * unattended use by DrJ 2026-08-27 as a distinct tier; the allowlist is the
+ * second check, so a searcher change cannot quietly widen what is fetched.
+ */
+const PLATFORM_SOURCES = new Set(["Pexels"]);
 
 /**
  * May this candidate be fetched with nobody watching?
@@ -58,8 +67,13 @@ export function unattendedRefusal(c = {}) {
   if (c.provenance === DECLARED) {
     return "provenance 'declared' — plausible ownership still needs a human to look at it, so it cannot enter an unattended film";
   }
+  if (c.provenance === PLATFORM) {
+    return PLATFORM_SOURCES.has(c.source)
+      ? null
+      : `source "${c.source}" is marked platform but is not on the approved stock-library list`;
+  }
   if (c.provenance !== VERIFIED) {
-    return `unknown provenance ${JSON.stringify(c.provenance)} — only 'verified' is fetched unattended`;
+    return `unknown provenance ${JSON.stringify(c.provenance)} — only 'verified' and approved 'platform' sources are fetched unattended`;
   }
   if (!PD_SOURCES.has(c.source)) {
     // Verified is asserted by the searcher; the source list is the second
@@ -90,18 +104,43 @@ export function keyFor(candidate, index) {
  *   `candidates` are in the shape longformMediaGate.screenCandidate expects.
  */
 export async function acquireFootage({
-  search, download, probe, resolveDownload = null, queries = [], destDir, want = 6,
+  search, download, probe, resolveDownload = null, relevanceScreen = null,
+  queries = [], destDir, want = 6,
 } = {}) {
   if (!search || !download || !probe) throw new Error("acquireFootage: search, download and probe are required");
   if (!queries.length) throw new Error("acquireFootage: no search queries — a film needs something to look for");
   if (!destDir) throw new Error("acquireFootage: destDir is required");
 
-  const found = await search(queries);
+  let found = await search(queries);
   const refused = [];
   const candidates = [];
 
+  // Provenance first (free), then relevance (an embedding call per survivor),
+  // then download (the expensive step) — each screen pays for the next.
+  if (relevanceScreen) {
+    const eligible = [], preRefused = [];
+    for (const c of found || []) {
+      const why = unattendedRefusal(c);
+      if (why) preRefused.push({ source: c.source, title: c.title, why });
+      else eligible.push(c);
+    }
+    const screened = await relevanceScreen(eligible);
+    refused.push(...preRefused);
+    refused.push(...screened.refused.map((r) => ({ source: r.source, title: r.title, why: r.why })));
+    found = screened.kept;
+    logger.info(`🎬 relevance: ${screened.kept.length} of ${eligible.length} candidate(s) on-story` +
+      (screened.measured === false ? " (screen did not run — unmeasured)" : ""));
+  }
+
+  // The same asset arrives once per matching query — three copies of one
+  // NASA clip measured on the calibration probe. One url, one candidate.
+  const seenUrls = new Set();
+
   for (const [i, c] of (found || []).entries()) {
     if (candidates.length >= want) break;
+    const mediaUrl = c.download || c.url;
+    if (mediaUrl && seenUrls.has(mediaUrl)) continue;
+    if (mediaUrl) seenUrls.add(mediaUrl);
 
     const why = unattendedRefusal(c);
     if (why) { refused.push({ source: c.source, title: c.title, why }); continue; }
@@ -148,11 +187,21 @@ export async function acquireFootage({
     candidates.push({
       key,
       file,
-      licence: "public-domain",
-      url: c.url || url,
+      // The gate's licence keys, exactly: "pexels" for platform stock (the
+      // gate then checks the file URL against videos.pexels.com/video-files
+      // and refuses the AIGC bundle host outright — which is also DrJ's
+      // no-generated-imagery rule enforced in code), "public-domain" for the
+      // federal sources.
+      licence: c.provenance === PLATFORM ? "pexels" : "public-domain",
+      // For platform stock the DOWNLOAD url is the provenance answer (the
+      // page url does not name the file the gate screens).
+      url: c.provenance === PLATFORM ? url : (c.url || url),
+      pageUrl: c.url,
       width: dim.value.width,
       height: dim.value.height,
-      attribution: c.attribution || `${c.source} — US Government work, public domain`,
+      attribution: c.attribution || (c.provenance === PLATFORM
+        ? `${c.source} — platform-licensed stock`
+        : `${c.source} — US Government work, public domain`),
       synthetic: false,
       containsPeople: undefined,   // unknown; the gate only bars SYNTHETIC people
     });
@@ -171,11 +220,11 @@ export async function acquireFootage({
  * visibly cycles, and the storyboard was written against the keys this
  * returns. Better to abandon the topic than to ship a film that loops.
  */
-export function makeAcquireMedia({ search, download, probe, resolveDownload = null, destDir, want = 6, min = 3 }) {
+export function makeAcquireMedia({ search, download, probe, resolveDownload = null, relevanceScreen = null, destDir, want = 6, min = 3 }) {
   return async ({ topic, script }) => {
     const queries = buildQueries(topic, script);
     const { candidates, refused } = await acquireFootage({
-      search, download, probe, resolveDownload, queries, destDir, want });
+      search, download, probe, resolveDownload, relevanceScreen, queries, destDir, want });
     if (candidates.length < min) {
       throw new Error(
         `acquisition yielded ${candidates.length} usable clip(s), need ${min}. ` +
@@ -195,25 +244,42 @@ export function makeAcquireMedia({ search, download, probe, resolveDownload = nu
  */
 export function buildQueries(topic = {}, script = null) {
   // SHORT NOUN PHRASES, NOT SENTENCES — the same lesson the demand gate paid
-  // for: a headline is written to be read, a search query is typed. The first
-  // real run sent the full title and the entire through-line SENTENCE to
-  // DVIDS and got nothing usable back.
+  // for: a headline is written to be read, a search query is typed.
+  //
+  // AND FROM THE SCRIPT'S OWN BODY, NOT JUST THE HEADLINE. The first
+  // published film searched on headline bigrams ("cyber tests", "model
+  // hacks") and filled an AI-surveillance story with Army b-roll; the script
+  // itself said "facial recognition", "surveillance cameras", "autonomous
+  // drone" over and over, and nothing ever searched for those. The most
+  // repeated bigrams across beats ARE the film's imagery vocabulary.
   const out = [];
-  for (const k of (topic.keys || []).slice(0, 3)) {
+  const bigramsOf = (text) => {
+    const words = String(text || "").toLowerCase()
+      .replace(/[^\w\s]/g, " ").split(/\s+/)
+      .filter((w) => w.length > 2 && !QUERY_STOPWORDS.has(w));
+    const grams = [];
+    for (let i = 0; i + 2 <= words.length; i++) grams.push(words.slice(i, i + 2).join(" "));
+    return grams;
+  };
+
+  const beats = Array.isArray(script?.beats) ? script.beats : [];
+  if (beats.length) {
+    const freq = new Map();
+    for (const b of beats) {
+      for (const g of new Set(bigramsOf(b?.text))) freq.set(g, (freq.get(g) || 0) + 1);
+    }
+    // A bigram in one beat is a phrase; in three or more it is a MOTIF.
+    const motifs = [...freq.entries()].filter(([, n]) => n >= 3)
+      .sort((a, b) => b[1] - a[1]).map(([g]) => g);
+    out.push(...motifs.slice(0, 4));
+  }
+
+  for (const k of (topic.keys || []).slice(0, 2)) {
     if (typeof k === "string" && k.trim()) out.push(k.trim());
   }
-  const words = String(topic.title || "").toLowerCase()
-    .replace(/[^\w\s]/g, " ").split(/\s+/)
-    .filter((w) => w.length > 2 && !QUERY_STOPWORDS.has(w));
-  for (let i = 0; i + 2 <= words.length && out.length < 5; i++) {
-    out.push(words.slice(i, i + 2).join(" "));
-  }
-  // The through-line contributes its NOUNS, not its sentence.
-  const through = String(script?.spine?.throughLine || "").toLowerCase()
-    .replace(/[^\w\s]/g, " ").split(/\s+/)
-    .filter((w) => w.length > 3 && !QUERY_STOPWORDS.has(w)).slice(0, 3);
-  if (through.length >= 2) out.push(through.slice(0, 2).join(" "));
-  return [...new Set(out.filter(Boolean))].slice(0, 5);
+  const titleGrams = bigramsOf(topic.title);
+  for (const g of titleGrams) { if (out.length >= 7) break; out.push(g); }
+  return [...new Set(out.filter(Boolean))].slice(0, 7);
 }
 
 const QUERY_STOPWORDS = new Set([

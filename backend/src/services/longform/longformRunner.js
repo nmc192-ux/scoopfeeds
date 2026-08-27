@@ -205,7 +205,8 @@ export function makeRenderStage({ dir, runEngine = engine }) {
  * @param {function} deps.publish   the publisher (called ONLY by publishIfPassed)
  */
 export async function runProduction(topic, {
-  root, search, download, publish, resolveDownload = null, sources = [], sourceText = "",
+  root, search, download, publish, resolveDownload = null, relevanceScreen = null,
+  sources = [], sourceText = "",
   runEngine = engine, now = Date.now(),
 } = {}) {
   const slug = topic?.slug || String(topic?.id || "film");
@@ -217,6 +218,20 @@ export async function runProduction(topic, {
   }
   const dir = scaffoldProject(slug, { root });
   logger.info(`🎬 ${slug}: project at ${dir}`);
+
+  // Relevance is on BY DEFAULT in production: the injected hook exists for
+  // tests, not as an opt-in — an unattended film that skips the screen is
+  // how six clips of unrelated Army b-roll shipped. Topic title + summary is
+  // what selection already knows; the screen itself reports honestly when
+  // embeddings are unavailable.
+  if (!relevanceScreen) {
+    const { makeRelevanceScreen } = await import("./longformFootageRelevance.js");
+    const { embedQuery } = await import("../../realityIndex/embeddings/embeddingService.js");
+    relevanceScreen = makeRelevanceScreen({
+      embed: embedQuery,
+      topicText: `${topic?.title || slug}. ${topic?.summary || ""}`.trim(),
+    });
+  }
 
   const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
   const _s = require("satori");
@@ -233,7 +248,7 @@ export async function runProduction(topic, {
     sources, sourceText, now, ffmpegPath,
 
     acquireMedia: makeAcquireMedia({
-      search, download, probe, resolveDownload,
+      search, download, probe, resolveDownload, relevanceScreen,
       destDir: path.join(dir, "out/footage"), want: 6, min: 3 }),
 
     // The render stage also writes the project inputs, because the engine

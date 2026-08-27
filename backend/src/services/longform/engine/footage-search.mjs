@@ -18,6 +18,12 @@
 //   declared  — an explicit licence attached by an uploader whose ownership is
 //               plausible (Wikimedia Commons, Internet Archive). Still needs a
 //               human to look at it.
+//   platform  — a stock library whose LICENSE IS THE PLATFORM'S OWN and is
+//               curated by it (Pexels). Unlike YouTube CC, the grant does not
+//               depend on an uploader's tick-box claim: the platform vouches
+//               for the catalogue it serves through its API. Approved for
+//               unattended use by DrJ 2026-08-27, as its own tier — never by
+//               widening `declared`.
 //   unverified— YouTube CC. LEAD GENERATION ONLY. Never downloaded by this
 //               tool: it tells you a clip exists so a human can find out who
 //               actually owns it. Downloading also breaks YouTube's ToS
@@ -90,6 +96,35 @@ async function nasa(q) {
 }
 
 // ── declared: an explicit licence, plausible owner ────────────────────────
+// ── platform: stock libraries with platform-curated licences ──────────────
+async function pexels(q) {
+  const key = process.env.PEXELS_API_KEY;
+  if (!key) return;   // dark until a key is set; the tier simply contributes nothing
+  try {
+    const u = `https://api.pexels.com/videos/search?query=${encodeURIComponent(q)}&per_page=10`;
+    const j = await (await fetch(u, { headers: { Authorization: key } })).json();
+    for (const v of j.videos || []) {
+      // Direct file now, not at resolve time: the API answer carries the
+      // rendition list, so pick the smallest file that still meets 1080.
+      const mp4s = (v.video_files || [])
+        .filter((f) => f.file_type === "video/mp4" && f.width >= 1920)
+        .sort((a, b) => (a.width * a.height) - (b.width * b.height));
+      if (!mp4s.length) continue;
+      add({
+        source: "Pexels", provenance: "platform",
+        licence: "Pexels License — free to use, modification allowed, no attribution required",
+        title: `${q} — ${v.user?.name || "Pexels"} #${v.id}`,
+        url: v.url, download: mp4s[0].link,
+        durationSec: v.duration, date: null,
+        attribution: `${v.user?.name || "Pexels contributor"} / Pexels`,
+        query: q,
+      });
+    }
+  } catch (e) {
+    add({ source: "Pexels", provenance: "platform", error: e.message, query: q });
+  }
+}
+
 async function commons(q) {
   // api.wikimedia.org, NOT commons.wikimedia.org/w/api.php. The classic endpoint
   // is reset at the connection level from some networks (ECONNRESET, which reads
@@ -203,9 +238,9 @@ export async function resolveDvidsDownload(assetId) {
 export async function searchFootage(queries = []) {
   results.length = 0;
   for (const q of queries) {
-    await Promise.all([dvids(q), nasa(q), commons(q), archive(q), youtubeCC(q)]);
+    await Promise.all([dvids(q), nasa(q), pexels(q), commons(q), archive(q), youtubeCC(q)]);
   }
-  const RANK = { verified: 0, declared: 1, unverified: 2 };
+  const RANK = { verified: 0, platform: 1, declared: 2, unverified: 3 };
   results.sort((a, b) => (RANK[a.provenance] - RANK[b.provenance]) || String(b.date).localeCompare(String(a.date)));
   return [...results];
 }
