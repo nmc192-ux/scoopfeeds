@@ -122,8 +122,9 @@ export async function produceLongformFilm(topic, {
   // ── 3. storyboard ────────────────────────────────────────────────────────
   stage("writing the storyboard");
   const mediaKeys = {
-    footage: acq.assets.filter((a) => !a.synthetic).map((a) => a.key),
-    photos: [], docs: captured.keys, statements: [],
+    footage: acq.assets.filter((a) => !a.synthetic && a.mediaKind !== "photo").map((a) => a.key),
+    photos: acq.assets.filter((a) => a.mediaKind === "photo").map((a) => a.key),
+    docs: captured.keys, statements: [],
   };
   const board = await writeBoard({
     script: script.markdown, spine: script.doc.spine, mediaKeys, sources, sourceText, slug,
@@ -132,6 +133,13 @@ export async function produceLongformFilm(topic, {
   // The docs TABLE is capture-derived (eyebrow, src) — the model references
   // keys, it does not author provenance rows. Model entries, if any, lose.
   if (captured.keys.length) board.docs = { ...(board.docs || {}), ...captured.docs };
+  // The photos TABLE is acquisition-derived (key → what the image shows) —
+  // like docs, the model references keys and does not author provenance.
+  const photoAssets = acq.assets.filter((a) => a.mediaKind === "photo");
+  if (photoAssets.length) {
+    board.photos = { ...(board.photos || {}),
+      ...Object.fromEntries(photoAssets.map((a) => [a.key, a.title || a.key])) };
+  }
 
   // ── 4. render ────────────────────────────────────────────────────────────
   if (!render) throw new NotImplementedError("render", "no render function supplied");

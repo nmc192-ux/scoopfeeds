@@ -114,9 +114,13 @@ export function keyFor(candidate, index) {
  * @returns {Promise<{candidates:object[], refused:object[]}>}
  *   `candidates` are in the shape longformMediaGate.screenCandidate expects.
  */
+/** One contributor's shoot may not fill the film. */
+export const MAX_PER_CONTRIBUTOR = () =>
+  Math.max(1, Number.parseInt(process.env.LONGFORM_MAX_PER_CONTRIBUTOR || "", 10) || 2);
+
 export async function acquireFootage({
   search, download, probe, resolveDownload = null, relevanceScreen = null,
-  queries = [], destDir, want = 6,
+  queries = [], destDir, photosDir = null, want = 6, wantPhotos = 4,
 } = {}) {
   if (!search || !download || !probe) throw new Error("acquireFootage: search, download and probe are required");
   if (!queries.length) throw new Error("acquireFootage: no search queries — a film needs something to look for");
@@ -143,12 +147,40 @@ export async function acquireFootage({
       (screened.measured === false ? " (screen did not run — unmeasured)" : ""));
   }
 
+  // PORTRAIT GOES LAST. A vertical clip in a landscape film survives only
+  // as a hard center crop (film 2 shipped a 2160x3840 clip that way), so
+  // landscape and unknown-orientation candidates are taken first and
+  // portrait fills in only when nothing else cleared the earlier screens.
+  // Stable within each group: the relevance order is preserved.
+  found = [
+    ...(found || []).filter((c) => !(c.width && c.height && c.height > c.width)),
+    ...(found || []).filter((c) => c.width && c.height && c.height > c.width),
+  ];
+
   // The same asset arrives once per matching query — three copies of one
   // NASA clip measured on the calibration probe. One url, one candidate.
   const seenUrls = new Set();
+  const perContributor = new Map();
+  const photos = [];
+  const wantOf = (c) => (c.mediaKind === "photo" ? wantPhotos : want);
+  const pool = (c) => (c.mediaKind === "photo" ? photos : candidates);
 
   for (const [i, c] of (found || []).entries()) {
-    if (candidates.length >= want) break;
+    if (candidates.length >= want && photos.length >= wantPhotos) break;
+    if (pool(c).length >= wantOf(c)) continue;
+    if (c.mediaKind === "photo" && !photosDir) continue;
+
+    // One contributor's shoot may not fill the film: 6 of film 2's 8 clips
+    // were a single on-topic-but-samey cottonbro set. Counted per media
+    // kind — a contributor may still supply both a clip and a photo.
+    if (c.contributor) {
+      const k = `${c.mediaKind || "video"}:${c.contributor}`;
+      if ((perContributor.get(k) || 0) >= MAX_PER_CONTRIBUTOR()) {
+        refused.push({ source: c.source, title: c.title,
+          why: `contributor "${c.contributor}" already supplied ${MAX_PER_CONTRIBUTOR()} ${c.mediaKind === "photo" ? "photo(s)" : "clip(s)"} — one shoot may not fill the film` });
+        continue;
+      }
+    }
     const mediaUrl = c.download || c.url;
     if (mediaUrl && seenUrls.has(mediaUrl)) continue;
     if (mediaUrl) seenUrls.add(mediaUrl);
@@ -156,7 +188,8 @@ export async function acquireFootage({
     const why = unattendedRefusal(c);
     if (why) { refused.push({ source: c.source, title: c.title, why }); continue; }
 
-    const key = keyFor(c, candidates.length);
+    const isPhoto = c.mediaKind === "photo";
+    const key = (isPhoto ? "P" : "F") + keyFor(c, pool(c).length).slice(1);
     // A search hit's url is often a WEB PAGE (DVIDS is). The source-specific
     // resolver turns it into a direct media url; a hit that cannot be
     // resolved is refused rather than downloaded-and-probed as HTML.
@@ -184,7 +217,14 @@ export async function acquireFootage({
     }
     let file;
     try {
-      file = await download(url, `${destDir}/${key}.mp4`);
+      // Photos land where build.mjs looks for them: out/photos/<KEY>.png is
+      // a HARDCODED path shape in the engine (image = P(`out/photos/${key}
+      // .png`)), so the extension is part of the contract, not a guess. The
+      // bytes are whatever the host served; ffmpeg sniffs content, and the
+      // probe still owns the verdict.
+      file = isPhoto
+        ? await download(url, `${photosDir}/${key}.png`)
+        : await download(url, `${destDir}/${key}.mp4`);
     } catch (e) {
       refused.push({ source: c.source, title: c.title, why: `download failed: ${e.message}` });
       continue;
@@ -200,9 +240,11 @@ export async function acquireFootage({
       continue;
     }
 
-    candidates.push({
+    pool(c).push({
       key,
       file,
+      title: c.title,
+      ...(isPhoto ? { mediaKind: "photo" } : {}),
       // The gate's licence keys, exactly: "pexels" for platform stock (the
       // gate then checks the file URL against videos.pexels.com/video-files
       // and refuses the AIGC bundle host outright — which is also DrJ's
@@ -221,12 +263,16 @@ export async function acquireFootage({
       synthetic: false,
       containsPeople: undefined,   // unknown; the gate only bars SYNTHETIC people
     });
+    if (c.contributor) {
+      const k = `${c.mediaKind || "video"}:${c.contributor}`;
+      perContributor.set(k, (perContributor.get(k) || 0) + 1);
+    }
   }
 
   logger.info(
-    `🎬 acquisition: ${candidates.length} clip(s) fetched, ${refused.length} refused ` +
+    `🎬 acquisition: ${candidates.length} clip(s) + ${photos.length} photo(s) fetched, ${refused.length} refused ` +
     `(${refused.filter((r) => /provenance/.test(r.why)).length} on provenance)`);
-  return { candidates, refused };
+  return { candidates, photos, refused };
 }
 
 /**
@@ -236,18 +282,20 @@ export async function acquireFootage({
  * visibly cycles, and the storyboard was written against the keys this
  * returns. Better to abandon the topic than to ship a film that loops.
  */
-export function makeAcquireMedia({ search, download, probe, resolveDownload = null, relevanceScreen = null, destDir, want = 6, min = 3 }) {
+export function makeAcquireMedia({ search, download, probe, resolveDownload = null, relevanceScreen = null, destDir, photosDir = null, want = 6, wantPhotos = 4, min = 3 }) {
   return async ({ topic, script }) => {
     const queries = buildQueries(topic, script);
-    const { candidates, refused } = await acquireFootage({
-      search, download, probe, resolveDownload, relevanceScreen, queries, destDir, want });
+    const { candidates, photos, refused } = await acquireFootage({
+      search, download, probe, resolveDownload, relevanceScreen, queries, destDir, photosDir, want, wantPhotos });
+    // The floor is on CLIPS only: photos diversify a film, they cannot
+    // carry one — zero photos is a texture loss, not an abandonment.
     if (candidates.length < min) {
       throw new Error(
         `acquisition yielded ${candidates.length} usable clip(s), need ${min}. ` +
         `A film built from fewer visibly cycles.\n` +
         refused.slice(0, 8).map((r) => `  refused: ${r.source || "?"} — ${r.why}`).join("\n"));
     }
-    return candidates;
+    return [...candidates, ...photos];
   };
 }
 

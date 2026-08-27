@@ -240,3 +240,12 @@ test("a doc beat may reference a CAPTURED key before its table row exists — th
   assert.match(validateStoryboard(withRoster).join("\n"),
     /not in storyboard.docs/, "no roster at all: the hand-authored rule still applies");
 });
+
+test("a photo beat may reference an ACQUIRED key before its table row exists, and ken is in/out only", () => {
+  const doc = ok({ beats: { 1: { photo: "P_STREET_1", ken: "in" } } });
+  assert.deepEqual(validateStoryboard(doc, { photoKeys: ["P_STREET_1"] }), []);
+  assert.match(validateStoryboard(doc, { photoKeys: [] }).join("\n"), /not an acquired photo/);
+  const badKen = ok({ beats: { 1: { photo: "P_STREET_1", ken: "zoom" } } });
+  assert.match(validateStoryboard(badKen, { photoKeys: ["P_STREET_1"] }).join("\n"),
+    /the only moves are "in" and "out"/);
+});

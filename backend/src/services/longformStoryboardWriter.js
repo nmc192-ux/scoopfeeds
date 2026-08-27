@@ -113,14 +113,15 @@ SHAPE
 A beat is EXACTLY ONE of:
   - a card:    { "card": "<type>", ...that type's fields }
   - footage:   { "footage": "<key>" }
-  - a photo:   { "photo": "<key>" }
+  - a photo:   { "photo": "<key>", "ken": "in"|"out" }   // ken burns: slow push or pull
 
 CARD TYPES — use only these, and only these fields. An unknown field is rejected.
 ${cardReference()}
 
-MEDIA KEYS — reference only what exists. USE the footage: several beats of
-real footage between card runs are what keep a card film from reading as a
-slide deck — aim for a footage beat at least every 8-10 beats when keys exist:
+MEDIA KEYS — reference only what exists. USE the footage AND the photos:
+several beats of real imagery between card runs are what keep a card film
+from reading as a slide deck — aim for a footage or photo beat at least
+every 6-8 beats when keys exist, alternating clips and stills for texture:
   footage:    ${footage.join(", ") || "(none)"}
   photos:     ${photos.join(", ") || "(none)"}
   docs:       ${docs.join(", ") || "(none)"}
@@ -211,6 +212,7 @@ export async function writeStoryboard({
     const schemaErrs = validateStoryboard(doc, {
       statementIds: mediaKeys.statements || [],
       docKeys: mediaKeys.docs || [],
+      photoKeys: mediaKeys.photos || [],
     });
     const spineErrs = validateSpine(doc);
     const groundErrs = ungroundedFigures(doc, sourceText);
