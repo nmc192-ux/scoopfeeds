@@ -45,7 +45,7 @@ export const MIN_HEIGHT = 1080;
 
 /** Pexels' AI-generated bundle. Contributor-shot clips never live here. */
 const AIGC_HOST = /content\.pexels\.com\/aigc-bundle\//i;
-const PEXELS_REAL = /videos\.pexels\.com\/video-files\//i;
+const PEXELS_REAL = /videos\.pexels\.com\/video-files\/|images\.pexels\.com\/photos\//i;
 
 /**
  * Screen one candidate. Returns [] when usable, or the reasons it is not.
@@ -67,7 +67,7 @@ export function screenCandidate(c = {}) {
   // A Pexels-licensed clip that is not from the real-footage host is not
   // something to assume about: say so rather than guess.
   if (c.licence === "pexels" && url && !PEXELS_REAL.test(url) && !AIGC_HOST.test(url)) {
-    errs.push(`licence "pexels" but the url is not videos.pexels.com/video-files/… — provenance unclear`);
+    errs.push(`licence "pexels" but the url is not a Pexels media host (videos.pexels.com/video-files or images.pexels.com/photos) — provenance unclear`);
   }
 
   if (!c.licence) errs.push("no licence — an asset without one cannot be registered");

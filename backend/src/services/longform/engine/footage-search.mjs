@@ -102,6 +102,29 @@ async function nasa(q) {
   } catch (e) { add({ source: "NASA", provenance: "verified", error: e.message, query: q }); }
 }
 
+async function pexelsPhotos(q) {
+  const key = process.env.PEXELS_API_KEY;
+  if (!key) return;
+  try {
+    const u = `https://api.pexels.com/v1/search?query=${encodeURIComponent(q)}&per_page=8&orientation=landscape`;
+    const j = await (await fetch(u, { headers: { Authorization: key } })).json();
+    for (const ph of j.photos || []) {
+      add({
+        source: "Pexels", provenance: "platform", mediaKind: "photo",
+        licence: "Pexels License — free to use, modification allowed, no attribution required",
+        title: `${ph.alt || q} — ${ph.photographer || "Pexels"} #${ph.id}`,
+        url: ph.url, download: ph.src?.original,
+        width: ph.width, height: ph.height,
+        contributor: ph.photographer || `pexels-${ph.photographer_id || "unknown"}`,
+        attribution: `${ph.photographer || "Pexels contributor"} / Pexels`,
+        query: q,
+      });
+    }
+  } catch (e) {
+    add({ source: "Pexels", provenance: "platform", mediaKind: "photo", error: e.message, query: q });
+  }
+}
+
 // ── declared: an explicit licence, plausible owner ────────────────────────
 // ── platform: stock libraries with platform-curated licences ──────────────
 async function pexels(q) {
@@ -123,6 +146,12 @@ async function pexels(q) {
         title: `${q} — ${v.user?.name || "Pexels"} #${v.id}`,
         url: v.url, download: mp4s[0].link,
         durationSec: v.duration, date: null,
+        // Advertised dims and contributor feed two acquisition rules: portrait
+        // goes last (a vertical clip in a landscape film is a hard crop), and
+        // one contributor's shoot may not fill the film (6 of film 2's 8
+        // clips were one cottonbro set — on-topic and visually samey).
+        width: mp4s[0].width, height: mp4s[0].height,
+        contributor: v.user?.name || `pexels-${v.user?.id || "unknown"}`,
         attribution: `${v.user?.name || "Pexels contributor"} / Pexels`,
         query: q,
       });
@@ -282,7 +311,7 @@ export async function resolveDownloadFor(c = {}) {
 export async function searchFootage(queries = []) {
   results.length = 0;
   for (const q of queries) {
-    await Promise.all([dvids(q), nasa(q), pexels(q), commons(q), archive(q), youtubeCC(q)]);
+    await Promise.all([dvids(q), nasa(q), pexels(q), pexelsPhotos(q), commons(q), archive(q), youtubeCC(q)]);
   }
   const RANK = { verified: 0, platform: 1, declared: 2, unverified: 3 };
   results.sort((a, b) => (RANK[a.provenance] - RANK[b.provenance]) || String(b.date).localeCompare(String(a.date)));

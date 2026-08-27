@@ -174,3 +174,50 @@ test("an unknown size is not refused on size — the probe owns the quality verd
   }));
   assert.equal(candidates.length, 1);
 });
+
+// ── visual variety (DrJ's film-2 review) ────────────────────────────────────
+
+test("one contributor's shoot may not fill the film", async () => {
+  const hits = Array.from({ length: 5 }, (_, i) =>
+    hit({ title: `clip ${i}`, provenance: "platform", source: "Pexels", contributor: "cottonbro",
+          download: `https://videos.pexels.com/video-files/${i}/x.mp4` }));
+  const { candidates, refused } = await acquireFootage(deps(hits));
+  assert.equal(candidates.length, 2, "MAX_PER_CONTRIBUTOR default is 2 — 6 of film 2's 8 clips were one set");
+  assert.ok(refused.some((r) => /one shoot may not fill the film/.test(r.why)));
+});
+
+test("portrait goes last: landscape fills the want first, vertical only as leftovers", async () => {
+  const { candidates } = await acquireFootage(deps([
+    hit({ title: "vertical", width: 2160, height: 3840 }),
+    hit({ title: "wide-1", width: 1920, height: 1080 }),
+    hit({ title: "wide-2", width: 1920, height: 1080 }),
+  ], { want: 2 }));
+  assert.deepEqual(candidates.map((c) => c.title), ["wide-1", "wide-2"],
+    "the 2160x3840 clip that shipped hard-cropped in film 2 is exactly what fills last");
+});
+
+test("photos partition separately: photo want, photo dir, P_ keys, and the clips floor ignores them", async () => {
+  const hits = [
+    hit({ title: "clip a" }),
+    hit({ title: "still b", mediaKind: "photo", provenance: "platform", source: "Pexels",
+          download: "https://images.pexels.com/photos/9/x.jpeg" }),
+  ];
+  const dl = [];
+  const { candidates, photos } = await acquireFootage(deps(hits, {
+    photosDir: "/tmp/p", download: async (_u, dest) => { dl.push(dest); return dest; } }));
+  assert.equal(candidates.length, 1);
+  assert.equal(photos.length, 1);
+  assert.match(photos[0].key, /^P_/, "photo keys are P_, clip keys F_");
+  assert.equal(photos[0].mediaKind, "photo");
+  assert.ok(dl.some((d) => d === `/tmp/p/${photos[0].key}.png`),
+    "photos land at out/photos/<KEY>.png — the engine's hardcoded path shape");
+});
+
+test("without a photosDir, photo candidates are simply skipped — no half-wired photo ever downloads", async () => {
+  const { photos } = await acquireFootage(deps([
+    hit({ title: "still", mediaKind: "photo", provenance: "platform", source: "Pexels",
+          download: "https://images.pexels.com/photos/9/x.jpeg" }),
+    hit({ title: "clip" }),
+  ]));
+  assert.equal(photos.length, 0);
+});

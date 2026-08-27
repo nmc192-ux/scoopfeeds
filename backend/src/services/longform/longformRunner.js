@@ -54,6 +54,7 @@ export function scaffoldProject(slug, { root }) {
   }
   mkdirSync(path.join(dir, "out"), { recursive: true });
   mkdirSync(path.join(dir, "out/footage"), { recursive: true });
+  mkdirSync(path.join(dir, "out/photos"), { recursive: true });
   writeFileSync(path.join(dir, "project.json"), JSON.stringify({ slug, title: slug }, null, 2));
   return dir;
 }
@@ -257,7 +258,9 @@ export async function runProduction(topic, {
 
     acquireMedia: makeAcquireMedia({
       search, download, probe, resolveDownload, relevanceScreen,
-      destDir: path.join(dir, "out/footage"), want: 6, min: 3 }),
+      destDir: path.join(dir, "out/footage"),
+      photosDir: path.join(dir, "out/photos"),
+      want: 6, wantPhotos: 4, min: 3 }),
 
     // Degrades to zero keys where Playwright is absent (the prod image, by
     // decision) — a film without doc cards, said so in the log.

@@ -109,7 +109,7 @@ const FIELD_SHAPE = {
  * @param {Set<string>|string[]} [opts.statementIds] ids present in the evidence archive
  * @returns {string[]} problems, empty when valid
  */
-export function validateStoryboard(doc, { statementIds = [], docKeys: capturedDocKeys = null } = {}) {
+export function validateStoryboard(doc, { statementIds = [], docKeys: capturedDocKeys = null, photoKeys: acquiredPhotoKeys = null } = {}) {
   const errs = [];
   const known = statementIds instanceof Set ? statementIds : new Set(statementIds);
   // null means "no doc-key roster supplied" (hand-authored films manage their
@@ -117,6 +117,8 @@ export function validateStoryboard(doc, { statementIds = [], docKeys: capturedDo
   // interpreter would resolve to undefined and build.mjs would then crash on.
   const knownDocs = capturedDocKeys == null ? null
     : (capturedDocKeys instanceof Set ? capturedDocKeys : new Set(capturedDocKeys));
+  const knownPhotos = acquiredPhotoKeys == null ? null
+    : (acquiredPhotoKeys instanceof Set ? acquiredPhotoKeys : new Set(acquiredPhotoKeys));
   if (!doc || typeof doc !== "object") return ["storyboard: not an object"];
   if (!doc.beats || typeof doc.beats !== "object") return ["storyboard.beats: missing or not an object"];
 
@@ -147,7 +149,16 @@ export function validateStoryboard(doc, { statementIds = [], docKeys: capturedDo
     if (kinds.length === 0) { errs.push(`${at}: is neither a card nor media (needs card, footage or photo)`); continue; }
     if (kinds.length > 1) { errs.push(`${at}: is both ${kinds.join(" and ")} — a beat is one thing`); continue; }
 
-    if (b.photo && !photoKeys.has(b.photo)) errs.push(`${at}: photo "${b.photo}" is not in storyboard.photos`);
+    // Like docs: the photos TABLE is acquisition-derived and merged after
+    // validation, so an acquired key is known before its table row exists.
+    if (b.photo && !photoKeys.has(b.photo) && !knownPhotos?.has(b.photo)) {
+      errs.push(knownPhotos
+        ? `${at}: photo ${JSON.stringify(b.photo)} is not an acquired photo (have: ${[...knownPhotos].join(", ") || "none"})`
+        : `${at}: photo "${b.photo}" is not in storyboard.photos`);
+    }
+    if (b.photo && b.ken !== undefined && b.ken !== "in" && b.ken !== "out") {
+      errs.push(`${at}: ken ${JSON.stringify(b.ken)} — the only moves are "in" and "out"`);
+    }
     if (b.footage && !isStr(b.footage)) errs.push(`${at}: footage must be a key string`);
 
     if (!b.card) continue;
