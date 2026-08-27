@@ -225,6 +225,13 @@ export async function runProduction(topic, {
   // how six clips of unrelated Army b-roll shipped. Topic title + summary is
   // what selection already knows; the screen itself reports honestly when
   // embeddings are unavailable.
+  // Per-source download resolution is on by default: DVIDS serves page urls
+  // and NASA serves manifests, and without the resolver every hit from
+  // either downloads HTML-or-JSON named .mp4 and dies at probe.
+  if (!resolveDownload) {
+    const { resolveDownloadFor } = await import("./engine/footage-search.mjs");
+    resolveDownload = resolveDownloadFor;
+  }
   if (!relevanceScreen) {
     const { makeRelevanceScreen } = await import("./longformFootageRelevance.js");
     const { embedQuery } = await import("../../realityIndex/embeddings/embeddingService.js");

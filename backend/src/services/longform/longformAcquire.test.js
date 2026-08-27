@@ -159,3 +159,18 @@ test("a film with nothing to search for refuses rather than searching blindly", 
   await assert.rejects(() => acquireFootage(deps([], { queries: [] })),
     /a film needs something to look for/);
 });
+
+test("a resolver-reported size over the cap refuses the clip BEFORE downloading it", async () => {
+  const { candidates, refused } = await acquireFootage(deps([hit({ download: undefined })], {
+    resolveDownload: async () => ({ src: "https://x/big.mp4", size: 5 * 1024 * 1024 * 1024 }),
+  }));
+  assert.equal(candidates.length, 0);
+  assert.match(refused[0].why, /too large to download unattended/);
+});
+
+test("an unknown size is not refused on size — the probe owns the quality verdict", async () => {
+  const { candidates } = await acquireFootage(deps([hit({ download: undefined })], {
+    resolveDownload: async () => ({ src: "https://x/ok.mp4" }),
+  }));
+  assert.equal(candidates.length, 1);
+});
