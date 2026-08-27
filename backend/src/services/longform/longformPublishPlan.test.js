@@ -116,3 +116,16 @@ test("a film with no Shorts is refused — the Shorts are the distribution", () 
   assert.throws(() => buildPublishPlan(base({ licensesText: NO_AI, shorts: [] })),
     /a film ships with Shorts/);
 });
+
+test("the corpus sources are stated publicly in the description, before the disclosure line", () => {
+  const plan = buildPublishPlan({
+    slug: "s", title: "T", description: "About the thing.",
+    licensesText: "| F_X | public-domain | url | 1920×1080 | DVIDS |",
+    shorts: [{ file: "01.mp4", title: "a", hook: "h" }],
+    sources: ["Reuters — The thing happened", "ABC Australia — Police trial the thing"],
+  });
+  const d = plan.youtube.description;
+  assert.ok(d.includes("Sources:\n• Reuters — The thing happened"), d);
+  assert.ok(d.indexOf("Sources:") < d.indexOf("AI-generated"),
+    "sources sit above the disclosure line");
+});
