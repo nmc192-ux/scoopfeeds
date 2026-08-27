@@ -313,7 +313,14 @@ async function _callOpenAICompat({ endpoint, apiKey, model, prompt, temperature,
         }
       );
       const text = data?.choices?.[0]?.message?.content;
-      if (!text) return null;
+      if (!text) {
+        // An empty 200 is a real provider behaviour (observed on DeepSeek:
+        // intermittent empty content on the same prompt that succeeds moments
+        // later — likely a content-filter flinch). finish_reason is the only
+        // clue, so log it; a bare null reads as "network problem" and is not.
+        logger.warn(`🧠 ${label} returned EMPTY content (finish_reason=${data?.choices?.[0]?.finish_reason ?? "?"}) — null`);
+        return null;
+      }
       // Most OpenAI-compat providers (cerebras/groq/nim) return content as a JSON STRING;
       // Cloudflare Workers AI returns it as an ALREADY-PARSED object. Accept both. A string
       // that fails to parse still falls through to the _rawText fallback.
@@ -337,12 +344,12 @@ async function _callOpenAICompat({ endpoint, apiKey, model, prompt, temperature,
 
 // ─── Generation handlers (OpenAI-compatible) ───────────────────────────────
 
-async function rawCallJsonCerebras({ prompt, temperature = 0.2, maxOutputTokens = 2048, model }) {
+async function rawCallJsonCerebras({ prompt, temperature = 0.2, maxOutputTokens = 2048, model, timeoutMs }) {
   if (!CEREBRAS_API_KEY) return null;
   return _callOpenAICompat({
     endpoint: CEREBRAS_ENDPOINT, apiKey: CEREBRAS_API_KEY,
     model: model || CEREBRAS_MODEL,
-    prompt, temperature, maxOutputTokens, label: "Cerebras", timeout: 30_000,
+    prompt, temperature, maxOutputTokens, label: "Cerebras", timeout: timeoutMs ?? 30_000,
   });
 }
 
@@ -355,25 +362,25 @@ async function rawCallJsonCloudflare({ prompt, temperature = 0.2, maxOutputToken
   });
 }
 
-async function rawCallJsonGroq({ prompt, temperature = 0.2, maxOutputTokens = 2048, model }) {
+async function rawCallJsonGroq({ prompt, temperature = 0.2, maxOutputTokens = 2048, model, timeoutMs }) {
   if (!GROQ_API_KEY) return null;
   return _callOpenAICompat({
     endpoint: GROQ_ENDPOINT, apiKey: GROQ_API_KEY,
     model: model || GROQ_MODEL,
-    prompt, temperature, maxOutputTokens, label: "Groq", timeout: 30_000,
+    prompt, temperature, maxOutputTokens, label: "Groq", timeout: timeoutMs ?? 30_000,
   });
 }
 
-async function rawCallJsonDeepseek({ prompt, temperature = 0.2, maxOutputTokens = 2048, model }) {
+async function rawCallJsonDeepseek({ prompt, temperature = 0.2, maxOutputTokens = 2048, model, timeoutMs }) {
   if (!DEEPSEEK_API_KEY) return null;
   return _callOpenAICompat({
     endpoint: DEEPSEEK_ENDPOINT, apiKey: DEEPSEEK_API_KEY,
     model: model || DEEPSEEK_MODEL,
-    prompt, temperature, maxOutputTokens, label: "DeepSeek", timeout: 30_000,
+    prompt, temperature, maxOutputTokens, label: "DeepSeek", timeout: timeoutMs ?? 30_000,
   });
 }
 
-async function rawCallJsonNim({ prompt, temperature = 0.2, maxOutputTokens = 2048, model }) {
+async function rawCallJsonNim({ prompt, temperature = 0.2, maxOutputTokens = 2048, model, timeoutMs }) {
   if (!NVIDIA_API_KEY) return null;
   return _callOpenAICompat({
     endpoint: NIM_ENDPOINT, apiKey: NVIDIA_API_KEY,
@@ -493,6 +500,13 @@ function resolveProvider(tier) {
   return null;
 }
 
+/**
+ * `timeoutMs` rides through to the provider handlers (default stays 30s).
+ * Added for long-form generation: a film script at ~8k output tokens takes
+ * longer than 30s on every provider, and the abort surfaces as ECONNRESET —
+ * which reads as a network fault, not as "your timeout is smaller than your
+ * output budget". Found on the first real run.
+ */
 export function callJson(prompt, opts = {}) {
   if (DISABLED) return Promise.resolve(null);
   const { priority = "normal", tier = "standard", task = "untagged", ...rest } = opts;

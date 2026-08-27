@@ -97,6 +97,16 @@ export function interpretStoryboard(doc, { P, loadStatement = null, strict = tru
       ...(f.crop ? { crop: f.crop } : {}),
     };
   }
+  // A beat's `footage: KEY` names the same key the footage table's `file`
+  // would — the table only adds refinements (in-point, grade, crop). Models
+  // emit the beat and skip the table, which is schema-legal and rendered as
+  // an ffmpeg command with an EMPTY input path (build.mjs reads only the
+  // table). Deriving the default entry is mechanical: key = file, in = 1,
+  // the same default the explicit path takes.
+  for (const [beat, b] of Object.entries(doc.beats || {})) {
+    const n = Number(beat);
+    if (b?.footage && !FOOTAGE[n]) FOOTAGE[n] = { file: b.footage, in: 1 };
+  }
 
   const PHOTOS = { ...(doc.photos || {}) };
 
@@ -121,6 +131,13 @@ export function interpretStoryboard(doc, { P, loadStatement = null, strict = tru
     const out = { ...b };
     if (out.src !== undefined) out.src = expand(out.src);
     if (out.note !== undefined) out.note = expand(out.note);
+
+    // House style writes chapter numerals as "01"; models emit n: 1. Satori
+    // additionally refuses a NUMERIC text child outright, so the coercion is
+    // correctness, the padding is style.
+    if (b.card === "chapter" && typeof out.n === "number") {
+      out.n = String(out.n).padStart(2, "0");
+    }
 
     // A tweet card carries the ARCHIVED RECORD, never free text — the card
     // itself re-checks the words against the archive on every frame.

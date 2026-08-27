@@ -32,7 +32,10 @@ const goodDoc = (over = {}) => ({
     4: { card: "ledger", rows: [{ who: "IMO", what: "Declared it closed." }] },
     5: { card: "statement", lines: ["NOBODY CAN CLOSE THE COUNT."] },
   },
-  shorts: [{ name: "a", from: 1, to: 2, title: "T", hook: "H" }],
+  // Three: the writer enforces the publish gate's minShorts at generation.
+  shorts: [{ name: "a", from: 1, to: 2, title: "T", hook: "H" },
+           { name: "b", from: 1, to: 2, title: "T2", hook: "H2" },
+           { name: "c", from: 1, to: 2, title: "T3", hook: "H3" }],
   reveal: 5,
   ...over,
 });
@@ -134,12 +137,15 @@ test("AN UNGROUNDED FIGURE ABANDONS THE FILM — and is never retried into", asy
   });
 });
 
-test("a null from the model layer abandons immediately rather than looping", async () => {
+test("provider nulls consume BOUNDED attempts — transient flakes cost retries, not the film", async () => {
+  // The original contract abandoned on the first null. The first real run
+  // measured intermittent empty responses succeeding on retry, so a null now
+  // consumes an attempt, bounded by LONGFORM_STORYBOARD_ATTEMPTS.
   await withEnv(true, async () => {
     let calls = 0;
     const out = await writeStoryboard({ script: "x", call: async () => { calls++; return null; } });
-    assert.equal(out, null);
-    assert.equal(calls, 1, "disabled/over-budget/provider-failure does not improve on retry");
+    assert.equal(out, null, "all-null still abandons");
+    assert.equal(calls, 3, "exactly the attempt budget, never an unbounded loop");
   });
 });
 

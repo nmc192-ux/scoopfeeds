@@ -57,6 +57,69 @@ export function scaffoldProject(slug, { root }) {
   return dir;
 }
 
+/**
+ * The title segment, synthesized MECHANICALLY when the storyboard has none.
+ *
+ * build.mjs refuses a storyboard without TITLE_SEGMENT — correctly, a film
+ * needs a title card — but the schema never asked the model for one, which
+ * the first real render found at the build step, after narration was paid
+ * for. The card is the film's title split across lines plus the spine's
+ * question: there is no creative decision in it, and the dossier-header rule
+ * applies — mechanical surfaces get mechanical content, not model prose.
+ */
+export function synthesizeTitleSegment({ title, spine }) {
+  const words = String(title || "").toUpperCase().replace(/[^\w\s'&-]/g, "").split(/\s+/).filter(Boolean);
+  // Widen until the whole title fits in three lines — a truncated title is
+  // not a title.
+  let lines = [];
+  for (let width = Math.max(20, Math.ceil(words.join(" ").length / 3) + 2); ; width += 2) {
+    lines = [];
+    for (const w of words) {
+      if (lines.length && (lines[lines.length - 1] + " " + w).length <= width) {
+        lines[lines.length - 1] += ` ${w}`;
+      } else lines.push(w);
+    }
+    if (lines.length <= 3) break;
+  }
+  return {
+    after: 2, seconds: 3.2,
+    spec: {
+      card: "title", kicker: "ScoopFeeds · Long-form",
+      lines,
+      ...(spine?.question ? { sub: spine.question } : {}),
+    },
+  };
+}
+
+/**
+ * Cutaway inserts, synthesized for footage beats that have none.
+ *
+ * The rhythm gate (>= 8% of shots under 2s) is the house pacing standard,
+ * and the shipped hormuz film failed it the same way this pipeline's first
+ * QC-complete render did: every shot a long hold, 0% quick cuts. Its fix is
+ * written above its INSERTS table as a derivation rule — "every footage beat
+ * gets a brief cutaway to a DIFFERENT clip" (~1.3s, at 0.55 of the beat) —
+ * which makes the inserts mechanical, not editorial: same rule, applied by
+ * code instead of by hand. Model-authored inserts are kept verbatim.
+ */
+export function synthesizeInserts(board) {
+  const beats = board?.beats || {};
+  const footageBeats = Object.entries(beats)
+    .filter(([, b]) => b?.footage).map(([n, b]) => [Number(n), b.footage])
+    .sort((a, b) => a[0] - b[0]);
+  const keys = [...new Set(footageBeats.map(([, k]) => k))];
+  if (keys.length < 2) return board.inserts || {};
+  const inserts = { ...(board.inserts || {}) };
+  for (const [n, key] of footageBeats) {
+    if (inserts[n]) continue;
+    // The next DIFFERENT clip in rotation — a cutaway to the same clip is
+    // just the shot continuing.
+    const other = keys[(keys.indexOf(key) + 1) % keys.length];
+    inserts[n] = [{ at: 0.55, dur: 1.3, footage: other }];
+  }
+  return inserts;
+}
+
 /** Write the artifacts the engine reads: beats.json and storyboard.json. */
 export function writeProjectInputs({ dir, slug, title, script, board, licenses }) {
   writeFileSync(path.join(dir, "project.json"), JSON.stringify({ slug, title }, null, 2));
@@ -64,7 +127,28 @@ export function writeProjectInputs({ dir, slug, title, script, board, licenses }
   writeFileSync(path.join(dir, "beats.json"), JSON.stringify(
     (script.doc.beats || []).map((b, i) => ({ id: i + 1, text: b.text })), null, 2));
   // JSON, not a module. See the header.
-  writeFileSync(path.join(dir, "storyboard.json"), JSON.stringify(board, null, 2));
+  const withTitle = {
+    ...board,
+    ...(board.titleSegment ? {} : { titleSegment: synthesizeTitleSegment({ title, spine: board.spine }) }),
+    inserts: synthesizeInserts(board),
+  };
+  writeFileSync(path.join(dir, "storyboard.json"), JSON.stringify(withTitle, null, 2));
+  // shorts.json is what shorts.mjs actually cuts from — the storyboard's
+  // shorts array never reaches the engine on its own (found when the first
+  // real render died at the shorts step, film already built). Names are
+  // index-prefixed and filename-safe here because the engine names output
+  // files from them and the publish plan zips shorts back to their titles
+  // BY SORTED FILENAME: a model's display names ("The Svetofor Slip") sort
+  // alphabetically, not in film order, and every title would attach to the
+  // wrong file.
+  if (board.shorts?.length) {
+    writeFileSync(path.join(dir, "shorts.json"), JSON.stringify(
+      board.shorts.map((sh, i) => ({
+        ...sh,
+        name: `${String(i + 1).padStart(2, "0")}_${String(sh.name || sh.title || "short")
+          .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)}`,
+      })), null, 2));
+  }
   if (licenses) writeFileSync(path.join(dir, "out/footage/LICENSES.md"), licenses);
 }
 
@@ -121,7 +205,7 @@ export function makeRenderStage({ dir, runEngine = engine }) {
  * @param {function} deps.publish   the publisher (called ONLY by publishIfPassed)
  */
 export async function runProduction(topic, {
-  root, search, download, publish, sources = [], sourceText = "",
+  root, search, download, publish, resolveDownload = null, sources = [], sourceText = "",
   runEngine = engine, now = Date.now(),
 } = {}) {
   const slug = topic?.slug || String(topic?.id || "film");
@@ -149,7 +233,8 @@ export async function runProduction(topic, {
     sources, sourceText, now, ffmpegPath,
 
     acquireMedia: makeAcquireMedia({
-      search, download, probe, destDir: path.join(dir, "out/footage"), want: 6, min: 3 }),
+      search, download, probe, resolveDownload,
+      destDir: path.join(dir, "out/footage"), want: 6, min: 3 }),
 
     // The render stage also writes the project inputs, because the engine
     // reads them from disk and they are only knowable once the script and

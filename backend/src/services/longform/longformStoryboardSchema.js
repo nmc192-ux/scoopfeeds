@@ -26,6 +26,8 @@
  */
 
 /** Card types the renderer actually exports. Anything else is a typo. */
+import { validateGeo } from "./engine/mapGeo.mjs";
+
 export const CARD_TYPES = Object.freeze([
   "title", "chapter", "stat", "bars", "outro", "quote", "tweet", "map",
   "linechart", "multiline", "equation", "doc", "dotgrid", "pipeline",
@@ -55,6 +57,15 @@ export const CARD_SPECS = Object.freeze({
   statement: { req: ["lines"],                                  opt: ["kicker", "src"] },
   ledger:    { req: ["rows"],                                   opt: ["kicker", "title", "src"] },
 });
+
+/** The widest beat range a short may cut. See the shorts check below. */
+export const MAX_SHORT_BEATS = 10;
+/**
+ * The QC gate publishes nothing with fewer (longformQcGate GATES.minShorts).
+ * Enforced by the WRITER, not validateStoryboard: hand-authored films keep
+ * their cuts in shorts.json and validate storyboards with none.
+ */
+export const MIN_SHORTS = 3;
 
 /** Non-card beats: the imagery the film cuts to. */
 export const MEDIA_KINDS = Object.freeze(["footage", "photo"]);
@@ -145,6 +156,15 @@ export function validateStoryboard(doc, { statementIds = [] } = {}) {
     for (const f of spec.req) {
       if (b[f] === undefined) errs.push(`${at} (${b.card}): missing required field "${f}"`);
     }
+    // A PRESENT geo must parse. The variant-or-geo rule below already forces
+    // a map to name its geography, but a truthy geo of the wrong SHAPE
+    // ("geo": "AU-NSW", a region code) satisfied it and died in geoSvg 45
+    // segments into the build — validateGeo was written "so the storyboard
+    // schema can call it long before a render is attempted", and nothing
+    // here called it.
+    if (b.card === "map" && b.geo !== undefined) {
+      for (const e of validateGeo(b.geo)) errs.push(`${at} (map): geo ${e}`);
+    }
     const allowed = new Set(["card", ...spec.req, ...spec.opt]);
     for (const f of Object.keys(b)) {
       if (!allowed.has(f)) {
@@ -174,6 +194,13 @@ export function validateStoryboard(doc, { statementIds = [] } = {}) {
   // means the author learns before a render, not after one.
   for (const [i, s] of (doc.shorts || []).entries()) {
     const at = `shorts[${i}]${s?.name ? ` (${s.name})` : ""}`;
+    // A short is a MOMENT, not a chapter. At the enforced beat granularity
+    // (~14 words ≈ 5-6s a beat), ten beats is the whole 59s budget; the
+    // first real storyboard cut 33-beat "shorts" that measured 150s+ and
+    // failed the duration gate after the render was paid for.
+    if (isNum(s?.from) && isNum(s?.to) && s.to - s.from + 1 > MAX_SHORT_BEATS) {
+      errs.push(`${at}: spans ${s.to - s.from + 1} beats (max ${MAX_SHORT_BEATS}) — a short is a moment, not a chapter; at ~5-6s a beat this cannot fit the 59s Shorts budget`);
+    }
     for (const f of ["name", "from", "to", "title", "hook"]) {
       if (s?.[f] === undefined) errs.push(`${at}: missing "${f}"`);
     }

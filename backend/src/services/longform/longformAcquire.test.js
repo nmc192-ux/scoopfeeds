@@ -121,7 +121,7 @@ test("too few usable clips ABANDONS the topic rather than shipping a loop", asyn
     min: 3,
   });
   await assert.rejects(
-    () => acquire({ topic: { title: "T" }, script: null }),
+    () => acquire({ topic: { title: "Strait Tanker Crossing Blocked" }, script: null }),
     (e) => /yielded 1 usable clip\(s\), need 3/.test(e.message)
         && /visibly cycles/.test(e.message)
         && /refused:/.test(e.message));
@@ -129,14 +129,17 @@ test("too few usable clips ABANDONS the topic rather than shipping a loop", asyn
 
 // ── Queries ─────────────────────────────────────────────────────────────────
 
-test("queries come from the TOPIC and the through-line, not the narration", () => {
+test("queries are SHORT NOUN PHRASES, never sentences — the demand gate's lesson", () => {
+  // The first real run sent the full title and the whole through-line
+  // sentence to DVIDS and got nothing usable back. A headline is written to
+  // be read; a search query is typed.
   const q = buildQueries(
     { title: "Iran Declares: Strait CLOSED!", keys: ["strait of hormuz"] },
     { spine: { throughLine: "the ship that cannot move" } });
-  assert.ok(q.includes("Iran Declares Strait CLOSED"), "punctuation stripped");
-  assert.ok(q.includes("strait of hormuz"));
-  assert.ok(q.includes("the ship that cannot move"), "the through-line is the film's best single query");
-  assert.ok(q.length <= 4);
+  assert.equal(q[0], "strait of hormuz", "entity keys lead — they ARE queries");
+  assert.ok(q.every((x) => x.split(" ").length <= 3), "no sentences: " + JSON.stringify(q));
+  assert.ok(q.some((x) => x.includes("ship")), "the through-line contributes its nouns");
+  assert.ok(q.length <= 5);
 });
 
 test("a film with nothing to search for refuses rather than searching blindly", async () => {

@@ -15,7 +15,7 @@ import { mkdtempSync, existsSync, readFileSync, mkdirSync, writeFileSync, readdi
 import os from "node:os";
 import path from "node:path";
 
-import { scaffoldProject, writeProjectInputs, makeRenderStage } from "./longformRunner.js";
+import { scaffoldProject, writeProjectInputs, makeRenderStage, synthesizeTitleSegment, synthesizeInserts } from "./longformRunner.js";
 
 const root = () => mkdtempSync(path.join(os.tmpdir(), "runner-"));
 
@@ -123,4 +123,69 @@ test("an engine step that fails propagates rather than continuing to the next", 
       return "";
     } })({ slug: "strait" }),
     /ffmpeg died/);
+});
+
+// ── the title segment, synthesized mechanically ──────────────────────────────
+// build.mjs refuses a storyboard without TITLE_SEGMENT, and the first real
+// render found that out after narration was paid for. The card is mechanical:
+// the film's title and the spine's question, no model prose.
+
+test("synthesizeTitleSegment: every word of the title survives, in at most three lines", () => {
+  const title = "AI Firms Debate Putting Cyber Tests Online After Model Hacks";
+  const t = synthesizeTitleSegment({ title, spine: { question: "Who decides?" } });
+  assert.equal(t.spec.card, "title");
+  assert.ok(t.spec.lines.length <= 3, "three lines maximum");
+  assert.equal(t.spec.lines.join(" "), title.toUpperCase(),
+    "a truncated title is not a title — the wrap widens instead of dropping words");
+  assert.equal(t.spec.sub, "Who decides?", "the sub is the spine's question");
+});
+
+test("synthesizeTitleSegment: no question means no sub, not an empty one", () => {
+  const t = synthesizeTitleSegment({ title: "Short Title" });
+  assert.equal(t.spec.sub, undefined);
+  assert.deepEqual(t.spec.lines, ["SHORT TITLE"]);
+});
+
+test("writeProjectInputs: a storyboard without a titleSegment gets the mechanical one; one with keeps its own", () => {
+  const dir = scaffoldProject("strait", { root: root() });
+  writeProjectInputs({ dir, slug: "strait", title: "The Strait", script: SCRIPT, board: BOARD });
+  const w = JSON.parse(readFileSync(path.join(dir, "storyboard.json"), "utf8"));
+  assert.ok(w.titleSegment?.spec?.lines?.length, "synthesized when absent");
+  assert.equal(w.titleSegment.spec.lines.join(" "), "THE STRAIT");
+
+  const authored = { after: 5, seconds: 3.2, spec: { card: "title", lines: ["OWN"] } };
+  writeProjectInputs({ dir, slug: "strait", title: "The Strait", script: SCRIPT,
+    board: { ...BOARD, titleSegment: authored } });
+  const w2 = JSON.parse(readFileSync(path.join(dir, "storyboard.json"), "utf8"));
+  assert.deepEqual(w2.titleSegment, authored, "an authored title segment is never overwritten");
+});
+
+test("writeProjectInputs: shorts reach the engine as shorts.json, index-prefixed so sorted files match storyboard order", () => {
+  const dir = scaffoldProject("strait", { root: root() });
+  writeProjectInputs({ dir, slug: "strait", title: "T", script: SCRIPT,
+    board: { ...BOARD, shorts: [
+      { name: "The Svetofor Slip", from: 1, to: 4, title: "A", hook: "h" },
+      { name: "Moral Red Line", from: 17, to: 22, title: "B", hook: "h" },
+    ] } });
+  const shorts = JSON.parse(readFileSync(path.join(dir, "shorts.json"), "utf8"));
+  assert.deepEqual(shorts.map((s) => s.name), ["01_the-svetofor-slip", "02_moral-red-line"],
+    "display names sort alphabetically, not in film order — the index prefix is what keeps " +
+    "the publish plan's sorted-filename zip attached to the right titles");
+  assert.equal(shorts[1].to, 22, "the cut range survives the rename");
+});
+
+test("synthesizeInserts: every footage beat cuts away to a DIFFERENT clip; authored inserts survive", () => {
+  const board = { beats: {
+    1: { card: "stat", figure: "1", label: "x" },
+    3: { footage: "F_A" }, 8: { footage: "F_B" }, 12: { footage: "F_A" },
+  }, inserts: { 8: [{ at: 0.3, dur: 1.0, footage: "F_A" }] } };
+  const ins = synthesizeInserts(board);
+  assert.equal(ins[3][0].footage, "F_B", "cutaway is a different clip");
+  assert.equal(ins[12][0].footage, "F_B");
+  assert.deepEqual(ins[8], [{ at: 0.3, dur: 1.0, footage: "F_A" }], "authored insert kept verbatim");
+  assert.equal(ins[1], undefined, "card beats get no synthesized cutaway");
+});
+
+test("synthesizeInserts: a single-clip film gets none — a cutaway to the same clip is the shot continuing", () => {
+  assert.deepEqual(synthesizeInserts({ beats: { 3: { footage: "F_A" }, 8: { footage: "F_A" } } }), {});
 });

@@ -16,8 +16,7 @@ import assert from "node:assert/strict";
 
 import {
   writeLongformScript, validateScript, renderScriptMarkdown, wordCount,
-  buildSpinePrompt, buildScriptPrompt, isLongformScriptEnabled, MIN_WORDS,
-} from "./longformScriptWriter.js";
+  buildSpinePrompt, buildScriptPrompt, isLongformScriptEnabled, MIN_WORDS, MIN_BEATS, MAX_BEAT_WORDS, normalizeBeats } from "./longformScriptWriter.js";
 
 const EVENT = { id: "e1", slug: "strait", title: "Strait of Hormuz closed", summary: "A summary." };
 const SOURCES = ["IMO, 31 March 2026: the strait is closed.", "Losses reached 1,240 billion."];
@@ -85,11 +84,16 @@ test("THE SPINE IS A SEPARATE CALL, MADE FIRST", async () => {
   });
 });
 
-test("no usable spine abandons before any script call", async () => {
+test("a bad spine is retried (nulls are transient), then abandons before any script call", async () => {
+  // Measured on the first real run: two empty provider responses, then a good
+  // one, on the same prompt. A flake must cost a retry, not the film — but a
+  // consistently unusable spine still abandons without a single script call.
   await withEnv(true, async () => {
     const call = stub(goodDoc(), { nonsense: true });
     assert.equal(await writeLongformScript({ event: EVENT, sources: SOURCES, call }), null);
-    assert.equal(call.calls.length, 1, "it must not go on to write beats");
+    assert.equal(call.calls.length, 3, "three spine tries, and NO script call");
+    assert.ok(call.calls.every((p) => /STORY SPINE for a 7-10 minute/.test(p)),
+      "every call was a spine call — beats were never attempted");
   });
 });
 
@@ -208,6 +212,27 @@ test("the prompts state the hard rules", () => {
   assert.match(buildSpinePrompt({ event: EVENT, sources: SOURCES }), /Do not open on the reversal/);
   const p = buildScriptPrompt({ event: EVENT, spine: SPINE, sources: SOURCES });
   assert.match(p, new RegExp(`${MIN_WORDS}-1400 words TOTAL`));
-  assert.match(p, /GROUNDING: every figure must appear in the SOURCES/);
+  assert.match(p, /GROUNDING: every figure must appear in the SOURCE TEXT/);
+  assert.match(p, /NONFICTION/);
+  assert.match(p, /reveal must be a REAL fact/);
   assert.match(p, /Assign no blame/);
+});
+
+test("beat granularity is structural: few long beats fail before anything is rendered", () => {
+  // 22 beats of ~47 words passed the old validator and then failed FIVE QC
+  // gates after the render was paid for — pacing is decided here, in text.
+  const fat = {
+    spine: { throughLine: "t", question: "q", reveal: "r", escalation: "e", questionBeat: 1, answerBeat: 22 },
+    beats: Array.from({ length: 22 }, () => ({ text: Array(48).fill("word").join(" ") })),
+  };
+  const errs = validateScript(fat);
+  assert.ok(errs.some((e) => e.includes(`need >= ${MIN_BEATS}`)), "beat-count floor");
+  assert.ok(errs.some((e) => e.includes(`over ${MAX_BEAT_WORDS} words`)), "per-beat cap");
+});
+
+test("normalizeBeats: the shapes models actually emit are renamed, not rejected", () => {
+  const doc = { beats: ["plain string", { narration: "from narration" }, { text: "already right" }, { wrong: 1 }] };
+  normalizeBeats(doc);
+  assert.deepEqual(doc.beats.map((b) => b.text), ["plain string", "from narration", "already right", undefined],
+    "renaming is mechanical; a beat with no recognisable text still fails validation");
 });

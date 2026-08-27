@@ -34,7 +34,7 @@
 import { logger } from "./logger.js";
 import { callJson } from "../realityIndex/llmQueue.js";
 import {
-  validateStoryboard, validateSpine, CARD_TYPES, CARD_SPECS,
+  validateStoryboard, validateSpine, CARD_TYPES, CARD_SPECS, MIN_SHORTS,
 } from "./longform/longformStoryboardSchema.js";
 
 export const isLongformStoryboardEnabled = () =>
@@ -106,6 +106,7 @@ SHAPE
              "questionBeat": <n>, "answerBeat": <n> },
   "beats": { "1": {...}, "2": {...}, ... },   // contiguous from 1, no gaps
   "shorts": [ { "name", "from": <beat>, "to": <beat>, "title", "hook" } ],
+             // 3 or 4 shorts, each a MOMENT of at most 10 beats, never a chapter
   "reveal": <beat number of the film's one remembered moment>
 }
 
@@ -117,13 +118,19 @@ A beat is EXACTLY ONE of:
 CARD TYPES — use only these, and only these fields. An unknown field is rejected.
 ${cardReference()}
 
-MEDIA KEYS — reference only what exists:
+MEDIA KEYS — reference only what exists. USE the footage: several beats of
+real footage between card runs are what keep a card film from reading as a
+slide deck — aim for a footage beat at least every 8-10 beats when keys exist:
   footage:    ${footage.join(", ") || "(none)"}
   photos:     ${photos.join(", ") || "(none)"}
   docs:       ${docs.join(", ") || "(none)"}
   statements: ${statements.join(", ") || "(none)"}
 
 HARD RULES
+- MAP CARDS: use one ONLY if you can author the full "geo" spec in the mapGeo
+  element grammar (paths, dots, lines with real coordinates). Never use the
+  "variant" registry — those are OTHER films' geography, and a wrong-place map
+  publishes silently. If you cannot author geo, use a different card.
 - GROUNDING: every figure must appear in the SOURCES below. Invent nothing. If
   a number cannot be sourced, leave it out — a film that omits a figure is
   correct; one that invents a figure is not publishable.
@@ -179,22 +186,36 @@ export async function writeStoryboard({
     const prompt = buildStoryboardPrompt({ script, spine, mediaKeys, sources, errors });
     let doc;
     try {
-      doc = await call(prompt, { task: "longform-storyboard", tier: "premium", priority: "low" });
+      // Same output-cap reasoning as the script writer: ~70 beats of card
+      // JSON does not fit the 2048-token default, and JSON-mode providers
+      // reject truncated output with an unhelpful 400.
+      // 32k, matching the script call: a 79-beat storyboard's JSON plus a
+      // hybrid reasoner's thinking measured over 24k (finish_reason=length,
+      // empty content, two attempts in a row).
+      doc = await call(prompt, { task: "longform-storyboard", tier: "premium", priority: "low", maxOutputTokens: 32_000, timeoutMs: 300_000 });
     } catch (e) {
       logger.warn(`🎬 ${slug}: storyboard call failed on attempt ${attempt}/${attempts} — ${e.message}`);
       doc = null;
     }
     if (!doc) {
-      // A null from callJson means disabled, over budget, or provider failure.
-      // None of those improve by asking again with the same prompt.
+      // A null is TRANSIENT more often than terminal — measured on the first
+      // real run (intermittent empty responses on the same prompt). It
+      // consumes an attempt, bounded by LONGFORM_STORYBOARD_ATTEMPTS.
       logger.warn(`🎬 ${slug}: no storyboard returned (attempt ${attempt}/${attempts})`);
-      return null;
+      continue;
     }
 
     const schemaErrs = validateStoryboard(doc, { statementIds: mediaKeys.statements || [] });
     const spineErrs = validateSpine(doc);
     const groundErrs = ungroundedFigures(doc, sourceText);
-    const all = [...schemaErrs, ...spineErrs, ...groundErrs];
+    // The publish gate's shorts floor, enforced AT GENERATION: qcVerdict
+    // requires GATES.minShorts, and the storyboard that cut two shorts would
+    // have failed it only after the whole render was paid for. Writer-level,
+    // not schema-level — hand-authored films keep their cuts in shorts.json.
+    const shortsErrs = (doc.shorts || []).length < MIN_SHORTS
+      ? [`${(doc.shorts || []).length} short(s) (need >= ${MIN_SHORTS}) — the publish gate requires ${MIN_SHORTS}`]
+      : [];
+    const all = [...schemaErrs, ...spineErrs, ...groundErrs, ...shortsErrs];
 
     if (!all.length) {
       const n = Object.keys(doc.beats).length;
@@ -213,7 +234,10 @@ export async function writeStoryboard({
       return null;
     }
 
-    logger.warn(`🎬 ${slug}: storyboard rejected on attempt ${attempt}/${attempts}, ${all.length} problem(s)`);
+    // The problems themselves — a count cannot tell a bad shorts span from a
+    // hallucinated figure, and an unattended cycle's log is all anyone gets.
+    logger.warn(`🎬 ${slug}: storyboard rejected on attempt ${attempt}/${attempts}, ${all.length} problem(s)\n  ` +
+      all.slice(0, 8).join("\n  "));
     errors = all.slice(0, 25);
   }
 

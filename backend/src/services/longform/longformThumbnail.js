@@ -160,17 +160,50 @@ export async function renderThumbnail({
  * someone click. Falls back to the title when no question is available rather
  * than inventing one.
  */
+const LINE_CHARS = 22;
+
+/**
+ * The longest word-prefix of `text` that wraps into MAX_HEADLINE_LINES lines
+ * of LINE_CHARS. A spine question is a sentence; the headline budget is 44
+ * characters — splitting the whole question in half produced two 45-char
+ * lines and a refusal. The hook is the OPENING of the question ("WHO IS
+ * REALLY IN CONTROL"), not all of it; trailing connectives are trimmed so
+ * the cut never ends mid-thought ("...CONTROL WHEN").
+ */
+export function headlineLines(text) {
+  const STOP = new Set(["WHEN", "AND", "OR", "OF", "IN", "ON", "TO", "THE", "A", "AN", "AS", "BY", "FOR", "WITH", "THAT", "IS", "ARE"]);
+  // The main clause first: "Who is really in control when AI generates…"
+  // headlines as "WHO IS REALLY IN CONTROL", not as a mid-clause fragment.
+  const main = String(text || "").split(/,|\s(?:when|if|while|because|after|before)\s/i)[0];
+  const words = String(main).toUpperCase().replace(/[^\w\s—-]/g, "").trim().split(/\s+/).filter(Boolean);
+  const lines = [];
+  for (const w of words) {
+    if (lines.length && (lines[lines.length - 1] + " " + w).length <= LINE_CHARS) {
+      lines[lines.length - 1] += ` ${w}`;
+    } else if (lines.length < MAX_HEADLINE_LINES && w.length <= LINE_CHARS) {
+      lines.push(w);
+    } else break;
+  }
+  while (lines.length) {
+    const last = lines[lines.length - 1].split(" ");
+    if (last.length && STOP.has(last[last.length - 1])) {
+      last.pop();
+      if (last.length) lines[lines.length - 1] = last.join(" ");
+      else lines.pop();
+    } else break;
+  }
+  return lines;
+}
+
 export function makeThumbnailStage({ outDir, ffmpegPath, fontsDir, satori, Resvg, plateFrom, plateAt }) {
   return async ({ slug, title, spine, sub }) => {
-    const source = String(spine?.question || title || "").toUpperCase().replace(/[^\w\s—-]/g, "").trim();
-    const words = source.split(/\s+/).filter(Boolean);
-    // Two lines, split near the middle so neither is a stub.
-    const mid = Math.ceil(words.length / 2);
-    const lines = words.length > 3
-      ? [words.slice(0, mid).join(" "), words.slice(mid).join(" ")]
-      : [source];
+    // The spine's question is what makes someone click; the title is the
+    // fallback when there is none.
+    const lines = headlineLines(spine?.question).length >= 2
+      ? headlineLines(spine?.question)
+      : headlineLines(title);
     return renderThumbnail({
-      spec: { lines: lines.filter(Boolean).slice(0, MAX_HEADLINE_LINES), sub, plateFrom, plateAt },
+      spec: { lines, sub, plateFrom, plateAt },
       outDir, ffmpegPath, fontsDir, satori, Resvg,
     });
   };
