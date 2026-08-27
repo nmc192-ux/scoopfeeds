@@ -116,7 +116,7 @@ export function buildSchedule(startFrom, shortCount = 5) {
 export function buildPublishPlan({
   slug, title, description = "", tags = [], licensesText,
   generatedScenes = [], shorts = [], startFrom = Date.now(),
-  facebookCaption = null,
+  facebookCaption = null, sources = [],
 } = {}) {
   if (!slug) throw new Error("buildPublishPlan: slug is required");
   if (!title) throw new Error("buildPublishPlan: title is required");
@@ -128,7 +128,14 @@ export function buildPublishPlan({
   // The disclosure sentence is APPENDED to the description rather than left to
   // the author, so the description can never contradict the provenance — the
   // exact drift that produced the bundibugyo error.
-  const fullDescription = [description.trim(), disc.descriptionLine]
+  // The sources are PUBLIC, in the description — DrJ's review of the first
+  // film: attribution lived only in small on-card src lines, and a viewer
+  // asking "says who?" had nowhere to look. The corpus that grounded the
+  // script is the honest answer, stated as outlet — headline.
+  const sourceBlock = sources.length
+    ? "Sources:\n" + sources.slice(0, 12).map((x) => `• ${x}`).join("\n")
+    : "";
+  const fullDescription = [description.trim(), sourceBlock, disc.descriptionLine]
     .filter(Boolean).join("\n\n");
 
   return {
