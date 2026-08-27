@@ -131,7 +131,13 @@ async function pexels(q) {
   const key = process.env.PEXELS_API_KEY;
   if (!key) return;   // dark until a key is set; the tier simply contributes nothing
   try {
-    const u = `https://api.pexels.com/videos/search?query=${encodeURIComponent(q)}&per_page=10`;
+    // /v1/ — the videos endpoints moved there and the old path is on notice:
+    // "Video endpoints are now available at https://api.pexels.com/v1/videos/.
+    //  The https://api.pexels.com/videos/ endpoints will be deprecated in the
+    //  future." (https://www.pexels.com/api/documentation/, checked 2026-08-27)
+    // Photo search above was always /v1/, which is why only this line was stale:
+    // code written against older video examples keeps the pre-move path.
+    const u = `https://api.pexels.com/v1/videos/search?query=${encodeURIComponent(q)}&per_page=10`;
     const j = await (await fetch(u, { headers: { Authorization: key } })).json();
     for (const v of j.videos || []) {
       // Direct file now, not at resolve time: the API answer carries the
