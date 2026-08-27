@@ -32,14 +32,19 @@ test("the Pexels endpoint is the /v1/ path the docs name", () => {
   assert.equal(PEXELS.doc, "https://www.pexels.com/api/documentation/#videos-search");
 });
 
-test("the deprecated Pexels path does not appear anywhere in the endpoint record", () => {
-  // "Video endpoints are now available at https://api.pexels.com/v1/videos/. The
-  //  https://api.pexels.com/videos/ endpoints will be deprecated in the future."
-  // The old path is exactly what a port from someone else's client reintroduces.
-  const serialised = JSON.stringify(PEXELS);
-  assert.ok(!/api\.pexels\.com\/videos\//.test(serialised),
-    "the deprecated https://api.pexels.com/videos/ path is back in the endpoint record");
-});
+// THE BAN ON THE DEPRECATED PATH HAS MOVED — to
+// src/services/pexelsEndpointGuard.test.js.
+//
+// It used to live here, and it checked only this file's PEXELS constant. That
+// was too narrow twice over: it scanned scripts/ alone, and it ran only under
+// the stock-suite command rather than the standard `node --test "src/**\/*.test.js"`
+// run. A live occurrence of the deprecated path sat in
+// src/services/longform/engine/footage-search.mjs the whole time.
+//
+// The replacement scans src/ AND scripts/ as source text, and sits in the
+// standard suite. endpoints.mjs is covered by it like any other file, so the
+// assertion that used to be here is not lost — it is subsumed, and there is one
+// ban rather than two that can disagree.
 
 test("the Pixabay endpoint and its auth style are as documented", () => {
   assert.equal(PIXABAY.url, "https://pixabay.com/api/videos/");
