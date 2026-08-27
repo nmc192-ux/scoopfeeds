@@ -109,9 +109,14 @@ const FIELD_SHAPE = {
  * @param {Set<string>|string[]} [opts.statementIds] ids present in the evidence archive
  * @returns {string[]} problems, empty when valid
  */
-export function validateStoryboard(doc, { statementIds = [] } = {}) {
+export function validateStoryboard(doc, { statementIds = [], docKeys: capturedDocKeys = null } = {}) {
   const errs = [];
   const known = statementIds instanceof Set ? statementIds : new Set(statementIds);
+  // null means "no doc-key roster supplied" (hand-authored films manage their
+  // own out/docs). When a roster IS supplied, an unknown docKey is a beat the
+  // interpreter would resolve to undefined and build.mjs would then crash on.
+  const knownDocs = capturedDocKeys == null ? null
+    : (capturedDocKeys instanceof Set ? capturedDocKeys : new Set(capturedDocKeys));
   if (!doc || typeof doc !== "object") return ["storyboard: not an object"];
   if (!doc.beats || typeof doc.beats !== "object") return ["storyboard.beats: missing or not an object"];
 
@@ -156,7 +161,10 @@ export function validateStoryboard(doc, { statementIds = [] } = {}) {
     for (const f of spec.req) {
       if (b[f] === undefined) errs.push(`${at} (${b.card}): missing required field "${f}"`);
     }
-    // A PRESENT geo must parse. The variant-or-geo rule below already forces
+    if (b.card === "doc" && knownDocs && !knownDocs.has(b.docKey)) {
+      errs.push(`${at} (doc): docKey ${JSON.stringify(b.docKey)} is not a captured document (have: ${[...knownDocs].join(", ") || "none"})`);
+    }
+        // A PRESENT geo must parse. The variant-or-geo rule below already forces
     // a map to name its geography, but a truthy geo of the wrong SHAPE
     // ("geo": "AU-NSW", a region code) satisfied it and died in geoSvg 45
     // segments into the build — validateGeo was written "so the storyboard
@@ -177,7 +185,11 @@ export function validateStoryboard(doc, { statementIds = [] } = {}) {
       if (verdict !== true) errs.push(`${at} (${b.card}): "${f}" ${verdict}`);
     }
     // Media references that resolve to nothing.
-    if (b.card === "doc" && b.docKey && !docKeys.has(b.docKey)) {
+    // A key on the captured roster is known even before its table row exists:
+    // the docs TABLE (eyebrow, src) is capture-derived and merged in AFTER
+    // validation, precisely so the model references keys without authoring
+    // provenance rows.
+    if (b.card === "doc" && b.docKey && !docKeys.has(b.docKey) && !knownDocs?.has(b.docKey)) {
       errs.push(`${at} (doc): docKey "${b.docKey}" is not in storyboard.docs`);
     }
     if (b.card === "tweet" && b.statementId && known.size && !known.has(String(b.statementId))) {

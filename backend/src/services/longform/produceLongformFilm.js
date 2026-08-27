@@ -77,6 +77,10 @@ export async function produceLongformFilm(topic, {
   // stages with no implementation — see MISSING_STAGES
   acquireMedia = notImplemented("acquireMedia", MISSING_STAGES.acquireMedia),
   makeThumbnail = notImplemented("makeThumbnail", MISSING_STAGES.makeThumbnail),
+  // Optional: no captureDocs means a film without doc cards, not a failure —
+  // Chromium is deliberately absent from the production image, and the stage
+  // itself degrades honestly when capture is unavailable at runtime.
+  captureDocs = null,
   // filesystem-bound
   render,
   // measurement + publication
@@ -106,16 +110,28 @@ export async function produceLongformFilm(topic, {
     throw new Error(`media acquisition refused:\n  ${acq.problems.join("\n  ")}`);
   }
 
+  // ── 2b. source pages, captured with measured highlights ──────────────────
+  // Before the storyboard, so the writer knows which doc keys exist. A
+  // capture that cannot run here yields no keys — the honest degrade.
+  let captured = { keys: [], docs: {} };
+  if (captureDocs) {
+    stage("capturing source pages");
+    captured = await captureDocs({ topic, script: script.doc });
+  }
+
   // ── 3. storyboard ────────────────────────────────────────────────────────
   stage("writing the storyboard");
   const mediaKeys = {
     footage: acq.assets.filter((a) => !a.synthetic).map((a) => a.key),
-    photos: [], docs: [], statements: [],
+    photos: [], docs: captured.keys, statements: [],
   };
   const board = await writeBoard({
     script: script.markdown, spine: script.doc.spine, mediaKeys, sources, sourceText, slug,
   });
   if (!board) throw new Error("storyboard generation returned null — the topic is abandoned");
+  // The docs TABLE is capture-derived (eyebrow, src) — the model references
+  // keys, it does not author provenance rows. Model entries, if any, lose.
+  if (captured.keys.length) board.docs = { ...(board.docs || {}), ...captured.docs };
 
   // ── 4. render ────────────────────────────────────────────────────────────
   if (!render) throw new NotImplementedError("render", "no render function supplied");

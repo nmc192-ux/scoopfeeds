@@ -231,3 +231,12 @@ test("a present geo must parse — a region-code string satisfied variant-or-geo
   assert.match(validateStoryboard(badGeo).join("\n"), /geo geo: not an object/,
     "a region-code string is not the mapGeo grammar");
 });
+
+test("a doc beat may reference a CAPTURED key before its table row exists — the row is merged after validation", () => {
+  const withRoster = ok({ beats: { 1: { card: "doc", docKey: "DOC_REUTERS_1" } } });
+  assert.deepEqual(validateStoryboard(withRoster, { docKeys: ["DOC_REUTERS_1"] }), []);
+  assert.match(validateStoryboard(withRoster, { docKeys: [] }).join("\n"),
+    /not a captured document/, "with an empty roster the same beat is refused");
+  assert.match(validateStoryboard(withRoster).join("\n"),
+    /not in storyboard.docs/, "no roster at all: the hand-authored rule still applies");
+});
