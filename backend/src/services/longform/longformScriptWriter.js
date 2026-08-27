@@ -28,6 +28,7 @@
 import { logger } from "../logger.js";
 import { callJson } from "../../realityIndex/llmQueue.js";
 import { ungroundedFigures } from "../longformStoryboardWriter.js";
+import { groundednessVerdict } from "./longformGroundedness.js";
 
 export const isLongformScriptEnabled = () =>
   process.env.LONGFORM_SCRIPT_ENABLED === "1";
@@ -371,8 +372,23 @@ export async function writeLongformScript({
       return null;
     }
     if (!structural.length) {
+      // THE GROUNDEDNESS GATE, last and only on a structurally accepted
+      // script (a judge call costs real money; a script that will be
+      // rejected anyway does not get one). Fiction passed every earlier
+      // gate on the first supervised run — perfect structure, zero figures
+      // — so figures alone are provably not enough. Fails ABANDON, never
+      // retry-with-feedback: told "not that claim", a model paraphrases
+      // the claim back in. Unmeasured also abandons — no degraded
+      // long-form includes degraded checking.
+      const g = await groundednessVerdict({
+        beats: doc.beats, spine: doc.spine || spine, sourceText, call, slug });
+      if (!g.grounded) {
+        logger.error(`🎬 ${slug}: ABANDONED — groundedness${g.measured ? "" : " UNVERIFIED"}:\n  ` +
+          g.problems.slice(0, 6).join("\n  "));
+        return null;
+      }
       const words = doc.beats.reduce((a, b) => a + wordCount(b.text), 0);
-      logger.info(`🎬 ${slug}: script accepted — ${doc.beats.length} beats, ${words} words (attempt ${attempt})`);
+      logger.info(`🎬 ${slug}: script accepted — ${doc.beats.length} beats, ${words} words, groundedness judged clean (attempt ${attempt})`);
       return { doc, markdown: renderScriptMarkdown(doc, { title: event.title }) };
     }
     // The problems THEMSELVES, not a count: an unattended cycle's rejection
