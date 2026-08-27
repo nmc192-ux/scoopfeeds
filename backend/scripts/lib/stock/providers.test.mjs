@@ -3,19 +3,25 @@
  *
  * Run: cd backend && node --test "scripts/lib/stock/*.test.mjs"
  *
- * ⚠️ THE FIXTURES BELOW ARE NOT CAPTURED RESPONSES. The brief (§9) asks for
- * "a real captured Pexels/Pixabay response shape", and these are not that: the
- * egress proxy in the environment this was written in blocks both providers, so
- * no live response could be captured and no documented shape could be read. They
- * encode what the port EXPECTS, which makes them a regression net for the port's
- * own logic and nothing more. If the real payload differs, these tests will
- * happily keep passing while the tool fails — so re-capture them against a real
- * response as part of closing §2a, and treat the shape as unverified until then.
+ * ⚠️ THE FIXTURES BELOW ARE DOC-DERIVED, NOT LIVE-CAPTURED. They are built from
+ * the example payloads published in the providers' own documentation, read
+ * off-container by DrJ on 27 Aug 2026 (the authoring session cannot reach either
+ * host). That is a real improvement on the previous draft, which encoded only
+ * what the port expected — but it is still not a captured response, and a doc
+ * example can lag or simplify the live payload.
  *
- * What they DO cover honestly: given a payload of this shape, the highest-quality
- * rendition is selected; a Cloudflare interstitial and a 429 stop with a named
- * reason rather than a JSON parse error; and a payload missing what the port
- * needs produces a refusal, not an entry full of nulls.
+ * STILL TO DO: re-capture these from a real response after the first acceptance
+ * run, and replace these fixtures with what actually came back.
+ *
+ * The traps below are the documented ones, and each has its own test because
+ * each would produce a WORKING tool that quietly does the wrong thing:
+ *   - Pexels "quality" is not resolution: a 1280×720 and a 4096×2160 file are
+ *     both quality "hd" in the docs' own example.
+ *   - a Pexels "hls" entry carries width: null and height: null.
+ *   - Pixabay returns `large` even when there is no large version, with an empty
+ *     url and size 0 — the key's presence proves nothing.
+ *   - Pixabay has no top-level width/height; dimensions are per-rendition only.
+ *   - Pixabay's `user` is a username STRING; Pexels' is an object.
  */
 
 import test from "node:test";
@@ -27,31 +33,54 @@ import {
 
 // ─── Fixtures (UNVERIFIED — see the header) ─────────────────────────────────
 
+/**
+ * Pexels video object. NOTE the deliberate ordering: the `hls` entry comes first
+ * with null dimensions, the first "hd" entry is only 1280×720, and the largest
+ * file — also "hd" — is LAST. A selector that trusts `quality` or takes the first
+ * match picks 720p here while a 4K file sits in the same array.
+ */
 const PEXELS_VIDEO = {
   id: 857195,
-  width: 3840,
+  width: 4096,
   height: 2160,
   duration: 14,
   url: "https://www.pexels.com/video/aerial-view-of-a-container-port-857195/",
-  user: { id: 417, name: "Ruvim Miksanskiy" },
+  image: "https://images.pexels.com/videos/857195/free-video-857195.jpg",
+  user: { id: 417, name: "Ruvim Miksanskiy", url: "https://www.pexels.com/@digitech" },
   video_files: [
-    { id: 1, quality: "sd", file_type: "video/mp4", width: 640, height: 360, link: "https://player.example/sd.mp4" },
-    { id: 2, quality: "hd", file_type: "video/mp4", width: 1920, height: 1080, link: "https://player.example/hd.mp4" },
-    { id: 3, quality: "uhd", file_type: "video/mp4", width: 3840, height: 2160, link: "https://player.example/uhd.mp4" },
+    { id: 1, quality: "hls", file_type: "video/mp4", width: null, height: null, fps: null, link: "https://player.example/stream.m3u8" },
+    { id: 2, quality: "hd", file_type: "video/mp4", width: 1280, height: 720, fps: 25, link: "https://player.example/hd-720.mp4" },
+    { id: 3, quality: "sd", file_type: "video/mp4", width: 640, height: 360, fps: 25, link: "https://player.example/sd-360.mp4" },
+    { id: 4, quality: "hd", file_type: "video/mp4", width: 4096, height: 2160, fps: 25, link: "https://player.example/hd-4k.mp4" },
   ],
+  video_pictures: [{ id: 1, picture: "https://images.pexels.com/pic-0.png", nr: 0 }],
 };
 
+/** Pixabay video hit. `user` is a string, and there is no top-level width/height. */
 const PIXABAY_HIT = {
   id: 125,
   pageURL: "https://pixabay.com/videos/id-125/",
-  duration: 12,
+  type: "film",
   tags: "container port, cranes, night",
-  user: "Coverr-Free-Footage",
+  duration: 12,
   videos: {
-    large: { url: "https://cdn.example/large.mp4", width: 1920, height: 1080, size: 6000000 },
-    medium: { url: "https://cdn.example/medium.mp4", width: 1280, height: 720, size: 3000000 },
-    small: { url: "https://cdn.example/small.mp4", width: 640, height: 360, size: 1000000 },
-    tiny: { url: "", width: 0, height: 0, size: 0 },
+    large: { url: "https://cdn.example/large.mp4", width: 3840, height: 2160, size: 24000000, thumbnail: "https://cdn.example/large.jpg" },
+    medium: { url: "https://cdn.example/medium.mp4", width: 1920, height: 1080, size: 6000000, thumbnail: "https://cdn.example/medium.jpg" },
+    small: { url: "https://cdn.example/small.mp4", width: 1280, height: 720, size: 3000000, thumbnail: "https://cdn.example/small.jpg" },
+    tiny: { url: "https://cdn.example/tiny.mp4", width: 960, height: 540, size: 1000000, thumbnail: "https://cdn.example/tiny.jpg" },
+  },
+  views: 4462, downloads: 1464, likes: 18, comments: 0,
+  user_id: 1281706, user: "Coverr-Free-Footage",
+  userImageURL: "https://cdn.pixabay.com/user/2017/user.jpg",
+};
+
+/** The documented degenerate case: `large` present, but empty. */
+const PIXABAY_HIT_NO_LARGE = {
+  ...PIXABAY_HIT,
+  id: 126,
+  videos: {
+    ...PIXABAY_HIT.videos,
+    large: { url: "", width: 0, height: 0, size: 0, thumbnail: "" },
   },
 };
 
@@ -65,10 +94,25 @@ const response = (body, { status = 200, contentType = "application/json" } = {})
 
 // ─── Rendition selection ────────────────────────────────────────────────────
 
-test("the highest-resolution Pexels rendition wins, not the first or last listed", () => {
+test("the highest-resolution Pexels rendition wins — `quality` is NOT resolution", () => {
+  // THE TRAP. In the docs' own example a 1280x720 file and a 4096x2160 file are
+  // BOTH quality "hd". Ranking "hd" over "sd" and taking the first match yields
+  // 720p while a 4K file sits two entries further down the same array.
   const picked = pickPexelsRendition(PEXELS_VIDEO);
-  assert.equal(picked.link, "https://player.example/uhd.mp4");
-  assert.equal(picked.width, 3840);
+  assert.equal(picked.link, "https://player.example/hd-4k.mp4");
+  assert.equal(picked.width, 4096);
+
+  const firstHd = PEXELS_VIDEO.video_files.find((f) => f.quality === "hd");
+  assert.equal(firstHd.width, 1280, "the fixture must keep a smaller 'hd' entry ahead of the big one");
+  assert.notEqual(picked.id, firstHd.id, "picking the first 'hd' is exactly the bug this guards");
+});
+
+test("an hls entry is skipped — its width and height are null", () => {
+  // Number(null) is 0, so the dimension filter would drop it anyway; it is also
+  // excluded by name, and a manifest row of width 0 must never be possible.
+  const hlsOnly = { ...PEXELS_VIDEO, video_files: [PEXELS_VIDEO.video_files[0]] };
+  assert.equal(pickPexelsRendition(hlsOnly), null, "an hls-only result yields nothing usable");
+  assert.notEqual(pickPexelsRendition(PEXELS_VIDEO).quality, "hls");
 });
 
 test("Pexels renditions that are not mp4 are passed over", () => {
@@ -83,10 +127,24 @@ test("Pexels renditions that are not mp4 are passed over", () => {
   assert.equal(pickPexelsRendition(withMov).link, "https://player.example/hd.mp4");
 });
 
-test("the largest usable Pixabay rendition wins and empty ones are ignored", () => {
+test("the largest usable Pixabay rendition wins", () => {
   const picked = pickPixabayRendition(PIXABAY_HIT);
   assert.equal(picked.url, "https://cdn.example/large.mp4");
+  assert.equal(picked.width, 3840);
+});
+
+test("a Pixabay hit with an EMPTY large falls back instead of downloading nothing", () => {
+  // THE TRAP. When no large version exists the key is still returned, with an
+  // empty url and size 0. Reading videos.large.url unconditionally yields "",
+  // and the download silently fetches nothing.
+  assert.equal(PIXABAY_HIT_NO_LARGE.videos.large.url, "", "the key is present but empty");
+  const picked = pickPixabayRendition(PIXABAY_HIT_NO_LARGE);
+  assert.equal(picked.url, "https://cdn.example/medium.mp4");
   assert.equal(picked.width, 1920);
+
+  const n = normalisePixabay(PIXABAY_HIT_NO_LARGE);
+  assert.equal(n.downloadUrl, "https://cdn.example/medium.mp4");
+  assert.ok(n.width > 0 && n.height > 0, "a zero-dimension entry must never reach the manifest");
 });
 
 test("a result with no usable rendition yields null rather than a broken entry", () => {
@@ -105,16 +163,34 @@ test("a Pexels result carries its creator, source URL and licence through", () =
   assert.equal(n.creator, "Ruvim Miksanskiy");
   assert.equal(n.sourceUrl, PEXELS_VIDEO.url);
   assert.equal(n.license, "Pexels License");
-  assert.equal(n.width, 3840);
+  assert.equal(n.width, 4096);
   assert.equal(n.durationSec, 14);
-  assert.equal(n.downloadUrl, "https://player.example/uhd.mp4");
+  assert.equal(n.downloadUrl, "https://player.example/hd-4k.mp4");
 });
 
 test("Pixabay's comma-joined tag string becomes a real list", () => {
   const n = normalisePixabay(PIXABAY_HIT);
   assert.deepEqual(n.tags, ["container port", "cranes", "night"]);
-  assert.equal(n.creator, "Coverr-Free-Footage");
   assert.equal(n.sourceUrl, "https://pixabay.com/videos/id-125/");
+});
+
+test("provenance is read from the right place for each provider", () => {
+  // Pixabay's `user` is a username STRING and the source is pageURL; Pexels'
+  // `user` is an OBJECT and the source is `url`. Reading user.name from a
+  // Pixabay hit yields undefined, and an unattributable clip is refused at the
+  // manifest — so this would surface as a confusing acquisition failure.
+  assert.equal(typeof PIXABAY_HIT.user, "string");
+  assert.equal(typeof PEXELS_VIDEO.user, "object");
+  assert.equal(normalisePixabay(PIXABAY_HIT).creator, "Coverr-Free-Footage");
+  assert.equal(normalisePexels(PEXELS_VIDEO).creator, "Ruvim Miksanskiy");
+});
+
+test("Pixabay dimensions come from the rendition — there is no top-level pair", () => {
+  assert.equal(PIXABAY_HIT.width, undefined, "the documented hit carries no top-level width");
+  assert.equal(PIXABAY_HIT.height, undefined);
+  const n = normalisePixabay(PIXABAY_HIT);
+  assert.equal(n.width, 3840, "so the dimensions must come from the chosen rendition");
+  assert.equal(n.height, 2160);
 });
 
 test("the normalised dimensions are the RENDITION's, not the result's headline pair", () => {
@@ -123,9 +199,9 @@ test("the normalised dimensions are the RENDITION's, not the result's headline p
   // library ends up full of clips that are softer than the manifest claims.
   const hdOnly = { ...PEXELS_VIDEO, video_files: [PEXELS_VIDEO.video_files[1]] };
   const n = normalisePexels(hdOnly);
-  assert.equal(hdOnly.width, 3840, "the result still claims UHD");
-  assert.equal(n.width, 1920, "but the rendition we can actually download is HD");
-  assert.equal(n.height, 1080);
+  assert.equal(hdOnly.width, 4096, "the result still claims 4K at the top level");
+  assert.equal(n.width, 1280, "but the rendition we can actually download is 720p");
+  assert.equal(n.height, 720);
 });
 
 // ─── Failure modes stop cleanly, with a named reason ────────────────────────
@@ -200,24 +276,57 @@ test("a genuinely empty result set is NOT an error", async () => {
 
 // ─── Requests carry what the contract says they carry ───────────────────────
 
-test("Pexels is asked for portrait explicitly and authorised by bare header", async () => {
+test("Pexels goes to the /v1/ path, not the deprecated one", async () => {
+  // The first draft of endpoints.mjs used https://api.pexels.com/videos/search,
+  // which the docs mark for deprecation. That near-miss is what the §2a gate
+  // caught, and this pins the corrected path so it cannot drift back.
+  let seenUrl;
+  const fetchImpl = async (url) => { seenUrl = url; return response({ videos: [] }); };
+  await searchPexels({ query: "ports", key: "k", fetchImpl });
+  assert.equal(seenUrl.origin + seenUrl.pathname, "https://api.pexels.com/v1/videos/search");
+});
+
+test("Pexels is asked for portrait 4K up front and authorised by bare header", async () => {
   let seenUrl;
   let seenInit;
   const fetchImpl = async (url, init) => { seenUrl = url; seenInit = init; return response({ videos: [] }); };
-  await searchPexels({ query: "container port", orientation: "portrait", key: "K123", fetchImpl });
+  await searchPexels({ query: "container port", orientation: "portrait", size: "large", key: "K123", fetchImpl });
   assert.equal(seenUrl.searchParams.get("orientation"), "portrait");
+  assert.equal(seenUrl.searchParams.get("size"), "large", "provider-side filtering is what saves the quota");
   assert.equal(seenUrl.searchParams.get("query"), "container port");
   assert.equal(seenInit.headers.Authorization, "K123", "no Bearer prefix — see endpoints.mjs");
+});
+
+test("Pexels per_page is clamped to the documented maximum", async () => {
+  let seenUrl;
+  const fetchImpl = async (url) => { seenUrl = url; return response({ videos: [] }); };
+  await searchPexels({ query: "ports", perPage: 500, key: "k", fetchImpl });
+  assert.equal(seenUrl.searchParams.get("per_page"), "80");
 });
 
 test("Pixabay carries the key as a query parameter and asks for no orientation", async () => {
   let seenUrl;
   const fetchImpl = async (url) => { seenUrl = url; return response({ hits: [] }); };
-  await searchPixabay({ query: "cargo ship", key: "K456", fetchImpl });
+  await searchPixabay({ query: "cargo ship", minHeight: 2160, key: "K456", fetchImpl });
   assert.equal(seenUrl.searchParams.get("key"), "K456");
   assert.equal(seenUrl.searchParams.get("q"), "cargo ship");
+  assert.equal(seenUrl.searchParams.get("min_height"), "2160", "the 4K pass filters provider-side");
+  assert.equal(seenUrl.searchParams.get("video_type"), "film");
+  assert.equal(seenUrl.searchParams.get("safesearch"), "true");
   assert.equal(seenUrl.searchParams.get("orientation"), null,
-    "Pixabay video search has no orientation filter — dimensions decide instead");
+    "confirmed 2026-08-27: video search has no orientation filter — dimensions decide instead");
+});
+
+test("an over-long Pixabay query is refused rather than silently truncated", async () => {
+  // q is capped at 100 characters; sending more would return results for a query
+  // nobody wrote, which is worse than an error.
+  let called = false;
+  const fetchImpl = async () => { called = true; return response({ hits: [] }); };
+  await assert.rejects(
+    () => searchPixabay({ query: "x".repeat(101), key: "k", fetchImpl }),
+    (e) => { assert.equal(e.reason, "bad-request"); return true; }
+  );
+  assert.equal(called, false);
 });
 
 test("wrapping a search in the repo's retry helper does not defeat the 429 stop", async () => {

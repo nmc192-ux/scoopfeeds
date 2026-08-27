@@ -7,14 +7,16 @@
  * story and a bar chart on a displacement story. So the search happens HERE,
  * once, under a human's eye, and the render loop never talks to a provider.
  *
- * ⚠️ THE ENDPOINTS ARE UNVERIFIED. §2a requires each host and path be confirmed
- * against the provider's own documentation, and the environment this was written
- * in could not reach pexels.com or pixabay.com (egress blocked). Every endpoint
- * is quarantined in lib/stock/endpoints.mjs behind `verifiedAgainstDocs`, which
- * is false — so this script REFUSES to contact a provider until a human closes
- * §2a. That includes --dry-run: a dry run still asks the provider what exists, so
- * it reaches the same unverified host. --dry-run withholds the download and the
- * manifest write, not the request. --list-classes is the only offline mode.
+ * ENDPOINTS: §2a is closed. Every host and path was verified against the
+ * providers' own documentation off-container by DrJ on 27 Aug 2026, and the check
+ * caught a real error — the Pexels endpoint was the deprecated /videos/ path
+ * rather than /v1/videos/. The constants and that record live in
+ * lib/stock/endpoints.mjs; this script still calls assertEndpointsVerified()
+ * before contacting anything, so reopening the question re-arms the refusal.
+ *
+ * QUOTA: Pexels allows 200 requests/hour, Pixabay 100 per 60 seconds. Requests are
+ * serial, filtered provider-side (see lib/stock/passes.mjs), cached within a run, and a
+ * 429 stops the run rather than being retried.
  *
  * MAC ONLY (§2e). Downloaded media is foreign content that ffmpeg parses. There
  * is deliberately no VPS path, no cron and no container service for any of this,
@@ -41,6 +43,7 @@ import { fileURLToPath } from "url";
 import { fetchTimeout, withNetworkRetry } from "../src/services/httpRetry.js";
 import { gradeCandidate, GRADES, rationSoftCrops } from "./lib/stock/cropGate.mjs";
 import { assertEndpointsVerified } from "./lib/stock/endpoints.mjs";
+import { applicablePasses, describePass } from "./lib/stock/passes.mjs";
 import {
   betterGradeCount, isKnown, LIBRARY_ROOT, makeEntry, nextId, readManifest, STAGING_DIR, writeManifest,
 } from "./lib/stock/manifest.mjs";
@@ -116,37 +119,52 @@ function byPreference(a, b) {
   return b.candidate.width * b.candidate.height - a.candidate.width * a.candidate.height;
 }
 
+function runPass(pass, query, keys, cache) {
+  if (pass.provider === "pexels") {
+    return cache(`pexels:${pass.orientation}:${pass.size}:${query}`, () =>
+      withNetworkRetry(
+        () => searchPexels({
+          query, orientation: pass.orientation, size: pass.size,
+          key: keys.pexels(), fetchImpl: timedFetch,
+        }),
+        { label: `pexels "${query}" (${pass.orientation}/${pass.size})` }
+      ));
+  }
+  return cache(`pixabay:${pass.minHeight}:${query}`, () =>
+    withNetworkRetry(
+      () => searchPixabay({ query, minHeight: pass.minHeight, key: keys.pixabay(), fetchImpl: timedFetch }),
+      { label: `pixabay "${query}" (min_height ${pass.minHeight})` }
+    ));
+}
+
 /**
  * Every candidate a class's queries turn up, deduped within the run and against
  * the manifest. Requests are SERIAL on purpose (§3a): these are free tiers, and a
  * 429 stops the run rather than being retried.
  */
-async function gatherCandidates(cls, { providers: wanted, keys, cache, existing }) {
+async function gatherCandidates(cls, { providers: wanted, keys, cache, existing, target }) {
   const seenThisRun = new Set();
   const out = [];
+  const acceptedSoFar = () => out.filter((o) => o.accepted).length;
+  const applicable = applicablePasses(wanted);
+  const passesUsed = [];
 
-  for (const query of cls.queries) {
-    if (wanted.includes("pexels")) {
-      // Native portrait first (§3a), then landscape — Pexels supports the filter.
-      for (const orientation of ["portrait", "landscape"]) {
-        const found = await cache(`pexels:${orientation}:${query}`, () =>
-          withNetworkRetry(
-            () => searchPexels({ query, orientation, key: keys.pexels(), fetchImpl: timedFetch }),
-            { label: `pexels "${query}" (${orientation})` }
-          ));
-        collect(found);
-      }
+  for (const pass of applicable) {
+    for (const query of cls.queries) {
+      collect(await runPass(pass, query, keys, cache));
     }
-    if (wanted.includes("pixabay")) {
-      // Pixabay video search has no orientation filter — dimensions decide (§3a).
-      const found = await cache(`pixabay:${query}`, () =>
-        withNetworkRetry(
-          () => searchPixabay({ query, key: keys.pixabay(), fetchImpl: timedFetch }),
-          { label: `pixabay "${query}"` }
-        ));
-      collect(found);
-    }
+    passesUsed.push(pass);
+    // The passes are ordered best-first, so once the class is full every further
+    // request is quota spent on candidates that would be discarded anyway. The
+    // §5 soft-crop ration may still trim the result below `target`; a re-run tops
+    // the class up safely, because dedupe means nothing is fetched twice.
+    if (acceptedSoFar() >= target) break;
   }
+
+  // This early stop bounds coverage, so it is reported rather than assumed —
+  // a run that searched 2 of 6 passes must not read as one that searched all 6.
+  const skipped = applicable.filter((p) => !passesUsed.includes(p));
+  return { candidates: out, passesUsed, skipped };
 
   function collect(found) {
     for (const candidate of found) {
@@ -158,8 +176,6 @@ async function gatherCandidates(cls, { providers: wanted, keys, cache, existing 
       out.push({ candidate, ...verdict });
     }
   }
-
-  return out;
 }
 
 const timedFetch = (url, init) => fetch(url, { ...init, signal: fetchTimeout() });
@@ -236,9 +252,11 @@ if (args.dryRun) console.log("   DRY RUN — nothing is downloaded and the manif
 else console.log("");
 
 for (const cls of selected) {
-  let graded;
+  let gathered;
   try {
-    graded = await gatherCandidates(cls, { providers: args.providers, keys, cache, existing: manifest });
+    gathered = await gatherCandidates(cls, {
+      providers: args.providers, keys, cache, existing: manifest, target: args.perClass,
+    });
   } catch (e) {
     if (e instanceof ProviderError || e?.cause instanceof ProviderError) {
       const pe = e instanceof ProviderError ? e : e.cause;
@@ -247,6 +265,7 @@ for (const cls of selected) {
     die(`${cls.id}: ${e.message}`, 2);
   }
 
+  const graded = gathered.candidates;
   const accepted = rationSoftCrops(
     graded.filter((g) => g.accepted).sort(byPreference),
     betterGradeCount(manifest, cls.id)
@@ -254,6 +273,11 @@ for (const cls of selected) {
 
   const rejected = graded.filter((g) => !g.accepted);
   console.log(`── ${cls.id} — ${graded.length} candidate(s), ${accepted.length} accepted, ${rejected.length} rejected`);
+  console.log(`   passes: ${gathered.passesUsed.map(describePass).join(", ")}`);
+  if (gathered.skipped.length) {
+    // Not a silent cap: the class filled, so these were never asked.
+    console.log(`   not searched (class filled first): ${gathered.skipped.map(describePass).join(", ")}`);
+  }
 
   for (const item of accepted) {
     const { candidate, grade, orientation } = item;

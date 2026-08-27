@@ -88,22 +88,44 @@ async function readJson(res, provider) {
   }
 }
 
-/** Highest-resolution mp4 rendition among a Pexels result's video_files. */
+const pixels = (r) => Number(r.width) * Number(r.height);
+
+/**
+ * Highest-resolution mp4 rendition among a Pexels result's video_files.
+ *
+ * RANKED BY DIMENSIONS, NEVER BY `quality`. Two documented traps make the quality
+ * string useless for this:
+ *   - "quality" is not resolution. In Pexels' own example payload a 1280×720 file
+ *     and a 4096×2160 file are BOTH quality "hd", so ranking "hd" over "sd" picks
+ *     720p while a 4K file sits in the same array.
+ *   - an "hls" entry has width: null and height: null. Number(null) is 0, so the
+ *     dimension filter drops it, but it is also excluded by name so the intent is
+ *     legible rather than incidental.
+ */
 export function pickPexelsRendition(video) {
   const files = Array.isArray(video?.video_files) ? video.video_files : [];
   const usable = files.filter(
-    (f) => f?.link && (!f.file_type || /mp4/i.test(f.file_type)) && Number(f.width) > 0 && Number(f.height) > 0
+    (f) => f?.link &&
+      f.quality !== "hls" &&
+      (!f.file_type || /mp4/i.test(f.file_type)) &&
+      Number(f.width) > 0 && Number(f.height) > 0
   );
   if (!usable.length) return null;
-  return usable.reduce((best, f) => (Number(f.width) * Number(f.height) > Number(best.width) * Number(best.height) ? f : best));
+  return usable.reduce((best, f) => (pixels(f) > pixels(best) ? f : best));
 }
 
-/** Highest-resolution rendition among a Pixabay hit's `videos` map. */
+/**
+ * Highest-resolution rendition among a Pixabay hit's `videos` map.
+ *
+ * TRAP: when no large version exists, `large` is still PRESENT, with an empty url
+ * and size 0. Code that reads videos.large.url unconditionally downloads nothing,
+ * so presence of the key proves nothing and every rendition is checked.
+ */
 export function pickPixabayRendition(hit) {
   const videos = hit?.videos && typeof hit.videos === "object" ? hit.videos : {};
   const usable = Object.values(videos).filter((v) => v?.url && Number(v.width) > 0 && Number(v.height) > 0);
   if (!usable.length) return null;
-  return usable.reduce((best, v) => (Number(v.width) * Number(v.height) > Number(best.width) * Number(best.height) ? v : best));
+  return usable.reduce((best, v) => (pixels(v) > pixels(best) ? v : best));
 }
 
 /** Pexels result → the shape the crop gate and manifest speak. */
@@ -149,16 +171,22 @@ export function normalisePixabay(hit) {
 }
 
 /**
- * Search Pexels. `orientation` is passed through because Pexels supports it and
- * §3a wants native portrait requested first.
+ * Search Pexels. `orientation` and `size` are provider-side filters: asking for
+ * portrait 4K up front costs one request instead of fetching a page of landscape
+ * HD and throwing it away at the crop gate, which matters on 200 requests/hour.
+ *   orientation: landscape | portrait | square
+ *   size:        large (4K) | medium (Full HD) | small (HD)
  */
-export async function searchPexels({ query, perPage = 15, page = 1, orientation, key, fetchImpl = globalThis.fetch }) {
+export async function searchPexels({
+  query, perPage = 15, page = 1, orientation, size, key, fetchImpl = globalThis.fetch,
+}) {
   if (!key) throw new ProviderError("no-key", "PEXELS_API_KEY is not set (Mac-local only — brief §2d).");
   const url = new URL(PEXELS.url);
   url.searchParams.set("query", query);
-  url.searchParams.set("per_page", String(perPage));
+  url.searchParams.set("per_page", String(Math.min(perPage, PEXELS.perPageMax)));
   url.searchParams.set("page", String(page));
   if (orientation) url.searchParams.set("orientation", orientation);
+  if (size) url.searchParams.set("size", size);
 
   const res = await fetchImpl(url, { headers: { Authorization: key } });
   const body = await readJson(res, "Pexels");
@@ -169,17 +197,29 @@ export async function searchPexels({ query, perPage = 15, page = 1, orientation,
 }
 
 /**
- * Search Pixabay. There is no orientation parameter for video search (§3a), so
+ * Search Pixabay. There is NO orientation parameter for video search (confirmed
+ * against the docs 2026-08-27 — image search has one, video search does not), so
  * portrait selection happens downstream on the returned dimensions.
+ *
+ * `minHeight` is the provider-side stand-in for the crop gate's 4K band: asking
+ * for min_height=2160 is far cheaper than filtering a page of 720p locally, on a
+ * budget of 100 requests per 60 seconds.
  */
-export async function searchPixabay({ query, perPage = 15, page = 1, key, fetchImpl = globalThis.fetch }) {
+export async function searchPixabay({
+  query, perPage = 20, page = 1, minHeight, videoType = "film", key, fetchImpl = globalThis.fetch,
+}) {
   if (!key) throw new ProviderError("no-key", "PIXABAY_API_KEY is not set (Mac-local only — brief §2d).");
+  if (String(query).length > PIXABAY.queryMaxChars) {
+    throw new ProviderError("bad-request", `Pixabay queries are capped at ${PIXABAY.queryMaxChars} characters.`);
+  }
   const url = new URL(PIXABAY.url);
   url.searchParams.set("key", key);
   url.searchParams.set("q", query);
-  url.searchParams.set("per_page", String(perPage));
+  url.searchParams.set("per_page", String(Math.min(Math.max(perPage, PIXABAY.perPageMin), PIXABAY.perPageMax)));
   url.searchParams.set("page", String(page));
   url.searchParams.set("safesearch", "true");
+  url.searchParams.set("video_type", videoType);
+  if (minHeight) url.searchParams.set("min_height", String(minHeight));
 
   const res = await fetchImpl(url, {});
   const body = await readJson(res, "Pixabay");
@@ -190,8 +230,21 @@ export async function searchPixabay({ query, perPage = 15, page = 1, key, fetchI
 }
 
 /**
- * Cache identical queries for the life of one run. Classes share query words and
- * the free tiers are small; MPT caches for the same reason.
+ * Cache identical queries so the same search is issued once per run.
+ *
+ * ⚠️ DO NOT REMOVE THIS AS AN OPTIMISATION. Caching is a PIXABAY LICENCE TERM,
+ * not a performance nicety: the API terms require that "requests must be cached
+ * for 24 hours" and state that "systematic mass downloads are not allowed"
+ * (PIXABAY.cacheHours in endpoints.mjs). Deleting this would put the tool out of
+ * compliance with the terms the footage is used under, which is a licensing
+ * problem rather than a slow one. Classes share query words, so it also happens
+ * to save quota — that is the side effect, not the reason.
+ *
+ * SCOPE: this cache lives for one process run. It satisfies the terms for repeat
+ * queries within a run; it does not persist across runs, so a re-run inside 24
+ * hours re-issues the searches. If acquisition ever becomes frequent enough for
+ * that to matter, this is the place to add a disk-backed cache with the 24-hour
+ * TTL the terms name.
  */
 export function makeSearchCache() {
   const cache = new Map();

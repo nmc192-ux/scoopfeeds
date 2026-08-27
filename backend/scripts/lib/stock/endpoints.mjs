@@ -3,62 +3,91 @@
  * in one file, because docs/briefs/stock-library-builder.md §2a makes endpoint
  * verification a stop-and-report rather than a judgement call.
  *
- * ┌──────────────────────────────────────────────────────────────────────────┐
- * │ THESE CONSTANTS ARE UNVERIFIED. `verifiedAgainstDocs` is false and the    │
- * │ acquire tool REFUSES to make a live request while it stays false.        │
- * └──────────────────────────────────────────────────────────────────────────┘
+ * §2a IS CLOSED. Verified off-container by DrJ on 27 Aug 2026 against the
+ * providers' own documentation. It was NOT verified by the session that wrote
+ * this code: the egress proxy blocks both hosts, so the first draft of this file
+ * shipped its constants quarantined behind `verifiedAgainstDocs: false` rather
+ * than assert a URL nobody had read.
  *
- * §2a requires each host and path be confirmed against the provider's own
- * documentation — NOT against MoneyPrinterTurbo's `material.py`, because porting
- * code means copying its URLs. That check could not be performed in the
- * environment this was written in: the egress proxy blocks www.pexels.com and
- * pixabay.com outright (verified — all four hosts return no response), so the
- * documentation pages were unreachable and no endpoint here has been read off
- * the official docs by the author of this file.
+ * THE GATE EARNED ITS KEEP. The Pexels endpoint in that first draft was WRONG —
+ * it used the older https://api.pexels.com/videos/ path, which the documentation
+ * marks for deprecation:
  *
- * Rather than ship a plausible URL behind a comment claiming it was checked,
- * the values below are quarantined: they are the *proposal*, and a human closes
- * §2a by reading each doc URL, confirming the constant beside it character for
- * character, and flipping `verifiedAgainstDocs` to true. A near-miss hostname is
- * exactly the failure §2a is written against, and a homograph or typosquat of a
- * media host is worth more than a stray comment.
+ *   "Video endpoints are now available at https://api.pexels.com/v1/videos/. The
+ *    https://api.pexels.com/videos/ endpoints will be deprecated in the future."
  *
- * TO CLOSE §2a:
- *   1. Open each `doc` URL below.
- *   2. Confirm `url`, `auth` and `params` match it exactly.
- *   3. Set verifiedAgainstDocs: true (and record who checked it, and when).
- * Nothing else in this port needs to change — the wire contract lives here.
+ * That is exactly the near-miss §2a is written against, and it reached this file
+ * because porting code means copying its URLs. Any future change to a constant
+ * here is the same kind of change: re-verify against the doc URL beside it, and
+ * update `verification` to say who did and when.
  */
 
-/** Flip to true ONLY after a human has read the doc URLs below. See §2a. */
-export const verifiedAgainstDocs = false;
+/** True only because a human read the doc pages below. See the header. */
+export const verifiedAgainstDocs = true;
 
-/** Who verified, and when. Fill in alongside the flag. */
-export const verification = { by: null, date: null };
+/** Who verified, when, and how — the how matters (see header). */
+export const verification = Object.freeze({
+  by: "DrJ",
+  date: "2026-08-27",
+  method: "off-container: read from the official documentation pages directly, " +
+    "not by the authoring session, which cannot reach either host",
+});
 
 export const PEXELS = Object.freeze({
-  // Doc to check against: https://www.pexels.com/api/documentation/#videos-search
+  // Verified 2026-08-27 against https://www.pexels.com/api/documentation/ (#videos-search).
   doc: "https://www.pexels.com/api/documentation/#videos-search",
-  url: "https://api.pexels.com/videos/search",
+  // NOTE the /v1/ — https://api.pexels.com/videos/search is the deprecated path.
+  url: "https://api.pexels.com/v1/videos/search",
   auth: "Authorization header, the API key as the bare value (no 'Bearer ' prefix)",
-  params: ["query", "orientation", "per_page", "page"],
+  params: ["query", "orientation", "size", "locale", "page", "per_page"],
+  // orientation: landscape | portrait | square
+  // size: large (4K) | medium (Full HD) | small (HD)
+  // per_page: default 15, max 80
+  perPageMax: 80,
   license: "Pexels License",
+  // 200 requests/hour, 20,000/month. X-Ratelimit-* headers come back on 2xx ONLY
+  // and are ABSENT on a 429, so they cannot be used to decide how long to wait —
+  // which is part of why a 429 stops the run outright instead of backing off.
+  rateLimit: { perHour: 200, perMonth: 20000, headersOn429: false },
 });
 
 export const PIXABAY = Object.freeze({
-  // Doc to check against: https://pixabay.com/api/docs/#api_search_videos
+  // Verified 2026-08-27 against https://pixabay.com/api/docs/ (#api_search_videos).
   doc: "https://pixabay.com/api/docs/#api_search_videos",
   url: "https://pixabay.com/api/videos/",
   auth: "`key` query parameter",
-  // Pixabay video search exposes NO orientation filter — §3a says filter on
-  // returned dimensions instead. Confirm that absence when verifying.
-  params: ["key", "q", "video_type", "per_page", "page", "safesearch"],
+  params: [
+    "key", "q", "lang", "id", "video_type", "category", "min_width", "min_height",
+    "editors_choice", "safesearch", "order", "page", "per_page",
+  ],
+  // CONFIRMED 2026-08-27: video search has NO orientation filter (image search
+  // does). Portrait detection is therefore dimension-based — see cropGate.mjs.
+  hasOrientationFilter: false,
+  // q is URL-encoded, max 100 characters. per_page is 3-200, default 20.
+  queryMaxChars: 100,
+  perPageMin: 3,
+  perPageMax: 200,
   license: "Pixabay Content License",
+  // 100 requests per 60 SECONDS — not per hour. A 429 returns a plain-text body,
+  // which is why readJson checks the content type before trying to parse.
+  rateLimit: { perSeconds: 60, requests: 100 },
+  /**
+   * CACHING IS A LICENCE TERM, NOT A PERFORMANCE CHOICE. The Pixabay API terms
+   * require that "requests must be cached for 24 hours" and state that
+   * "systematic mass downloads are not allowed". The search cache in
+   * providers.mjs is therefore a compliance mechanism: do not remove it as an
+   * optimisation nobody needs.
+   */
+  cacheHours: 24,
 });
 
 /**
- * Throw unless a human has closed §2a. Called on the live path only — --dry-run
- * and the unit tests never reach the network and so never call this.
+ * Throw unless a human has closed §2a. Called on the live path only — the unit
+ * tests never reach the network and so never call this.
+ *
+ * This passes today. It is kept because the condition it guards can be reopened:
+ * anyone changing a URL above without re-verifying should flip the flag back and
+ * get this refusal rather than silently repointing the tool at a new host.
  */
 export function assertEndpointsVerified() {
   if (verifiedAgainstDocs === true) return;
