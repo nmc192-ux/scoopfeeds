@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://scoopfeeds.com/schemas/stock-manifest.json",
+  "title": "Stock library manifest",
+  "description": "Schema for backend/data/stock-library/manifest.json (brief docs/briefs/stock-library-builder.md §6). The manifest itself lives with the assets and is gitignored; this schema is committed so the shape is reviewable without the binaries. Provenance fields are mandatory: the attribution discipline that applies to charts applies to footage.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id", "subjectClass", "tags", "provider", "providerId", "creator", "sourceUrl",
+      "license", "width", "height", "durationSec", "orientation", "cropGrade",
+      "filePath", "treatedPath", "status", "addedAt"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]+-[0-9]{4}$",
+        "description": "Class-scoped, zero-padded, never reused. e.g. ports-0003"
+      },
+      "subjectClass": { "type": "string", "description": "A class id from stock-taxonomy.json." },
+      "tags": { "type": "array", "items": { "type": "string" } },
+      "provider": { "type": "string", "enum": ["pexels", "pixabay", "coverr"] },
+      "providerId": { "type": "string", "description": "Provider's own id. (provider, providerId) is the dedupe key." },
+      "creator": { "type": ["string", "null"], "description": "Attribution. Null only where the provider returned none." },
+      "sourceUrl": { "type": "string", "description": "The clip's page on the provider — mandatory." },
+      "license": { "type": "string", "description": "Licence as named by the provider, e.g. 'Pexels License'." },
+      "width": { "type": "integer", "minimum": 1 },
+      "height": { "type": "integer", "minimum": 1 },
+      "durationSec": { "type": "number", "exclusiveMinimum": 0 },
+      "orientation": { "type": "string", "enum": ["portrait", "landscape"] },
+      "cropGrade": {
+        "type": "string",
+        "enum": ["native-portrait", "crisp-4k-crop", "soft-hd-crop"],
+        "description": "The §5 grade. soft-hd-crop is rationed per class and flagged for curation."
+      },
+      "filePath": {
+        "type": "string",
+        "description": "Relative to the library root, e.g. staging/ports-0003.mp4. Never absolute — the library is relocatable."
+      },
+      "treatedPath": {
+        "type": ["string", "null"],
+        "description": "Relative path to the graded rendition, or null before treatment. The source download is never overwritten."
+      },
+      "status": {
+        "type": "string",
+        "enum": ["staged", "kept", "rejected", "treated"],
+        "description": "staged → (kept | rejected, set by a human) → treated. A rejected row is KEPT so re-acquire does not re-download it, even though its file is deleted."
+      },
+      "addedAt": { "type": "string", "format": "date-time" }
+    }
+  }
+}
