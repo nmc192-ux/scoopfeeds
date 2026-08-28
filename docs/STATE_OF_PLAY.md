@@ -4,6 +4,7 @@ Orientation for a fresh context (or future-you). Last docs sync: **`a42e681`** (
 This field names the last docs reconciliation, not necessarily current HEAD — to check that all
 three checkouts agree, run `git fetch && git status -sb` on the Mac and on `/opt/scoopfeeds`.
 
+- **How to deploy this box without breaking it:** [`docs/ops/runbooks/deploy.md`](ops/runbooks/deploy.md) — the image bakes the source, never filter services, every compose call needs `-f docker-compose.production.yml`, and `SCOOP_PERSISTENT_DATA_DIR` is container-only
 - What the system actually does: [`docs/architecture/dossier_and_event_graph.md`](architecture/dossier_and_event_graph.md)
 - Every flag, default, and prod value: [`docs/reference/env_reference.md`](reference/env_reference.md)
 - How work is run (gates, COW discipline): [`docs/agentic-workflow.md`](agentic-workflow.md)
