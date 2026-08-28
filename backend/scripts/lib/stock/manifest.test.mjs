@@ -19,7 +19,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  betterGradeCount, isKnown, knownKeys, makeEntry, manifestPath, nextId, readManifest, writeManifest,
+  betterGradeCount, isKnown, knownKeys, makeEntry, MANIFEST_SHAPE_VERSION, manifestPath, nextId,
+  readManifest, writeManifest,
 } from "./manifest.mjs";
 
 const roots = [];
@@ -72,6 +73,45 @@ test("the write is atomic — no .tmp file survives a completed write", () => {
   const root = tmpRoot();
   writeManifest([entry()], root);
   assert.throws(() => readFileSync(`${manifestPath(root)}.tmp`, "utf8"), /ENOENT/);
+});
+
+// ─── The shape version, and forward compatibility ───────────────────────────
+
+test("the shape version records what a reader is getting", () => {
+  // The manifest is a bare array and cannot carry a version of its own, so the
+  // expectation is versioned at the reader — the same discipline videoFootage.js
+  // applies to its cache. It moved to 2 when treated files became 1080x1920 at
+  // crf 20: no field changed, but what `treatedPath` points AT did, and a
+  // library holding a mix of the two is half stale.
+  assert.equal(MANIFEST_SHAPE_VERSION, 2);
+});
+
+test("an unknown field survives a read — a later tag needs no lockstep deploy", () => {
+  // THE POINT OF THIS TEST. Curation may one day mark an asset `avoid` (visible
+  // company livery, say). That field is added by this toolchain, on the Mac,
+  // and the manifest is then synced to a renderer that was deployed before the
+  // field existed. If either side rejected what it did not recognise, the two
+  // would have to ship together forever.
+  const root = tmpRoot();
+  const withExtra = { ...entry(), avoid: "visible company livery", somethingFuture: { nested: true } };
+  writeManifest([withExtra], root);
+
+  const [got] = readManifest(root);
+  assert.equal(got.avoid, "visible company livery", "an unknown field is preserved, not dropped");
+  assert.deepEqual(got.somethingFuture, { nested: true });
+  assert.equal(got.id, "ports-0001", "and the known fields are unaffected");
+});
+
+test("a row missing a field this toolchain writes is still readable", () => {
+  // The other direction: a manifest written by an OLDER toolchain, read by a
+  // newer one. Reading must not throw; whether a row is usable is decided by
+  // whoever consumes it, not by the reader.
+  const root = tmpRoot();
+  const { cropGrade, orientation, ...older } = entry();
+  writeManifest([older], root);
+  const [got] = readManifest(root);
+  assert.equal(got.id, "ports-0001");
+  assert.equal(got.cropGrade, undefined);
 });
 
 // ─── Dedupe ─────────────────────────────────────────────────────────────────

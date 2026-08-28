@@ -3,6 +3,7 @@
   "$id": "https://scoopfeeds.com/schemas/stock-manifest.json",
   "title": "Stock library manifest",
   "description": "Schema for backend/data/stock-library/manifest.json (brief docs/briefs/stock-library-builder.md §6). The manifest itself lives with the assets and is gitignored; this schema is committed so the shape is reviewable without the binaries. Provenance fields are mandatory: the attribution discipline that applies to charts applies to footage.",
+  "$comment": "ADDING A FIELD LATER IS A ONE-SIDED CHANGE. `additionalProperties: false` keeps this document an accurate description of what the toolchain writes, so a new field (a curation `avoid` tag marking visible company livery, say) means editing this file — deliberately. It does NOT mean a coordinated deploy: readers on both sides preserve fields they do not recognise and judge rows on the fields they need, so a manifest written by a newer toolchain is readable by an older renderer and vice versa. That property is pinned by tests in lib/stock/manifest.test.mjs; do not 'tidy' it away by making a reader reject unknown keys.",
   "type": "array",
   "items": {
     "type": "object",
@@ -40,7 +41,7 @@
       },
       "treatedPath": {
         "type": ["string", "null"],
-        "description": "Relative path to the graded rendition, or null before treatment. The source download is never overwritten."
+        "description": "Relative path to the graded rendition, or null before treatment. The treated file is 1080x1920 (the delivery frame) at crf 20, downscaled from the master in the same pass as the grade; the master in staging/ keeps its own resolution and is never overwritten, because it is the re-treat source. Rows written before that change point at 2160x3840 crf 18 files — `stock-treat --retreat` re-encodes them. See MANIFEST_SHAPE_VERSION in lib/stock/manifest.mjs."
       },
       "status": {
         "type": "string",

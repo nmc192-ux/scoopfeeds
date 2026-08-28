@@ -19,8 +19,8 @@ import os from "node:os";
 import path from "node:path";
 import { GRADES } from "../../../src/services/longform/storyboardInterpreter.js";
 import {
-  buildFilterChain, coolGrade, COOL_BLUE_MIDS, COOL_BLUE_SHADOWS, GRAIN_CHAINS, LIBRARY_GRADE,
-  resolveFfmpeg, treatFile,
+  buildFilterChain, coolGrade, COOL_BLUE_MIDS, COOL_BLUE_SHADOWS, DELIVERY, GRAIN_CHAINS,
+  isDeliveryAspect, LIBRARY_CRF, LIBRARY_GRADE, resolveFfmpeg, treatFile,
 } from "./treat.mjs";
 
 const dirs = [];
@@ -40,7 +40,7 @@ function makeClip(dir, name = "source.mp4", seconds = 1) {
   const file = path.join(dir, name);
   execFileSync(FFMPEG, [
     "-y", "-loglevel", "error", "-f", "lavfi",
-    "-i", `testsrc=size=320x240:rate=10:duration=${seconds}`,
+    "-i", `testsrc=size=216x384:rate=10:duration=${seconds}`,
     "-c:v", "libx264", "-pix_fmt", "yuv420p", file,
   ]);
   return file;
@@ -101,6 +101,75 @@ test("the chain ends in a pixel format ffmpeg and every player agree on", () => 
   assert.ok(buildFilterChain("static14").endsWith("format=yuv420p"));
 });
 
+// ─── Delivery resolution and the encode ─────────────────────────────────────
+
+test("the chain scales to the delivery frame, and scales BEFORE it grades", () => {
+  // Grading fewer pixels is identical in result and cheaper, and it keeps the
+  // vignette sized to the frame that ships rather than to the master's.
+  const chain = buildFilterChain();
+  assert.match(chain, /^scale=1080:1920:flags=lanczos,/);
+  assert.ok(chain.indexOf("scale=") < chain.indexOf("eq=saturation"), "scale precedes the grade");
+  assert.equal(DELIVERY.width, 1080);
+  assert.equal(DELIVERY.height, 1920);
+});
+
+test("the downscale is ONE pass — the grade and the resize share an encode", () => {
+  // A second encode to resize would decode and re-encode the graded output,
+  // paying quality for nothing.
+  const chain = buildFilterChain();
+  assert.equal((chain.match(/scale=/g) || []).length, 1, "exactly one scale in the chain");
+});
+
+test("the encode quality is the measured value, not the original 18", () => {
+  // crf 18 is finer than a typical provider delivery encode, so re-encoding an
+  // already-compressed clip spent bits on its artefacts — ships-0008 GREW on
+  // treatment, 160.5 MB -> 192.0 MB. The value and its measurement are recorded
+  // beside LIBRARY_CRF; this pins that a future edit is deliberate.
+  assert.equal(LIBRARY_CRF, "20");
+  assert.notEqual(LIBRARY_CRF, "18", "the growth case is the whole reason this moved");
+});
+
+test("only the delivery aspect is a straight scale", () => {
+  assert.equal(isDeliveryAspect(2160, 3840), true, "the library's own master shape");
+  assert.equal(isDeliveryAspect(1080, 1920), true);
+  for (const [w, h] of [[1920, 1080], [1080, 1080], [3840, 2160], [0, 0], [1080, 0]]) {
+    assert.equal(isDeliveryAspect(w, h), false, `${w}x${h} is not 9:16`);
+  }
+});
+
+test("a non-portrait source is REFUSED, never stretched or cropped", async () => {
+  // Scaling it would distort the picture and cropping it would silently reframe
+  // somebody else's shot. Reframing is a curation decision, not one to make here.
+  const dir = tmpDir();
+  const src = makeClip(dir);
+  await assert.rejects(
+    () => treatFile({
+      sourcePath: src, outputPath: path.join(dir, "out.mp4"), ffmpegPath: FFMPEG,
+      sourceWidth: 1920, sourceHeight: 1080,
+    }),
+    /not the 1080x1920 delivery aspect/
+  );
+});
+
+test("a 4K portrait master comes out at the delivery frame, and much smaller", async () => {
+  const dir = tmpDir();
+  const master = path.join(dir, "master4k.mp4");
+  execFileSync(FFMPEG, ["-y", "-loglevel", "error", "-f", "lavfi",
+    "-i", "testsrc2=size=2160x3840:rate=25:duration=1", "-c:v", "libx264",
+    "-crf", "23", "-pix_fmt", "yuv420p", master]);
+  const out = path.join(dir, "treated.mp4");
+
+  const { bytes } = await treatFile({
+    sourcePath: master, outputPath: out, ffmpegPath: FFMPEG,
+    sourceWidth: 2160, sourceHeight: 3840,
+  });
+
+  assert.match(probeVideoLine(out), /1080x1920/);
+  assert.ok(bytes < statSync(master).size,
+    `the treated file must be smaller than its master: ${bytes} vs ${statSync(master).size}`);
+  assert.ok(existsSync(master), "and the master is untouched — it is the re-treat source");
+});
+
 // ─── The source download is never overwritten ───────────────────────────────
 
 test("treating a file onto itself is refused", async () => {
@@ -144,7 +213,8 @@ test("the treated rendition is a real, different video — not a copy", async ()
   // It must still be a decodable video, not merely a non-empty file. `ffmpeg -i`
   // with no output exits non-zero and prints to stderr, so the output is read
   // rather than the exit code — the same handling longformMeasure.js uses.
-  assert.match(probeVideoLine(out), /320x240/, "the grade must not have resized anything");
+  assert.match(probeVideoLine(out), /1080x1920/,
+    "treatment now writes the delivery frame, not the master's resolution");
 });
 
 /** The `Video:` line ffmpeg prints for a file, however it chooses to exit. */
