@@ -33,6 +33,9 @@ import {
   setEmbedOnly, setAcquisition, createCommission, LedgerError,
 } from "../services/incident/incidentLedger.js";
 import { IntakeRefusedError, requiresPosterSuppliedFile } from "../services/incident/incidentIntake.js";
+import { runVerification, recordHumanVerdict, readHumanVerdicts, HumanVerdictError } from "../services/incident/incidentVerifyRunner.js";
+import { makeReverseSearch, reverseSearchConfigured } from "../services/incident/incidentReverseSearch.js";
+import { CHECK_NAMES } from "../services/incident/incidentChecks.js";
 
 const router = Router();
 const json = express.json({ limit: "16kb" });
@@ -53,6 +56,14 @@ function fail(res, err, where) {
   }
   if (err?.name === "IllegalTransitionError") {
     return res.status(409).json({ error: err.message, from: err.from, to: err.to });
+  }
+  if (err instanceof HumanVerdictError) {
+    // 409, not 400: the request was well-formed and was REFUSED. An operator
+    // trying to overturn a machine kill needs to see that as a rule, not a typo.
+    return res.status(409).json({ error: err.message, code: err.code, check: err.check });
+  }
+  if (err?.name === "VerificationError") {
+    return res.status(422).json({ error: err.message, code: err.code });
   }
   logger.error(`❌ incident-ops ${where}: ${err?.message}`, { stack: err?.stack });
   return res.status(500).json({ error: "internal error" });
@@ -163,6 +174,73 @@ router.post("/commissions", json, (req, res) => {
     return res.status(201).json({ commission });
   } catch (err) {
     return fail(res, err, "POST /commissions");
+  }
+});
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/verify
+ * { posts?, originalityEvidence?, politicallyLive?, imageRef? }
+ *
+ * Runs the four checks and moves the candidate. Safe to re-run: an unresolved
+ * candidate stays in `verifying` and writes no extra trail row.
+ *
+ * THE VISION PASS IS NOT WIRED IN THIS PHASE. `vision: null` means the context
+ * check reports "unmeasured", which is NEEDS_HUMAN everywhere and a KILL on a
+ * Pakistan-related or politically live story. That is the honest state of it —
+ * a model is not called yet, so nothing pretends one was. Wiring it is a
+ * separate change that must be reported as such.
+ */
+router.post("/candidates/:id/verify", json, async (req, res) => {
+  try {
+    const out = await runVerification(getDb(), req.params.id, {
+      story: req.body?.story ?? null,
+      posts: Array.isArray(req.body?.posts) ? req.body.posts : [],
+      originalityEvidence: req.body?.originalityEvidence ?? null,
+      politicallyLive: Boolean(req.body?.politicallyLive),
+      imageRef: req.body?.imageRef ?? null,
+      reverseSearch: makeReverseSearch(),
+      vision: null,
+      actor: "operator",
+    });
+    return res.json({
+      outcome: out.outcome,
+      candidate: decorate(out.candidate),
+      summary: out.summary,
+      // Stated on every response so nobody reads an "unmeasured" as a clean run
+      // without seeing why it was unmeasured.
+      capabilities: { reverseSearch: reverseSearchConfigured(), vision: false },
+    });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/verify");
+  }
+});
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/human-verdict
+ * { check, verdict: "pass"|"kill", note? }
+ *
+ * Settles a check the machine could not answer. It CANNOT overturn a machine
+ * verdict — that is refused with 409 and an explanation. Recording a ruling does
+ * not itself move the candidate; re-run /verify to apply it.
+ */
+router.post("/candidates/:id/human-verdict", json, (req, res) => {
+  try {
+    const trail = recordHumanVerdict(
+      getDb(), req.params.id, req.body?.check, req.body?.verdict,
+      { note: req.body?.note ?? null, actor: "operator" }
+    );
+    return res.json({ recorded: true, checks: CHECK_NAMES, trail });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/human-verdict");
+  }
+});
+
+/** GET /scoop-ops/incident/candidates/:id/human-verdicts — what has been ruled. */
+router.get("/candidates/:id/human-verdicts", (req, res) => {
+  try {
+    return res.json({ verdicts: readHumanVerdicts(getDb(), req.params.id) });
+  } catch (err) {
+    return fail(res, err, "GET /candidates/:id/human-verdicts");
   }
 });
 
