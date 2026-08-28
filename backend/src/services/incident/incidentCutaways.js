@@ -34,8 +34,11 @@ import { MAX_CUTAWAYS, cutawaySecs } from "../videoStockLibrary.js";
 import { cutawayFrameForLane } from "../videoAssembler.js";
 import { logger } from "../logger.js";
 
-/** Dark until switched on, in the established shape (brief §2 Phase 5). */
-export const incidentMediaEnabled = () => process.env.VIDEO_INCIDENT_MEDIA_ENABLED === "1";
+// The flag lives in incidentFlags.js and is RE-EXPORTED here. It moved when the
+// ops router needed to read it: importing this module to get a flag gave the
+// web process a path to incidentFiles and videoHouseGrade, which the stock
+// boundary guard refused. See incidentFlags.js for the whole story.
+export { incidentMediaEnabled } from "./incidentFlags.js";
 
 /**
  * THE COLD OPEN IS OURS (DrJ, Gate C).

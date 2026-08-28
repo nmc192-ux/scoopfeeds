@@ -67,7 +67,7 @@ import {
   TAKEDOWN_SURFACES, takedownReality,
 } from "../services/incident/incidentRevocation.js";
 import { REVOCATION_REASONS } from "../services/incident/incidentStatus.js";
-import { incidentMediaEnabled } from "../services/incident/incidentCutaways.js";
+import { incidentMediaEnabled } from "../services/incident/incidentFlags.js";
 
 const router = Router();
 const json = express.json({ limit: "16kb" });
