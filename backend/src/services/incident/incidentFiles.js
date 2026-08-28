@@ -124,6 +124,22 @@ export function ingestFile(candidateId, sourcePath, { root = quarantineRoot() } 
   return { relPath: rel, absPath: abs, bytes: bytes.length, sha256 };
 }
 
+/**
+ * The sha256 of a file on disk.
+ *
+ * Own material is identified by its own bytes (`incidentLedger.createOwnCandidate`)
+ * and the candidate id is not known until after that row exists — so the hash has
+ * to be computable BEFORE `ingestFile`, which names its output after the candidate.
+ * Same algorithm and same encoding as `ingestFile`'s, deliberately: the two are
+ * compared as an integrity check on the pair.
+ */
+export function sha256OfFile(sourcePath) {
+  if (!existsSync(sourcePath)) {
+    throw new IncidentFileError(`no such file: ${sourcePath}`, { code: "no-file" });
+  }
+  return createHash("sha256").update(readFileSync(sourcePath)).digest("hex");
+}
+
 /** Absolute path for a stored relative path. */
 export const resolveQuarantined = (rel, { root = quarantineRoot() } = {}) =>
   rel ? path.join(root, rel) : null;

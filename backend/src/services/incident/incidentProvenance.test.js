@@ -29,7 +29,8 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import { makeTestDb } from "../../testing/testDb.js";
-import { createCandidate, getCandidate, transition } from "./incidentLedger.js";
+import { createHash } from "crypto";
+import { createCandidate, createOwnCandidate, getCandidate, transition, OWN_PLATFORM } from "./incidentLedger.js";
 import { beginClearing, applyClearance, assertRenderable } from "./incidentClearanceLedger.js";
 import {
   assertClearance, ClearanceRefusedError,
@@ -62,6 +63,24 @@ const mk = (db, over = {}) => createCandidate(db, {
   postUrl: `https://bsky.app/profile/p${++seq}.bsky.social/post/3k${seq}`,
   posterDisplay: `Poster ${seq}`, ...over,
 }).candidate;
+
+/**
+ * An OWN candidate, through the own door.
+ *
+ * NOT `mk`. Every own-lane test in this file used to borrow a bluesky URL and
+ * then clear it on the `owner` basis — true, and it read as end-to-end while
+ * never touching own intake, which is how the missing intake door survived
+ * review (see incidentOwnIntake.test.js). Own material is created the way own
+ * material is actually created, or the coverage is a costume.
+ */
+const mkOwn = (db, over = {}) => createOwnCandidate(db, {
+  storyKind: "article", storyId: "art-1",
+  sha256: createHash("sha256").update(`own-${++seq}`).digest("hex"),
+  mediaType: "video", ...over,
+}).candidate;
+
+/** The right door for a basis. Used by the table-driven test below. */
+const mkFor = (db, basis) => (basis === "owner" ? mkOwn(db) : mk(db));
 
 /** Walk a candidate to `cleared` on a given lane. */
 function clearOn(db, id, lane) {
@@ -176,7 +195,8 @@ test("a poster_display on the row does NOT leak into an owner credit", () => {
 
 test("an own asset renders: cleared, tapped, uncredited, framed", (t0) => {
   const t = db0(); t0.after(() => t.cleanup());
-  const c = mk(t.db);
+  const c = mkOwn(t.db);
+  assert.equal(c.platform, OWN_PLATFORM, "created through the own door, not a borrowed URL");
   const root = files(t0, [c.id]);
 
   clearOn(t.db, c.id, "owner");
@@ -202,7 +222,7 @@ test("an own asset renders: cleared, tapped, uncredited, framed", (t0) => {
 
 test("a stray credit on an own row is ignored, not burned onto the picture", (t0) => {
   const t = db0(); t0.after(() => t.cleanup());
-  const c = mk(t.db);
+  const c = mkOwn(t.db);
   const root = files(t0, [c.id]);
   clearOn(t.db, c.id, "owner");
   // A value left over from before this lane existed, or a hand edit.
@@ -216,7 +236,7 @@ test("a stray credit on an own row is ignored, not burned onto the picture", (t0
 
 test("the queue tells the operator which kind of row they are tapping", (t0) => {
   const t = db0(); t0.after(() => t.cleanup());
-  const own = mk(t.db); clearOn(t.db, own.id, "owner");
+  const own = mkOwn(t.db); clearOn(t.db, own.id, "owner");
   const third = mk(t.db); clearOn(t.db, third.id, "grant");
 
   const rows = buildQueue(t.db).buckets.awaiting_render_tap;
@@ -348,7 +368,7 @@ test("all four credit sites give the same answer for every basis × credit combi
 
   for (const basis of CLEARANCE_BASES) {
     for (const hasCredit of [true, false]) {
-      const c = mk(t.db);
+      const c = mkFor(t.db, basis);
       const root = files(t0, [c.id]);
       clearOn(t.db, c.id, basis);
       forceApprove(t.db, c.id);
