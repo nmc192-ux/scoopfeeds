@@ -36,6 +36,12 @@ import { IntakeRefusedError, requiresPosterSuppliedFile } from "../services/inci
 import { runVerification, recordHumanVerdict, readHumanVerdicts, HumanVerdictError } from "../services/incident/incidentVerifyRunner.js";
 import { makeReverseSearch, reverseSearchConfigured } from "../services/incident/incidentReverseSearch.js";
 import { CHECK_NAMES } from "../services/incident/incidentChecks.js";
+import {
+  beginClearing, recordGrantRequest, recordGrantReply, applyClearance,
+  markUncleared, ClearanceLedgerError,
+} from "../services/incident/incidentClearanceLedger.js";
+import { ClearanceRefusedError, LANES, EXCERPT_MAX_SECS } from "../services/incident/incidentClearance.js";
+import { renderGrantDraft, GrantDraftError } from "../services/incident/incidentGrantDraft.js";
 
 const router = Router();
 const json = express.json({ limit: "16kb" });
@@ -64,6 +70,11 @@ function fail(res, err, where) {
   }
   if (err?.name === "VerificationError") {
     return res.status(422).json({ error: err.message, code: err.code });
+  }
+  if (err instanceof ClearanceRefusedError || err instanceof GrantDraftError || err instanceof ClearanceLedgerError) {
+    // The messages here are written for the operator and say what to do next,
+    // so they are returned rather than logged and replaced with "bad request".
+    return res.status(400).json({ error: err.message, code: err.code, lane: err.lane ?? null });
   }
   logger.error(`❌ incident-ops ${where}: ${err?.message}`, { stack: err?.stack });
   return res.status(500).json({ error: "internal error" });
@@ -242,6 +253,95 @@ router.get("/candidates/:id/human-verdicts", (req, res) => {
   } catch (err) {
     return fail(res, err, "GET /candidates/:id/human-verdicts");
   }
+});
+
+// ─── Phase 3 — clearance ───────────────────────────────────────────────────
+
+/** POST /scoop-ops/incident/candidates/:id/begin-clearing  { note? } */
+router.post("/candidates/:id/begin-clearing", json, (req, res) => {
+  try {
+    const row = beginClearing(getDb(), req.params.id, { note: req.body?.note ?? null, actor: "operator" });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/begin-clearing");
+  }
+});
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/grant-draft  { operatorName, storyTitle?, outlet? }
+ *
+ * DRAFTS AND RECORDS. DOES NOT SEND. The response body is the message to paste
+ * into a DM by hand, from the operator's own account — there is no send path in
+ * this engine and adding one is a decision, not a convenience.
+ */
+router.post("/candidates/:id/grant-draft", json, (req, res) => {
+  try {
+    const { draft, candidate } = recordGrantRequest(getDb(), req.params.id, {
+      operatorName: req.body?.operatorName,
+      storyTitle: req.body?.storyTitle ?? null,
+      outlet: req.body?.outlet ?? "ScoopFeeds",
+      actor: "operator",
+    });
+    return res.json({
+      draft, rendered: renderGrantDraft(draft),
+      candidate: decorate(candidate),
+      sent: false,
+      note: "Nothing was sent. Paste `draft.body` from your own account, then record the reply at /grant-reply.",
+    });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/grant-draft");
+  }
+});
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/grant-reply
+ * { outcome: "granted"|"refused"|"no_reply", grantReference?, replyText?, fileSuppliedByPoster? }
+ */
+router.post("/candidates/:id/grant-reply", json, (req, res) => {
+  try {
+    const row = recordGrantReply(getDb(), req.params.id, req.body?.outcome, {
+      grantReference: req.body?.grantReference ?? null,
+      replyText: req.body?.replyText ?? null,
+      fileSuppliedByPoster: Boolean(req.body?.fileSuppliedByPoster),
+      actor: "operator",
+    });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/grant-reply");
+  }
+});
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/clear  { lane, ...laneDetail }
+ * Lane 0 (owner) and Lane 3 (fair_use). Lane 2 goes through /grant-reply.
+ */
+router.post("/candidates/:id/clear", json, (req, res) => {
+  try {
+    const { lane, ...detail } = req.body || {};
+    const row = applyClearance(getDb(), req.params.id, lane, detail, { actor: "operator" });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/clear");
+  }
+});
+
+/** POST /scoop-ops/incident/candidates/:id/uncleared  { reason? } */
+router.post("/candidates/:id/uncleared", json, (req, res) => {
+  try {
+    const row = markUncleared(getDb(), req.params.id, { reason: req.body?.reason ?? null, actor: "operator" });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/uncleared");
+  }
+});
+
+/** GET /scoop-ops/incident/clearance-rules — what the lanes allow, for the queue. */
+router.get("/clearance-rules", (req, res) => {
+  res.json({
+    lanes: LANES,
+    excerptMaxSecs: EXCERPT_MAX_SECS,
+    note: "The excerpt cap is inherited from the cutaway mechanism, not set here. Treatment never affects rights.",
+  });
 });
 
 export default router;
