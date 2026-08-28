@@ -42,6 +42,9 @@ import {
 } from "../services/incident/incidentClearanceLedger.js";
 import { ClearanceRefusedError, LANES, EXCERPT_MAX_SECS } from "../services/incident/incidentClearance.js";
 import { renderGrantDraft, GrantDraftError } from "../services/incident/incidentGrantDraft.js";
+import {
+  buildQueue, approveForRender, withdrawRenderApproval, renderableCandidates, QueueError,
+} from "../services/incident/incidentQueue.js";
 
 const router = Router();
 const json = express.json({ limit: "16kb" });
@@ -70,6 +73,9 @@ function fail(res, err, where) {
   }
   if (err?.name === "VerificationError") {
     return res.status(422).json({ error: err.message, code: err.code });
+  }
+  if (err instanceof QueueError) {
+    return res.status(400).json({ error: err.message, code: err.code });
   }
   if (err instanceof ClearanceRefusedError || err instanceof GrantDraftError || err instanceof ClearanceLedgerError) {
     // The messages here are written for the operator and say what to do next,
@@ -332,6 +338,62 @@ router.post("/candidates/:id/uncleared", json, (req, res) => {
     return res.json({ candidate: decorate(row) });
   } catch (err) {
     return fail(res, err, "POST /candidates/:id/uncleared");
+  }
+});
+
+// ─── Phase 4 — the review queue and the render tap ─────────────────────────
+
+/**
+ * GET /scoop-ops/incident/queue?perBucket=25
+ *
+ * Everything blocked on a person, bucketed in the order to work them, with the
+ * evidence needed to decide already attached. Deliberately does NOT re-run
+ * verification: opening the queue must not spend a paid reverse search per row.
+ */
+router.get("/queue", (req, res) => {
+  try {
+    return res.json(buildQueue(getDb(), { perBucket: req.query.perBucket }));
+  } catch (err) {
+    return fail(res, err, "GET /queue");
+  }
+});
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/approve-render  { note? }
+ *
+ * The v1 render gate. One tap per asset, even when every check passed — "the
+ * checks passed" and "put this on the channel" are different decisions.
+ */
+router.post("/candidates/:id/approve-render", json, (req, res) => {
+  try {
+    const row = approveForRender(getDb(), req.params.id, { actor: "operator", note: req.body?.note ?? null });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/approve-render");
+  }
+});
+
+/** POST /scoop-ops/incident/candidates/:id/withdraw-render  { reason? } */
+router.post("/candidates/:id/withdraw-render", json, (req, res) => {
+  try {
+    const row = withdrawRenderApproval(getDb(), req.params.id, { actor: "operator", reason: req.body?.reason ?? null });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/withdraw-render");
+  }
+});
+
+/** GET /scoop-ops/incident/renderable — exactly what the renderer may draw. */
+router.get("/renderable", (req, res) => {
+  try {
+    const rows = renderableCandidates(getDb(), {
+      storyKind: req.query.storyKind || null,
+      storyId: req.query.storyId || null,
+      limit: req.query.limit,
+    });
+    return res.json({ count: rows.length, candidates: rows.map(decorate) });
+  } catch (err) {
+    return fail(res, err, "GET /renderable");
   }
 });
 

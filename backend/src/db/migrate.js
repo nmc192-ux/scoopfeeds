@@ -37,11 +37,12 @@ import * as migration030 from "./migrations/030_longform_posts.js";
 import * as migration031 from "./migrations/031_stock_asset_usage.js";
 import * as migration032 from "./migrations/032_media_candidates.js";
 import * as migration033 from "./migrations/033_media_candidate_clearance.js";
+import * as migration034 from "./migrations/034_media_candidate_render_approval.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations");
 
-const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021, migration022, migration023, migration024, migration025, migration026, migration027, migration028, migration029, migration030, migration031, migration032, migration033];
+const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021, migration022, migration023, migration024, migration025, migration026, migration027, migration028, migration029, migration030, migration031, migration032, migration033, migration034];
 
 function ensureSchemaMigrationsTable(db) {
   db.exec(`
