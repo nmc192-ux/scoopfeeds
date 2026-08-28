@@ -51,12 +51,21 @@ export const VIDEO_DESIGN_VER = "vid-v1";
 // unchanged key means prod keeps serving the MP4 it already cached, and the
 // only human step that would catch it is the one nobody remembers to do.
 // `new URL(...)` creates no import edge, so this adds no cycle.
+// videoHouseGrade.js and incident/incidentFiles.js join the list for the same
+// reason videoAssembler did. Neither rasterises anything, but both DECIDE
+// PIXELS: the house grade is the colour of every treated clip, and
+// buildIncidentFilter() is the chain that produces the incident footage a
+// cutaway composites. Change either with an unchanged key and prod keeps
+// serving the MP4 it already cached, with the only human step that would catch
+// it being the one nobody remembers to do.
 export const VIDEO_BUILDER_FINGERPRINT = sourceFingerprint([
   import.meta.url,
   new URL("./videoGeometry.js", import.meta.url).href,
   new URL("./videoSlideChrome.js", import.meta.url).href,
   new URL("./videoSlideRendererVertical.js", import.meta.url).href,
   new URL("./videoAssembler.js", import.meta.url).href,
+  new URL("./videoHouseGrade.js", import.meta.url).href,
+  new URL("./incident/incidentFiles.js", import.meta.url).href,
 ]);
 export const videoDesignKey = () => `${VIDEO_DESIGN_VER}-${VIDEO_BUILDER_FINGERPRINT}`;
 

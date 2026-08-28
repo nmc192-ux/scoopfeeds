@@ -177,5 +177,20 @@ export function assertRenderable(candidate) {
       { code: "no-credit" }
     );
   }
+  // THE HUMAN RENDER TAP (Phase 4). Verified and cleared are findings about the
+  // media; this is the decision to put it on the channel, and v1 requires a
+  // person to make it per asset. Checking it HERE rather than only in the queue
+  // is what stops the tap being decorative: a render path that never went
+  // through the queue still cannot draw an untapped asset, because this is the
+  // function it has to call. Automating the tap later means changing this line
+  // deliberately, which is the point.
+  if (!candidate.render_approved) {
+    throw new ClearanceRefusedError(
+      `candidate ${candidate.id} is cleared but has not been approved for render. Every asset needs one ` +
+      "operator tap before it can be drawn, even when every check passed — \"the checks passed\" and " +
+      "\"put this on the channel\" are different decisions.",
+      { code: "not-approved" }
+    );
+  }
   return true;
 }

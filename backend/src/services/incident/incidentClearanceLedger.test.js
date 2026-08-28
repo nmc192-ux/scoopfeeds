@@ -15,6 +15,7 @@ import {
 } from "./incidentClearanceLedger.js";
 import { ClearanceRefusedError } from "./incidentClearance.js";
 import { IllegalTransitionError } from "./incidentStatus.js";
+import { approveForRender } from "./incidentQueue.js";
 
 function caught(fn, Type) {
   try { fn(); } catch (err) {
@@ -197,6 +198,9 @@ test("assertRenderable refuses anything not cleared", (t0) => {
   assert.equal(caught(() => assertRenderable(null), ClearanceRefusedError).code, "no-candidate");
 
   applyClearance(t.db, t.id, "owner", { declaration: "shot by me at the barrage" });
+  // Cleared is not enough on its own — the Phase 4 render tap is also required.
+  assert.equal(caught(() => assertRenderable(getCandidate(t.db, t.id)), ClearanceRefusedError).code, "not-approved");
+  approveForRender(t.db, t.id);
   assert.equal(assertRenderable(getCandidate(t.db, t.id)), true);
 });
 
@@ -205,6 +209,7 @@ test("assertRenderable refuses a cleared row that somehow lost its credit", (t0)
   // module, so the guard is for whatever bypasses it later.
   const t = fixture(); t0.after(() => t.cleanup());
   applyClearance(t.db, t.id, "owner", { declaration: "shot by me at the barrage" });
+  approveForRender(t.db, t.id);
   t.db.prepare("UPDATE media_candidates SET credit_text = NULL WHERE id = ?").run(t.id);
   const err = caught(() => assertRenderable(getCandidate(t.db, t.id)), ClearanceRefusedError);
   assert.equal(err.code, "no-credit");
