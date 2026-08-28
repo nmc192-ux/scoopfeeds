@@ -6,16 +6,33 @@
  * re-implement auth: adding a router under that prefix inherits it, and a second
  * implementation is how the two drift apart.
  *
- * NO ENV FLAG, AND THAT IS A DELIBERATE DEPARTURE from "new work ships dark".
- * The convention exists to keep unfinished work off reader surfaces, and nothing
- * here is one: every route is admin-authenticated, writes only to tables added by
- * migration 032, and is read by no render or publish path — Phase 1 cannot put a
- * pixel anywhere. Against that, a dark flag has a real cost this repo has already
- * paid: VIDEO_SUBJECT_VISUALS_ENABLED sat off in production while four PRs were
- * built on top of it. Adding a flag whose only job is to be switched on later
- * manufactures that same hazard for no safety. The dark flag belongs at Phase 5,
- * where pixels are at stake, and the brief puts it there
- * (VIDEO_INCIDENT_MEDIA_ENABLED).
+ * FLAG-GATED FOR WRITES SINCE 2026-08-28 (DrJ, Gate F). This header used to argue
+ * that no flag belonged here, on the grounds that Phase 1 could not put a pixel
+ * anywhere. That was true of Phase 1 and stopped being true by Phase 6: the
+ * router now reaches clearance and the render tap, which are the two decisions
+ * that authorise footage onto a channel.
+ *
+ * The deploy question that forced this: "what must be OFF for the engine to ship
+ * inert?" The honest answer was that selection and rendering are inert BY
+ * CONSTRUCTION — nothing calls the selector — while `VIDEO_INCIDENT_MEDIA_ENABLED`
+ * had no consumer at all, and this router was mounted unconditionally. So the
+ * flag was decorative and the one thing it was supposed to prevent, clearing, was
+ * the one thing available. That is exactly the hazard the old header warned
+ * about, pointed the other way.
+ *
+ * WRITES REFUSE, READS DO NOT — AND THAT IS THE POINT, NOT A COMPROMISE.
+ * Refusing to mount the router entirely would make every endpoint 404, which is
+ * indistinguishable from the engine not being deployed. "Present and provably
+ * dormant" is a stronger post-deploy check than "absent", and it is what the
+ * runbook's dormancy check reads: GET /clearance-rules answering 200 with three
+ * lanes is the engine saying it is here and doing nothing.
+ *
+ * REVOCATION AND TAKEDOWN ARE EXEMPT FROM THE GATE. If the flag is turned OFF
+ * after something has already been published — which is a likely response to
+ * trouble, not a hypothetical — gating the revoke path would mean the act of
+ * disabling the engine also disabled the only way to withdraw what it published.
+ * The one operation that must never be unavailable is the one that stops us
+ * using somebody's footage after they have asked us to stop.
  *
  * WHAT IS NOT HERE. There is no endpoint that sets a status. Verification,
  * clearance and construction each own their transitions and arrive with their
@@ -50,9 +67,45 @@ import {
   TAKEDOWN_SURFACES, takedownReality,
 } from "../services/incident/incidentRevocation.js";
 import { REVOCATION_REASONS } from "../services/incident/incidentStatus.js";
+import { incidentMediaEnabled } from "../services/incident/incidentCutaways.js";
 
 const router = Router();
 const json = express.json({ limit: "16kb" });
+
+/**
+ * Paths that stay open with the flag off. See the header.
+ *
+ * Matched against the router-relative path, and deliberately anchored: a
+ * substring match would let `/candidates/x/revoke-something-else` through, and
+ * this list is the exception to the gate rather than a hint about it.
+ */
+const ALWAYS_ALLOWED = [
+  /^\/candidates\/[^/]+\/revoke\/?$/,
+  /^\/candidates\/[^/]+\/takedown-actioned\/?$/,
+];
+
+/**
+ * The dark gate.
+ *
+ * GET is never blocked: reads cannot clear, approve or publish anything, and the
+ * dormancy check depends on them answering. Everything else is refused with 503
+ * and a message naming the flag — a refusal an operator can act on beats a 404
+ * they have to diagnose.
+ */
+function incidentWritesGate(req, res, next) {
+  if (incidentMediaEnabled()) return next();
+  if (req.method === "GET" || req.method === "HEAD") return next();
+  if (ALWAYS_ALLOWED.some((re) => re.test(req.path))) return next();
+
+  logger.warn(`🎥 incident: refused ${req.method} ${req.path} — VIDEO_INCIDENT_MEDIA_ENABLED is not "1"`);
+  return res.status(503).json({
+    error: "the incident media engine is disabled (VIDEO_INCIDENT_MEDIA_ENABLED is not \"1\")",
+    code: "incident_engine_disabled",
+    reads: "GET endpoints stay available so the engine can be seen to be present and dormant",
+    exempt: "revoke and takedown-actioned are never gated — disabling the engine must not disable withdrawal",
+  });
+}
+router.use(incidentWritesGate);
 
 /**
  * Turn a thrown error into a response.
