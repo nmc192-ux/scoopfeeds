@@ -23,10 +23,18 @@
  * its import walker against a known-reachable module before trusting its silence.
  *
  * WHY A FLAT MID-GREY CUTAWAY SOURCE. The detector counts near-white pixels in
- * the credit band. Against flat grey, the chip's text (0xcfcabd) is the only
- * bright thing that can be there, and the default film grain (±14 around the
- * grey) comes nowhere near the threshold — so the measurement survives the
- * treatment the real pipeline applies rather than needing it switched off.
+ * the credit band. Against flat grey, the chip's text is the only bright thing
+ * that can be there, and the default film grain (±14 around the grey) comes
+ * nowhere near the threshold — so the measurement survives the treatment the
+ * real pipeline applies rather than needing it switched off.
+ *
+ * BOTH LANES, EVERY PROPERTY (DrJ, Gate D). This file originally ran full-bleed
+ * only, which is precisely where the framed-lane chip bug lived — the chip
+ * inheriting masthead coordinates inside an 872x490 picture, caught by looking
+ * at a render rather than by any test here. So every property below runs under
+ * `for (const lane of LANES)`, and the credit region is asked for PER LANE:
+ * cropping the masthead band on a framed render would measure the card behind
+ * the picture and report a credit that is not there.
  */
 
 import test from "node:test";
@@ -37,10 +45,22 @@ import path from "path";
 import { spawn } from "child_process";
 import {
   buildSlideFilter, buildCutawayCreditFilter, creditChipRegion, totalFor, FPS,
+  cutawayFrameFor, cutawayFrameForLane,
 } from "./videoAssembler.js";
 import { getFFmpegPath } from "./videoGenerator.js";
 
 const ORIENTATION = "vertical";
+
+/**
+ * The two compositions, as the clearance lanes that select them.
+ *
+ * Named by lane rather than by "framed"/"full-bleed" so the test fails if the
+ * lane→composition mapping is ever changed without thinking about the credit.
+ */
+const LANES = [
+  { lane: "grant", frame: null },
+  { lane: "fair_use", frame: cutawayFrameFor("vertical") },
+];
 const FONT = new URL("../../assets/fonts/Inter-SemiBold.otf", import.meta.url).pathname;
 const CREDIT_TEXT = "Sarah Voss / BLUESKY";
 const CUTAWAY_SECS = 1.2;
@@ -71,13 +91,19 @@ function run(args, ff) {
  * that many frames in — the exact defect this test exists to catch, produced
  * deliberately so the detector can be shown to catch it.
  */
-async function renderWithCredit(dir, { delayFrames = 0, omit = false } = {}) {
+async function renderWithCredit(dir, { delayFrames = 0, omit = false, frame = null } = {}) {
   const ff = getFFmpegPath();
+  const tag = `${delayFrames}-${omit}-${frame ? "framed" : "bleed"}`;
   const state = path.join(dir, "state.png");
-  const cut = path.join(dir, `cut-${delayFrames}-${omit}.mp4`);
-  const out = path.join(dir, `out-${delayFrames}-${omit}.mp4`);
+  const cut = path.join(dir, `cut-${tag}.mp4`);
+  const out = path.join(dir, `out-${tag}.mp4`);
 
   // One state: no xfade, so this renders on any ffmpeg the repo might resolve.
+  // The card is dark in BOTH lanes. The detector counts pixels brighter than
+  // 190, and neither a dark card nor mid-grey footage produces any — the chip's
+  // text is the only bright thing that can be in the band. (A bright card was
+  // tried and made the framed detector useless: the region caught the card and
+  // the uncredited control read 152 bright pixels.)
   await run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x101010:size=1080x1920:d=1",
     "-frames:v", "1", state], ff);
   // Flat mid-grey footage — see the header.
@@ -87,7 +113,8 @@ async function renderWithCredit(dir, { delayFrames = 0, omit = false } = {}) {
   let credit = null;
   if (!omit) {
     credit = buildCutawayCreditFilter({
-      text: CREDIT_TEXT, workDir: dir, slideIndex: delayFrames, fontFile: FONT, orientation: ORIENTATION,
+      text: CREDIT_TEXT, workDir: dir, slideIndex: `${delayFrames}${frame ? "f" : "b"}`,
+      fontFile: FONT, orientation: ORIENTATION, frame,
     });
     if (delayFrames > 0) {
       credit += `:enable='gte(t,${(delayFrames / FPS).toFixed(4)})'`;
@@ -96,7 +123,7 @@ async function renderWithCredit(dir, { delayFrames = 0, omit = false } = {}) {
 
   const { filter, totalDuration } = buildSlideFilter({
     stateCount: 1, hold: HOLD, driftDir: 0, orientation: ORIENTATION,
-    cutaway: { inputIndex: 1, seconds: CUTAWAY_SECS, credit },
+    cutaway: { inputIndex: 1, seconds: CUTAWAY_SECS, credit, frame },
   });
 
   await run(["-y", "-v", "error",
@@ -116,9 +143,11 @@ async function renderWithCredit(dir, { delayFrames = 0, omit = false } = {}) {
  * One decode, one crop, the whole stream — so "every frame" is literally every
  * frame rather than a sample someone chose.
  */
-async function creditBandPerFrame(videoPath) {
+async function creditBandPerFrame(videoPath, { frame = null } = {}) {
   const ff = getFFmpegPath();
-  const r = creditChipRegion(ORIENTATION);
+  // PER LANE. Cropping the masthead band on a framed render would measure the
+  // card behind the picture, not the chip.
+  const r = creditChipRegion(ORIENTATION, { frame });
   const raw = await run(["-v", "error", "-i", videoPath,
     "-vf", `crop=${r.w}:${r.h}:${r.x}:${r.y},format=gray`,
     "-f", "rawvideo", "-pix_fmt", "gray", "-"], ff);
@@ -141,110 +170,131 @@ const cutawayFrameCount = () => Math.floor(CUTAWAY_SECS * FPS);
 
 // ─── The detector must work before its silence means anything ──────────────
 
-test("the detector distinguishes a credited frame from an uncredited one", async (t) => {
-  const dir = mkdtempSync(path.join(tmpdir(), "credit-detect-")); t.after(() => rmSync(dir, { recursive: true, force: true }));
-  assert.ok(getFFmpegPath(), "ffmpeg must resolve — this is a real failure, not a skip");
+for (const { lane, frame } of LANES) {
+  const where = frame ? "framed" : "full-bleed";
 
-  const withChip = await creditBandPerFrame(await renderWithCredit(dir, {}));
-  const without = await creditBandPerFrame(await renderWithCredit(dir, { omit: true }));
+  test(`[${lane}/${where}] the detector distinguishes a credited frame from an uncredited one`, async (t) => {
+    const dir = mkdtempSync(path.join(tmpdir(), `credit-detect-${where}-`));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    assert.ok(getFFmpegPath(), "ffmpeg must resolve — this is a real failure, not a skip");
 
-  assert.ok(withChip[0] >= MIN_BRIGHT_PIXELS,
-    `a credited frame measured only ${withChip[0]} bright pixels — the crop rectangle may not overlap the chip`);
-  assert.ok(without[0] < MIN_BRIGHT_PIXELS,
-    `an UNcredited frame measured ${without[0]} bright pixels, above the threshold — the detector cannot tell ` +
-    "the difference, so every assertion below would pass for the wrong reason");
-});
+    const withChip = await creditBandPerFrame(await renderWithCredit(dir, { frame }), { frame });
+    const without = await creditBandPerFrame(await renderWithCredit(dir, { omit: true, frame }), { frame });
 
-// ─── The property ───────────────────────────────────────────────────────────
+    assert.ok(withChip[0] >= MIN_BRIGHT_PIXELS,
+      `a credited frame measured only ${withChip[0]} bright pixels — the crop rectangle may not overlap the chip`);
+    assert.ok(without[0] < MIN_BRIGHT_PIXELS,
+      `an UNcredited frame measured ${without[0]} bright pixels, above the threshold — the detector cannot tell ` +
+      "the difference, so every assertion below would pass for the wrong reason");
+  });
 
-test("EVERY frame carrying third-party footage carries the credit", async (t) => {
-  const dir = mkdtempSync(path.join(tmpdir(), "credit-every-")); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // ─── The property ─────────────────────────────────────────────────────────
 
-  const perFrame = await creditBandPerFrame(await renderWithCredit(dir, {}));
-  const n = cutawayFrameCount();
-  assert.ok(perFrame.length > n, `video has ${perFrame.length} frames, fewer than the ${n}-frame cutaway`);
+  test(`[${lane}/${where}] EVERY frame carrying third-party footage carries the credit`, async (t) => {
+    const dir = mkdtempSync(path.join(tmpdir(), `credit-every-${where}-`));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
 
-  const bare = [];
-  for (let i = 0; i < n; i++) if (perFrame[i] < MIN_BRIGHT_PIXELS) bare.push(i);
-  assert.deepEqual(
-    bare, [],
-    `frames ${bare.join(", ")} of the cutaway carry footage with no credit. The permission request promises the ` +
-    "poster their name is on screen for as long as their footage is — every one of these frames breaks it."
-  );
-});
+    const perFrame = await creditBandPerFrame(await renderWithCredit(dir, { frame }), { frame });
+    const n = cutawayFrameCount();
+    assert.ok(perFrame.length > n, `video has ${perFrame.length} frames, fewer than the ${n}-frame cutaway`);
 
-test("the credit does not outlive the footage it credits", async (t) => {
-  // The other half of the promise: the chip belongs to the picture, so once the
-  // footage ends the chip must be gone too. Structural (it is composited inside
-  // the cutaway stream), measured here anyway.
-  const dir = mkdtempSync(path.join(tmpdir(), "credit-end-")); t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const bare = [];
+    for (let i = 0; i < n; i++) if (perFrame[i] < MIN_BRIGHT_PIXELS) bare.push(i);
+    assert.deepEqual(
+      bare, [],
+      `frames ${bare.join(", ")} of the cutaway carry footage with no credit. The permission request promises the ` +
+      "poster their name is on screen for as long as their footage is — every one of these frames breaks it."
+    );
+  });
 
-  const perFrame = await creditBandPerFrame(await renderWithCredit(dir, {}));
-  const n = cutawayFrameCount();
-  // One frame of slack at the boundary: the cut lands between samples.
-  for (let i = n + 2; i < perFrame.length; i++) {
-    assert.ok(perFrame[i] < MIN_BRIGHT_PIXELS,
-      `frame ${i} still carries the credit ${((i - n) / FPS).toFixed(2)}s after the footage ended`);
+  test(`[${lane}/${where}] the credit does not outlive the footage it credits`, async (t) => {
+    const dir = mkdtempSync(path.join(tmpdir(), `credit-end-${where}-`));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+    const perFrame = await creditBandPerFrame(await renderWithCredit(dir, { frame }), { frame });
+    const n = cutawayFrameCount();
+    // One frame of slack at the boundary: the cut lands between samples.
+    for (let i = n + 2; i < perFrame.length; i++) {
+      assert.ok(perFrame[i] < MIN_BRIGHT_PIXELS,
+        `frame ${i} still carries the credit ${((i - n) / FPS).toFixed(2)}s after the footage ended`);
+    }
+  });
+
+  // ─── The negative controls, in BOTH lanes ────────────────────────────────
+
+  test(`[${lane}/${where}] a credit delayed by ONE FRAME is caught`, async (t) => {
+    const dir = mkdtempSync(path.join(tmpdir(), `credit-delay-${where}-`));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+    const perFrame = await creditBandPerFrame(await renderWithCredit(dir, { delayFrames: 1, frame }), { frame });
+
+    assert.ok(perFrame[0] < MIN_BRIGHT_PIXELS,
+      `frame 0 measured ${perFrame[0]} bright pixels, but the credit was deliberately delayed one frame — ` +
+      "the detector did not notice a one-frame gap, so it would not notice a real one either");
+    assert.ok(perFrame[2] >= MIN_BRIGHT_PIXELS,
+      "the delayed render should carry the credit from frame 2 onward — if not, this control proves nothing");
+  });
+
+  test(`[${lane}/${where}] a credit truncated by one frame is caught`, async (t) => {
+    const dir = mkdtempSync(path.join(tmpdir(), `credit-trunc-${where}-`));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const ff = getFFmpegPath();
+    const state = path.join(dir, "s.png");
+    const cut = path.join(dir, "c.mp4");
+    const out = path.join(dir, "t.mp4");
+    await run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x101010:size=1080x1920:d=1", "-frames:v", "1", state], ff);
+    await run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x808080:size=1080x1920:d=3:r=25",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", cut], ff);
+
+    const truncatedAt = (CUTAWAY_SECS - 1 / FPS).toFixed(4);
+    const credit = buildCutawayCreditFilter({
+      text: CREDIT_TEXT, workDir: dir, slideIndex: `t${where}`, fontFile: FONT, orientation: ORIENTATION, frame,
+    }) + `:enable='lt(t,${truncatedAt})'`;
+
+    const { filter, totalDuration } = buildSlideFilter({
+      stateCount: 1, hold: HOLD, driftDir: 0, orientation: ORIENTATION,
+      cutaway: { inputIndex: 1, seconds: CUTAWAY_SECS, credit, frame },
+    });
+    await run(["-y", "-v", "error", "-loop", "1", "-t", String(HOLD), "-i", state, "-i", cut,
+      "-filter_complex", filter, "-map", "[out]", "-t", totalDuration.toFixed(3),
+      "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p", "-r", String(FPS), out], ff);
+
+    const perFrame = await creditBandPerFrame(out, { frame });
+    const last = cutawayFrameCount() - 1;
+    assert.ok(perFrame[last] < MIN_BRIGHT_PIXELS,
+      `the final cutaway frame (${last}) measured ${perFrame[last]} bright pixels, but the credit was deliberately ` +
+      "cut one frame short — a truncation at the tail would go unnoticed");
+  });
+}
+
+// ─── The regions themselves ────────────────────────────────────────────────
+
+test("the credit region is derived from the same geometry the filter draws into", () => {
+  for (const { lane, frame } of LANES) {
+    const r = creditChipRegion(ORIENTATION, { frame });
+    assert.ok(r.w > 0 && r.h > 0, lane);
+    assert.ok(r.x >= 0 && r.y >= 0, lane);
+    assert.ok(r.x + r.w <= 1080, `${lane}: the region must sit inside the vertical canvas`);
+    assert.ok(r.y + r.h <= 1920, lane);
   }
 });
 
-// ─── The negative control ──────────────────────────────────────────────────
-
-test("a credit delayed by ONE FRAME is caught", async (t) => {
-  // The defect the whole file exists for. If this test ever goes green while
-  // the one above also passes, the detector has stopped discriminating.
-  const dir = mkdtempSync(path.join(tmpdir(), "credit-delay-")); t.after(() => rmSync(dir, { recursive: true, force: true }));
-
-  const perFrame = await creditBandPerFrame(await renderWithCredit(dir, { delayFrames: 1 }));
-
-  assert.ok(perFrame[0] < MIN_BRIGHT_PIXELS,
-    `frame 0 measured ${perFrame[0]} bright pixels, but the credit was deliberately delayed one frame — ` +
-    "the detector did not notice a one-frame gap, so it would not notice a real one either");
-  // And the frames after the delay DO carry it, so the render is otherwise sound
-  // and the failure above is specifically the missing first frame.
-  assert.ok(perFrame[2] >= MIN_BRIGHT_PIXELS,
-    "the delayed render should carry the credit from frame 2 onward — if not, this control proves nothing");
+test("the two lanes crop DIFFERENT bands — one region for both would be vacuous", () => {
+  // The framed chip is drawn at the picture's corner, ~575px below the masthead
+  // slot. Cropping the masthead band on a framed render would measure the card
+  // behind the picture and report a credit that is not there.
+  const bleed = creditChipRegion(ORIENTATION);
+  const framed = creditChipRegion(ORIENTATION, { frame: cutawayFrameFor(ORIENTATION) });
+  assert.notDeepEqual(bleed, framed);
+  assert.ok(framed.y > bleed.y + bleed.h,
+    `the framed band (y=${framed.y}) must not overlap the masthead band (y=${bleed.y}..${bleed.y + bleed.h})`);
 });
 
-test("a credit truncated by one frame is caught", async (t) => {
-  // Same detector, the other end. Built by shortening the enable window rather
-  // than the footage, so the footage still runs its full length underneath.
-  const dir = mkdtempSync(path.join(tmpdir(), "credit-trunc-")); t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const ff = getFFmpegPath();
-  const state = path.join(dir, "s.png");
-  const cut = path.join(dir, "c.mp4");
-  const out = path.join(dir, "t.mp4");
-  await run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x101010:size=1080x1920:d=1", "-frames:v", "1", state], ff);
-  await run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x808080:size=1080x1920:d=3:r=25",
-    "-c:v", "libx264", "-pix_fmt", "yuv420p", cut], ff);
-
-  const truncatedAt = (CUTAWAY_SECS - 1 / FPS).toFixed(4);
-  const credit = buildCutawayCreditFilter({
-    text: CREDIT_TEXT, workDir: dir, slideIndex: 9, fontFile: FONT, orientation: ORIENTATION,
-  }) + `:enable='lt(t,${truncatedAt})'`;
-
-  const { filter, totalDuration } = buildSlideFilter({
-    stateCount: 1, hold: HOLD, driftDir: 0, orientation: ORIENTATION,
-    cutaway: { inputIndex: 1, seconds: CUTAWAY_SECS, credit },
-  });
-  await run(["-y", "-v", "error", "-loop", "1", "-t", String(HOLD), "-i", state, "-i", cut,
-    "-filter_complex", filter, "-map", "[out]", "-t", totalDuration.toFixed(3),
-    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p", "-r", String(FPS), out], ff);
-
-  const perFrame = await creditBandPerFrame(out);
-  const last = cutawayFrameCount() - 1;
-  assert.ok(perFrame[last] < MIN_BRIGHT_PIXELS,
-    `the final cutaway frame (${last}) measured ${perFrame[last]} bright pixels, but the credit was deliberately ` +
-    "cut one frame short — a truncation at the tail would go unnoticed");
-});
-
-// ─── The region itself ─────────────────────────────────────────────────────
-
-test("the credit region is derived from the same geometry the filter draws into", () => {
-  // If these drifted apart, every measurement above would be of empty frame.
-  const r = creditChipRegion(ORIENTATION);
-  assert.ok(r.w > 0 && r.h > 0);
-  assert.ok(r.x >= 0 && r.y >= 0);
-  assert.ok(r.x + r.w <= 1080, "the region must sit inside the vertical canvas");
-  assert.ok(r.y + r.h <= 1920);
+test("the lane a clearance selects is the lane the region is asked for", () => {
+  // Ties the composition mapping to the measurement: if fair_use stopped being
+  // framed, this test says so rather than the persistence property quietly
+  // measuring the wrong band.
+  assert.equal(cutawayFrameForLane("grant", ORIENTATION), null);
+  assert.equal(cutawayFrameForLane("owner", ORIENTATION), null);
+  assert.deepEqual(cutawayFrameForLane("fair_use", ORIENTATION), cutawayFrameFor(ORIENTATION));
 });

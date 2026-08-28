@@ -339,9 +339,35 @@ export async function buildCaptionFilter({ text, workDir, slideIndex, fontFile, 
  * that contains the chip plus margin is exactly what "is anything drawn here"
  * needs.
  */
-export function creditChipRegion(orientation = "horizontal") {
+export function creditChipRegion(orientation = "horizontal", { frame = null } = {}) {
   const G = geometryFor(orientation);
   const CV = G.canvas;
+  const h = Math.round(G.creditFontSize * 2);
+
+  // FRAMED LANE. The chip is drawn into the INSET stream at the picture's own
+  // corner, so in FRAME coordinates it lands at the box's origin plus that
+  // inset — not in the masthead slot. A persistence test that cropped the
+  // masthead band here would be measuring the card behind the picture and would
+  // report "credit present" from whatever the card happens to have drawn there.
+  // That is exactly the vacuous-pass this whole property is written against, and
+  // it is why the region is a function of the lane rather than a constant.
+  if (frame) {
+    const inset = Math.round(G.creditFontSize / 2);
+    // CLAMPED STRICTLY INSIDE THE PICTURE. A band that spilled past the box
+    // edge would sample the CARD around the inset, and then "is anything drawn
+    // here" would be answered by our own layout rather than by the chip —
+    // measured: the uncredited control read 152 bright pixels from the card
+    // alone, which is a detector that cannot tell a missing credit from a
+    // present one.
+    const x = Math.max(frame.x, frame.x + inset - 20);
+    const y = Math.max(frame.y, frame.y + inset - 12);
+    return {
+      x, y,
+      w: Math.max(1, Math.min(frame.x + frame.w - x, frame.w)),
+      h: Math.max(1, Math.min(h, frame.y + frame.h - y)),
+    };
+  }
+
   // The chip is left-anchored in the masthead slot, so the band runs from just
   // left of that anchor across the width a credit can plausibly occupy.
   const x = Math.max(0, G.creditX - 20);
@@ -350,7 +376,7 @@ export function creditChipRegion(orientation = "horizontal") {
     x,
     y,
     w: Math.min(CV.w - x, Math.round(CV.w * 0.72)),
-    h: Math.round(G.creditFontSize * 2),
+    h,
   };
 }
 

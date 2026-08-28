@@ -145,3 +145,39 @@ export function recordTakedownActioned(db, candidateId, { note = null, actor = "
   logger.info(`🎥 incident: takedown recorded for candidate ${candidateId} (video ${row.constructed_video_id})`);
   return getCandidate(db, candidateId);
 }
+
+/**
+ * Which surfaces a published short reaches, and whether we can retract from each.
+ *
+ * GROUNDED, NOT ASSUMED (Gate D, item d). Every client under services/*Client.js
+ * was read for an exported delete / remove / privacy / retract function. Exactly
+ * one has one: `youtubeClient.setYouTubePrivacy`. The other six are upload-only,
+ * so a withdrawal on those surfaces is a hand action in the platform's own app.
+ *
+ * This lives beside the revocation because the operator needs it at the moment
+ * they are acting, not in a document they have to remember exists. The full
+ * reasoning and the step-by-step are in
+ * docs/ops/runbooks/incident_takedown.md.
+ *
+ * IF A CLIENT EVER GAINS A RETRACTION FUNCTION, change it here — a stale "manual"
+ * costs a few minutes; a stale "automatic" means somebody believes a video came
+ * down when it did not.
+ */
+export const TAKEDOWN_SURFACES = Object.freeze([
+  { surface: "youtube",   programmatic: true,  how: "POST /scoop-ops/video/unlist-recent (see runbook — it targets the LAST N, not one video)" },
+  { surface: "facebook",  programmatic: false, how: "delete the Reel in Meta Business Suite → Content" },
+  { surface: "instagram", programmatic: false, how: "delete the Reel in the app or Business Suite (archiving is not deletion)" },
+  { surface: "threads",   programmatic: false, how: "delete the post in the app" },
+  { surface: "bluesky",   programmatic: false, how: "delete the post in the app" },
+  { surface: "tiktok",    programmatic: false, how: "delete the video in the app (upload privacy cannot be changed by us afterwards)" },
+  { surface: "x",         programmatic: false, how: "delete the post in the app" },
+]);
+
+/** The blunt fact the runbook opens with, in one line, for an API response. */
+export const takedownReality = () => ({
+  programmatic: TAKEDOWN_SURFACES.filter((s) => s.programmatic).map((s) => s.surface),
+  manual: TAKEDOWN_SURFACES.filter((s) => !s.programmatic).map((s) => s.surface),
+  note: "Only YouTube can be retracted programmatically, and that route targets the last N published " +
+        "videos rather than a specific one. Every other surface is a hand action. See " +
+        "docs/ops/runbooks/incident_takedown.md.",
+});

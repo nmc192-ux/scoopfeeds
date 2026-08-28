@@ -16,6 +16,7 @@ import { ClearanceRefusedError } from "./incidentClearance.js";
 import { approveForRender } from "./incidentQueue.js";
 import {
   revokeClearance, pendingTakedowns, recordTakedownActioned, RevocationError,
+  TAKEDOWN_SURFACES, takedownReality,
 } from "./incidentRevocation.js";
 import { REVOCATION_REASONS, KILL_REASONS, IllegalTransitionError } from "./incidentStatus.js";
 import { toRenderable } from "./incidentCutaways.js";
@@ -204,4 +205,49 @@ test("the revocation is in the trail, with the note and where it came from", (t0
   assert.equal(last.to_status, "revoked");
   assert.match(last.evidence.note, /stringer/);
   assert.equal(last.evidence.takedownRequired, true);
+});
+
+
+// ─── The takedown reality (Gate D, item d) ─────────────────────────────────
+
+test("the surface list matches what the clients can ACTUALLY do", async () => {
+  // Grounded, not assumed: exactly one client exports a retraction function.
+  // If a client ever gains one, this test fails until the list is updated — a
+  // stale "manual" costs minutes, a stale "automatic" means somebody believes a
+  // video came down when it did not.
+  const { readFileSync } = await import("fs");
+  const RETRACTS = /export\s+(async\s+)?function\s+\w*(setYouTubePrivacy|delete|remove|retract)\w*/i;
+
+  const clients = {
+    youtube: "youtubeClient", facebook: "facebookClient", instagram: "instagramClient",
+    threads: "threadsClient", bluesky: "blueskyClient", tiktok: "tiktokClient", x: "xClient",
+  };
+  for (const { surface, programmatic } of TAKEDOWN_SURFACES) {
+    const src = readFileSync(new URL(`../${clients[surface]}.js`, import.meta.url), "utf8");
+    assert.equal(
+      RETRACTS.test(src), programmatic,
+      `${surface}: the list says programmatic=${programmatic}, but the client ` +
+      `${RETRACTS.test(src) ? "DOES" : "does NOT"} export a retraction function`
+    );
+  }
+});
+
+test("only YouTube is programmatic — this is the fact that constrains the promise", () => {
+  const r = takedownReality();
+  assert.deepEqual(r.programmatic, ["youtube"]);
+  assert.equal(r.manual.length, 6);
+  assert.match(r.note, /last N published/, "the unlist route's shape defect must be stated, not glossed");
+});
+
+test("every surface a short can reach is in the list", () => {
+  // video_posts stores a post id per surface; a surface missing from this list
+  // is one an operator would not know to check.
+  const named = TAKEDOWN_SURFACES.map((s) => s.surface).sort();
+  assert.deepEqual(named, ["bluesky", "facebook", "instagram", "threads", "tiktok", "x", "youtube"]);
+});
+
+test("every surface says HOW, not just whether", () => {
+  for (const s of TAKEDOWN_SURFACES) {
+    assert.ok(s.how && s.how.length > 15, `${s.surface} has no usable instruction`);
+  }
 });

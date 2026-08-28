@@ -47,6 +47,7 @@ import {
 } from "../services/incident/incidentQueue.js";
 import {
   revokeClearance, pendingTakedowns, recordTakedownActioned, RevocationError,
+  TAKEDOWN_SURFACES, takedownReality,
 } from "../services/incident/incidentRevocation.js";
 import { REVOCATION_REASONS } from "../services/incident/incidentStatus.js";
 
@@ -435,6 +436,9 @@ router.post("/candidates/:id/revoke", json, (req, res) => {
       next: out.requiresTakedown
         ? `Video ${out.videoId} is published and must be pulled. Unlist it, then POST /candidates/${req.params.id}/takedown-actioned.`
         : "Nothing was published, so there is nothing to pull.",
+      ...(out.requiresTakedown
+        ? { surfaces: TAKEDOWN_SURFACES, reality: takedownReality(), runbook: "docs/ops/runbooks/incident_takedown.md" }
+        : {}),
     });
   } catch (err) {
     return fail(res, err, "POST /candidates/:id/revoke");
@@ -445,7 +449,15 @@ router.post("/candidates/:id/revoke", json, (req, res) => {
 router.get("/takedowns", (req, res) => {
   try {
     const rows = pendingTakedowns(getDb(), { limit: req.query.limit });
-    return res.json({ count: rows.length, pending: rows });
+    // The surface checklist travels WITH the outstanding work. An operator
+    // pulling a video at speed should not be recalling which of seven surfaces
+    // is scriptable — six of them are not.
+    return res.json({
+      count: rows.length,
+      pending: rows.map((r) => ({ ...r, surfaces: TAKEDOWN_SURFACES })),
+      reality: takedownReality(),
+      runbook: "docs/ops/runbooks/incident_takedown.md",
+    });
   } catch (err) {
     return fail(res, err, "GET /takedowns");
   }
