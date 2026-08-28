@@ -44,11 +44,19 @@ export const VIDEO_DESIGN_VER = "vid-v1";
 // serving the frames it already cached. That is the v12 lesson made structural,
 // and splitting the renderer across files is exactly how it would have been
 // quietly undone.
+// videoAssembler.js joined this list when stock cutaways landed. It is not a
+// renderer — it builds no tree and rasterises nothing — but it now DECIDES
+// PIXELS: a cutaway composites third-party footage over the frame and hides the
+// masthead and counter for its duration. A change to that composite with an
+// unchanged key means prod keeps serving the MP4 it already cached, and the
+// only human step that would catch it is the one nobody remembers to do.
+// `new URL(...)` creates no import edge, so this adds no cycle.
 export const VIDEO_BUILDER_FINGERPRINT = sourceFingerprint([
   import.meta.url,
   new URL("./videoGeometry.js", import.meta.url).href,
   new URL("./videoSlideChrome.js", import.meta.url).href,
   new URL("./videoSlideRendererVertical.js", import.meta.url).href,
+  new URL("./videoAssembler.js", import.meta.url).href,
 ]);
 export const videoDesignKey = () => `${VIDEO_DESIGN_VER}-${VIDEO_BUILDER_FINGERPRINT}`;
 

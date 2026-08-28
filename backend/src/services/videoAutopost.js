@@ -43,6 +43,7 @@ import {
   markVideoBluesky, countBlueskyPostsSince,
   markVideoTikTok, countTikTokPostsSince,
   markVideoX, countXPostsSince, getArticleEntitiesForTagging,
+  getDb,
 } from "../models/database.js";
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
 import {
@@ -68,6 +69,9 @@ import { findFootageStill, footageEnabled, footageCreditLines, footageDateLabel 
 import { withDeadline } from "./httpRetry.js";
 import { isTikTokConfigured, uploadToTikTok, tiktokPrivacyLevel } from "./tiktokClient.js";
 import { isXConfigured, postToX, fitPost, xSafePublisher } from "./xClient.js";
+import {
+  CUTAWAY_SECS, cutawayCredit, cutawaysAllowedFor, loadLibrary, readUsage, recordUsage, selectCutaways,
+} from "./videoStockLibrary.js";
 import { hashtagsFor, withHashtags } from "./xHashtags.js";
 import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure } from "./heartbeatPing.js";
 
@@ -471,6 +475,42 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
     // Public domain is not the same as unattributed, and DVIDS attaches an
     // actual condition — see footageCreditLines.
     const footageUsed = [];
+    // ── Stock cutaways (dark: VIDEO_STOCK_CUTAWAYS_ENABLED=1) ───────────────
+    //
+    // A lookup against the curated library, never a search. The picks are made
+    // ONCE for the whole video, before any slide is assembled, because two of
+    // the rules — one contributor per video, and never on consecutive beats —
+    // are properties of the video rather than of a slide, and cannot be decided
+    // from inside a per-slide loop.
+    //
+    // SENSITIVITY IS WHOLE-VIDEO. The guard judges a HEADLINE and nothing else;
+    // there is no per-beat signal in the spec and inventing one would be a
+    // classifier, not a guard. So a flagged headline suppresses every cutaway in
+    // the video — the same over-broad, cheap-false-positive posture the card
+    // renderer already takes when it drops to a typographic card.
+    const cutawayBySlide = new Map();
+    const cutawayGate = cutawaysAllowedFor(article);
+    if (!cutawayGate.allowed) {
+      if (cutawayGate.reason === "sensitive-headline") {
+        logger.info(
+          `🎞 stock cutaway: sensitive headline — no cutaways for ${article.id} ` +
+          `("${String(article.title).slice(0, 60)}")`
+        );
+      }
+    } else {
+      const { assets } = loadLibrary();
+      const db = getDb();
+      const { picks } = selectCutaways(slides, { assets, lastUsed: readUsage(db) });
+      for (const p of picks) cutawayBySlide.set(p.slideIndex, p.asset);
+      if (picks.length) {
+        recordUsage(db, picks.map((p) => p.asset.id));
+        logger.info(
+          `🎞 stock cutaway: ${picks.length} selected for ${article.id} — ` +
+          picks.map((p) => `slide ${p.slideIndex}:${p.asset.id}`).join(", ")
+        );
+      }
+    }
+
     for (let i = 0; i < slides.length; i++) {
       const card = slides[i];
       const audioSecs = audio[i].durationSecs;
@@ -563,10 +603,19 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
       }
 
       const seg = path.join(work, `slide${String(i).padStart(2, "0")}.mp4`);
+      // The cutaway sits INSIDE this slide's segment and is clamped against its
+      // length, so the finished video is exactly as long with cutaways on as
+      // off. Nothing new is concatenated, and the music bed — which derives its
+      // timeline independently from slideTotalSecs — stays in sync by not
+      // having anything to be out of sync with.
+      const cutAsset = cutawayBySlide.get(i) || null;
       await assembleSlide({
         statePaths: paths, hold, outputPath: seg, driftDir: i, orientation,
         audioPath: audio[i].path, captionText: card.caption, workDir: work, fontFile: FONT_FILE,
         underlayPath,
+        cutawayPath: cutAsset?.absPath || null,
+        cutawaySecs: cutAsset ? CUTAWAY_SECS() : 0,
+        cutawayCredit: cutAsset ? cutawayCredit(cutAsset) : null,
       });
       segments.push(seg);
     }

@@ -259,6 +259,39 @@ export async function buildCaptionFilter({ text, workDir, slideIndex, fontFile, 
 }
 
 /**
+ * The credit that rides on a cutaway.
+ *
+ * ATTRIBUTION IS OWED HERE MORE THAN ANYWHERE. A cutaway is somebody else's
+ * footage, and the licence asks for the creator to be credited where possible.
+ * The masthead and the slide counter drop for the cutaway's duration — they are
+ * our furniture and a two-second gap in them reads as an edit — but the credit
+ * is the one piece of chrome that must NOT drop, because it belongs to the
+ * picture rather than to us.
+ *
+ * It carries its own contrast, the same way the photo credit does: a chip on a
+ * near-opaque plate, because a photograph is whatever it happens to be and dim
+ * grey over a bright frame is not a credit at all. This is drawn in ffmpeg
+ * rather than in the satori tree so that no renderer file changes — the design
+ * key stays where it is, and the credit is composited into the cutaway stream
+ * itself, so it cannot outlive the footage by even one frame.
+ */
+export function buildCutawayCreditFilter({ text, workDir, slideIndex, fontFile, orientation = "horizontal" }) {
+  const G = geometryFor(orientation);
+  const file = path.join(workDir, `cutaway-credit-${String(slideIndex).padStart(2, "0")}.txt`);
+  const esc = (v) => String(v).replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
+  writeFileSync_(file, String(text).toUpperCase(), "utf8");
+  // Right-aligned inside the action rail, on the top safe line — the same band
+  // the photo credit uses, so the two never collide or read differently.
+  const rightInset = G.safeRight + G.marginX;
+  return (
+    `drawtext=fontfile='${esc(fontFile)}':textfile='${esc(file)}':` +
+    `fontsize=24:fontcolor=0xcfcabd:` +
+    `x=w-text_w-${rightInset}:y=${G.safeTop !== undefined ? G.safeTop + 8 : G.chromeTopY + 8}:` +
+    `box=1:boxcolor=0x090706@0.62:boxborderw=10`
+  );
+}
+
+/**
  * FILM GRAIN — static, not temporal, and that choice is the whole cost story.
  *
  * Measured 2026-08-14 on a 43s vertical render, final encode from clean masters:
@@ -300,7 +333,27 @@ export const grainChain = () => {
   return n > 0 ? `,noise=alls=${n}:allf=u:all_seed=${GRAIN_SEED}` : "";
 };
 
-export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0, caption = null, orientation = "horizontal", underlay = false }) {
+/**
+ * A cutaway is a stream that ENDS, not a time-gated overlay.
+ *
+ * The clip is trimmed to its own length and composited with `eof_action=pass`,
+ * so when it runs out the slide underneath simply passes through. Two
+ * consequences, both load-bearing:
+ *
+ *   1. THE CHROME DROP IS FRAME-EXACT BY CONSTRUCTION. The masthead and the
+ *      slide counter are baked into the state PNGs, which are the main stream,
+ *      so a full-frame cutaway hides them for exactly as long as it exists and
+ *      they return on the frame it ends. Nothing has to agree with anything:
+ *      there is one stream boundary, not two expressions that could drift by a
+ *      frame and read as a glitch.
+ *   2. NO TIME TERM ENTERS THE GRAPH. An `enable='lt(t,N)'` overlay would put a
+ *      `t` into an `overlay=` stage, which is precisely what the type-chain
+ *      time-invariance tests forbid. A stream that ends needs no clock.
+ *
+ * The credit rides INSIDE the cutaway stream for the same reason: composited
+ * before the overlay, it cannot outlive the footage it credits.
+ */
+export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0, caption = null, orientation = "horizontal", underlay = false, cutaway = null }) {
   const CV = geometryFor(orientation).canvas;
   const parts = [];
   // The whole-slide timeline, needed by image motion so each state animates its
@@ -370,6 +423,28 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
   // any downscale — so they neither move nor get resampled.
   const captionChain = caption ? `,${caption}` : "";
 
+  /**
+   * The cutaway stage, and the tail it feeds.
+   *
+   * `scale=…:force_original_aspect_ratio=increase` then `crop` covers the frame
+   * whatever the asset's dimensions are — the library is portrait 2160x3840
+   * today and 1080x1920 after the treatment pass, and neither may letterbox.
+   * The caption and the grain are applied AFTER the composite, so narration
+   * stays burned over the footage and one grain field covers the whole slide.
+   */
+  const appendCutaway = () => {
+    const credit = cutaway.credit ? `,${cutaway.credit}` : "";
+    parts.push(
+      `[${cutaway.inputIndex}:v]scale=${CV.w}:${CV.h}:force_original_aspect_ratio=increase,` +
+      `crop=${CV.w}:${CV.h},setsar=1,fps=${FPS},` +
+      `trim=duration=${cutaway.seconds.toFixed(3)},setpts=PTS-STARTPTS${credit}[cut]`
+    );
+    parts.push(`[base][cut]overlay=0:0:eof_action=pass,setsar=1${captionChain}${grainChain()}[out]`);
+  };
+  // With no cutaway the graph is byte-for-byte what it was: one node, ending in
+  // [out]. The split into [base] happens only when there is something to composite.
+  const sink = cutaway ? `setsar=1[base]` : `setsar=1${captionChain}${grainChain()}[out]`;
+
   // ── STATIC (the default): the same 2% overscan, cropped dead centre ──
   //
   // The centre is not an arbitrary choice — it is the MIDPOINT of the pan this
@@ -391,8 +466,9 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
     parts.push(
       `[${last}]scale=${w2s}:${h2s}:flags=lanczos,` +
       `crop=${CV.w}:${CV.h}:x=${offX}:y=${offY},` +
-      `setsar=1${captionChain}${grainChain()}[out]`
+      sink
     );
+    if (cutaway) appendCutaway();
     return { filter: parts.join("; "), totalDuration: total };
   }
 
@@ -430,8 +506,9 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
   parts.push(
     `[${last}]scale=${w2}:${h2}:flags=lanczos,` +
     `crop=${cw}:${ch}:x='${Math.round(padX / 2)}+${xExpr}':y='${Math.round(padY / 2)}+${yExpr}',` +
-    `scale=${CV.w}:${CV.h}:flags=lanczos,setsar=1${captionChain}${grainChain()}[out]`
+    `scale=${CV.w}:${CV.h}:flags=lanczos,${sink}`
   );
+  if (cutaway) appendCutaway();
 
   return { filter: parts.join("; "), totalDuration: total };
 }
@@ -465,6 +542,16 @@ export function holdForAudio(audioSecs, stateCount, crossfade = CROSSFADE_SECS) 
 }
 
 /**
+ * The assembled length of a slide — the same accumulation buildSlideFilter does,
+ * and the inverse of holdForAudio. A cutaway is clamped against this so it can
+ * never outlast the slide it sits inside, which is what keeps total video
+ * duration identical whether cutaways are on or off.
+ */
+export function totalFor(stateCount, hold, crossfade = CROSSFADE_SECS) {
+  return hold + Math.max(0, stateCount - 1) * (hold - crossfade);
+}
+
+/**
  * Assemble one slide: state PNGs → crossfade → drift → caption → + its audio.
  *
  * Pass `audioPath` and the segment carries that slide's narration, with the
@@ -474,6 +561,7 @@ export async function assembleSlide({
   statePaths, hold, outputPath, driftDir = 0, ffmpegPath = null,
   audioPath = null, captionText = null, workDir = null, fontFile = null,
   orientation = "horizontal", underlayPath = null,
+  cutawayPath = null, cutawaySecs = 0, cutawayCredit = null,
 }) {
   const ff = ffmpegPath || getFFmpegPath();
   if (!ff) throw new Error("videoAssembler: ffmpeg not available");
@@ -484,16 +572,30 @@ export async function assembleSlide({
   // Input ORDER is the contract with buildSlideFilter: states, then the
   // underlay, then audio. The filter addresses them by index.
   if (underlayPath) args.push("-loop", "1", "-t", String(hold * statePaths.length), "-i", underlayPath);
-  const audioIdx = statePaths.length + (underlayPath ? 1 : 0);
+  // The cutaway sits AFTER the underlay and BEFORE the audio, so both indices
+  // below stay arithmetic on the counts rather than on which options are set.
+  const useCutaway = Boolean(cutawayPath) && cutawaySecs > 0;
+  const cutawayIdx = statePaths.length + (underlayPath ? 1 : 0);
+  if (useCutaway) args.push("-i", cutawayPath);
+  const audioIdx = cutawayIdx + (useCutaway ? 1 : 0);
   if (audioPath) args.push("-i", audioPath);
 
   const caption = (captionText && workDir && fontFile)
     ? await buildCaptionFilter({ text: captionText, workDir, slideIndex: driftDir, fontFile, orientation })
     : null;
 
+  // The cutaway can never outlast the slide it sits inside. That is what keeps
+  // the video's total duration identical with cutaways on and off: the segment
+  // is still cut to `-t totalDuration`, and nothing new is concatenated.
+  const cutSecs = useCutaway ? Math.min(cutawaySecs, Math.max(0, totalFor(statePaths.length, hold) - 0.25)) : 0;
+  const credit = (useCutaway && cutawayCredit && workDir && fontFile)
+    ? buildCutawayCreditFilter({ text: cutawayCredit, workDir, slideIndex: driftDir, fontFile, orientation })
+    : null;
+
   const { filter, totalDuration } = buildSlideFilter({
     stateCount: statePaths.length, hold, driftDir, caption, orientation,
     underlay: Boolean(underlayPath),
+    cutaway: useCutaway && cutSecs > 0 ? { inputIndex: cutawayIdx, seconds: cutSecs, credit } : null,
   });
 
   args.push("-filter_complex", filter, "-map", "[out]");
