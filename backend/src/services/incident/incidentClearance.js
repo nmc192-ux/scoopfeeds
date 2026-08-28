@@ -24,6 +24,11 @@
  * a clearance that cannot produce one is refused rather than cleared without.
  * The renderer's own refusal (Phase 5) is the backstop; this is the gate that
  * makes the backstop unreachable in normal operation.
+ *
+ * CREDIT IS CONDITIONAL ON PROVENANCE, NEVER OPTIONAL. See `requiresCredit`
+ * below. Own material has nobody to credit; third-party material without a
+ * credit still cannot render at all. Those are two different rules, not one
+ * relaxed rule.
  */
 
 import { CUTAWAY_MAX_SECS, MAX_CUTAWAYS } from "../videoStockLibrary.js";
@@ -95,8 +100,68 @@ export function creditTextFor({ poster_handle, poster_display, platform } = {}) 
   return where ? `${who} / ${where}` : who;
 }
 
-/** Owner media is ours; there is nobody else to credit. */
-const OWNER_CREDIT = "ScoopFeeds";
+/**
+ * ─── PROVENANCE ───────────────────────────────────────────────────────────────
+ *
+ * Whose material is this? Two answers, and the whole credit rule hangs off them.
+ *
+ *   own          — the operator shot it, or it is an authorised release we hold.
+ *                  It is ScoopFeeds' own material. There is no third party, so
+ *                  there is nothing truthful to put in a credit chip, and
+ *                  crediting the operator by name on screen would be inventing
+ *                  an external source for our own footage.
+ *   third_party  — somebody else's, used by grant or as a fair-use excerpt.
+ *                  A credit is part of what makes the use legitimate, and an
+ *                  asset without one does not render.
+ *
+ * WHY THIS IS A CONDITION AND NOT A RELAXATION, and why the distinction lives
+ * here rather than at each of the four places that used to ask "is credit_text
+ * non-empty":
+ *
+ * The obvious way to let own material through is to make the credit optional —
+ * `if (credit_text || basis === 'owner')` at each site, or worse, dropping the
+ * check. That silently disables the gate for genuine third-party assets the
+ * moment anyone gets a basis wrong, and the renderer refusing to draw
+ * uncredited borrowed footage is the one refusal this engine may never lose.
+ *
+ * So the question every call site asks changed shape: not "may this row skip
+ * the credit?" but "does this row's provenance OWE a credit?" — and the answer
+ * is computed from the clearance basis, in one place, with an explicit
+ * allowlist of exactly one basis.
+ *
+ * DEFAULT IS THIRD PARTY. `provenanceFor(null)`, `provenanceFor(undefined)` and
+ * `provenanceFor("something-new")` all return "third_party", so a missing,
+ * corrupt or newly-added basis owes a credit rather than escaping the
+ * requirement. A new lane has to be argued into the exemption; it cannot fall
+ * into it. Tests assert exactly that, because a fail-open default here is the
+ * vacuous gate this file exists to avoid.
+ */
+export const PROVENANCE = Object.freeze({ OWN: "own", THIRD_PARTY: "third_party" });
+
+/**
+ * The ONLY basis that is our own material. Deliberately a one-element list.
+ *
+ * EXPORTED because `renderableCandidates` has to ask the same question in SQL,
+ * and a hand-written `clearance_basis != 'owner'` in a query string is a second
+ * copy of this rule that no test would catch drifting. The query builds its IN
+ * clause from this array.
+ */
+export const OWN_CLEARANCE_BASES = Object.freeze(["owner"]);
+
+export function provenanceFor(clearanceBasis) {
+  return OWN_CLEARANCE_BASES.includes(clearanceBasis) ? PROVENANCE.OWN : PROVENANCE.THIRD_PARTY;
+}
+
+/**
+ * Does an asset on this basis have to carry a credit before it may render?
+ *
+ * The single predicate behind `assertRenderable`, `approveForRender`, the
+ * `renderableCandidates` query and `toRenderable`. Those four used to hold four
+ * copies of `credit_text IS NOT NULL`; they now hold four calls to this.
+ */
+export function requiresCredit(clearanceBasis) {
+  return provenanceFor(clearanceBasis) === PROVENANCE.THIRD_PARTY;
+}
 
 /**
  * Validate a clearance and return what to persist.
@@ -144,6 +209,18 @@ export function assertClearance(candidate = {}, lane, detail = {}) {
  * claimed date or location correct, and the status machine has no edge from
  * `verified` that avoids `clearing`. Provenance is about rights; verification is
  * about truth.
+ *
+ * NO CREDIT (DrJ, Gate E). This lane used to emit `creditText: "ScoopFeeds"`,
+ * which made our own footage behave in every downstream check exactly like a
+ * third party's: a credit chip was composited into the cutaway stream and the
+ * masthead was suppressed underneath it, so a clip we shot ourselves rendered
+ * with our name in the *source* slot instead of the masthead slot. That is a
+ * borrowed-footage grammar applied to material nobody borrowed.
+ *
+ * The operator is not an external source to be credited on screen. What they
+ * supply is the outlet's own material, and the outlet's name belongs where it
+ * always is — in the masthead, which stays visible. See
+ * `videoAssembler.cutawayFrameForLane`.
  */
 function clearOwner(candidate, detail) {
   const declaration = String(detail.declaration || "").trim();
@@ -157,9 +234,19 @@ function clearOwner(candidate, detail) {
   }
   return {
     clearanceBasis: "owner",
-    // Our own material carries our own name, not a null credit.
-    creditText: OWNER_CREDIT,
-    detail: { lane: "owner", declaration, declaredAt: Date.now() },
+    // NULL, and load-bearing. Anything non-null here reaches
+    // buildCutawayCreditFilter and gets burned onto the picture as a source
+    // credit. There is no source to name.
+    creditText: null,
+    detail: {
+      lane: "owner",
+      provenance: PROVENANCE.OWN,
+      declaration,
+      // Said in words in the row itself, so the absence of a credit reads as a
+      // decision rather than as a missing field somebody should go and fill in.
+      creditPolicy: "own material: no on-screen source credit, masthead retained",
+      declaredAt: Date.now(),
+    },
   };
 }
 
@@ -196,6 +283,7 @@ function clearGrant(candidate, detail) {
     creditText,
     detail: {
       lane: "grant",
+      provenance: PROVENANCE.THIRD_PARTY,
       grantReference: reference,
       grantedBy: candidate.poster_handle || null,
       // What the poster actually agreed to, kept beside the reference so the two
@@ -288,6 +376,7 @@ function clearFairUse(candidate, detail) {
     creditText,
     detail: {
       lane: "fair_use",
+      provenance: PROVENANCE.THIRD_PARTY,
       sourceType,
       excerptSecs: secs,
       excerptMaxSecs: EXCERPT_MAX_SECS,

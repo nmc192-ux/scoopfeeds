@@ -21,6 +21,7 @@
  */
 
 import { getCandidate, listCandidates } from "./incidentLedger.js";
+import { OWN_CLEARANCE_BASES, provenanceFor, requiresCredit } from "./incidentClearance.js";
 import { CHECK_NAMES, VERDICTS } from "./incidentChecks.js";
 import { readHumanVerdicts } from "./incidentVerifyRunner.js";
 import { logger } from "../logger.js";
@@ -138,6 +139,12 @@ function decorateForQueue(db, row, bucket) {
     embedOnly: Boolean(row.embed_only),
     creditText: row.credit_text || null,
     clearanceBasis: row.clearance_basis || null,
+    // Shown so a null creditText in the awaiting_render_tap bucket reads as
+    // "ours, nothing to credit" rather than as a row missing a field. The
+    // operator is about to put their name to this; the queue should not make
+    // them guess which of the two it is.
+    provenance: provenanceFor(row.clearance_basis),
+    creditRequired: requiresCredit(row.clearance_basis),
     renderApproved: Boolean(row.render_approved),
     updatedAt: row.updated_at,
   };
@@ -180,10 +187,14 @@ export function approveForRender(db, candidateId, { actor = "operator", note = n
       { code: "not-cleared" }
     );
   }
-  if (!String(row.credit_text || "").trim()) {
+  // Same provenance condition as assertRenderable, from the same predicate.
+  // Third-party assets are refused here exactly as before; own material has no
+  // third party to name. `requiresCredit` defaults to true, so a row with a
+  // missing or unrecognised basis is still refused.
+  if (requiresCredit(row.clearance_basis) && !String(row.credit_text || "").trim()) {
     throw new QueueError(
-      `candidate ${candidateId} is cleared but carries no credit text, so there is nothing to burn onto the picture. ` +
-      "Clearance and credit are one decision; this row is missing half of it.",
+      `candidate ${candidateId} is cleared on basis "${row.clearance_basis}" but carries no credit text, so there is ` +
+      "nothing to burn onto the picture. Clearance and credit are one decision; this row is missing half of it.",
       { code: "no-credit" }
     );
   }
@@ -202,7 +213,10 @@ export function approveForRender(db, candidateId, { actor = "operator", note = n
       JSON.stringify({ creditText: row.credit_text, clearanceBasis: row.clearance_basis, note }));
   })();
 
-  logger.info(`🎥 incident: candidate ${candidateId} APPROVED for render by ${actor} — credit "${row.credit_text}"`);
+  logger.info(
+    `🎥 incident: candidate ${candidateId} APPROVED for render by ${actor} — ` +
+    (requiresCredit(row.clearance_basis) ? `credit "${row.credit_text}"` : "own material, no credit")
+  );
   return getCandidate(db, candidateId);
 }
 
@@ -248,8 +262,26 @@ export function withdrawRenderApproval(db, candidateId, { actor = "operator", re
  * looser question and get a longer list.
  */
 export function renderableCandidates(db, { storyKind = null, storyId = null, limit = 25 } = {}) {
-  const where = ["status = 'cleared'", "render_approved = 1", "credit_text IS NOT NULL", "TRIM(credit_text) != ''"];
+  const where = ["status = 'cleared'", "render_approved = 1"];
   const args = [];
+
+  // THE CREDIT CONDITION, IN SQL, FROM THE SAME CONSTANT AS THE JS.
+  //
+  // Was two flat predicates (`credit_text IS NOT NULL AND TRIM(credit_text) !=
+  // ''`). It is now the provenance condition: own material may be uncredited,
+  // everything else may not. Built from OWN_CLEARANCE_BASES rather than
+  // spelling 'owner' into the string, because a literal here is a second copy
+  // of the rule that would silently stop matching if the list ever changed.
+  //
+  // NULL BEHAVIOUR IS THE SAFE ONE: `NULL IN ('owner')` is NULL, not true, so a
+  // row with no basis falls through to the credit requirement rather than out
+  // of it. Same default-deny as `requiresCredit`.
+  const ownPlaceholders = OWN_CLEARANCE_BASES.map(() => "?").join(", ");
+  where.push(
+    `(clearance_basis IN (${ownPlaceholders}) OR (credit_text IS NOT NULL AND TRIM(credit_text) != ''))`
+  );
+  args.push(...OWN_CLEARANCE_BASES);
+
   if (storyKind) { where.push("story_kind = ?"); args.push(storyKind); }
   if (storyId) { where.push("story_id = ?"); args.push(storyId); }
   return db.prepare(

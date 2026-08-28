@@ -48,6 +48,8 @@ import {
   cutawayFrameFor, cutawayFrameForLane,
 } from "./videoAssembler.js";
 import { getFFmpegPath } from "./videoGenerator.js";
+import { CLEARANCE_BASES } from "./incident/incidentStatus.js";
+import { requiresCredit } from "./incident/incidentClearance.js";
 
 const ORIENTATION = "vertical";
 
@@ -56,10 +58,19 @@ const ORIENTATION = "vertical";
  *
  * Named by lane rather than by "framed"/"full-bleed" so the test fails if the
  * lane→composition mapping is ever changed without thinking about the credit.
+ *
+ * THIRD-PARTY LANES ONLY, AND THAT IS CHECKED RATHER THAN ASSUMED (DrJ, Gate E).
+ * The property under test is "a credit chip is present on every frame carrying
+ * borrowed footage". Own material carries no credit — there is no third party to
+ * name — so running this property over the `owner` lane would assert a chip that
+ * is correctly absent, and the only way to make it pass would be to weaken the
+ * detector. The list below is therefore exactly the set of bases for which
+ * `requiresCredit` is true, asserted by the first test in this file: a new
+ * third-party lane cannot be added without this property covering it.
  */
 const LANES = [
-  { lane: "grant", frame: null },
-  { lane: "fair_use", frame: cutawayFrameFor("vertical") },
+  { lane: "grant", frame: cutawayFrameForLane("grant", "vertical") },
+  { lane: "fair_use", frame: cutawayFrameForLane("fair_use", "vertical") },
 ];
 const FONT = new URL("../../assets/fonts/Inter-SemiBold.otf", import.meta.url).pathname;
 const CREDIT_TEXT = "Sarah Voss / BLUESKY";
@@ -295,6 +306,22 @@ test("the lane a clearance selects is the lane the region is asked for", () => {
   // framed, this test says so rather than the persistence property quietly
   // measuring the wrong band.
   assert.equal(cutawayFrameForLane("grant", ORIENTATION), null);
-  assert.equal(cutawayFrameForLane("owner", ORIENTATION), null);
   assert.deepEqual(cutawayFrameForLane("fair_use", ORIENTATION), cutawayFrameFor(ORIENTATION));
+  // Own material is framed, because the masthead stays (Gate E).
+  assert.deepEqual(cutawayFrameForLane("owner", ORIENTATION), cutawayFrameFor(ORIENTATION));
+});
+
+test("this property covers EVERY lane that owes a credit, and only those", () => {
+  // THE ANTI-DRIFT GUARD. `LANES` is a hand-written list, and a hand-written
+  // list of lanes to test is exactly the thing that stops being complete. If a
+  // fourth clearance basis is added and it owes a credit, this fails until the
+  // persistence property runs over it too.
+  //
+  // The "and only those" half matters as much: it is what stops someone
+  // "fixing" a red run on the `owner` lane by adding it here and then weakening
+  // the detector to make the absent chip pass.
+  const owesCredit = CLEARANCE_BASES.filter((b) => requiresCredit(b)).sort();
+  assert.deepEqual(LANES.map((l) => l.lane).sort(), owesCredit,
+    "the lanes this property renders must be exactly the lanes that require a credit");
+  assert.equal(requiresCredit("owner"), false, "own material has no third party to credit");
 });

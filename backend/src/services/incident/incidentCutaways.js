@@ -26,7 +26,7 @@
 
 import { existsSync } from "fs";
 import { assertRenderable } from "./incidentClearanceLedger.js";
-import { EXCERPT_MAX_SECS, EXCERPT_MAX_TOTAL_SECS } from "./incidentClearance.js";
+import { EXCERPT_MAX_SECS, EXCERPT_MAX_TOTAL_SECS, provenanceFor, requiresCredit } from "./incidentClearance.js";
 import { resolveQuarantined } from "./incidentFiles.js";
 import { MAX_CUTAWAYS, cutawaySecs } from "../videoStockLibrary.js";
 import { cutawayFrameForLane } from "../videoAssembler.js";
@@ -117,16 +117,32 @@ export function toRenderable(candidate, { root, orientation = "vertical" } = {})
     );
   }
 
+  const creditRequired = requiresCredit(candidate.clearance_basis);
+
   return {
     id: candidate.id,
     absPath,
-    credit: candidate.credit_text,
+    // CREDIT BY PROVENANCE, READ THROUGH THE PREDICATE RATHER THAN OFF THE ROW.
+    //
+    // A third-party row's credit is passed through; own material passes null
+    // even if the row happens to carry a credit string. That asymmetry is
+    // deliberate: `assertRenderable` above has already refused any third-party
+    // row without a credit, so the only way a credit reaches here on an `owner`
+    // row is a stale value from before this lane existed, or a hand-edited
+    // row — and burning either onto the picture would put a source credit on
+    // footage that has no source. Ignoring it is the quiet failure; refusing
+    // the render would be the loud one, and the loud one is wrong here because
+    // the asset is genuinely usable and nothing about the credit is needed to
+    // use it. A test covers the stray-credit row explicitly.
+    credit: creditRequired ? candidate.credit_text : null,
+    creditRequired,
+    provenanceOfRights: provenanceFor(candidate.clearance_basis),
     seconds: secondsFor(candidate),
     clearanceBasis: candidate.clearance_basis,
-    // Lane-aware composition (DrJ, Gate C): grant/owner render full-bleed with
-    // the chrome suppressed; fair_use keeps our framing around it, because the
-    // Lane 3 posture rests on commentary and chrome-suppressed full-bleed shows
-    // the least of it.
+    // Lane-aware composition (DrJ, Gate C and Gate E): grant renders full-bleed
+    // with the chrome suppressed; fair_use and owner keep our framing. See
+    // cutawayFrameForLane for why those two share a composition for entirely
+    // different reasons.
     frame: cutawayFrameForLane(candidate.clearance_basis, orientation),
     provenance: "incident",
   };

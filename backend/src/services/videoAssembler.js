@@ -399,15 +399,47 @@ export function cutawayFrameFor(orientation = "horizontal") {
 /**
  * Which composition does this clearance lane get?
  *
- * grant / owner → full-bleed, chrome suppressed.
- * fair_use      → framed, chrome retained.
+ *   grant     → full-bleed, chrome suppressed.
+ *   fair_use  → framed, chrome retained.
+ *   owner     → framed, chrome retained.
+ *   anything else, including null → framed.
+ *
+ * FULL-BLEED IS NOW AN ALLOWLIST OF ONE, AND THE DEFAULT IS FRAMED. It used to
+ * be `basis === "fair_use" ? framed : full-bleed`, i.e. an unrecognised basis
+ * suppressed the masthead. Suppressing our own branding is the more consequential
+ * of the two outcomes, so it is the one that has to be asked for by name.
+ *
+ * WHY fair_use AND owner SHARE A COMPOSITION FOR OPPOSITE REASONS. This looks
+ * like the lane distinction collapsing and it is not:
+ *
+ *   fair_use is framed because the LANE NEEDS IT. Its whole posture rests on the
+ *     use being commentary, and chrome-suppressed full-bleed shows the least
+ *     commentary of any composition available (DrJ, Gate C).
+ *   owner is framed because THE MASTHEAD IS OURS TO KEEP (DrJ, Gate E).
+ *     Suppressing our own branding over our own footage makes no sense. Own
+ *     material renders with normal chrome.
+ *
+ * They would diverge the moment either reason changed, which is why they are two
+ * entries in a table rather than one condition.
+ *
+ * WHAT THIS DELIBERATELY IS NOT: full-bleed with the masthead redrawn on top.
+ * That was the other way to satisfy Gate E, and it was rejected. The masthead is
+ * baked into the state PNGs by satori at 34px with 8px letter-spacing, and
+ * `drawtext` has no tracking control — a redrawn masthead would be a visibly
+ * different wordmark appearing at the exact frame the cutaway starts, which is
+ * the kind of one-frame pop this file's cutaway header exists to prevent.
+ * Cropping the real masthead out of the state PNG and re-overlaying it would
+ * carry the card's opaque background with it and land a solid bar across the
+ * footage. Framing costs nothing and needs no new compositing stage.
  *
  * Exported as a function rather than inlined at the call site so the rule has
  * one home and a test can walk every lane rather than the two someone
  * remembered.
  */
+const FULL_BLEED_BASES = Object.freeze(["grant"]);
+
 export function cutawayFrameForLane(clearanceBasis, orientation = "horizontal") {
-  return clearanceBasis === "fair_use" ? cutawayFrameFor(orientation) : null;
+  return FULL_BLEED_BASES.includes(clearanceBasis) ? null : cutawayFrameFor(orientation);
 }
 
 export function buildCutawayCreditFilter({ text, workDir, slideIndex, fontFile, orientation = "horizontal", frame = null }) {

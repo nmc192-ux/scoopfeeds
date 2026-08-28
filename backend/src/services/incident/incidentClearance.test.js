@@ -74,9 +74,13 @@ test("owner clearance needs a real declaration, not a shrug", () => {
   assert.equal(out.detail.declaration, "shot by me at the barrage on the 14th");
 });
 
-test("owner media carries our own name rather than a null credit", () => {
+test("owner media carries NO credit — there is no third party to name", () => {
+  // WAS "ScoopFeeds" (Phase 3), CHANGED AT GATE E. Emitting our own name as a
+  // creditText made own footage behave downstream exactly like a third party's:
+  // a source chip composited over the picture and the masthead suppressed
+  // underneath it. See incidentProvenance.test.js for the full property.
   const out = assertClearance(CAND, "owner", { declaration: "district press release, authorised" });
-  assert.equal(out.creditText, "ScoopFeeds");
+  assert.equal(out.creditText, null);
 });
 
 // ─── Lane 2 — grant ────────────────────────────────────────────────────────

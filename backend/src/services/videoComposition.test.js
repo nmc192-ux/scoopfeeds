@@ -135,10 +135,22 @@ test("the credit region follows the chip to its new anchor", () => {
 
 // ─── (e) Lane-aware composition ────────────────────────────────────────────
 
-test("grant and owner render full-bleed; fair_use keeps our framing", () => {
+test("grant renders full-bleed; fair_use and owner keep our framing", () => {
   assert.equal(cutawayFrameForLane("grant", "vertical"), null);
-  assert.equal(cutawayFrameForLane("owner", "vertical"), null);
   assert.ok(cutawayFrameForLane("fair_use", "vertical"), "the Lane 3 posture rests on visible commentary");
+  // GATE E. Own material keeps the masthead: suppressing our own branding over
+  // our own footage makes no sense, and full-bleed is what suppresses it.
+  assert.ok(cutawayFrameForLane("owner", "vertical"), "own material renders with normal chrome");
+});
+
+test("an unrecognised basis is framed, not full-bleed — the default keeps the masthead", () => {
+  // Direction matters. Before Gate E the fall-through was full-bleed, so a typo
+  // or a newly-added basis silently suppressed our branding. Suppression is the
+  // more consequential outcome, so it has to be asked for by name.
+  for (const basis of [null, undefined, "", "OWNER", "grant ", "licence", 0]) {
+    assert.ok(cutawayFrameForLane(basis, "vertical"),
+      `basis ${JSON.stringify(basis)} must not fall through to a suppressed masthead`);
+  }
 });
 
 test("every clearance lane has a defined composition — none falls through", () => {

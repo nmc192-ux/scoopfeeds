@@ -30,7 +30,7 @@ Exactly one client exports a retraction function:
 Verified by reading every client in `backend/src/services/*Client.js` for an exported
 delete / remove / privacy / retract function. Six of seven have none.
 
-### And the one route we have is the wrong shape
+### The route we had was the wrong shape — fixed 28 Aug 2026
 
 `POST /scoop-ops/video/unlist-recent` does **not** take a video id. It runs:
 
@@ -45,9 +45,20 @@ either requires that video to be the most recent, or takes down N−1 videos tha
 asked about. It was built as a "the loop went wrong at 3am" button, which is a different
 job from a targeted withdrawal, and it does that job well.
 
-**This route has never been successfully called** (open-items list since launch). The
-runbook below therefore treats the YouTube step as *unverified in production* and says so
-at the point of use.
+**`POST /scoop-ops/video/unlist/:youtubeId` now does the targeted job.** One named video,
+and only that one. It does not require us to hold a `video_posts` row for the id — a
+takedown is about a video on a platform, not about our bookkeeping — and it reports
+`known: false` when we don't. Both routes stay: they answer different questions.
+
+**Neither route has ever been successfully called against YouTube** (open-items list since
+launch). The targeted route is exercised end to end in
+`backend/src/routes/videoUnlistOne.test.js` — real express, real router, real HTTP, real
+SQLite, real `setYouTubePrivacy`, with only the Google endpoints stubbed at
+`globalThis.fetch` — so the routing, validation, targeting, status-merge, failure handling
+and DB write are all proven. What is **not** proven is the one thing no test here can
+prove: that our OAuth token is accepted by `videos.update` in production. The runbook
+below therefore still treats the YouTube step as *unverified in production* and says so at
+the point of use.
 
 ### What this means for the permission request
 
@@ -103,21 +114,35 @@ surface checklist.
 
 ## 3. YouTube — the one programmatic step
 
-⚠️ **Unverified in production.** This route has never been successfully called. Expect to
-debug it the first time, and do not assume a 200 means the video moved — check the video's
-privacy in YouTube Studio afterwards.
+⚠️ **Unverified against the real YouTube API.** No call from this codebase has ever
+successfully reached `videos.update` in production. The route itself is exercised end to
+end against a stubbed API (see §0), so what is likely to fail first is the credential, not
+the code: the original token carried `upload` + `readonly` only and `videos.update` 403'd
+— re-mint with `node backend/scripts/youtube-auth.mjs`, which requests `force-ssl`. Do not
+assume a 200 means the video moved; check its privacy in YouTube Studio afterwards.
 
-If the video is the most recent published:
+**Use the targeted route. It takes the video id.**
 
 ```bash
-curl -X POST "https://<host>/scoop-ops/video/unlist-recent?n=1&privacy=private" \
+curl -X POST "https://<host>/scoop-ops/video/unlist/<youtubeId>?privacy=private" \
   -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
 ```
 
-If it is **not** the most recent, do **not** raise `n` to reach it — that flips every video
-in between. Set it private by hand in YouTube Studio instead. (A targeted
-`unlist-one/:videoId` route is the obvious fix and is deliberately not built here; changing
-a live recovery route is DrJ's call.)
+`privacy` is `private` (default) or `unlisted`. `public` is refused — this is a withdrawal
+route and it does not re-publish.
+
+Read the response:
+
+| Field | Meaning |
+|---|---|
+| `ok: true` | YouTube accepted the change |
+| `known: false` | we hold no `video_posts` row for that id — the flip still happened |
+| `dbRowUpdated` | whether our own row was updated to match |
+| HTTP 502 | YouTube refused; **nothing** was written to our DB, so the row still reads `public` |
+
+Do **not** use `unlist-recent` for a targeted withdrawal. It flips the last N published,
+and raising `n` to reach an older video takes down every video in between. It remains the
+right tool for its own job: the loop went wrong and the last few uploads all have to go.
 
 ## 4. The six manual surfaces
 
@@ -158,10 +183,13 @@ Not a system step, and the most important one. They asked; tell them it is done 
 
 ## What would make this better, in priority order
 
-1. **A targeted `unlist-one/:youtubeId` route.** The current one cannot retract a specific
-   video without collateral. Small change to a live recovery route — needs a ruling.
-2. **A delete path for Bluesky.** The AT Protocol supports record deletion and we already
+1. ~~**A targeted `unlist-one/:youtubeId` route.**~~ **Done, 28 Aug 2026** —
+   `POST /scoop-ops/video/unlist/:youtubeId`. See §0 and §3.
+2. **Run the targeted route once, deliberately, against a throwaway video.** Still the
+   biggest open gap: no call from this codebase has ever reached `videos.update` in
+   production. A recovery route that has never been executed is a plan, not a capability —
+   the same reasoning that made this engine's own gates get exercised rather than asserted.
+   Needs `ADMIN_BEARER_TOKEN` (or `ADMIN_KEY`) sent as `Authorization: Bearer`, and a token
+   minted with `force-ssl`.
+3. **A delete path for Bluesky.** The AT Protocol supports record deletion and we already
    hold an authenticated agent; it is the cheapest of the six to automate.
-3. **Verify `unlist-recent` once, deliberately, on a throwaway video.** It has never run.
-   A recovery route that has never been executed is a plan, not a capability — the same
-   reasoning that made this engine's own gates get exercised rather than asserted.

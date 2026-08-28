@@ -15,7 +15,7 @@
  */
 
 import { transition, getCandidate, candidateTrail } from "./incidentLedger.js";
-import { assertClearance, ClearanceRefusedError } from "./incidentClearance.js";
+import { assertClearance, ClearanceRefusedError, provenanceFor, requiresCredit } from "./incidentClearance.js";
 import { draftGrantRequest } from "./incidentGrantDraft.js";
 import { logger } from "../logger.js";
 
@@ -142,7 +142,10 @@ export function applyClearance(db, candidateId, lane, detail = {}, { actor = "op
   });
   run();
 
-  logger.info(`🎥 incident: candidate ${candidateId} cleared (${clearanceBasis}) — credit "${creditText}"`);
+  logger.info(
+    `🎥 incident: candidate ${candidateId} cleared (${clearanceBasis}, ${provenanceFor(clearanceBasis)}) — ` +
+    (creditText ? `credit "${creditText}"` : "no credit: our own material, masthead retained")
+  );
   return getCandidate(db, candidateId);
 }
 
@@ -181,10 +184,17 @@ export function assertRenderable(candidate) {
       { code: "not-cleared" }
     );
   }
-  if (!String(candidate.credit_text || "").trim()) {
+  // CONDITIONAL ON PROVENANCE, NOT OPTIONAL (DrJ, Gate E). `requiresCredit` is
+  // true for every basis except `owner`, including a missing or unrecognised
+  // one — so this refusal is exactly as strong for third-party assets as it was
+  // before own material existed, and a row cannot escape it by having a basis
+  // nobody has heard of. Own material has no third party to name; asking for a
+  // credit there would only be satisfiable by inventing one.
+  if (requiresCredit(candidate.clearance_basis) && !String(candidate.credit_text || "").trim()) {
     throw new ClearanceRefusedError(
-      `candidate ${candidate.id} is cleared but carries no credit text. A third-party asset renders with a ` +
-      "credit chip or it does not render — clearance and credit are one decision, not two.",
+      `candidate ${candidate.id} is cleared on basis "${candidate.clearance_basis}" but carries no credit text. ` +
+      "A third-party asset renders with a credit chip or it does not render — clearance and credit are one " +
+      "decision, not two. (Only `owner` material renders uncredited, because there is nobody else to name.)",
       { code: "no-credit" }
     );
   }

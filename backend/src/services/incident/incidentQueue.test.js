@@ -44,12 +44,23 @@ const mk = (db, over = {}) => createCandidate(db, {
   posterDisplay: `Poster ${seq}`, ...over,
 }).candidate;
 
-/** Walk a candidate all the way to `cleared`. */
-function toCleared(db, id) {
+/**
+ * Walk a candidate all the way to `cleared`.
+ *
+ * DEFAULTS TO A THIRD-PARTY LANE. It used to use `owner`, which since Gate E is
+ * the one basis that carries no credit — and most of the assertions in this file
+ * are about the credit being required. Clearing on `owner` would have made those
+ * tests assert nothing. `owner` is still reachable by argument for the tests
+ * that are actually about own material.
+ */
+function toCleared(db, id, lane = "grant") {
   transition(db, id, "verifying", { checkName: "t" });
   transition(db, id, "verified", { checkName: "t" });
   beginClearing(db, id);
-  return applyClearance(db, id, "owner", { declaration: "shot by me at the scene on the 14th" });
+  if (lane === "owner") {
+    return applyClearance(db, id, "owner", { declaration: "shot by me at the scene on the 14th" });
+  }
+  return applyClearance(db, id, "grant", { grantReference: "https://bsky.app/profile/x/post/3kabcdef" });
 }
 
 // ─── The tap is a real gate ────────────────────────────────────────────────
@@ -105,7 +116,8 @@ test("the tap is recorded — who, when, and what they were approving", (t0) => 
   const last = candidateTrail(t.db, c.id).at(-1);
   assert.equal(last.check_name, "render:approved");
   assert.equal(last.actor, "drj");
-  assert.equal(last.evidence.creditText, "ScoopFeeds");
+  assert.equal(last.evidence.creditText, getCandidate(t.db, c.id).credit_text);
+  assert.match(last.evidence.creditText, /\/ BLUESKY$/, "the credit that was approved is recorded verbatim");
   assert.equal(last.evidence.note, "looks right");
 });
 

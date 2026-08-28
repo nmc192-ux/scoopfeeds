@@ -75,14 +75,16 @@ test("an unverified candidate cannot begin clearing at all", (t0) => {
 
 // ─── Lane 0 ─────────────────────────────────────────────────────────────────
 
-test("owner clearance writes the basis, the credit and the declaration together", (t0) => {
+test("owner clearance writes the basis and the declaration, and NO credit", (t0) => {
   const t = fixture(); t0.after(() => t.cleanup());
   const row = applyClearance(t.db, t.id, "owner", { declaration: "shot by me at the barrage on the 14th" });
 
   assert.equal(row.status, "cleared");
   assert.equal(row.clearance_basis, "owner");
-  assert.equal(row.credit_text, "ScoopFeeds");
-  assert.equal(JSON.parse(row.clearance_detail).declaration, "shot by me at the barrage on the 14th");
+  assert.equal(row.credit_text, null, "own material has no third party to credit (Gate E)");
+  const detail = JSON.parse(row.clearance_detail);
+  assert.equal(detail.declaration, "shot by me at the barrage on the 14th");
+  assert.equal(detail.provenance, "own");
 });
 
 test("a refused clearance leaves the row and the trail untouched", (t0) => {
@@ -207,8 +209,12 @@ test("assertRenderable refuses anything not cleared", (t0) => {
 test("assertRenderable refuses a cleared row that somehow lost its credit", (t0) => {
   // Defence in depth: the transaction makes this unreachable through this
   // module, so the guard is for whatever bypasses it later.
+  // ON A THIRD-PARTY LANE, which is the only lane that owes a credit at all.
+  // It used to use the owner lane, which since Gate E is the one basis for
+  // which a null credit is correct — running it there now would assert a
+  // refusal that must not happen.
   const t = fixture(); t0.after(() => t.cleanup());
-  applyClearance(t.db, t.id, "owner", { declaration: "shot by me at the barrage" });
+  applyClearance(t.db, t.id, "fair_use", { sourceType: "eyewitness", excerptSecs: 2, commentaryLayer: true });
   approveForRender(t.db, t.id);
   t.db.prepare("UPDATE media_candidates SET credit_text = NULL WHERE id = ?").run(t.id);
   const err = caught(() => assertRenderable(getCandidate(t.db, t.id)), ClearanceRefusedError);
