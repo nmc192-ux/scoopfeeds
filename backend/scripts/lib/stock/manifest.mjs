@@ -22,6 +22,35 @@ export const TREATED_DIR = "treated";
 
 export const STATUSES = ["staged", "kept", "rejected", "treated"];
 
+/**
+ * THE SHAPE THIS TOOLCHAIN READS AND WRITES.
+ *
+ * The manifest is a bare JSON array, so it cannot carry a version of its own
+ * without changing shape — which is the thing a version exists to signal. So the
+ * expectation is versioned at the READER, the same way videoFootage.js versions
+ * its cache with CACHE_VERSION rather than stamping the cached files.
+ *
+ * BUMP THIS WHENEVER WHAT A READER GETS BACK CHANGES. That means a field added,
+ * removed or repurposed — and it also means a change to what `treatedPath`
+ * POINTS AT, because a reader that assumed one thing about those files and gets
+ * another is broken in exactly the way a version is meant to catch.
+ *
+ *   1 — the original: entries as makeEntry writes them, treated files at the
+ *       master's own resolution (2160x3840) and crf 18.
+ *   2 — treated files are now 1080x1920 at crf 20. No FIELD changed, so nothing
+ *       that reads the manifest breaks; what changed is the contract about the
+ *       files those rows point to, and a library holding a mix of the two is a
+ *       library half of which is stale. `stock-treat --retreat` is how the mix
+ *       is resolved.
+ *
+ * There is a second copy of this expectation on the renderer side, which reads
+ * the synced manifest at render time. The two are deliberately independent —
+ * the renderer must be able to tolerate a manifest written by a newer toolchain
+ * without a lockstep deploy — so this constant is not imported there and must
+ * not be.
+ */
+export const MANIFEST_SHAPE_VERSION = 2;
+
 export function manifestPath(root = LIBRARY_ROOT) {
   return path.join(root, "manifest.json");
 }

@@ -65,12 +65,75 @@ export const GRAIN_CHAINS = Object.freeze({
   static14: "noise=alls=14:allf=u:all_seed=20260814",
 });
 
+/**
+ * Treated assets are written at DELIVERY resolution, not at the master's.
+ *
+ * Renders are 1080x1920 and a cutaway is 1.5-3s of it, so every pixel above
+ * 1080 wide was being carried to the VPS and then discarded at assembly. The
+ * masters in staging/ stay 2160x3840 and untouched — they are the re-treat
+ * source, and the only reason this is a safe one-way change.
+ *
+ * The downscale happens in the SAME pass as the grade. A second encode to
+ * resize would decode and re-encode the graded output, which costs quality for
+ * nothing.
+ */
+export const DELIVERY = Object.freeze({ width: 1080, height: 1920 });
+const DELIVERY_AR = DELIVERY.width / DELIVERY.height;
+
+/** Is this source the delivery aspect (9:16), so a straight scale is lossless in framing? */
+export function isDeliveryAspect(width, height) {
+  const w = Number(width);
+  const h = Number(height);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return false;
+  return Math.abs(w / h - DELIVERY_AR) < 0.005;
+}
+
+/**
+ * THE ENCODE QUALITY, AND WHY IT IS 20 RATHER THAN 18.
+ *
+ * crf 18 was the original choice and it was wrong in a way that showed up in the
+ * library: it is finer than a typical provider delivery encode, so re-encoding
+ * an already-compressed clip spent bits describing its compression artefacts.
+ * ships-0008 GREW on treatment, 160.5 MB -> 192.0 MB.
+ *
+ * Measured here rather than chosen by convention, on 4K portrait sources first
+ * encoded at crf 23 to imitate a provider delivery file, graded and downscaled
+ * to 1080x1920, and compared against a LOSSLESS render of the same downscale and
+ * grade so the numbers isolate encode loss:
+ *
+ *   crf   detail-like            smooth/gradient-like
+ *   16    3.04 MB  PSNR 50.9     5.71 MB  PSNR 48.0
+ *   18    2.16 MB  PSNR 49.5     4.33 MB  PSNR 46.7
+ *   20    1.42 MB  PSNR 48.0     3.23 MB  PSNR 45.3   <- chosen
+ *   22    0.96 MB  PSNR 46.8     2.34 MB  PSNR 43.8
+ *   24    0.64 MB  PSNR 45.7     1.63 MB  PSNR 42.5
+ *
+ * The curve has no knee — it is a straight trade — so the value is a judgement
+ * about where this library sits. 20 takes 25-34% off 18 while holding 45-48 dB,
+ * which is comfortably inside visually-transparent territory for content that
+ * has already lost most of its hard-to-encode detail in a 4x downscale.
+ *
+ * NOT lower than 20: the grade ends in `vignette`, which is a smooth luminance
+ * ramp, and gradients are what band first. The gradient-like column is the
+ * proxy for that and it is the one that falls off faster — 45.3 dB at 20
+ * against 43.8 at 22. Saving another megabyte per clip is not worth banding a
+ * vignette in a library that is encoded once and used many times, especially
+ * when the whole library at 11 subject classes lands near 1.3 GB either way.
+ *
+ * If this is ever revisited, revisit it with a measurement on REAL masters —
+ * the numbers above come from synthetic sources (see the PR).
+ */
+export const LIBRARY_CRF = "20";
+
 export function buildFilterChain(grain = "none") {
   const grainChain = GRAIN_CHAINS[grain];
   if (grainChain === undefined) {
     throw new Error(`unknown grain option \`${grain}\` — expected one of: ${Object.keys(GRAIN_CHAINS).join(", ")}`);
   }
-  return [LIBRARY_GRADE, grainChain, "format=yuv420p"].filter(Boolean).join(",");
+  // Scale FIRST: grading fewer pixels is cheaper and identical in result, and it
+  // keeps the vignette sized to the delivery frame rather than the master's.
+  const scale = `scale=${DELIVERY.width}:${DELIVERY.height}:flags=lanczos`;
+  return [scale, LIBRARY_GRADE, grainChain, "format=yuv420p"].filter(Boolean).join(",");
 }
 
 /**
@@ -97,7 +160,10 @@ export function resolveFfmpeg() {
  * Grade one file. Never writes over `sourcePath` (§3b) — refuses if asked to.
  * Returns { treated: true, bytes } or throws with a readable reason.
  */
-export async function treatFile({ sourcePath, outputPath, grain = "none", ffmpegPath = resolveFfmpeg() }) {
+export async function treatFile({
+  sourcePath, outputPath, grain = "none", ffmpegPath = resolveFfmpeg(),
+  sourceWidth = null, sourceHeight = null,
+}) {
   if (!ffmpegPath) {
     throw new Error(
       "no ffmpeg available: set FFMPEG_PATH, install ffmpeg on PATH, or install backend dependencies " +
@@ -105,6 +171,18 @@ export async function treatFile({ sourcePath, outputPath, grain = "none", ffmpeg
     );
   }
   if (!existsSync(sourcePath)) throw new Error(`source missing: ${sourcePath}`);
+  // A STRAIGHT SCALE, NEVER A SILENT CROP. The library is native-portrait by
+  // construction — the crop gate only accepts 9:16 or downscales 4K landscape —
+  // so a source of another shape means something upstream changed. Scaling it
+  // anyway would stretch the picture, and cropping it would silently reframe
+  // someone else's shot. Both are worse than stopping and saying so.
+  if (sourceWidth !== null && sourceHeight !== null && !isDeliveryAspect(sourceWidth, sourceHeight)) {
+    throw new Error(
+      `refusing to treat ${path.basename(sourcePath)}: ${sourceWidth}x${sourceHeight} is not the ` +
+      `${DELIVERY.width}x${DELIVERY.height} delivery aspect. Treatment scales, it does not crop — ` +
+      "reframing is a human decision made at curation, not one to make here."
+    );
+  }
   if (path.resolve(sourcePath) === path.resolve(outputPath)) {
     throw new Error(`refusing to treat ${sourcePath} onto itself — the source download is never overwritten (§3b)`);
   }
@@ -114,7 +192,7 @@ export async function treatFile({ sourcePath, outputPath, grain = "none", ffmpeg
     ["-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-i", sourcePath,
       "-vf", buildFilterChain(grain),
       // Silent masters: these are 1.5-3s cutaways under narration; the film owns its audio bed.
-      "-an", "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p",
+      "-an", "-c:v", "libx264", "-crf", LIBRARY_CRF, "-preset", "medium", "-pix_fmt", "yuv420p",
       outputPath],
     { maxBuffer: 1 << 26 }
   );
