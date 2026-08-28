@@ -134,10 +134,25 @@ export const resolveQuarantined = (rel, { root = quarantineRoot() } = {}) =>
  * Grade a quarantined file to the house palette.
  *
  * THIS IS STYLE. It makes a clip look like ours and it has no bearing on whether
- * we may use it — that was decided in incidentClearance.js before this function
- * could be reached, and nothing here is an input to that decision. The comment
+ * we may use it. Nothing here is an input to that decision, and the comment
  * exists because the opposite reasoning ("we graded it, so it's ours now") is
  * exactly the reasoning this engine forbids.
+ *
+ * CORRECTED 2026-08-28. This header used to say the clearance decision "was
+ * decided in incidentClearance.js before this function could be reached". That
+ * was false: nothing in this function reads `status`, and treatment is reachable
+ * on a candidate at any point in the machine, including one that has not been
+ * verified. A comment asserting an ordering the code does not enforce is exactly
+ * the kind of claim this engine must not make about rights.
+ *
+ * The ordering is NOT enforced here, deliberately. Treating a file while a grant
+ * is still pending is legitimate — the operator wants to see how it will look
+ * before deciding whether to chase the poster — and gating treatment on
+ * clearance would forbid that for no gain. What IS enforced, and what makes the
+ * gap harmless, sits one layer down: `toRenderable` calls `assertRenderable`, so
+ * a treated file belonging to an uncleared, untapped or revoked candidate cannot
+ * reach the assembler. Treatment produces bytes; only that gate produces pixels
+ * in a video.
  *
  * NO GENERATIVE MOTION, EVER. See buildIncidentFilter below.
  */
