@@ -41,7 +41,7 @@ import {
 import path from "path";
 import { spawn } from "child_process";
 import { getFFmpegPath } from "../videoGenerator.js";
-import { LIBRARY_GRADE } from "../videoHouseGrade.js";
+import { INCIDENT_GRADE } from "../videoHouseGrade.js";
 import { logger } from "../logger.js";
 
 const BACKEND_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
@@ -202,7 +202,10 @@ export function buildIncidentFilter() {
   return [
     // Deinterlace only if the source is interlaced; a no-op otherwise.
     "yadif=deint=interlaced",
-    LIBRARY_GRADE,
+    // INCIDENT_GRADE, not LIBRARY_GRADE. Eyewitness footage is graded lighter
+    // than curated stock — see videoHouseGrade.js for why, and for the fact that
+    // these numbers have not yet been validated against real footage.
+    INCIDENT_GRADE,
     "format=yuv420p",
   ].join(",");
 }

@@ -15,6 +15,7 @@ import path from "path";
 import {
   incidentMediaEnabled, toRenderable, selectIncidentCutaways, mergeCutaways,
   secondsFor, creditForPick, IncidentRenderRefused,
+  COLD_OPEN_SECS, assertColdOpen,
 } from "./incidentCutaways.js";
 import { EXCERPT_MAX_SECS, EXCERPT_MAX_TOTAL_SECS, ClearanceRefusedError } from "./incidentClearance.js";
 import { MAX_CUTAWAYS } from "../videoStockLibrary.js";
@@ -245,4 +246,67 @@ test("credit comes from the right place for each source", () => {
     creditForPick({ source: "stock", asset: { creator: "Bob", provider: "pexels" } }, stockCredit),
     "Bob / PEXELS"
   );
+});
+
+
+// ─── The cold open is ours ─────────────────────────────────────────────────
+
+test("no incident cutaway lands on the opening beat", (t) => {
+  // Frame 0 autoplays in feed and is grabbed as the thumbnail. The Gate C render
+  // opened on full-bleed borrowed material with the masthead suppressed.
+  const ids = ["k1", "k2", "k3"];
+  const root = files(t, ids);
+  const { picks } = selectIncidentCutaways(slides(10), { candidates: ids.map((i) => cand(i)), root });
+  assert.ok(picks.length > 0, "the guard must not simply disable the feature");
+  assert.equal(picks.some((p) => p.slideIndex === 0), false, "slide 0 starts at t=0");
+});
+
+test("with real slide starts, every beat inside the cold open is excluded", (t) => {
+  const ids = ["m1", "m2"];
+  const root = files(t, ids);
+  // A pathological timeline: three very short opening beats, all inside 0.8s.
+  const slideStarts = [0, 0.3, 0.6, 1.4, 3.0, 5.0];
+  const { picks } = selectIncidentCutaways(slides(6), {
+    candidates: ids.map((i) => cand(i)), root, slideStarts,
+  });
+  for (const p of picks) {
+    assert.ok(slideStarts[p.slideIndex] >= COLD_OPEN_SECS,
+      `slide ${p.slideIndex} starts at ${slideStarts[p.slideIndex]}s, inside the ${COLD_OPEN_SECS}s cold open`);
+  }
+});
+
+test("the cold-open constant is named and defaults into the ruled band", () => {
+  assert.ok(COLD_OPEN_SECS >= 0.5 && COLD_OPEN_SECS <= 1.0, `COLD_OPEN_SECS is ${COLD_OPEN_SECS}`);
+});
+
+test("assertColdOpen is the authoritative check and THROWS", () => {
+  // Selection's fallback is a heuristic; this one runs where the timeline is
+  // actually known. A cold open on borrowed footage is the thumbnail, not a
+  // degraded render to log and carry on with.
+  const starts = [0, 2.0, 4.0];
+  assert.equal(assertColdOpen([{ slideIndex: 1, source: "incident", asset: { id: "a" } }], starts), true);
+  const err = caught(
+    () => assertColdOpen([{ slideIndex: 0, source: "incident", asset: { id: "a" } }], starts),
+    IncidentRenderRefused
+  );
+  assert.equal(err.code, "cold-open");
+  assert.match(err.message, /thumbnail/i);
+});
+
+test("the cold-open guard does not apply to our OWN stock — only to borrowed footage", () => {
+  // Stock is subject illustration we licensed; the rule is about third-party
+  // incident material representing the event.
+  assert.equal(assertColdOpen([{ slideIndex: 0, source: "stock", asset: { id: "s" } }], [0, 2]), true);
+});
+
+// ─── Lane-aware composition reaches the renderable ─────────────────────────
+
+test("a fair_use asset carries a frame; a granted one does not", (t) => {
+  const root = files(t, ["lane1", "lane2"]);
+  const grant = toRenderable(cand("lane1"), { root });
+  const fair = toRenderable(cand("lane2", {
+    clearance_basis: "fair_use", clearance_detail: JSON.stringify({ excerptSecs: 2 }),
+  }), { root });
+  assert.equal(grant.frame, null, "granted footage renders full-bleed");
+  assert.ok(fair.frame && fair.frame.w > 0, "fair use keeps our framing around it");
 });

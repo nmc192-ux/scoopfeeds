@@ -53,6 +53,12 @@ export const HORIZONTAL = Object.freeze({
   // freeze throws in module scope, which takes the whole renderer down at
   // import time rather than at render time.
   progressY: H_CANVAS.h - H_DRIFT_SAFE_Y - 6,   // 1046
+  // 16:9 has no platform furniture to dodge, so the chip keeps its own slot
+  // here; the masthead anchor and the size floor are the same rule applied to
+  // this frame's own masthead and subtitle.
+  creditX: 96,
+  creditY: 72,
+  creditFontSize: 34,
 });
 
 /**
@@ -144,10 +150,37 @@ export const VERTICAL = Object.freeze({
   driftSafeY: 28,
   progressH: 5,
   contentBottom: V_CONTENT_BOTTOM,
-  // The progress line sits at the bottom of OUR content area, not the bottom of
-  // the frame as it does in 16:9. Below contentBottom is the platform's band.
-  progressY: V_CONTENT_BOTTOM - 6,      // 1594
+  // THE PROGRESS LINE MOVED UP, above the caption block rather than below it.
+  //
+  // It used to sit at V_CONTENT_BOTTOM - 6 = 1594, which is 83% of frame height.
+  // TikTok's own furniture reaches about 85% and the Instagram Reels caption
+  // block sits inside that band, so our accent rule was landing underneath
+  // somebody else's UI on two of the seven surfaces — and the burned caption,
+  // at 81%, was in the same trouble. Both now sit above 75% (see
+  // MAX_CAPTION_BOTTOM_FRACTION in videoAssembler), with the rule above the
+  // caption block it belongs to rather than stranded below it.
+  //
+  // contentBottom is unchanged: it is where OUR content area ends, which is a
+  // different question from where the chrome sits inside it.
+  progressY: 1296,
   reservedBottomY: V_CONTENT_BOTTOM,
+  /**
+   * Where the cutaway credit chip goes, and how big.
+   *
+   * ANCHORED TO THE MASTHEAD SLOT — the same x and the same top as SCOOPFEEDS.
+   * The rule that encodes: *when the frame is not ours, the source's name takes
+   * our name's position.* The chip used to be right-aligned inside the action
+   * rail, which aligned it to nothing — measured on a real render it centred at
+   * x≈663 against a subtitle centred at x≈540, neither centred nor edge-aligned,
+   * and it read as accidental.
+   *
+   * creditFontSize (38) matches the title card's `sub` size, so the chip's cap
+   * height is no smaller than the subtitle beneath it. At 24 it was the smallest
+   * text in the frame — backwards for something that is a promise to a person.
+   */
+  creditX: 104,
+  creditY: 140,
+  creditFontSize: 38,
 });
 
 export const GEOMETRY = Object.freeze({ horizontal: HORIZONTAL, vertical: VERTICAL });

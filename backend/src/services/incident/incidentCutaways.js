@@ -29,10 +29,29 @@ import { assertRenderable } from "./incidentClearanceLedger.js";
 import { EXCERPT_MAX_SECS, EXCERPT_MAX_TOTAL_SECS } from "./incidentClearance.js";
 import { resolveQuarantined } from "./incidentFiles.js";
 import { MAX_CUTAWAYS, cutawaySecs } from "../videoStockLibrary.js";
+import { cutawayFrameForLane } from "../videoAssembler.js";
 import { logger } from "../logger.js";
 
 /** Dark until switched on, in the established shape (brief §2 Phase 5). */
 export const incidentMediaEnabled = () => process.env.VIDEO_INCIDENT_MEDIA_ENABLED === "1";
+
+/**
+ * THE COLD OPEN IS OURS (DrJ, Gate C).
+ *
+ * No third-party footage may start inside the first COLD_OPEN_SECS of a video.
+ *
+ * Frame 0 is what autoplays in feed and what every platform grabs as a
+ * thumbnail, and the Gate C render opened on full-bleed borrowed material with
+ * the masthead suppressed — which is simultaneously the first thing a viewer
+ * sees, the still that represents the video everywhere it is listed, and the
+ * weakest Lane 3 position available. None of those were decisions; they were
+ * consequences of slide 0 being eligible.
+ *
+ * 0.8s: long enough that the thumbnail frame and the first beat of autoplay are
+ * unambiguously ours, short enough not to cost a cutaway on a four-slide short.
+ * Named rather than inlined so the number can be argued with.
+ */
+export const COLD_OPEN_SECS = Number.parseFloat(process.env.VIDEO_INCIDENT_COLD_OPEN_SECS || "0.8");
 
 export class IncidentRenderRefused extends Error {
   constructor(message, { code, candidateId } = {}) {
@@ -68,7 +87,7 @@ const safeParse = (s) => { try { return JSON.parse(s); } catch { return null; } 
  * cleared and approved and then could not be used" — is exactly what somebody
  * needs to see.
  */
-export function toRenderable(candidate, { root } = {}) {
+export function toRenderable(candidate, { root, orientation = "vertical" } = {}) {
   // Cleared + credited + operator-tapped. Throws ClearanceRefusedError.
   assertRenderable(candidate);
 
@@ -104,6 +123,11 @@ export function toRenderable(candidate, { root } = {}) {
     credit: candidate.credit_text,
     seconds: secondsFor(candidate),
     clearanceBasis: candidate.clearance_basis,
+    // Lane-aware composition (DrJ, Gate C): grant/owner render full-bleed with
+    // the chrome suppressed; fair_use keeps our framing around it, because the
+    // Lane 3 posture rests on commentary and chrome-suppressed full-bleed shows
+    // the least of it.
+    frame: cutawayFrameForLane(candidate.clearance_basis, orientation),
     provenance: "incident",
   };
 }
@@ -119,21 +143,36 @@ export function toRenderable(candidate, { root } = {}) {
  * need: two 3-second excerpts from two different posts have the same effect on a
  * video as two from one, so the budget is per video rather than per asset.
  */
-export function selectIncidentCutaways(slides = [], { candidates = [], max = MAX_CUTAWAYS, root = null } = {}) {
+export function selectIncidentCutaways(slides = [], {
+  candidates = [], max = MAX_CUTAWAYS, root = null, slideStarts = null, orientation = "vertical",
+} = {}) {
   const picks = [];
   const refused = [];
   let fairUseSpent = 0;
 
+  /**
+   * Is this beat inside the cold open?
+   *
+   * With real slide start times this is exact. Without them only slide 0 can be
+   * PROVEN to start at t=0, so that is the conservative floor — and
+   * `assertColdOpen` below is the authoritative check, run at assembly where the
+   * timeline is actually known. Two layers, the second being the one that cannot
+   * be fooled by a missing argument.
+   */
+  const insideColdOpen = (i) =>
+    Array.isArray(slideStarts) ? (slideStarts[i] ?? 0) < COLD_OPEN_SECS : i === 0;
+
   const usable = [];
   for (const c of candidates) {
     try {
-      usable.push(toRenderable(c, root ? { root } : undefined));
+      usable.push(toRenderable(c, { root: root ?? undefined, orientation }));
     } catch (err) {
       refused.push({ candidateId: c?.id, code: err?.code || "refused", reason: err?.message });
     }
   }
 
   for (let i = 0; i < slides.length && picks.length < max; i++) {
+    if (insideColdOpen(i)) continue;                                            // the open is ours
     if (picks.length && i - picks[picks.length - 1].slideIndex < 2) continue;   // never consecutive
     const asset = usable.find((a) => !picks.some((p) => p.asset.id === a.id));
     if (!asset) break;
@@ -198,4 +237,30 @@ export function mergeCutaways(incidentPicks = [], stockPicks = [], { max = MAX_C
 export function creditForPick(pick, stockCredit) {
   if (pick.source === "incident") return pick.asset.credit;
   return stockCredit ? stockCredit(pick.asset) : null;
+}
+
+
+/**
+ * The authoritative cold-open check, run where the timeline is known.
+ *
+ * Selection excludes beats it can prove are inside the cold open; this refuses
+ * any pick that actually is, given the real slide start times. It exists because
+ * selection's fallback is a heuristic and this one is not — and the property
+ * being protected (the first frames of the video are ours) is about the finished
+ * timeline rather than about slide indices.
+ *
+ * THROWS. A cold open on borrowed footage is not a degraded render to log and
+ * carry on with: it is the thumbnail.
+ */
+export function assertColdOpen(picks = [], slideStarts = []) {
+  const bad = picks.filter((p) => p.source !== "stock" && (slideStarts[p.slideIndex] ?? 0) < COLD_OPEN_SECS);
+  if (bad.length) {
+    throw new IncidentRenderRefused(
+      `third-party footage starts at ${bad.map((p) => (slideStarts[p.slideIndex] ?? 0).toFixed(2)).join("s, ")}s, ` +
+      `inside the ${COLD_OPEN_SECS}s cold open. Frame 0 autoplays in feed and is grabbed as the thumbnail — ` +
+      "opening on borrowed material with no framing is the weakest position available.",
+      { code: "cold-open", candidateId: bad[0]?.asset?.id }
+    );
+  }
+  return true;
 }
