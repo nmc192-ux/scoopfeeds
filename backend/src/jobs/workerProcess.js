@@ -14,7 +14,7 @@ import {
   runEventPromoterCronCycle, runRealityIndexComposeCycle,
 } from "../services/scheduler.js";
 import { sweepAtStartup } from "../services/videoArtifacts.js";
-import { assertFFmpegCapable } from "../services/ffmpegCapability.js";
+import { reportFFmpegCapabilityAtBoot, withFFmpegGuard } from "../services/ffmpegCapability.js";
 import { runVideoRenderCycle } from "../services/videoAutopost.js";
 import { longformCycleJob } from "../services/longform/runLongformCycle.js";
 import { runSocialCycleWithTimeout } from "../services/socialPublisher.js";
@@ -38,6 +38,11 @@ async function shutdown(signal) {
 }
 
 function registerWorker(queueName, name, concurrency, processor) {
+  // Applied to EVERY queue, deliberately. withFFmpegGuard returns the processor
+  // untouched for queues that do not render, so wrapping them all costs nothing
+  // and means a render queue added later cannot be registered without the
+  // guard — the failure mode being that someone adds one and forgets.
+  processor = withFFmpegGuard(queueName, processor);
   const worker = new Worker(
     queueName,
     (job) => withJobRunLogging(queueName, job, () => processor(job)),
@@ -96,20 +101,23 @@ try {
   //
   // Its failure is logged and swallowed: disk cleanup is maintenance, not a
   // precondition for consuming jobs, and the outer catch here exits the process.
-  // CAN THIS BINARY ACTUALLY RENDER? Asked before the workers register, and
-  // NOT swallowed like the sweep below.
+  // CAN THIS BINARY ACTUALLY RENDER? Probed once, reported loudly, and NOT
+  // allowed to stop this process from starting.
   //
   // getFFmpegPath() falls back to the bundled @ffmpeg-installer binary, which on
   // linux-x64 is a 2018 build with no `xfade` — a filter every multi-state slide
-  // needs. Without this check the process boots clean, health is green, and the
-  // failure surfaces at 3am inside a render as "No such filter: 'xfade'". That
-  // is the token-cache and disk-cache-precedence shape: a silent fallback to
-  // something that cannot do the work.
+  // needs. Unprobed, the process boots clean, health is green, and the failure
+  // surfaces at 3am inside a render as "No such filter: 'xfade'": the
+  // token-cache and disk-cache-precedence shape, a silent fallback to something
+  // that cannot do the work.
   //
-  // A worker that cannot render is not degraded, it is a worker that will take
-  // video jobs and fail every one of them. So this throws to the outer catch,
-  // which exits — visible immediately, to the person deploying.
-  assertFFmpegCapable();
+  // But this worker also consumes ingestion, social, enrichment and analysis,
+  // and NONE of them touch ffmpeg. Refusing to boot would turn a video-render
+  // gap into RSS ingestion stopping and every social surface going dark — a
+  // narrow fault converted into a broad outage by the guard meant to prevent
+  // one. So the refusal lives at DISPATCH on the two render queues (see
+  // withFFmpegGuard below); everything else comes up regardless.
+  reportFFmpegCapabilityAtBoot({ role: PROCESS_ROLE });
 
   try {
     const swept = await sweepAtStartup();

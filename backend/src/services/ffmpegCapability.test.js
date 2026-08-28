@@ -14,7 +14,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   REQUIRED_FILTERS, probeFilters, assertFFmpegCapable, FFmpegCapabilityError,
+  FFMPEG_DEPENDENT_QUEUES, requiresFFmpeg, withFFmpegGuard, ffmpegCapability,
+  reportFFmpegCapabilityAtBoot, _resetCapability,
 } from "./ffmpegCapability.js";
+import { QUEUE_NAMES } from "../jobs/jobOptions.js";
 import { getFFmpegPath } from "./videoGenerator.js";
 
 function caught(fn, Type) {
@@ -165,4 +168,120 @@ test("the required set names the things that actually break", () => {
   // Each entry should be justifiable; if one is not used by the render path it
   // is a boot check refusing deploys for no reason.
   assert.deepEqual([...REQUIRED_FILTERS].sort(), ["drawtext", "overlay", "xfade", "zoompan"]);
+});
+
+
+// ─── The refusal is SCOPED — the rest of the worker must come up ───────────
+
+/** Every queue this worker consumes, by the string BullMQ actually sees. */
+const ALL_WORKER_QUEUES = [
+  QUEUE_NAMES.ingestion, QUEUE_NAMES.video, QUEUE_NAMES.videoRender,
+  QUEUE_NAMES.longform, QUEUE_NAMES.enrichment, QUEUE_NAMES.social,
+  QUEUE_NAMES.analysis,
+];
+
+/** A probe that says the host cannot render. */
+const brokenProbe = () => ({ capable: false, missing: ["xfade"], reason: "no xfade" });
+
+test("ingestion, social, enrichment and analysis STILL RUN when ffmpeg cannot render", async () => {
+  // The ruling this exists for: the first version refused to boot, which would
+  // have taken RSS ingestion and every social surface down for a render fault.
+  const ran = [];
+  const registered = ALL_WORKER_QUEUES.map((q) => [
+    q, withFFmpegGuard(q, async () => { ran.push(q); return "ok"; }, { probe: brokenProbe }),
+  ]);
+
+  for (const [q, processor] of registered) {
+    if (requiresFFmpeg(q)) continue;
+    assert.equal(await processor({}), "ok", `queue "${q}" must still run`);
+  }
+  assert.deepEqual(
+    ran.sort(),
+    ALL_WORKER_QUEUES.filter((q) => !requiresFFmpeg(q)).sort(),
+    "every non-render queue must have executed"
+  );
+});
+
+test("YouTube INGESTION is not a render queue — it must not be caught by the guard", async () => {
+  // `video` fetches YouTube content; `video_render` renders. Confusing the two
+  // would take content ingestion down for a render fault, which is exactly the
+  // mistake being undone.
+  assert.equal(requiresFFmpeg(QUEUE_NAMES.video), false);
+  const processor = withFFmpegGuard(QUEUE_NAMES.video, async () => "ingested", { probe: brokenProbe });
+  assert.equal(await processor({}), "ingested");
+});
+
+test("the render queues refuse at DISPATCH, naming the missing capability", async () => {
+  for (const q of FFMPEG_DEPENDENT_QUEUES) {
+    const processor = withFFmpegGuard(q, async () => "rendered", { probe: brokenProbe });
+    const err = await processor({}).then(() => null, (e) => e);
+    assert.ok(err instanceof FFmpegCapabilityError, `${q} should refuse`);
+    assert.equal(err.code, "render-unavailable");
+    assert.match(err.message, /xfade/, "the missing capability must be named");
+    assert.match(err.message, /other queues are unaffected/, "and the blast radius stated");
+  }
+});
+
+test("the dependent set is exactly the two queues that render", () => {
+  assert.deepEqual([...FFMPEG_DEPENDENT_QUEUES].sort(), ["longform", "video_render"]);
+  // Keyed by the STRING BullMQ sees, not the QUEUE_NAMES key — they differ for
+  // videoRender, and a mismatch there would make the guard a no-op.
+  assert.equal(QUEUE_NAMES.videoRender, "video_render");
+  assert.ok(FFMPEG_DEPENDENT_QUEUES.includes(QUEUE_NAMES.videoRender));
+  assert.ok(FFMPEG_DEPENDENT_QUEUES.includes(QUEUE_NAMES.longform));
+});
+
+test("with a capable host the guard is transparent on every queue", async () => {
+  const goodProbe = () => ({ capable: true, missing: [] });
+  for (const q of ALL_WORKER_QUEUES) {
+    const processor = withFFmpegGuard(q, async () => "ok", { probe: goodProbe });
+    assert.equal(await processor({}), "ok", q);
+  }
+});
+
+test("a non-render processor is returned UNCHANGED, not merely passed through", () => {
+  // Identity matters: it means the guard adds no wrapper, no async hop and no
+  // behaviour to queues it has no business touching.
+  const fn = async () => "x";
+  assert.equal(withFFmpegGuard(QUEUE_NAMES.ingestion, fn), fn);
+  assert.notEqual(withFFmpegGuard(QUEUE_NAMES.videoRender, fn), fn);
+});
+
+test("the boot report does NOT throw on an incapable host", () => {
+  // The whole point: the process comes up.
+  const cap = reportFFmpegCapabilityAtBoot({ probe: brokenProbe });
+  assert.equal(cap.capable, false);
+});
+
+test("the capability probe is memoised — registration and every dispatch share one answer", () => {
+  _resetCapability();
+  let probes = 0;
+  const run = () => { probes++; return PLAUSIBLE; };
+  ffmpegCapability({ force: true, ffmpegPath: "/fake", run });
+  ffmpegCapability({ ffmpegPath: "/fake", run });
+  ffmpegCapability({ ffmpegPath: "/fake", run });
+  assert.equal(probes, 1, "spawning a process per dispatch would be a real cost");
+  _resetCapability();
+});
+
+test("the probe reports incapability instead of throwing", () => {
+  _resetCapability();
+  const cap = ffmpegCapability({ force: true, ffmpegPath: "/fake", run: () => filterLines(["drawtext", "overlay", "zoompan", ...Array.from({ length: 80 }, (_, i) => `f${i}`)]) });
+  assert.equal(cap.capable, false);
+  assert.deepEqual(cap.missing, ["xfade"]);
+  assert.ok(cap.reason, "the reason must survive for the dispatch message");
+  _resetCapability();
+});
+
+test("the guard is WIRED — registerWorker applies it, and boot does not refuse", async () => {
+  // The migrate.test.js discipline: a guard that exists but is not called is
+  // decoration. Asserted against the source, because workerProcess is a process
+  // entry point that cannot be imported in a test without starting it.
+  const { readFileSync } = await import("fs");
+  const src = readFileSync(new URL("../jobs/workerProcess.js", import.meta.url), "utf8");
+  assert.match(src, /processor = withFFmpegGuard\(queueName, processor\)/,
+    "registerWorker must wrap every processor");
+  assert.match(src, /reportFFmpegCapabilityAtBoot\(/, "boot must report the capability");
+  assert.equal(/assertFFmpegCapable\(\)/.test(src), false,
+    "boot must NOT refuse: that would take ingestion and social down for a render fault");
 });

@@ -17,10 +17,21 @@
  * the failure from boot — where it is one log line and an obvious cause — to
  * 3am, inside a cycle, with a stack trace about filter graphs.
  *
- * WHY REFUSE TO START RATHER THAN WARN. A worker that cannot render is not a
- * degraded worker, it is a worker that will fail every video job it takes and
- * mark them failed. Refusing to boot makes the problem visible immediately and
- * to the person deploying, which is exactly who can fix it.
+ * WHY THE REFUSAL IS SCOPED TO THE RENDER QUEUES, NOT TO BOOT (DrJ, Gate D).
+ *
+ * The first version of this refused to start the worker at all. That was wrong,
+ * and wrong in a familiar direction: the worker process also consumes ingestion,
+ * social, enrichment and analysis, none of which touch ffmpeg. A missing xfade
+ * would have turned a video-render gap into RSS ingestion stopping and every
+ * social surface going dark — converting a narrow, visible fault into a broad,
+ * confusing outage. That is the shape of the outages this repo spent August
+ * chasing, manufactured deliberately by a guard meant to prevent one.
+ *
+ * So the capability is probed ONCE, loudly, and the refusal happens at DISPATCH
+ * on the two queues that actually render. Everything else comes up and keeps
+ * working. A render job then fails fast with the missing filter named and lands
+ * in BullMQ's failed set — visible and attributable — rather than piling up
+ * silently behind a worker that was never registered.
  *
  * WHY THE CHECK ASKS THE BINARY RATHER THAN PARSING A VERSION. Version strings
  * lie: distributions backport, the bundled build reports an `N-` nightly tag
@@ -138,4 +149,90 @@ export function assertFFmpegCapable({ ffmpegPath = null, run = null, resolve = g
 
   logger.info(`🎬 ffmpeg capability OK — ${bin} (${filterCount} filters, all of ${REQUIRED_FILTERS.join("/")} present)`);
   return { ffmpegPath: bin, filterCount, missing: [] };
+}
+
+// ─── Scoping: which queues actually need it, and how they refuse ────────────
+
+/**
+ * The queues whose jobs invoke ffmpeg.
+ *
+ * Keyed by the QUEUE NAME STRING, not the QUEUE_NAMES key — they differ for
+ * exactly the queue that matters most here (`videoRender` is `"video_render"`),
+ * and that mismatch is the kind that turns a guard into decoration.
+ *
+ * `video` is deliberately NOT here: it is YouTube INGESTION, not rendering.
+ * Including it would take content ingestion down for a render fault, which is
+ * the whole mistake this scoping exists to undo.
+ */
+export const FFMPEG_DEPENDENT_QUEUES = Object.freeze(["video_render", "longform"]);
+
+export const requiresFFmpeg = (queueName) => FFMPEG_DEPENDENT_QUEUES.includes(String(queueName));
+
+/**
+ * Probe once, without throwing, and remember the answer.
+ *
+ * Memoised because it spawns a process: registration asks, then every dispatch
+ * asks again. The answer cannot change without a redeploy, and a redeploy is a
+ * new process.
+ */
+let _capability;
+export function ffmpegCapability({ force = false, ffmpegPath = null, run = null, resolve = getFFmpegPath } = {}) {
+  if (_capability && !force) return _capability;
+  try {
+    _capability = { ...assertFFmpegCapable({ ffmpegPath, run, resolve }), capable: true, reason: null };
+  } catch (err) {
+    _capability = {
+      capable: false,
+      ffmpegPath: ffmpegPath || null,
+      missing: err.missing || REQUIRED_FILTERS,
+      reason: err.message,
+      code: err.code,
+    };
+  }
+  return _capability;
+}
+
+/** Test seam: forget the memoised probe. */
+export const _resetCapability = () => { _capability = undefined; };
+
+/**
+ * Wrap a queue processor so a RENDER job refuses at dispatch when ffmpeg cannot
+ * render, and every other queue is untouched.
+ *
+ * Returns the processor UNCHANGED for queues that do not need ffmpeg — so it is
+ * safe to apply to all of them, and applying it to all of them is what stops
+ * someone adding a render queue later and forgetting the guard.
+ */
+export function withFFmpegGuard(queueName, processor, { probe = ffmpegCapability } = {}) {
+  if (!requiresFFmpeg(queueName)) return processor;
+  return async (...args) => {
+    const cap = probe();
+    if (!cap.capable) {
+      throw new FFmpegCapabilityError(
+        `queue "${queueName}" cannot run: ffmpeg is missing ${(cap.missing || []).join(", ") || "required filters"}. ` +
+        "This worker's other queues are unaffected and still consuming. " +
+        (cap.reason ? `Probe said: ${String(cap.reason).split("\n")[0]}` : ""),
+        { code: "render-unavailable", missing: cap.missing }
+      );
+    }
+    return processor(...args);
+  };
+}
+
+/**
+ * The one boot-time line. Reports; does NOT refuse.
+ *
+ * Loud on failure, because a host that cannot render should be obvious in the
+ * first screen of a deploy log — even though the process is going to come up
+ * and serve everything else correctly.
+ */
+export function reportFFmpegCapabilityAtBoot({ role = "worker", probe = ffmpegCapability } = {}) {
+  const cap = probe();
+  if (cap.capable) return cap;
+  logger.error(
+    `🎬 [${role}] ffmpeg CANNOT RENDER — missing ${(cap.missing || []).join(", ")}. ` +
+    `Queues ${FFMPEG_DEPENDENT_QUEUES.join(" and ")} will refuse their jobs; every other queue is unaffected. ` +
+    "Install a system ffmpeg >= 4.3 (the Dockerfile's apt step does this)."
+  );
+  return cap;
 }
