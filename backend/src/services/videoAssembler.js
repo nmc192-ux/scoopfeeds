@@ -275,6 +275,36 @@ export async function buildCaptionFilter({ text, workDir, slideIndex, fontFile, 
  * key stays where it is, and the credit is composited into the cutaway stream
  * itself, so it cannot outlive the footage by even one frame.
  */
+/**
+ * The band the credit chip occupies, as a crop rectangle.
+ *
+ * EXPORTED SO THE PERSISTENCE TEST CAN LOOK AT IT. `videoCreditPersistence.test.js`
+ * renders a real short and samples every frame carrying third-party footage,
+ * asserting the credit region is non-empty in each. That test is only meaningful
+ * if it looks at the region the chip is ACTUALLY drawn in — so the region is
+ * defined once, here, beside the filter that draws into it, rather than as a
+ * rectangle the test guesses at and that silently stops overlapping the chip the
+ * next time the chip moves.
+ *
+ * Generous on purpose: a band, not a tight box, because the chip's width depends
+ * on the credit text and `drawtext` positions it by measured text width. A band
+ * that contains the chip plus margin is exactly what "is anything drawn here"
+ * needs.
+ */
+export function creditChipRegion(orientation = "horizontal") {
+  const G = geometryFor(orientation);
+  const CV = G.canvas;
+  const top = G.safeTop !== undefined ? G.safeTop : G.chromeTopY;
+  const rightInset = G.safeRight + G.marginX;
+  const x = Math.round(CV.w / 2);
+  return {
+    x,
+    y: Math.max(0, top - 4),
+    w: Math.max(1, CV.w - rightInset + 20 - x),
+    h: 56,
+  };
+}
+
 export function buildCutawayCreditFilter({ text, workDir, slideIndex, fontFile, orientation = "horizontal" }) {
   const G = geometryFor(orientation);
   const file = path.join(workDir, `cutaway-credit-${String(slideIndex).padStart(2, "0")}.txt`);

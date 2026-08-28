@@ -42,6 +42,10 @@ export class QueueError extends Error {
  * shows history is a queue people stop reading.
  */
 export const BUCKETS = Object.freeze([
+  // FIRST, and above everything: a revoked candidate whose video is still up.
+  // Every hour this sits here is an hour we are publishing something we have
+  // been asked to stop publishing, so it outranks any amount of pending work.
+  "takedown_pending",
   "awaiting_render_tap",   // cleared, credited, one tap from usable
   "awaiting_ruling",       // a check abstained and needs a person
   "awaiting_clearance",    // verified, nobody has asked the poster yet
@@ -51,6 +55,7 @@ export const BUCKETS = Object.freeze([
 
 /** Which bucket does this row belong in? Exactly one, by construction. */
 export function bucketFor(row) {
+  if (row.takedown_required && !row.takedown_actioned_at) return "takedown_pending";
   if (row.status === "cleared") return row.render_approved ? null : "awaiting_render_tap";
   if (row.status === "verifying") return "awaiting_ruling";
   if (row.status === "verified") return "awaiting_clearance";
@@ -102,7 +107,10 @@ export function buildQueue(db, { perBucket = 25 } = {}) {
 
   // One pass over the working statuses. `killed`, `uncleared` and `constructed`
   // are never fetched — they are not work.
-  for (const status of ["cleared", "verifying", "verified", "clearing", "candidate"]) {
+  // `revoked` is fetched despite being terminal: a revoked row with an
+  // outstanding takedown is the most urgent work there is, and a queue that
+  // only listed live candidates would never show it.
+  for (const status of ["revoked", "cleared", "verifying", "verified", "clearing", "candidate"]) {
     for (const row of listCandidates(db, { status, limit: 500 })) {
       const bucket = bucketFor(row);
       if (!bucket || out[bucket].length >= limit) continue;
@@ -138,6 +146,11 @@ function decorateForQueue(db, row, bucket) {
   if (bucket === "awaiting_ruling") base.pending = pendingRulings(db, row.id);
   if (bucket === "awaiting_render_tap") {
     base.clearanceDetail = row.clearance_detail ? safeParse(row.clearance_detail) : null;
+  }
+  if (bucket === "takedown_pending") {
+    base.constructedVideoId = row.constructed_video_id;
+    base.revocationReason = row.revocation_reason;
+    base.revokedAt = row.revoked_at;
   }
   return base;
 }

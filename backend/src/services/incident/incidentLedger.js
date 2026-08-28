@@ -185,7 +185,7 @@ export function getCandidate(db, id) {
  */
 export function transition(db, id, toStatus, {
   checkName, actor = "system", evidence = null,
-  killReason = null, clearanceBasis = null, constructedVideoId = null,
+  killReason = null, clearanceBasis = null, constructedVideoId = null, revocationReason = null,
 } = {}) {
   if (!db) throw new LedgerError("no database handle", { code: "no-db" });
   if (!checkName) {
@@ -204,7 +204,7 @@ export function transition(db, id, toStatus, {
 
     // Throws IllegalTransitionError on an illegal edge or a missing payload.
     const detail = assertTransition(row.status, toStatus, {
-      killReason, clearanceBasis, constructedVideoId,
+      killReason, clearanceBasis, constructedVideoId, revocationReason,
     });
 
     // THE DETAIL FIELDS ARE STICKY. assertTransition returns the detail the
@@ -216,15 +216,24 @@ export function transition(db, id, toStatus, {
     // and then reads the row back; a test that stopped at `cleared` would not
     // have seen it.)
     const ts = now();
+    // takedown_required is derived HERE, by the transition that still knows what
+    // state the candidate was in. Once the row says `revoked`, the fact that it
+    // was `constructed` a moment ago is only recoverable from the trail — see
+    // migration 036's header.
+    const takedownRequired = toStatus === "revoked" && row.status === "constructed" ? 1 : row.takedown_required || 0;
     db.prepare(`
       UPDATE media_candidates
-         SET status = ?, kill_reason = ?, clearance_basis = ?, constructed_video_id = ?, updated_at = ?
+         SET status = ?, kill_reason = ?, clearance_basis = ?, constructed_video_id = ?,
+             revocation_reason = ?, revoked_at = ?, takedown_required = ?, updated_at = ?
        WHERE id = ?
     `).run(
       toStatus,
       detail.killReason ?? row.kill_reason,
       detail.clearanceBasis ?? row.clearance_basis,
       detail.constructedVideoId ?? row.constructed_video_id,
+      detail.revocationReason ?? row.revocation_reason,
+      toStatus === "revoked" ? ts : row.revoked_at,
+      takedownRequired,
       ts, id
     );
 
@@ -236,7 +245,7 @@ export function transition(db, id, toStatus, {
   });
 
   const moved = run();
-  const detail = killReason || clearanceBasis || constructedVideoId;
+  const detail = killReason || clearanceBasis || constructedVideoId || revocationReason;
   logger.info(
     `🎥 incident: candidate ${id} ${moved.from} → ${moved.to}` +
     `${detail ? ` (${detail})` : ""} by ${checkName} [${actor}]`
