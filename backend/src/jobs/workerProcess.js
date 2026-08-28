@@ -14,6 +14,7 @@ import {
   runEventPromoterCronCycle, runRealityIndexComposeCycle,
 } from "../services/scheduler.js";
 import { sweepAtStartup } from "../services/videoArtifacts.js";
+import { assertFFmpegCapable } from "../services/ffmpegCapability.js";
 import { runVideoRenderCycle } from "../services/videoAutopost.js";
 import { longformCycleJob } from "../services/longform/runLongformCycle.js";
 import { runSocialCycleWithTimeout } from "../services/socialPublisher.js";
@@ -95,6 +96,21 @@ try {
   //
   // Its failure is logged and swallowed: disk cleanup is maintenance, not a
   // precondition for consuming jobs, and the outer catch here exits the process.
+  // CAN THIS BINARY ACTUALLY RENDER? Asked before the workers register, and
+  // NOT swallowed like the sweep below.
+  //
+  // getFFmpegPath() falls back to the bundled @ffmpeg-installer binary, which on
+  // linux-x64 is a 2018 build with no `xfade` — a filter every multi-state slide
+  // needs. Without this check the process boots clean, health is green, and the
+  // failure surfaces at 3am inside a render as "No such filter: 'xfade'". That
+  // is the token-cache and disk-cache-precedence shape: a silent fallback to
+  // something that cannot do the work.
+  //
+  // A worker that cannot render is not degraded, it is a worker that will take
+  // video jobs and fail every one of them. So this throws to the outer catch,
+  // which exits — visible immediately, to the person deploying.
+  assertFFmpegCapable();
+
   try {
     const swept = await sweepAtStartup();
     logger.info(`[${PROCESS_ROLE}] startup sweep`, {

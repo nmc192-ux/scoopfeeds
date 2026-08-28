@@ -12,10 +12,19 @@
  * Requires ffmpeg >= 4.3 for `xfade`. Verified on the VPS 2026-08-02:
  * 5.1.9-0+deb12u1 with xfade present, installed via the Dockerfile's apt step.
  * getFFmpegPath() prefers system ffmpeg over the bundled @ffmpeg-installer
- * binary. That bundle was recorded here as "4.1, lacks xfade"; measured
- * 2026-08-12 on darwin-arm64 it is **4.4 and DOES carry xfade**, so a dev Mac
- * with no system ffmpeg can render after all. The stale note had already
- * talked one session out of attempting a local render.
+ * binary.
+ *
+ * THE BUNDLE IS PLATFORM-DEPENDENT, and this note was wrong in both directions
+ * before. On darwin-arm64 it is 4.4 and DOES carry xfade (measured 2026-08-12),
+ * which is why a dev Mac with no system ffmpeg can render. On **linux-x64 it is
+ * a 2018 build with 381 filters and NO xfade** (measured 2026-08-28) — so a
+ * Linux host without a system ffmpeg resolves a binary, boots clean, and then
+ * fails at the first multi-state slide.
+ *
+ * That is now caught at boot rather than at render: `assertFFmpegCapable()` in
+ * services/ffmpegCapability.js runs in the worker's startup path and refuses to
+ * start without the filters this file needs. Do not soften it into a warning —
+ * a worker that cannot render takes video jobs and fails every one.
  */
 
 import { spawn } from "child_process";
