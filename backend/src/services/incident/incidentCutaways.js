@@ -26,7 +26,9 @@
 
 import { existsSync } from "fs";
 import { assertRenderable } from "./incidentClearanceLedger.js";
-import { EXCERPT_MAX_SECS, EXCERPT_MAX_TOTAL_SECS, provenanceFor, requiresCredit } from "./incidentClearance.js";
+import {
+  EXCERPT_MAX_SECS, EXCERPT_MAX_TOTAL_SECS, PROVENANCE, provenanceFor, requiresCredit,
+} from "./incidentClearance.js";
 import { resolveQuarantined } from "./incidentFiles.js";
 import { MAX_CUTAWAYS, cutawaySecs } from "../videoStockLibrary.js";
 import { cutawayFrameForLane } from "../videoAssembler.js";
@@ -52,6 +54,37 @@ export const incidentMediaEnabled = () => process.env.VIDEO_INCIDENT_MEDIA_ENABL
  * Named rather than inlined so the number can be argued with.
  */
 export const COLD_OPEN_SECS = Number.parseFloat(process.env.VIDEO_INCIDENT_COLD_OPEN_SECS || "0.8");
+
+/**
+ * Does this pick have to stay OUT of the cold open?
+ *
+ * THE RULE IS ABOUT WHOSE PICTURE IT IS, not about whether it is a cutaway
+ * (DrJ, Gate F). Two things made the original exclusion right, and neither
+ * survives contact with our own material:
+ *
+ *   1. Frame 0 is the autoplay frame and the thumbnail, so borrowed footage
+ *      there puts somebody else's picture in our feed slot.
+ *   2. Chrome-suppressed full-bleed is the weakest available Lane 3 position,
+ *      and it was what slide 0 got.
+ *
+ * Own material is ours, framed, masthead intact. That is a news channel opening
+ * on its own footage, which is not a posture problem — it is the ordinary thing.
+ *
+ * SCOPED, NOT LIFTED. `grant` and `fair_use` are excluded exactly as before, and
+ * so is anything whose provenance cannot be established: a pick with no asset,
+ * no basis, or an unrecognised one is protected, because the cheap failure here
+ * is a beat that renders without a cutaway and the expensive one is somebody
+ * else's footage as our thumbnail.
+ *
+ * Stock keeps its existing exemption. It is licensed library material selected
+ * to illustrate, closer to our own furniture than to an eyewitness clip, and the
+ * cold-open rule was never about it.
+ */
+export function coldOpenProtected(pick) {
+  if (!pick) return true;
+  if (pick.source === "stock") return false;
+  return provenanceFor(pick.asset?.clearanceBasis) !== PROVENANCE.OWN;
+}
 
 export class IncidentRenderRefused extends Error {
   constructor(message, { code, candidateId } = {}) {
@@ -188,10 +221,20 @@ export function selectIncidentCutaways(slides = [], {
   }
 
   for (let i = 0; i < slides.length && picks.length < max; i++) {
-    if (insideColdOpen(i)) continue;                                            // the open is ours
     if (picks.length && i - picks[picks.length - 1].slideIndex < 2) continue;   // never consecutive
     const asset = usable.find((a) => !picks.some((p) => p.asset.id === a.id));
     if (!asset) break;
+
+    // THE COLD-OPEN TEST MOVED BELOW ASSET RESOLUTION (DrJ, Gate F). It used to
+    // skip the beat before knowing what would go there, which is why own
+    // material could never open a video. It now asks about the asset.
+    //
+    // NO REORDERING. A cold-open beat whose next asset is third-party is skipped
+    // exactly as before, rather than searched for an own asset to put there
+    // instead. Reordering would be a new selection policy — it would change
+    // which asset lands on which beat for reasons unrelated to the beat — and
+    // that is a bigger change than the ruling asked for.
+    if (insideColdOpen(i) && coldOpenProtected({ asset })) continue;
 
     if (asset.clearanceBasis === "fair_use") {
       if (fairUseSpent + asset.seconds > EXCERPT_MAX_TOTAL_SECS) {
@@ -267,14 +310,19 @@ export function creditForPick(pick, stockCredit) {
  *
  * THROWS. A cold open on borrowed footage is not a degraded render to log and
  * carry on with: it is the thumbnail.
+ *
+ * WHAT IT PROTECTS AGAINST IS BORROWED MATERIAL, not cutaways — see
+ * `coldOpenProtected`. Own material may open a video; `grant` and `fair_use` may
+ * not, and neither may a pick whose provenance cannot be established.
  */
 export function assertColdOpen(picks = [], slideStarts = []) {
-  const bad = picks.filter((p) => p.source !== "stock" && (slideStarts[p.slideIndex] ?? 0) < COLD_OPEN_SECS);
+  const bad = picks.filter((p) => coldOpenProtected(p) && (slideStarts[p.slideIndex] ?? 0) < COLD_OPEN_SECS);
   if (bad.length) {
     throw new IncidentRenderRefused(
       `third-party footage starts at ${bad.map((p) => (slideStarts[p.slideIndex] ?? 0).toFixed(2)).join("s, ")}s, ` +
       `inside the ${COLD_OPEN_SECS}s cold open. Frame 0 autoplays in feed and is grabbed as the thumbnail — ` +
-      "opening on borrowed material with no framing is the weakest position available.",
+      "opening on borrowed material with no framing is the weakest position available. " +
+      "Our own material (basis `owner`) may open a video; this is not ours.",
       { code: "cold-open", candidateId: bad[0]?.asset?.id }
     );
   }

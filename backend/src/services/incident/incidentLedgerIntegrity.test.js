@@ -197,12 +197,37 @@ test("every non-terminal state has a retirement route that is not a delete", (t0
   assert.ok(REVOCATION_REASONS.includes("operator"));
 });
 
-test("a fresh `candidate` row has no direct retirement edge — documented, not hidden", () => {
-  // THE ROUGH EDGE 037's HEADER NAMES. A mis-pasted URL has to go
-  // candidate → verifying → killed: two audit rows for one decision. Pinned here
-  // so that if `candidate → killed` is ever added, this test is the reminder to
-  // update the migration header and LEGAL_TRANSITION_COUNT with it.
-  assert.deepEqual([...TRANSITIONS.candidate], ["verifying"],
-    "if this changed, 037's header and the retirement advice need updating too");
-  assert.equal(TRANSITIONS.candidate.includes("killed"), false);
+test("a fresh `candidate` row can be retired in ONE step", (t0) => {
+  // THE ROUGH EDGE 037's HEADER NAMED, NOW RULED IN (DrJ, Gate F). It used to
+  // cost candidate → verifying → killed: two audit rows for one decision, the
+  // first of them recording a verification nobody ran.
+  const t = db0(); t0.after(() => t.cleanup());
+  const c = mk(t.db);
+  const before = candidateTrail(t.db, c.id).length;
+
+  transition(t.db, c.id, "killed", { checkName: "retire", killReason: "operator" });
+
+  assert.equal(getCandidate(t.db, c.id).status, "killed");
+  assert.equal(getCandidate(t.db, c.id).kill_reason, "operator");
+  assert.equal(candidateTrail(t.db, c.id).length, before + 1, "one decision, one audit row");
+  assert.equal(candidateTrail(t.db, c.id).at(-1).from_status, "candidate",
+    "and the trail says it was retired from `candidate`, not from a verification that never ran");
+});
+
+test("the new edge did not open a shortcut past verification", () => {
+  // The whole risk of widening TRANSITIONS. `candidate` must still reach nothing
+  // USABLE without verifying — the only ways out are verification and the bin.
+  assert.deepEqual([...TRANSITIONS.candidate].sort(), ["killed", "verifying"]);
+  for (const to of ["verified", "clearing", "cleared", "constructed", "uncleared", "revoked"]) {
+    assert.equal(TRANSITIONS.candidate.includes(to), false,
+      `candidate → ${to} would skip verification`);
+  }
+});
+
+test("retiring still demands a reason — the edge is not an unreasoned exit", (t0) => {
+  const t = db0(); t0.after(() => t.cleanup());
+  const c = mk(t.db);
+  const err = caught(() => transition(t.db, c.id, "killed", { checkName: "retire" }));
+  assert.match(err.message, /a kill needs a reason/);
+  assert.equal(getCandidate(t.db, c.id).status, "candidate", "and nothing moved");
 });

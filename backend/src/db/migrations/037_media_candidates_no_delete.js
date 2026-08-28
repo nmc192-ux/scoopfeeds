@@ -31,20 +31,22 @@
  * as a candidate moves through the machine, and the trail is what records each
  * change. Only DELETE is refused.
  *
- * RETIRING A CANDIDATE IS A STATUS, NOT A DELETE, and the machine already says
- * so at every stage:
+ * RETIRING A CANDIDATE IS A STATUS, NOT A DELETE, and the machine says so at
+ * every stage:
  *
+ *     candidate    → killed    with killReason "operator" — the row should never
+ *                              have existed (a mis-pasted URL, a duplicate)
  *     verifying    → killed    with killReason "operator" — a human said no
  *     verified     → clearing → uncleared — nothing cleared
  *     cleared      → revoked   with revocationReason "operator"
  *     constructed  → revoked   — the takedown path
  *
- * One rough edge, left alone rather than smoothed over unasked: a row in
- * `candidate` that should never have been created (a mis-pasted URL) has no
- * direct edge to `killed`, so retiring it means `candidate → verifying → killed`
- * — two audit rows for one decision. Adding `candidate → killed` is a deliberate
- * widening of TRANSITIONS and of LEGAL_TRANSITION_COUNT, which is a ruling, not a
- * tidy-up.
+ * The first of those was added WITH this migration and not before it (DrJ, Gate
+ * F ruling). Making a row undeletable without a one-step way to retire a row
+ * that should never have existed would have forced `candidate → verifying →
+ * killed` — two audit rows for one decision, the first of them recording a
+ * verification nobody ran. A trail that has to lie to let you tidy up is not the
+ * trail this migration is protecting. LEGAL_TRANSITION_COUNT moved 9 → 10.
  *
  * NOTHING IN THE CODEBASE DELETES FROM THIS TABLE. Verified by grep across src/
  * and scripts/ before writing this: there is no caller to break, and the sweeper

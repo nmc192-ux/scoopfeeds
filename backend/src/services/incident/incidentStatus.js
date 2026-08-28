@@ -83,7 +83,20 @@ export const REVOCATION_REASONS = Object.freeze([
  * not to the machine.
  */
 export const TRANSITIONS = Object.freeze({
-  candidate:   Object.freeze(["verifying"]),
+  // `candidate → killed` is RETIREMENT, not a verification outcome (DrJ, Gate F).
+  //
+  // Added when migration 037 made a candidate row undeletable. Retiring a row
+  // that should never have existed — a mis-pasted URL, a duplicate, the wrong
+  // post — is a real operator action, and before this edge it had to route
+  // `candidate → verifying → killed`: two audit rows for one decision, the first
+  // of them a lie about having opened a verification that nobody ran.
+  //
+  // It does NOT weaken anything. `killed` still demands a reason from
+  // KILL_REASONS, so the honest one here is `operator` — "a human looked at it
+  // and said no" — and the trail records who and when. There is still no edge
+  // from `candidate` to anything usable: the only ways out remain verification
+  // and the bin.
+  candidate:   Object.freeze(["verifying", "killed"]),
   verifying:   Object.freeze(["verified", "killed"]),
   verified:    Object.freeze(["clearing"]),
   clearing:    Object.freeze(["cleared", "uncleared"]),
@@ -105,7 +118,7 @@ export const TRANSITIONS = Object.freeze({
  * a reviewer skims past. Adding "verified → constructed" — the shortcut that
  * would skip clearance entirely — is exactly the change this is here to catch.
  */
-export const LEGAL_TRANSITION_COUNT = 9;
+export const LEGAL_TRANSITION_COUNT = 10;
 
 /** The reasons a candidate may be killed. Free text is not a reason. */
 export const KILL_REASONS = Object.freeze([

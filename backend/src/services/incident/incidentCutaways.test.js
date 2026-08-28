@@ -15,7 +15,7 @@ import path from "path";
 import {
   incidentMediaEnabled, toRenderable, selectIncidentCutaways, mergeCutaways,
   secondsFor, creditForPick, IncidentRenderRefused,
-  COLD_OPEN_SECS, assertColdOpen,
+  COLD_OPEN_SECS, assertColdOpen, coldOpenProtected,
 } from "./incidentCutaways.js";
 import { EXCERPT_MAX_SECS, EXCERPT_MAX_TOTAL_SECS, ClearanceRefusedError } from "./incidentClearance.js";
 import { MAX_CUTAWAYS } from "../videoStockLibrary.js";
@@ -297,6 +297,85 @@ test("the cold-open guard does not apply to our OWN stock — only to borrowed f
   // Stock is subject illustration we licensed; the rule is about third-party
   // incident material representing the event.
   assert.equal(assertColdOpen([{ slideIndex: 0, source: "stock", asset: { id: "s" } }], [0, 2]), true);
+});
+
+// ─── The relaxation is SCOPED to own material (DrJ, Gate F) ────────────────
+
+test("own material MAY open a video — it is ours, framed, masthead intact", () => {
+  const starts = [0, 2.0, 4.0];
+  assert.equal(
+    assertColdOpen([{ slideIndex: 0, source: "incident", asset: { id: "o", clearanceBasis: "owner" } }], starts),
+    true,
+    "a news channel opening on its own footage is the ordinary thing"
+  );
+});
+
+test("the relaxation is SCOPED, not LIFTED — grant and fair_use are refused exactly as before", () => {
+  // The failure this test exists for: `assertColdOpen` returning true for
+  // everything, which would pass the own-material test above and silently
+  // remove the guard for borrowed footage.
+  const starts = [0, 2.0, 4.0];
+  for (const basis of ["grant", "fair_use"]) {
+    const err = caught(
+      () => assertColdOpen([{ slideIndex: 0, source: "incident", asset: { id: "x", clearanceBasis: basis } }], starts),
+      IncidentRenderRefused
+    );
+    assert.equal(err.code, "cold-open", `basis "${basis}" must still be refused`);
+  }
+});
+
+test("an unestablished provenance is refused — the default protects the open", () => {
+  // A pick with no asset, no basis, or a basis nobody recognises. The cheap
+  // failure is a beat with no cutaway; the expensive one is somebody else's
+  // footage as our thumbnail.
+  const starts = [0, 2.0];
+  for (const asset of [undefined, {}, { id: "x" }, { id: "x", clearanceBasis: null }, { id: "x", clearanceBasis: "OWNER" }, { id: "x", clearanceBasis: "licence" }]) {
+    assert.equal(
+      caught(() => assertColdOpen([{ slideIndex: 0, source: "incident", asset }], starts), IncidentRenderRefused).code,
+      "cold-open",
+      `asset ${JSON.stringify(asset)} must not open the video`
+    );
+  }
+  // And a pick that is not a pick at all.
+  assert.equal(coldOpenProtected(undefined), true);
+  assert.equal(coldOpenProtected(null), true);
+});
+
+test("coldOpenProtected splits the three sources the way the ruling does", () => {
+  assert.equal(coldOpenProtected({ source: "stock", asset: { id: "s" } }), false, "licensed library");
+  assert.equal(coldOpenProtected({ source: "incident", asset: { clearanceBasis: "owner" } }), false, "ours");
+  assert.equal(coldOpenProtected({ source: "incident", asset: { clearanceBasis: "grant" } }), true, "borrowed");
+  assert.equal(coldOpenProtected({ source: "incident", asset: { clearanceBasis: "fair_use" } }), true, "borrowed");
+});
+
+test("SELECTION lets own material take the opening beat", (t) => {
+  // The other half of the ruling. assertColdOpen is the authoritative check, but
+  // selection is what decides whether the asset is ever offered that beat — and
+  // it used to skip cold-open beats before knowing what would go there.
+  const ids = ["own1", "own2"];
+  const root = files(t, ids);
+  const { picks } = selectIncidentCutaways(slides(10), {
+    candidates: ids.map((i) => cand(i, { clearance_basis: "owner", credit_text: null })),
+    root,
+    slideStarts: [0, 2, 4, 6, 8, 10, 12, 14, 16, 18],
+  });
+  assert.ok(picks.some((p) => p.slideIndex === 0), "own material must be able to open the video");
+  // And the authoritative check agrees with the selector.
+  assertColdOpen(picks.map((p) => ({ ...p, source: "incident" })), [0, 2, 4, 6, 8, 10, 12, 14, 16, 18]);
+});
+
+test("SELECTION still keeps borrowed footage off the opening beat", (t) => {
+  // Same fixture, one field different. If this ever goes green with slide 0
+  // picked, the relaxation has stopped being scoped.
+  const ids = ["g1", "g2"];
+  const root = files(t, ids);
+  const { picks } = selectIncidentCutaways(slides(10), {
+    candidates: ids.map((i) => cand(i)),   // cand() defaults to basis "grant"
+    root,
+    slideStarts: [0, 2, 4, 6, 8, 10, 12, 14, 16, 18],
+  });
+  assert.ok(picks.length > 0, "the guard must not simply disable the feature");
+  assert.equal(picks.some((p) => p.slideIndex === 0), false);
 });
 
 // ─── Lane-aware composition reaches the renderable ─────────────────────────
