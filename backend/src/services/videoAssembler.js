@@ -183,12 +183,60 @@ function runFFmpeg(args, ffmpegPath) {
  * of the arc work. A layout constraint must not become an editorial one
  * (DrJ, 2026-08-12).
  */
+/**
+ * How far down the frame a burned caption may sit.
+ *
+ * 75%. Measured against the platforms: TikTok's own furniture reaches about 85%
+ * of frame height and Instagram Reels' caption block sits inside that band, so
+ * anything we burn below 75% is competing with somebody else's UI on two of the
+ * seven surfaces we publish to. This is a ceiling on the BOTTOM of the block —
+ * the caption can always move up, never down.
+ */
+export const MAX_CAPTION_BOTTOM_FRACTION = 0.75;
+
+/**
+ * The caption for a card, or null when it would only repeat what is on screen.
+ *
+ * FOUND AT GATE C by frame-by-frame reading of a real render: at 3.6s the burned
+ * subtitle read "Riverside bridge reopens" while the card's own display lines
+ * read RIVERSIDE BRIDGE / REOPENS. The caption track itself was fine — it
+ * changed correctly later — but on that beat it was spending the bottom band
+ * saying something the viewer had already read in 100pt type.
+ *
+ * A duplicate caption is worse than no caption. It costs the band, it costs the
+ * reader a second of attention for nothing, and on a card that also carries a
+ * cutaway it competes with the one piece of text that has to be read.
+ *
+ * COMPARED LOOSELY on purpose — case, punctuation and whitespace all differ
+ * between a display line ("RIVERSIDE BRIDGE") and a caption ("Riverside bridge
+ * reopens"), and an exact-match test would never fire on the very case that
+ * prompted this.
+ */
+export function captionForCard(card = {}) {
+  const caption = String(card.caption || "").trim();
+  if (!caption) return null;
+
+  const norm = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  const headline = norm(
+    Array.isArray(card.lines) ? card.lines.map((l) => (Array.isArray(l) ? l[0] : l)).join(" ") : card.title
+  );
+  if (!headline) return caption;
+  return norm(caption) === headline ? null : caption;
+}
+
+
+
 export function captionGeometry(orientation = "horizontal") {
   const g = geometryFor(orientation);
   if (orientation === "vertical") {
     return Object.freeze({
       fontSize: 30, lineHeight: 40,
-      bottomY: g.contentBottom - 44,
+      // CLAMPED TO 75% OF FRAME HEIGHT. The unclamped value (contentBottom - 44
+      // = 1556) is 81%, and TikTok's furniture reaches about 85% with the
+      // Instagram Reels caption block inside that band — so a burned caption
+      // down there is competing with somebody else's UI on two of the seven
+      // surfaces. The clamp is a MIN so the band can only ever move up.
+      bottomY: Math.min(g.contentBottom - 44, Math.round(g.canvas.h * MAX_CAPTION_BOTTOM_FRACTION)),
       maxWidth: g.canvas.w - 2 * (g.marginX + 20),
       maxLines: 3,
     });
@@ -294,30 +342,81 @@ export async function buildCaptionFilter({ text, workDir, slideIndex, fontFile, 
 export function creditChipRegion(orientation = "horizontal") {
   const G = geometryFor(orientation);
   const CV = G.canvas;
-  const top = G.safeTop !== undefined ? G.safeTop : G.chromeTopY;
-  const rightInset = G.safeRight + G.marginX;
-  const x = Math.round(CV.w / 2);
+  // The chip is left-anchored in the masthead slot, so the band runs from just
+  // left of that anchor across the width a credit can plausibly occupy.
+  const x = Math.max(0, G.creditX - 20);
+  const y = Math.max(0, G.creditY - 12);
   return {
     x,
-    y: Math.max(0, top - 4),
-    w: Math.max(1, CV.w - rightInset + 20 - x),
-    h: 56,
+    y,
+    w: Math.min(CV.w - x, Math.round(CV.w * 0.72)),
+    h: Math.round(G.creditFontSize * 2),
   };
 }
 
-export function buildCutawayCreditFilter({ text, workDir, slideIndex, fontFile, orientation = "horizontal" }) {
+/**
+ * The inset box a FRAMED cutaway occupies (the fair-use lane).
+ *
+ * Sized to the content measure and 16:9 inside it, sitting above the caption
+ * band and below the masthead — so the chrome that makes the use legible as
+ * commentary is visible on all four sides of the borrowed picture, which is the
+ * entire point of the lane distinction.
+ */
+export function cutawayFrameFor(orientation = "horizontal") {
+  const G = geometryFor(orientation);
+  const CV = G.canvas;
+  const w = G.contentW - (G.contentW % 2);
+  const h = Math.round(w * 9 / 16) - (Math.round(w * 9 / 16) % 2);
+  return { w, h, x: Math.round((CV.w - w) / 2), y: Math.round((CV.h - h) / 2) };
+}
+
+/**
+ * Which composition does this clearance lane get?
+ *
+ * grant / owner → full-bleed, chrome suppressed.
+ * fair_use      → framed, chrome retained.
+ *
+ * Exported as a function rather than inlined at the call site so the rule has
+ * one home and a test can walk every lane rather than the two someone
+ * remembered.
+ */
+export function cutawayFrameForLane(clearanceBasis, orientation = "horizontal") {
+  return clearanceBasis === "fair_use" ? cutawayFrameFor(orientation) : null;
+}
+
+export function buildCutawayCreditFilter({ text, workDir, slideIndex, fontFile, orientation = "horizontal", frame = null }) {
   const G = geometryFor(orientation);
   const file = path.join(workDir, `cutaway-credit-${String(slideIndex).padStart(2, "0")}.txt`);
   const esc = (v) => String(v).replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
   writeFileSync_(file, String(text).toUpperCase(), "utf8");
   // Right-aligned inside the action rail, on the top safe line — the same band
   // the photo credit uses, so the two never collide or read differently.
-  const rightInset = G.safeRight + G.marginX;
+  // MASTHEAD ANCHOR, OPAQUE PLATE, SUBTITLE-SIZED.
+  //
+  // x and y are the masthead's own slot: when the frame is not ours, the
+  // source's name takes our name's position. Left-aligned to marginX like every
+  // other piece of chrome, rather than floating at whatever x the text width
+  // happened to produce.
+  //
+  // The plate is FULLY OPAQUE (@1.0, was @0.62). At 0.62 it survived a test
+  // pattern and would not have survived a blown-out sky, which is precisely the
+  // frame a phone clip of an outdoor incident produces — and an unreadable
+  // credit is not a credit.
+  // IN THE FRAMED LANE the chip is drawn into the INSET stream, not the full
+  // frame, so the masthead's coordinates mean nothing there — 104/140 inside an
+  // 872x490 box is a third of the way down a picture rather than a masthead
+  // slot. The credit still belongs to the picture (it is composited inside the
+  // cutaway stream, which is what stops it outliving the footage), so in that
+  // lane it takes the picture's own top-left corner instead. Found by looking at
+  // the Gate D render, not by a test.
+  const inset = Math.round(G.creditFontSize / 2);
+  const x = frame ? inset : G.creditX;
+  const y = frame ? inset : G.creditY;
   return (
     `drawtext=fontfile='${esc(fontFile)}':textfile='${esc(file)}':` +
-    `fontsize=24:fontcolor=0xcfcabd:` +
-    `x=w-text_w-${rightInset}:y=${G.safeTop !== undefined ? G.safeTop + 8 : G.chromeTopY + 8}:` +
-    `box=1:boxcolor=0x090706@0.62:boxborderw=10`
+    `fontsize=${G.creditFontSize}:fontcolor=0xf5f2ea:` +
+    `x=${x}:y=${y}:` +
+    `box=1:boxcolor=0x090706@1.0:boxborderw=12`
   );
 }
 
@@ -464,6 +563,38 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
    */
   const appendCutaway = () => {
     const credit = cutaway.credit ? `,${cutaway.credit}` : "";
+
+    /**
+     * FRAMED LANE. `cutaway.frame` insets the footage instead of covering the
+     * frame, and the slide underneath — masthead, counter, card type — stays
+     * visible around it.
+     *
+     * WHY THIS IS A LANE AND NOT A PREFERENCE (DrJ, Gate C). Full-bleed with the
+     * chrome suppressed is normal broadcast grammar for GRANTED footage: nothing
+     * carries platform furniture, a source chip is expected, and the frame reads
+     * as ours. A Lane 3 fair-use excerpt is a different claim. Its whole posture
+     * rests on the use being commentary, and chrome-suppressed full-bleed shows
+     * the least commentary of any composition available — it is the weakest
+     * possible position for the one lane that may actually have to be defended.
+     * So fair_use keeps our framing around it, visibly.
+     *
+     * Still ONE compositing path: the same stream-that-ends, the same
+     * `eof_action=pass`, the same credit composited inside it. Only the scale
+     * and the overlay offset differ, and both are constants in the graph — no
+     * time term enters an `overlay=` stage, so the type-chain time-invariance
+     * tests hold exactly as before.
+     */
+    if (cutaway.frame) {
+      const f = cutaway.frame;
+      parts.push(
+        `[${cutaway.inputIndex}:v]scale=${f.w}:${f.h}:force_original_aspect_ratio=increase,` +
+        `crop=${f.w}:${f.h},setsar=1,fps=${FPS},` +
+        `trim=duration=${cutaway.seconds.toFixed(3)},setpts=PTS-STARTPTS${credit}[cut]`
+      );
+      parts.push(`[base][cut]overlay=${f.x}:${f.y}:eof_action=pass,setsar=1${captionChain}${grainChain()}[out]`);
+      return;
+    }
+
     parts.push(
       `[${cutaway.inputIndex}:v]scale=${CV.w}:${CV.h}:force_original_aspect_ratio=increase,` +
       `crop=${CV.w}:${CV.h},setsar=1,fps=${FPS},` +
@@ -591,7 +722,7 @@ export async function assembleSlide({
   statePaths, hold, outputPath, driftDir = 0, ffmpegPath = null,
   audioPath = null, captionText = null, workDir = null, fontFile = null,
   orientation = "horizontal", underlayPath = null,
-  cutawayPath = null, cutawaySecs = 0, cutawayCredit = null,
+  cutawayPath = null, cutawaySecs = 0, cutawayCredit = null, cutawayFrame = null,
 }) {
   const ff = ffmpegPath || getFFmpegPath();
   if (!ff) throw new Error("videoAssembler: ffmpeg not available");
@@ -619,13 +750,15 @@ export async function assembleSlide({
   // is still cut to `-t totalDuration`, and nothing new is concatenated.
   const cutSecs = useCutaway ? Math.min(cutawaySecs, Math.max(0, totalFor(statePaths.length, hold) - 0.25)) : 0;
   const credit = (useCutaway && cutawayCredit && workDir && fontFile)
-    ? buildCutawayCreditFilter({ text: cutawayCredit, workDir, slideIndex: driftDir, fontFile, orientation })
+    ? buildCutawayCreditFilter({ text: cutawayCredit, workDir, slideIndex: driftDir, fontFile, orientation, frame: cutawayFrame })
     : null;
 
   const { filter, totalDuration } = buildSlideFilter({
     stateCount: statePaths.length, hold, driftDir, caption, orientation,
     underlay: Boolean(underlayPath),
-    cutaway: useCutaway && cutSecs > 0 ? { inputIndex: cutawayIdx, seconds: cutSecs, credit } : null,
+    cutaway: useCutaway && cutSecs > 0
+      ? { inputIndex: cutawayIdx, seconds: cutSecs, credit, frame: cutawayFrame }
+      : null,
   });
 
   args.push("-filter_complex", filter, "-map", "[out]");

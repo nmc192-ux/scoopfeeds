@@ -19,7 +19,7 @@ import {
   parseQuarantineName, ALLOWED_EXTS, SWEEP_CAP, UNDECIDED_RETENTION_MS,
   IncidentFileError,
 } from "./incidentFiles.js";
-import { LIBRARY_GRADE } from "../videoHouseGrade.js";
+import { INCIDENT_GRADE, LIBRARY_GRADE } from "../videoHouseGrade.js";
 import { ffmpegRaw } from "./incidentHash.js";
 
 function caught(fn, Type) {
@@ -112,9 +112,30 @@ test("stored paths are relative — an absolute path is machine-specific", (t) =
 
 // ─── The filter chain fabricates nothing ───────────────────────────────────
 
-test("the incident chain uses the house grade — one definition, not a copy", () => {
-  assert.ok(buildIncidentFilter().includes(LIBRARY_GRADE),
-    "incident media must be graded with the same chain as the stock library");
+test("the incident chain uses INCIDENT_GRADE, never the library grade", () => {
+  const chain = buildIncidentFilter();
+  assert.ok(chain.includes(INCIDENT_GRADE));
+  assert.equal(chain.includes(LIBRARY_GRADE), false,
+    "eyewitness footage graded to the stock plate reads as produced — the two grades must not be the same");
+});
+
+test("the two grades are distinct constants that cannot drift together", () => {
+  // Not one grade with a parameter: a parameterised grade is a single definition
+  // both callers share, so a change made for stock lands on incident footage
+  // too — and the ruling is precisely that they must not move together.
+  assert.notEqual(INCIDENT_GRADE, LIBRARY_GRADE);
+});
+
+test("the incident grade is LIGHTER — that is the whole ruling", () => {
+  const sat = (g) => Number(/saturation=([\d.]+)/.exec(g)?.[1]);
+  assert.ok(sat(INCIDENT_GRADE) > sat(LIBRARY_GRADE),
+    `incident saturation ${sat(INCIDENT_GRADE)} must exceed library ${sat(LIBRARY_GRADE)} — the crush is what makes stock read as a plate`);
+  assert.equal(/vignette/.test(INCIDENT_GRADE), false,
+    "a vignette is unambiguously OUR framing; putting one on somebody else's footage is the most produced thing in the chain");
+  assert.equal(/colorbalance/.test(INCIDENT_GRADE), false,
+    "a colour push is a look, not a black point");
+  // But the black point IS matched — that is the half of the grade we keep.
+  assert.match(INCIDENT_GRADE, /brightness=-0\.\d+/);
 });
 
 test("no filter that fabricates motion or content appears in the chain", () => {

@@ -49,7 +49,15 @@ test("9:16 is 1080x1920 with an asymmetric safe area", () => {
   // at the bottom. If someone "tidies" these to match, this fails.
   assert.ok(VERTICAL.safeBottom > VERTICAL.safeTop * 2, "the bottom reservation must dominate");
   assert.equal(VERTICAL.contentBottom, 1600);
-  assert.equal(VERTICAL.progressY, 1594, "the progress line sits inside our area, not the platform's");
+  // The progress line MOVED UP (Gate C): it was 1594 — 83% of frame height —
+  // which is under TikTok's own furniture and below the burned caption band.
+  // The invariant it was pinning is unchanged and now asserted as an invariant
+  // rather than as a literal: it sits inside OUR content area, and it now also
+  // sits above the captions it belongs to.
+  assert.ok(VERTICAL.progressY < VERTICAL.contentBottom, "the progress line sits inside our area, not the platform's");
+  assert.ok(VERTICAL.progressY / VERTICAL.canvas.h <= 0.75,
+    `the progress line is at ${(VERTICAL.progressY / VERTICAL.canvas.h * 100).toFixed(1)}% — platform furniture starts around 85%`);
+  assert.equal(VERTICAL.progressY, 1296);
   assert.ok(VERTICAL.contentWRail < VERTICAL.contentW, "content must have a rail-safe measure");
 });
 

@@ -52,3 +52,43 @@ export function coolGrade(chain) {
 
 /** The library grade: the house default, cooled. One definition, two consumers. */
 export const LIBRARY_GRADE = coolGrade(GRADES.default);
+
+/**
+ * INCIDENT_GRADE — deliberately lighter than the library grade, and deliberately
+ * a SEPARATE CONSTANT rather than a flag on the one above.
+ *
+ * THE RULING (DrJ, Gate C): grade lighter on incident footage. Grading a phone
+ * clip to the same plate as a curated stock asset reads as *produced*, and
+ * produced is what this engine exists to stop looking like. Noise, exposure
+ * error and colour cast are credibility signals in eyewitness material — a
+ * viewer reads an over-graded clip of a flood as something we made, and the
+ * whole point of the grant, the verification and the credit chip is that we did
+ * not make it. So: match the black point, then stop.
+ *
+ * What that means concretely, against LIBRARY_GRADE:
+ *   saturation  0.42 → 0.88   the crush is what makes stock read as a plate
+ *   contrast    1.14 → 1.04   enough to seat the blacks, not to restyle
+ *   brightness -0.10 → -0.06  the black point, which is the part we DO match
+ *   gamma       0.94 → 0.98   barely off neutral
+ *   colorbalance      dropped  a colour push is a look, not a black point
+ *   vignette          dropped  a vignette is unambiguously OUR framing, and
+ *                              putting one on somebody else's footage is the
+ *                              single most "produced" thing in the chain
+ *
+ * TWO CONSTANTS, NOT ONE WITH A PARAMETER. A parameterised grade is one
+ * definition that both callers share, which means a change made for stock
+ * silently lands on incident footage too — and the whole ruling is that they
+ * must NOT move together. Separate constants cannot drift into each other;
+ * a test asserts they are distinct and that this one carries no vignette.
+ *
+ * THIS IS STYLE. Like everything else in this file it has no bearing on whether
+ * the footage may be used.
+ *
+ * ⚠️ UNVALIDATED AGAINST REAL FOOTAGE. The Gate C render that prompted this
+ * ruling used an ffmpeg test pattern, which has no grain, no exposure error and
+ * no colour cast — so it CANNOT show whether these numbers are right. The first
+ * real granted clip is the test, and these values are a starting point to be
+ * looked at, not a measurement.
+ */
+export const INCIDENT_GRADE =
+  "eq=saturation=0.88:contrast=1.04:brightness=-0.06:gamma=0.98";
