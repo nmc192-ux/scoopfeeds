@@ -30,6 +30,63 @@ recalibration · sentiment module hidden on comprehensibility grounds.
 verbatim artifacts, 🛑 at the report) → build → COW-validate → dark behind a URL param →
 live eyeball → default flip. DrJ deploys; agents never touch prod deploys.
 
+## ⚠️ Incident media engine — three things that are BUILT AND NEVER TESTED
+
+<!-- Placed above everything else deliberately (DrJ, 2026-08-28). These are not
+     pending polish and they are not "awaiting eyeball" in the ordinary
+     shipped-dark sense. They are decisions implemented to a ruling, whose
+     ruling has never been checked against the thing it was a ruling about. A
+     future session must not read them as validated. -->
+
+The engine (PRs #123 merged, #130 pending) is complete through Phase 6E and **has never
+rendered a frame of real footage**. Every render that informed its visual decisions used a
+synthetic test pattern or an ffmpeg gradient. That is not a small caveat: a test pattern
+has no grain, no exposure error, no colour cast and no blown highlights, which is precisely
+the material every one of these three decisions was made about.
+
+- **`INCIDENT_GRADE` has NEVER been rendered against real footage.** The values in
+  `services/videoHouseGrade.js` (`eq=saturation=0.88:contrast=1.04:brightness=-0.06:gamma=0.98`)
+  implement DrJ's Gate C ruling that eyewitness footage is graded lighter than curated
+  stock — match the black point, then stop. **No grain, no exposure error and no colour
+  cast has ever gone through it.** It is unvalidated, not tuned-and-awaiting-approval.
+- **The credit plate is fully opaque on reasoning, not on evidence.** `boxcolor=0x090706@1.0`
+  in `videoAssembler.buildCutawayCreditFilter`, raised from `@0.62` because DrJ judged 0.62
+  would not survive a blown-out sky. **No sky has ever been rendered.** The opacity is a
+  prediction about a frame nobody has produced.
+- **The framed-vs-full-bleed composition for own material is provisionally accepted and
+  unseen. Ruling 1 stays OPEN.** `cutawayFrameForLane` gives `owner` the framed composition
+  so the masthead survives (Gate E). DrJ accepted it provisionally, on the explicit
+  condition of seeing it rendered, and flagged the real risk: own and fair_use now share a
+  composition for opposite reasons, so our own footage gets the same treatment as material
+  we are using without permission. That may read as correct or as apologising for footage
+  we own. **Nobody has looked.**
+
+What would settle all three is one ordinary handheld outdoor clip with sky in frame, shot
+by DrJ, run twice — once through the own lane as it ships, once forced through the grant
+lane with a synthetic credit purely as a rendering test. Stood down 2026-08-28 for want of
+daylight; **not** substituted with an indoor clip or a screen recording, because validating
+against the wrong material is worse than not validating — it stops anyone looking again.
+
+Also outstanding, and DrJ's rather than an agent's:
+
+- **The YouTube token has not been re-minted with `force-ssl`.** Until it is, the takedown
+  half of `docs/ops/runbooks/incident_takedown.md` is **unproven against the real API** —
+  no call from this codebase has ever reached `videos.update` in production. The original
+  token carried `upload` + `readonly` only and `videos.update` 403'd. Re-mint with
+  `node backend/scripts/youtube-auth.mjs`. This is the half the permission message makes a
+  promise about.
+
+Two smaller items queued from the same sequence, both flagged and neither built:
+
+- **Quarantine retention treats derived state as evidence.** Treatment is byte-identical
+  from source (measured), so a treated file is *derived* and the quarantined source is the
+  only thing that constitutes evidence. `incidentFiles.sweep` ages both out together, so it
+  could delete the original while keeping a derivative — backwards for a system whose job
+  is proving what we had and where it came from.
+- **`incidentQueue.pendingRulings` returns taps for a killed candidate.** Not live (the
+  queue never asks — `bucketFor` returns null for terminal states), so it is only reachable
+  by calling it directly. Tighten whenever that file is next open.
+
 ## Operational insurance — ahead of the open items
 
 <!-- /plan drains this section BEFORE the numbered open items below.
