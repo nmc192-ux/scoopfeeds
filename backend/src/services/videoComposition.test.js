@@ -51,6 +51,22 @@ test("the accent rule sits ABOVE the caption block, not below it", () => {
   assert.ok(V.progressY / V.canvas.h < MAX_CAPTION_BOTTOM_FRACTION);
 });
 
+test("the caption block the assembler burns IS the one the geometry positions the rule from", () => {
+  // THE ANTI-DRIFT TEST, and the reason the caption numbers moved into
+  // videoGeometry. While captionGeometry held its own literals and progressY
+  // held another, the two could diverge silently — the rule would keep its
+  // position while the text moved out from under it. Ties the two files
+  // together so that cannot happen without a failure.
+  const cap = captionGeometry("vertical");
+  assert.equal(cap.bottomY, V.captionBottomY);
+  assert.equal(cap.lineHeight, V.captionLineHeight);
+  assert.equal(cap.maxLines, V.captionMaxLines);
+  assert.equal(cap.fontSize, V.captionFontSize);
+  // And the relationship the whole arrangement exists for, restated from the
+  // assembler's side rather than the geometry's.
+  assert.equal(V.progressY + V.ruleAir, cap.bottomY - cap.maxLines * cap.lineHeight);
+});
+
 // ─── (h) The duplicate subtitle ────────────────────────────────────────────
 
 test("a caption that repeats the card headline is suppressed", () => {

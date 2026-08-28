@@ -134,6 +134,44 @@ export const HORIZONTAL = Object.freeze({
 const V_CANVAS = { w: 1080, h: 1920 };
 const V_SAFE_BOTTOM = 320;
 const V_CONTENT_BOTTOM = V_CANVAS.h - V_SAFE_BOTTOM;   // 1600
+
+/**
+ * ─── The 9:16 caption block, and the rule that sits above it ────────────────
+ *
+ * THESE LIVE HERE BECAUSE progressY IS DERIVED FROM THEM. They used to live in
+ * `videoAssembler.captionGeometry` while `progressY` was the literal `1296` —
+ * which is the value the arithmetic below produces, so the two agreed by
+ * coincidence rather than by construction. Move `bottomY`, `lineHeight` or
+ * `maxLines` and the rule would silently stop being "just above the caption",
+ * with nothing failing. `captionGeometry` now reads these back off the geometry,
+ * so there is one set of numbers and one place to change them.
+ *
+ * MAX_CAPTION_BOTTOM_FRACTION (0.75) — measured against the platforms. TikTok's
+ * own furniture reaches about 85% of frame height and the Instagram Reels
+ * caption block sits inside that band, so anything burned below 75% competes
+ * with somebody else's UI on two of the seven surfaces. It is a ceiling on the
+ * BOTTOM of the block: the caption can move up, never down.
+ *
+ * V_RULE_AIR (24) — the only free number here, and the only one that is a
+ * composition choice rather than a constraint. It is the gap between the accent
+ * rule and the top of a caption at its MAXIMUM length, so a three-line caption
+ * still clears the rule. Shorter captions simply leave more air.
+ *
+ * 16:9 IS NOT DERIVED THIS WAY, deliberately. There, the rule sits BELOW the
+ * caption (1046 against 1034) — the arrangement 9:16 had before Gate C — and
+ * nothing in the vertical pass may move a horizontal number. See the header.
+ */
+export const MAX_CAPTION_BOTTOM_FRACTION = 0.75;
+const V_CAPTION_FONT_SIZE = 30;
+const V_CAPTION_LINE_HEIGHT = 40;
+const V_CAPTION_MAX_LINES = 3;
+const V_RULE_AIR = 24;
+const V_CAPTION_BOTTOM = Math.min(
+  V_CONTENT_BOTTOM - 44,                                     // 1556, the unclamped value
+  Math.round(V_CANVAS.h * MAX_CAPTION_BOTTOM_FRACTION)       // 1440, the platform ceiling
+);
+/** The top of a caption at its longest. The rule sits V_RULE_AIR above this. */
+const V_CAPTION_TOP_MAX = V_CAPTION_BOTTOM - V_CAPTION_MAX_LINES * V_CAPTION_LINE_HEIGHT;   // 1320
 export const VERTICAL = Object.freeze({
   name: "vertical",
   canvas: Object.freeze({ w: 1080, h: 1920 }),
@@ -156,13 +194,27 @@ export const VERTICAL = Object.freeze({
   // TikTok's own furniture reaches about 85% and the Instagram Reels caption
   // block sits inside that band, so our accent rule was landing underneath
   // somebody else's UI on two of the seven surfaces — and the burned caption,
-  // at 81%, was in the same trouble. Both now sit above 75% (see
-  // MAX_CAPTION_BOTTOM_FRACTION in videoAssembler), with the rule above the
-  // caption block it belongs to rather than stranded below it.
+  // at 81%, was in the same trouble. Both now sit above 75%, with the rule above
+  // the caption block it belongs to rather than stranded below it.
+  //
+  // DERIVED, NOT A LITERAL (DrJ, Gate F). This was `1296`, which is what the
+  // expression below evaluates to — so the rule's position agreed with the
+  // caption's by coincidence, and moving the caption would have left the rule
+  // behind with no test failing. It is now the arithmetic it always was:
+  // *the top of the longest possible caption, less a fixed gap*. Reporting it
+  // as "67.5% of frame height" was what made it look like a free choice; it is
+  // not one, and the fraction is an output rather than an input.
   //
   // contentBottom is unchanged: it is where OUR content area ends, which is a
   // different question from where the chrome sits inside it.
-  progressY: 1296,
+  progressY: V_CAPTION_TOP_MAX - V_RULE_AIR,   // 1440 - 120 - 24 = 1296
+  // The caption block, read back by videoAssembler.captionGeometry so that the
+  // rule above and the text below cannot drift apart.
+  captionFontSize: V_CAPTION_FONT_SIZE,
+  captionLineHeight: V_CAPTION_LINE_HEIGHT,
+  captionMaxLines: V_CAPTION_MAX_LINES,
+  captionBottomY: V_CAPTION_BOTTOM,
+  ruleAir: V_RULE_AIR,
   reservedBottomY: V_CONTENT_BOTTOM,
   /**
    * Where the cutaway credit chip goes, and how big.

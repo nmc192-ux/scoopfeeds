@@ -193,15 +193,15 @@ function runFFmpeg(args, ffmpegPath) {
  * (DrJ, 2026-08-12).
  */
 /**
- * How far down the frame a burned caption may sit.
+ * How far down the frame a burned caption may sit. RE-EXPORTED, NOT DEFINED.
  *
- * 75%. Measured against the platforms: TikTok's own furniture reaches about 85%
- * of frame height and Instagram Reels' caption block sits inside that band, so
- * anything we burn below 75% is competing with somebody else's UI on two of the
- * seven surfaces we publish to. This is a ceiling on the BOTTOM of the block —
- * the caption can always move up, never down.
+ * It moved to videoGeometry when `progressY` became derived (DrJ, Gate F): the
+ * accent rule is positioned from the caption block, so the caption block's
+ * numbers have to live where the geometry can see them. Re-exported here because
+ * this is where callers and tests already import it from, and moving an import
+ * surface for a definition that moved is churn with no payer.
  */
-export const MAX_CAPTION_BOTTOM_FRACTION = 0.75;
+export { MAX_CAPTION_BOTTOM_FRACTION } from "./videoGeometry.js";
 
 /**
  * The caption for a card, or null when it would only repeat what is on screen.
@@ -238,16 +238,16 @@ export function captionForCard(card = {}) {
 export function captionGeometry(orientation = "horizontal") {
   const g = geometryFor(orientation);
   if (orientation === "vertical") {
+    // READ OFF THE GEOMETRY, NOT RESTATED. These were literals here while
+    // VERTICAL.progressY was the literal 1296 — two copies of the same
+    // arrangement, agreeing by coincidence. The clamp to 75% of frame height
+    // and the arithmetic that puts the rule above this block both now live in
+    // videoGeometry, so a change to either moves both.
     return Object.freeze({
-      fontSize: 30, lineHeight: 40,
-      // CLAMPED TO 75% OF FRAME HEIGHT. The unclamped value (contentBottom - 44
-      // = 1556) is 81%, and TikTok's furniture reaches about 85% with the
-      // Instagram Reels caption block inside that band — so a burned caption
-      // down there is competing with somebody else's UI on two of the seven
-      // surfaces. The clamp is a MIN so the band can only ever move up.
-      bottomY: Math.min(g.contentBottom - 44, Math.round(g.canvas.h * MAX_CAPTION_BOTTOM_FRACTION)),
+      fontSize: g.captionFontSize, lineHeight: g.captionLineHeight,
+      bottomY: g.captionBottomY,
       maxWidth: g.canvas.w - 2 * (g.marginX + 20),
-      maxLines: 3,
+      maxLines: g.captionMaxLines,
     });
   }
   return Object.freeze({

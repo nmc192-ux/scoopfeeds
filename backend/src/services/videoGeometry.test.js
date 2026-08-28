@@ -14,7 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { GEOMETRY, HORIZONTAL, VERTICAL, geometryFor } from "./videoGeometry.js";
+import { GEOMETRY, HORIZONTAL, VERTICAL, geometryFor, MAX_CAPTION_BOTTOM_FRACTION } from "./videoGeometry.js";
 import { statesForCard, VIDEO_BUILDER_FINGERPRINT, CANVAS, MARGIN_X } from "./videoSlideRenderer.js";
 import { verticalStatesForCard, VY } from "./videoSlideRendererVertical.js";
 import { makePrimitives, GROUND } from "./videoSlideChrome.js";
@@ -59,6 +59,37 @@ test("9:16 is 1080x1920 with an asymmetric safe area", () => {
     `the progress line is at ${(VERTICAL.progressY / VERTICAL.canvas.h * 100).toFixed(1)}% — platform furniture starts around 85%`);
   assert.equal(VERTICAL.progressY, 1296);
   assert.ok(VERTICAL.contentWRail < VERTICAL.contentW, "content must have a rail-safe measure");
+});
+
+test("progressY is DERIVED from the caption block, not a literal that agrees with it", () => {
+  // It was `1296` — which is exactly what this arithmetic produces, so the rule
+  // and the caption agreed by coincidence. Move captionBottomY, captionLineHeight
+  // or captionMaxLines and the literal would have stayed put, silently stopping
+  // being "just above the caption", with nothing failing (DrJ, Gate F).
+  assert.equal(
+    VERTICAL.progressY,
+    VERTICAL.captionBottomY - VERTICAL.captionMaxLines * VERTICAL.captionLineHeight - VERTICAL.ruleAir,
+    "the rule sits ruleAir above the top of a caption at its maximum length"
+  );
+  // Every input named, so none can quietly go missing and leave NaN behind.
+  for (const k of ["captionBottomY", "captionLineHeight", "captionMaxLines", "ruleAir"]) {
+    assert.equal(typeof VERTICAL[k], "number", `${k} must be a number`);
+    assert.ok(Number.isFinite(VERTICAL[k]) && VERTICAL[k] > 0, `${k} must be positive and finite`);
+  }
+  // The clamp is the caption's ceiling, and the rule is above the caption, so
+  // the rule is necessarily above the ceiling too. Stated as the consequence it
+  // is rather than as a second rule about frame fractions — "67.5% of frame
+  // height" is an OUTPUT of this arithmetic, never an input to it.
+  assert.ok(VERTICAL.captionBottomY <= Math.round(VERTICAL.canvas.h * MAX_CAPTION_BOTTOM_FRACTION));
+});
+
+test("16:9 keeps its own arrangement — the rule stays BELOW its caption there", () => {
+  // The vertical pass may not move a horizontal number (this file's header), and
+  // the two frames genuinely differ: nothing crops or overlays a landscape
+  // upload, so there is no platform furniture for the rule to dodge.
+  assert.equal(HORIZONTAL.progressY, 1046);
+  assert.equal(HORIZONTAL.captionBottomY, undefined,
+    "16:9 does not derive its rule from a caption block, and must not pretend to");
 });
 
 test("an unknown orientation THROWS rather than defaulting to 16:9", () => {
