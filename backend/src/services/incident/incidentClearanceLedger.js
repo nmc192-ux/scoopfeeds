@@ -164,6 +164,17 @@ export function markUncleared(db, candidateId, { reason = null, actor = "operato
  */
 export function assertRenderable(candidate) {
   if (!candidate) throw new ClearanceRefusedError("no candidate", { code: "no-candidate" });
+  // Named separately from the general not-cleared refusal, because the two mean
+  // very different things and the operator needs to be told which. "Not cleared
+  // yet" is work in progress; "revoked" is a right that has been withdrawn, and
+  // rendering it anyway would be the single worst thing this engine could do.
+  if (candidate.status === "revoked") {
+    throw new ClearanceRefusedError(
+      `candidate ${candidate.id} was REVOKED (${candidate.revocation_reason}) and may never render again. ` +
+      "The rights were withdrawn; the media being genuine does not make it usable.",
+      { code: "revoked" }
+    );
+  }
   if (candidate.status !== "cleared") {
     throw new ClearanceRefusedError(
       `candidate ${candidate.id} is "${candidate.status}", not "cleared" — no pixel from an uncleared candidate renders`,

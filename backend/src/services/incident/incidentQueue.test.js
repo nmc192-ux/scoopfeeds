@@ -20,6 +20,7 @@ import {
 } from "./incidentQueue.js";
 import { runVerification, recordHumanVerdict } from "./incidentVerifyRunner.js";
 import { VERDICTS } from "./incidentChecks.js";
+import { revokeClearance, recordTakedownActioned } from "./incidentRevocation.js";
 
 function caught(fn, Type) {
   try { fn(); } catch (err) {
@@ -162,6 +163,43 @@ test("renderableCandidates can be scoped to one story", (t0) => {
 
 // ─── Buckets ────────────────────────────────────────────────────────────────
 
+test("an outstanding takedown is the FIRST bucket — it outranks all pending work", (t0) => {
+  const t = db0(); t0.after(() => t.cleanup());
+  const c = mk(t.db);
+  toCleared(t.db, c.id);
+  approveForRender(t.db, c.id);
+  transition(t.db, c.id, "constructed", { checkName: "render", constructedVideoId: "vid-9" });
+  revokeClearance(t.db, c.id, "grantor_withdrew", { note: "Alice asked us to pull it on 30 Aug" });
+
+  assert.equal(BUCKETS[0], "takedown_pending");
+  const q = buildQueue(t.db);
+  assert.equal(q.counts.takedown_pending, 1);
+  const item = q.buckets.takedown_pending[0];
+  assert.equal(item.constructedVideoId, "vid-9");
+  assert.equal(item.revocationReason, "grantor_withdrew");
+});
+
+test("a revoked candidate with NO outstanding takedown is history, not work", (t0) => {
+  const t = db0(); t0.after(() => t.cleanup());
+  const c = mk(t.db);
+  toCleared(t.db, c.id);
+  revokeClearance(t.db, c.id, "grantor_withdrew", { note: "withdrawn before we published anything" });
+  assert.equal(buildQueue(t.db).total, 0, "nothing was published, so there is nothing to do");
+});
+
+test("recording the takedown removes it from the queue", (t0) => {
+  const t = db0(); t0.after(() => t.cleanup());
+  const c = mk(t.db);
+  toCleared(t.db, c.id);
+  approveForRender(t.db, c.id);
+  transition(t.db, c.id, "constructed", { checkName: "render", constructedVideoId: "vid-9" });
+  revokeClearance(t.db, c.id, "takedown_request", { note: "formal request 30 Aug" });
+  assert.equal(buildQueue(t.db).counts.takedown_pending, 1);
+
+  recordTakedownActioned(t.db, c.id, { note: "set to private" });
+  assert.equal(buildQueue(t.db).counts.takedown_pending, 0);
+});
+
 test("every working status lands in exactly one bucket, and history lands in none", () => {
   assert.equal(bucketFor({ status: "candidate" }), "new");
   assert.equal(bucketFor({ status: "verifying" }), "awaiting_ruling");
@@ -189,7 +227,10 @@ test("the queue puts the one-tap-away item first, ahead of a pile of new ones", 
   const ready = mk(t.db); toCleared(t.db, ready.id);
 
   const q = buildQueue(t.db);
-  assert.equal(BUCKETS[0], "awaiting_render_tap");
+  // takedown_pending outranks it, but with nothing revoked the tappable item is
+  // the first thing that actually appears.
+  assert.equal(BUCKETS[1], "awaiting_render_tap");
+  assert.equal(q.counts.takedown_pending, 0);
   assert.equal(q.counts.awaiting_render_tap, 1);
   assert.equal(q.counts.new, 5);
   assert.equal(q.buckets.awaiting_render_tap[0].id, ready.id);

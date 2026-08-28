@@ -45,6 +45,10 @@ import { renderGrantDraft, GrantDraftError } from "../services/incident/incident
 import {
   buildQueue, approveForRender, withdrawRenderApproval, renderableCandidates, QueueError,
 } from "../services/incident/incidentQueue.js";
+import {
+  revokeClearance, pendingTakedowns, recordTakedownActioned, RevocationError,
+} from "../services/incident/incidentRevocation.js";
+import { REVOCATION_REASONS } from "../services/incident/incidentStatus.js";
 
 const router = Router();
 const json = express.json({ limit: "16kb" });
@@ -73,6 +77,9 @@ function fail(res, err, where) {
   }
   if (err?.name === "VerificationError") {
     return res.status(422).json({ error: err.message, code: err.code });
+  }
+  if (err instanceof RevocationError) {
+    return res.status(400).json({ error: err.message, code: err.code });
   }
   if (err instanceof QueueError) {
     return res.status(400).json({ error: err.message, code: err.code });
@@ -404,6 +411,60 @@ router.get("/clearance-rules", (req, res) => {
     excerptMaxSecs: EXCERPT_MAX_SECS,
     note: "The excerpt cap is inherited from the cutaway mechanism, not set here. Treatment never affects rights.",
   });
+});
+
+// ─── Phase 6A — revocation and takedown ────────────────────────────────────
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/revoke  { reason, note }
+ *
+ * Keeps the promise the permission request makes. Works before publication
+ * (stop using it) and after (pull it). Revoking is terminal — a withdrawn grant
+ * cannot be un-withdrawn.
+ */
+router.post("/candidates/:id/revoke", json, (req, res) => {
+  try {
+    const out = revokeClearance(getDb(), req.params.id, req.body?.reason, {
+      note: req.body?.note ?? null, actor: "operator",
+    });
+    return res.json({
+      candidate: decorate(out.candidate),
+      requiresTakedown: out.requiresTakedown,
+      videoId: out.videoId,
+      reasons: REVOCATION_REASONS,
+      next: out.requiresTakedown
+        ? `Video ${out.videoId} is published and must be pulled. Unlist it, then POST /candidates/${req.params.id}/takedown-actioned.`
+        : "Nothing was published, so there is nothing to pull.",
+    });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/revoke");
+  }
+});
+
+/** GET /scoop-ops/incident/takedowns — revoked, published, still up. */
+router.get("/takedowns", (req, res) => {
+  try {
+    const rows = pendingTakedowns(getDb(), { limit: req.query.limit });
+    return res.json({ count: rows.length, pending: rows });
+  } catch (err) {
+    return fail(res, err, "GET /takedowns");
+  }
+});
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/takedown-actioned  { note? }
+ * Records that the published video was ACTUALLY pulled. Only this clears the
+ * pending bucket — deciding to pull it is not the same fact as it being gone.
+ */
+router.post("/candidates/:id/takedown-actioned", json, (req, res) => {
+  try {
+    const row = recordTakedownActioned(getDb(), req.params.id, {
+      note: req.body?.note ?? null, actor: "operator",
+    });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/takedown-actioned");
+  }
 });
 
 export default router;
