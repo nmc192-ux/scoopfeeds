@@ -55,6 +55,7 @@ import {
   validateSpec, validatePackaging, decorateTitleCard,
   displayStrings, motiveVerdict,
 } from "./videoSpecSchema.js";
+import { stockCutawaysEnabled } from "./videoStockLibrary.js";
 import { resolveAttribution } from "./videoAttribution.js";
 
 // TWO PINS, deliberately different tiers for two different jobs.
@@ -500,6 +501,9 @@ export function buildSpecPrompt({ article, allowedSources = [], bodyText = null 
   // instruction can never again describe material that is not present.
   const multiSource = allowedSources.length > 1;
   const visualsOn = subjectVisualsEnabled();
+  // The cutaway rule is asked for only when the feature that consumes it is on.
+  // A prompt rule with nothing behind it reads as covered while doing nothing.
+  const cutawaysOn = stockCutawaysEnabled();
   const emittable = MODEL_EMITTABLE.filter(t => {
     if (t === "sources") return false;
     if (!SUBJECT_VISUAL_TYPES.includes(t)) return true;
@@ -540,6 +544,27 @@ WHY THIS RULE EXISTS, stated plainly so you can apply it rather than pattern-mat
 
 AT MOST ONE subject-visual card per video. It is the establishing shot, and it belongs early — normally the second or third card. Two of them is a slideshow.
 ${hasPhoto ? "" : "This article has NO photograph, so \"photo\" is not on your list of card types. Do not ask for one."}
+` : ""}${cutawaysOn ? `
+"visual" — AN OPTIONAL CUTAWAY, ON A CARD THAT NAMES SOMETHING YOU COULD POINT A CAMERA AT.
+You may add "visual" to a "stat", "diagram", "bars" or "turn" card. It is a SHORT NOUN naming the
+thing itself — "ports", "ships", "datacentre" — never a sentence, never the beat restated, and never
+a hedge between two things.
+
+  !! MOST BEATS HAVE NO VISUAL, AND OMITTING IT IS THE NORMAL, CORRECT ANSWER. A "visual" is only
+     right when the beat names a physical thing a viewer could see: a place, a vessel, a building, a
+     flag. A beat about a percentage, a decision, a negotiation or a trend names nothing visible —
+     leave it out. NO "visual" FIELD MEANS NO CUTAWAY, and a video with no cutaways at all is a
+     correct video, not a failure.
+
+  !! IT IS RESOLVED AGAINST A FIXED LIST OF REVIEWED FOOTAGE, NOT SEARCHED FOR. Nothing goes and
+     finds a picture of whatever you write. A noun that is not in that library produces NOTHING —
+     no cutaway, no substitute, no near-miss — so an inventive or unusual noun is simply a beat
+     that loses its cutaway. Name the plain thing.
+
+  !! IT DESCRIBES THE SUBJECT, NEVER THE EVENT. The footage illustrates what the story is ABOUT; it
+     is never a picture of what happened. If what you want to name is the incident itself — a crash,
+     a protest, a strike — that is exactly the case where you must omit the field, because any
+     footage shown there would be mistaken for the event and it is not.
 ` : ""}CARD GRAMMAR — field names and types are exact:
 ${cardGrammar({ visualsOn, hasPhoto })}
 

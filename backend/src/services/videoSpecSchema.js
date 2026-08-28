@@ -639,10 +639,17 @@ const CARD_FIELDS = {
   // `outlet` and `date` are CODE-INJECTED onto the title by decorateTitleCard,
   // never model-emitted — they are the absorbed attribution card (see below).
   title:   { required: ["lines", "caption"],                 optional: ["eyebrow", "sub", "outlet", "date"] },
-  stat:    { required: ["value", "caption", "source"],       optional: ["eyebrow", "unit", "lines", "hi"] },
-  diagram: { required: ["nodes", "caption"],                 optional: ["eyebrow", "marker"] },
-  bars:    { required: ["bars", "caption", "source"],        optional: ["eyebrow", "source_note"] },
-  turn:    { required: ["lines", "caption"],                 optional: ["eyebrow", "sub"] },
+  // `visual` is the optional cutaway hint: a concrete noun naming something the
+  // beat makes visible, resolved at render time against the curated library.
+  // It is offered ONLY on the four type-only cards. `photo` and `map` already
+  // carry imagery of their own, and a cutaway over them would replace the
+  // picture the card exists to show; `title` and `kicker` are the wrappers.
+  // Most beats have no visual, and that is the normal case — see the selection
+  // rules in videoStockLibrary.js.
+  stat:    { required: ["value", "caption", "source"],       optional: ["eyebrow", "unit", "lines", "hi", "visual"] },
+  diagram: { required: ["nodes", "caption"],                 optional: ["eyebrow", "marker", "visual"] },
+  bars:    { required: ["bars", "caption", "source"],        optional: ["eyebrow", "source_note", "visual"] },
+  turn:    { required: ["lines", "caption"],                 optional: ["eyebrow", "sub", "visual"] },
   kicker:  { required: ["top", "bottom", "caption"],         optional: ["sub"] },
   // `photo` carries NO image field. The photograph is the article's own
   // (image_url), and the MOUNT is a design decision made in code — a model
@@ -759,6 +766,16 @@ function validateCardShape(card, idx) {
   // caption is the narration line — brief §3. An empty caption means a slide
   // with no voiceover, which desynchronises everything after it.
   if (card.caption !== undefined && !isStr(card.caption)) e.push(`${at} (${t}): "caption" must be a non-empty string`);
+
+  // `visual` is TYPE-checked here and no more. Whether the noun is usable — a
+  // short phrase, not a hedge — and whether anything in the library matches it
+  // are decided at selection, which is where the log line naming the noun is
+  // emitted. Judging it here would mean either dropping a good content card
+  // over an optional hint, or stripping the field silently; the selection path
+  // reports it by name instead, and an unusable visual simply yields no cutaway.
+  if (card.visual !== undefined && !isStr(card.visual)) {
+    e.push(`${at} (${t}): "visual" must be a string naming one concrete thing, or be omitted`);
+  }
 
   switch (t) {
     case "title":

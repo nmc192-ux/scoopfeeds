@@ -71,7 +71,10 @@ test("THE FINGERPRINT COVERS EVERY FILE THAT DECIDES A PIXEL", () => {
   // no human step to forget.
   const src = readFileSync(new URL("./videoSlideRenderer.js", import.meta.url), "utf8");
   const call = src.slice(src.indexOf("sourceFingerprint(["), src.indexOf("]);", src.indexOf("sourceFingerprint([")));
-  for (const f of ["videoGeometry.js", "videoSlideChrome.js", "videoSlideRendererVertical.js"]) {
+  // videoAssembler.js is here because a cutaway composites footage over the
+  // frame and drops the masthead for its duration — it decides pixels now, even
+  // though it rasterises nothing.
+  for (const f of ["videoGeometry.js", "videoSlideChrome.js", "videoSlideRendererVertical.js", "videoAssembler.js"]) {
     assert.ok(call.includes(f), `${f} decides rendered output but is not in the fingerprint`);
   }
   assert.ok(call.includes("import.meta.url"), "this file itself must stay in the list");

@@ -14,7 +14,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  loadLibrary, matchAssets, MAX_CUTAWAYS, selectCutaways, stockCutawaysEnabled,
+  cutawayCredit, cutawaySecs, cutawaysAllowedFor, isUsableVisual, loadLibrary, matchAssets,
+  MAX_CUTAWAYS, selectCutaways, stockCutawaysEnabled,
 } from "./videoStockLibrary.js";
 
 const roots = [];
@@ -240,6 +241,108 @@ test("selection is deterministic when nothing has been used", () => {
   const b = selectCutaways([slide("ports")], { assets }).picks[0].asset.id;
   assert.equal(a, b);
   assert.equal(a, "ports-0001");
+});
+
+// ─── What counts as a usable visual ─────────────────────────────────────────
+
+test("a visual names one thing, in a few words", () => {
+  for (const good of ["ports", "ships", "flag-china", "container port", "trading floor"]) {
+    assert.equal(isUsableVisual(good), true, `"${good}" should be usable`);
+  }
+});
+
+test("a hedged visual is unusable — the writer did not choose", () => {
+  // Same rule, and the SAME regex, as the photo card's `subject`. There is no
+  // rule by which selection could break the tie, so it must not try.
+  for (const hedge of ["ports or ships", "ports/ships", "either ports"]) {
+    assert.equal(isUsableVisual(hedge), false, `"${hedge}" should be refused`);
+  }
+  assert.equal(isUsableVisual("health and safety"), true,
+    "\" and \" is ordinary inside real names and must NOT be treated as a hedge");
+});
+
+test("a sentence is not a visual", () => {
+  assert.equal(isUsableVisual("the ports that handle most of the trade"), false);
+  assert.equal(isUsableVisual(""), false);
+  assert.equal(isUsableVisual(null), false);
+  assert.equal(isUsableVisual(undefined), false);
+});
+
+test("an unusable visual is reported by name, exactly like an unmatched one", () => {
+  // It must not be stripped silently upstream: the point of naming it is that
+  // someone can see the writer asked for something the system cannot serve.
+  const assets = [asset({ id: "ports-0001" })];
+  const { picks, unresolved } = selectCutaways([slide("ports or ships")], { assets });
+  assert.deepEqual(picks, []);
+  assert.deepEqual(unresolved, ["ports or ships"]);
+});
+
+// ─── The sensitivity gate ───────────────────────────────────────────────────
+
+test("a sensitive headline suppresses cutaways for the WHOLE video", () => {
+  // The guard judges headlines and there is no per-beat signal in the spec, so
+  // this is whole-video by design rather than by omission. A false positive
+  // costs one typographic video; a false negative puts stock footage beside a
+  // death toll.
+  const real = process.env.VIDEO_STOCK_CUTAWAYS_ENABLED;
+  process.env.VIDEO_STOCK_CUTAWAYS_ENABLED = "1";
+  try {
+    const flagged = cutawaysAllowedFor({ title: "Twelve killed in factory fire" });
+    assert.equal(flagged.allowed, false);
+    assert.equal(flagged.reason, "sensitive-headline");
+
+    assert.equal(cutawaysAllowedFor({ title: "Port congestion eases after tariff deal" }).allowed, true);
+    // No headline to judge — the guard takes the safe path, and so does this.
+    assert.equal(cutawaysAllowedFor({ title: "" }).allowed, false);
+    assert.equal(cutawaysAllowedFor({}).allowed, false);
+  } finally {
+    if (real === undefined) delete process.env.VIDEO_STOCK_CUTAWAYS_ENABLED;
+    else process.env.VIDEO_STOCK_CUTAWAYS_ENABLED = real;
+  }
+});
+
+test("the flag is checked BEFORE sensitivity — off means off", () => {
+  const real = process.env.VIDEO_STOCK_CUTAWAYS_ENABLED;
+  delete process.env.VIDEO_STOCK_CUTAWAYS_ENABLED;
+  try {
+    const off = cutawaysAllowedFor({ title: "Port congestion eases" });
+    assert.equal(off.allowed, false);
+    assert.equal(off.reason, "disabled");
+  } finally {
+    if (real !== undefined) process.env.VIDEO_STOCK_CUTAWAYS_ENABLED = real;
+  }
+});
+
+// ─── Credit and window ──────────────────────────────────────────────────────
+
+test("the credit names the creator first and the platform second", () => {
+  // The licence asks for the creator where possible; the platform alone credits
+  // the wrong party.
+  assert.equal(cutawayCredit(asset({ creator: "Ruvim Miksanskiy", provider: "pexels" })),
+    "Ruvim Miksanskiy / PEXELS");
+  assert.equal(cutawayCredit(asset({ creator: null })), null,
+    "no creator means no credit line — and such an asset is never selectable anyway");
+});
+
+test("the cutaway window is clamped into the band, loudly", () => {
+  const real = process.env.VIDEO_STOCK_CUTAWAY_SECS;
+  try {
+    delete process.env.VIDEO_STOCK_CUTAWAY_SECS;
+    assert.equal(cutawaySecs(), 2.2, "the default sits in the middle of 1.5-3s");
+    for (const [raw, want] of [["1.5", 1.5], ["3", 3], ["2.6", 2.6]]) {
+      process.env.VIDEO_STOCK_CUTAWAY_SECS = raw;
+      assert.equal(cutawaySecs(), want);
+    }
+    // Out of band falls back rather than being honoured: under 1.5s reads as a
+    // flash, over 3s stops being a cutaway. Zero is not "off" — the flag is.
+    for (const raw of ["0", "0.5", "12", "abc", "-2"]) {
+      process.env.VIDEO_STOCK_CUTAWAY_SECS = raw;
+      assert.equal(cutawaySecs(), 2.2, `"${raw}" should fall back`);
+    }
+  } finally {
+    if (real === undefined) delete process.env.VIDEO_STOCK_CUTAWAY_SECS;
+    else process.env.VIDEO_STOCK_CUTAWAY_SECS = real;
+  }
 });
 
 test("an empty library selects nothing and reports every noun", () => {
