@@ -2774,6 +2774,25 @@ export function recentPublishedVideos(n = 5) {
   `).all(n);
 }
 
+/**
+ * One published video, by its YouTube id — backs the TARGETED unlist route.
+ *
+ * `recentPublishedVideos` above answers "what did the loop just publish", which
+ * is the 3am-recovery question. This answers "where is THIS video", which is the
+ * takedown question, and they are not the same question: reaching a specific
+ * video through the recent list means either it is the newest or you flip every
+ * video in between (incident_takedown.md §0).
+ *
+ * Returns undefined when we hold no row. The caller must NOT treat that as a
+ * reason to refuse: a takedown request is about a video on a platform, not
+ * about our bookkeeping, and refusing to pull something because our own table
+ * has no row for it is the wrong failure. YouTube's own 404/403 is the check
+ * that the id is real and ours.
+ */
+export function videoPostByYouTubeId(youtubeId) {
+  return getDb().prepare("SELECT * FROM video_posts WHERE youtube_id = ?").get(youtubeId);
+}
+
 export function markVideoPrivacy(articleId, privacyStatus) {
   getDb().prepare("UPDATE video_posts SET privacy_status = ?, updated_at = ? WHERE article_id = ?")
     .run(privacyStatus, Date.now(), articleId);

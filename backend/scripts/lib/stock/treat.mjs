@@ -32,24 +32,20 @@ import { createRequire } from "module";
 import { existsSync, statSync } from "fs";
 import path from "path";
 import { promisify } from "util";
-import { GRADES } from "../../../src/services/longform/storyboardInterpreter.js";
 
 const execFileP = promisify(execFile);
 const require = createRequire(import.meta.url);
 
-/** Blue lift matching the `marine` grade — see the cooling-fix note above. */
-export const COOL_BLUE_SHADOWS = "0.04";
-export const COOL_BLUE_MIDS = "0.03";
-
-/** Take the blue terms of a colorbalance chain positive. */
-export function coolGrade(chain) {
-  return String(chain)
-    .replace(/\bbs=-?[\d.]+/, `bs=${COOL_BLUE_SHADOWS}`)
-    .replace(/\bbm=-?[\d.]+/, `bm=${COOL_BLUE_MIDS}`);
-}
-
-/** The library grade: the house default, cooled. */
-export const LIBRARY_GRADE = coolGrade(GRADES.default);
+// The cooled grade now lives on the RUNTIME side, in
+// src/services/videoHouseGrade.js, because incident media is graded at render
+// time on the server and the boundary guard forbids the runtime importing these
+// scripts. Scripts importing the runtime is the permitted direction, so the
+// definition moved there and is re-exported here — one definition, two
+// consumers, nothing to drift.
+import { COOL_BLUE_SHADOWS, COOL_BLUE_MIDS, coolGrade, LIBRARY_GRADE } from "../../../src/services/videoHouseGrade.js";
+// Imported AND re-exported: `export ... from` alone would re-export without
+// binding the names locally, and buildFilterChain() below uses LIBRARY_GRADE.
+export { COOL_BLUE_SHADOWS, COOL_BLUE_MIDS, coolGrade, LIBRARY_GRADE };
 
 /**
  * Static grain, strength 14 — the treatment measured in the prototype and used by

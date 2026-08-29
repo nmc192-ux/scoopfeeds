@@ -3,7 +3,7 @@
  *
  * A hand-written list of "these transitions should fail" tests only the ones
  * somebody thought of, which is precisely the guard that widens quietly later.
- * So the first test below walks the entire STATES × STATES matrix — all 64
+ * So the first test below walks the entire STATES × STATES matrix — all 81
  * ordered pairs — and requires each one to be legal exactly when TRANSITIONS
  * says so. Adding an edge anywhere makes it fail until the declaration and the
  * count both agree.
@@ -49,11 +49,11 @@ test("every ordered pair of states is legal exactly when TRANSITIONS says so", (
   );
 });
 
-test("the matrix walk is not vacuous — it really did cover 64 pairs", () => {
+test("the matrix walk is not vacuous — it really did cover 81 pairs", () => {
   // If STATES were ever emptied or shadowed, the loop above would pass having
   // asserted nothing. This pins the size of the thing being walked.
-  assert.equal(STATES.length, 8);
-  assert.equal(STATES.length * STATES.length, 64);
+  assert.equal(STATES.length, 9);
+  assert.equal(STATES.length * STATES.length, 81);
   assert.equal(new Set(STATES).size, STATES.length, "STATES contains a duplicate");
 });
 
@@ -75,8 +75,8 @@ test("the two shortcuts that would break the engine's whole premise are absent",
   assert.equal(canTransition("candidate", "constructed"), false);
 });
 
-test("kills and uncleared are terminal — nothing leaves them", () => {
-  for (const s of ["killed", "uncleared"]) {
+test("kills, uncleared and revoked are terminal — nothing leaves them", () => {
+  for (const s of ["killed", "uncleared", "revoked"]) {
     assert.ok(isTerminal(s));
     assert.deepEqual(TRANSITIONS[s], [], `${s} must have no outgoing edges`);
     for (const to of STATES) {
@@ -85,9 +85,32 @@ test("kills and uncleared are terminal — nothing leaves them", () => {
   }
 });
 
-test("constructed is terminal too — an asset is used once, then its row is history", () => {
-  assert.ok(TERMINAL_STATES.includes("constructed"));
-  assert.deepEqual(TRANSITIONS.constructed, []);
+test("constructed is NOT terminal — the post-publish takedown path leaves it", () => {
+  // It used to be. Revocation is why it is not: a grant can be withdrawn after
+  // the video is published, and a machine where `constructed` is terminal cannot
+  // express that. The permission request promises the poster they can change
+  // their mind; without this edge that promise is one the system cannot keep.
+  assert.equal(TERMINAL_STATES.includes("constructed"), false);
+  assert.deepEqual(TRANSITIONS.constructed, ["revoked"]);
+});
+
+test("revoked is terminal, and reachable from both sides of publication", () => {
+  assert.ok(TERMINAL_STATES.includes("revoked"));
+  assert.deepEqual(TRANSITIONS.revoked, []);
+  assert.equal(canTransition("cleared", "revoked"), true, "before publication");
+  assert.equal(canTransition("constructed", "revoked"), true, "after publication");
+  // But not from anywhere that never held a clearance to withdraw.
+  for (const from of ["candidate", "verifying", "verified", "clearing", "uncleared", "killed"]) {
+    assert.equal(canTransition(from, "revoked"), false, `${from} → revoked has no clearance to revoke`);
+  }
+});
+
+test("a revocation needs a reason, and a kill reason is not one", () => {
+  assert.throws(() => assertTransition("cleared", "revoked", {}), IllegalTransitionError);
+  assert.throws(() => assertTransition("cleared", "revoked", { revocationReason: "stale" }), IllegalTransitionError);
+  const out = assertTransition("cleared", "revoked", { revocationReason: "grantor_withdrew" });
+  assert.equal(out.revocationReason, "grantor_withdrew");
+  assert.equal(out.killReason, null, "a revocation is not a kill");
 });
 
 test("the terminal refusal explains what to do instead", () => {
@@ -157,7 +180,7 @@ test("constructed needs the video id, and whitespace is not an id", () => {
 test("states that need no payload reject none and return nulls", () => {
   for (const [from, to] of [["candidate", "verifying"], ["verifying", "verified"], ["verified", "clearing"], ["clearing", "uncleared"]]) {
     const out = assertTransition(from, to, {});
-    assert.deepEqual(out, { killReason: null, clearanceBasis: null, constructedVideoId: null });
+    assert.deepEqual(out, { killReason: null, clearanceBasis: null, constructedVideoId: null, revocationReason: null });
   }
 });
 

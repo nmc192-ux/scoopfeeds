@@ -170,6 +170,133 @@ export function createCandidate(db, {
   return { created: true, candidate: getCandidate(db, id) };
 }
 
+// ─── The own-material door ──────────────────────────────────────────────────
+//
+// WHY THIS IS A SECOND FUNCTION AND NOT A PARAMETER ON THE FIRST (DrJ, Gate F).
+//
+// `createCandidate` above is a social-post intake: it exists to turn a pasted
+// URL into a named lane, and every refusal it makes is about that URL. Material
+// the operator shot has no post behind it, so every one of those refusals fires
+// on something that was never wrong. Measured, before this existed — all four
+// plausible spellings were refused:
+//
+//     (no postUrl)                      no URL given
+//     scoopfeeds://own/<uuid>           not a web URL
+//     file://<path>                     not a web URL
+//     https://scoopfeeds.com/own/clip-1 not a platform this engine has a lane for
+//
+// So own material could not be intaken at all. The `owner` clearance basis has
+// existed since Phase 3 and the own render lane since Gate E, and neither was
+// reachable from the front door — a gap that survived because every own-lane
+// TEST borrowed a bluesky URL and still read as end-to-end coverage.
+//
+// IDENTITY IS THE FILE, NOT A URL. `post_url` is the ledger's dedupe key
+// (UNIQUE), and for material with no post a synthesised URL would be a lie
+// sitting in exactly the column that has to be trustworthy. The sha256 of the
+// footage is the honest identity: re-ingesting the same clip is idempotent, and
+// what makes two rows the same asset is that they ARE the same asset.
+//
+// `own` IS DELIBERATELY NOT ADDED TO intakeIntake.PLATFORMS. That list means
+// "hosts this engine can parse a post URL from", and putting a non-platform in
+// it would leave every consumer of that list quietly wrong — including the
+// operator-facing error message that recites it.
+
+/** The platform value for material with no post behind it. Not a PLATFORMS entry. */
+export const OWN_PLATFORM = "own";
+
+/** The `post_url` scheme for own material. The hash IS the identity. */
+export const OWN_REF_PREFIX = "own:sha256:";
+export const ownRefFor = (sha256) => `${OWN_REF_PREFIX}${String(sha256).toLowerCase()}`;
+export const isOwnRef = (ref) => /^own:sha256:[0-9a-f]{64}$/.test(String(ref || ""));
+
+/**
+ * Create a candidate for material the operator shot or holds outright.
+ *
+ * Takes a sha256 rather than a path so this module stays free of the
+ * filesystem. Hash the source with `incidentFiles.sha256OfFile` first, then
+ * `ingestFile(candidate.id, source)` — whose returned sha256 should equal the
+ * one passed here, which is a free integrity check on the pair.
+ *
+ * NOTE WHAT THIS DOES NOT DO: skip verification, or imply a clearance. It
+ * produces a `candidate` like any other, and the machine's only exits from
+ * there remain verification and the bin. Owning a clip says nothing about
+ * whether its claimed date or location is right — provenance is about rights,
+ * verification is about truth, and this is the rights end.
+ *
+ * @returns {{ created: boolean, candidate: object }}
+ */
+export function createOwnCandidate(db, {
+  storyKind, storyId, sha256,
+  mediaType = null, claimedAt = null, claimedLocation = null,
+  intakeSource = "manual", embedOnly = false,
+  actor = "operator", evidence = null,
+} = {}) {
+  if (!db) throw new LedgerError("no database handle", { code: "no-db" });
+
+  const hash = String(sha256 || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(hash)) {
+    throw new LedgerError(
+      `own material is identified by the sha256 of its file (64 hex characters); got ${JSON.stringify(sha256)}. ` +
+      "Hash the source with incidentFiles.sha256OfFile — the footage is the identity, because there is no post " +
+      "to be identified by.",
+      { code: "bad-own-hash" }
+    );
+  }
+  if (!INTAKE_SOURCES.includes(intakeSource)) {
+    throw new LedgerError(
+      `intake_source must be one of: ${INTAKE_SOURCES.join(", ")} (got ${JSON.stringify(intakeSource)})`,
+      { code: "bad-intake-source" }
+    );
+  }
+  // NO GUESS AVAILABLE. `createCandidate` can fall back to what the URL implies;
+  // here there is no URL, so an unstated media type is the operator not having
+  // said, and defaulting it would be inventing a fact about their own footage.
+  if (!MEDIA_TYPES.includes(mediaType)) {
+    throw new LedgerError(
+      `media_type must be stated for own material — one of: ${MEDIA_TYPES.join(", ")} (got ${JSON.stringify(mediaType)}). ` +
+      "There is no URL to infer it from.",
+      { code: "bad-media-type" }
+    );
+  }
+
+  assertStoryExists(db, storyKind, storyId);
+
+  const ref = ownRefFor(hash);
+  const existing = db.prepare("SELECT * FROM media_candidates WHERE post_url = ?").get(ref);
+  if (existing) return { created: false, candidate: existing };
+
+  const id = crypto.randomUUID();
+  const ts = now();
+
+  db.transaction(() => {
+    db.prepare(`
+      INSERT INTO media_candidates (
+        id, story_kind, story_id, platform, post_url, poster_handle, poster_display,
+        claimed_at, claimed_location, media_type, intake_source, acquisition,
+        status, kill_reason, clearance_basis, constructed_video_id, embed_only,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, 'held', ?, NULL, NULL, NULL, ?, ?, ?)
+    `).run(
+      id, storyKind, storyId, OWN_PLATFORM, ref,
+      Number.isFinite(claimedAt) ? claimedAt : null,
+      claimedLocation ? String(claimedLocation) : null,
+      mediaType, intakeSource,
+      INITIAL_STATE, embedOnly ? 1 : 0, ts, ts
+    );
+    appendEvent(db, {
+      candidateId: id, ts, fromStatus: null, toStatus: INITIAL_STATE,
+      checkName: "intake:own", actor,
+      evidence: { ...(evidence || {}), platform: OWN_PLATFORM, sha256: hash },
+    });
+  })();
+
+  // poster_handle and poster_display stay NULL. There is no poster — that is the
+  // whole point of the lane, and a placeholder would be a name in a column the
+  // credit chip reads from.
+  logger.info(`🎥 incident: OWN candidate ${id} intake ${ref} → ${storyKind}:${storyId}`);
+  return { created: true, candidate: getCandidate(db, id) };
+}
+
 export function getCandidate(db, id) {
   return db.prepare("SELECT * FROM media_candidates WHERE id = ?").get(id) || null;
 }
@@ -185,7 +312,7 @@ export function getCandidate(db, id) {
  */
 export function transition(db, id, toStatus, {
   checkName, actor = "system", evidence = null,
-  killReason = null, clearanceBasis = null, constructedVideoId = null,
+  killReason = null, clearanceBasis = null, constructedVideoId = null, revocationReason = null,
 } = {}) {
   if (!db) throw new LedgerError("no database handle", { code: "no-db" });
   if (!checkName) {
@@ -204,7 +331,7 @@ export function transition(db, id, toStatus, {
 
     // Throws IllegalTransitionError on an illegal edge or a missing payload.
     const detail = assertTransition(row.status, toStatus, {
-      killReason, clearanceBasis, constructedVideoId,
+      killReason, clearanceBasis, constructedVideoId, revocationReason,
     });
 
     // THE DETAIL FIELDS ARE STICKY. assertTransition returns the detail the
@@ -216,15 +343,24 @@ export function transition(db, id, toStatus, {
     // and then reads the row back; a test that stopped at `cleared` would not
     // have seen it.)
     const ts = now();
+    // takedown_required is derived HERE, by the transition that still knows what
+    // state the candidate was in. Once the row says `revoked`, the fact that it
+    // was `constructed` a moment ago is only recoverable from the trail — see
+    // migration 036's header.
+    const takedownRequired = toStatus === "revoked" && row.status === "constructed" ? 1 : row.takedown_required || 0;
     db.prepare(`
       UPDATE media_candidates
-         SET status = ?, kill_reason = ?, clearance_basis = ?, constructed_video_id = ?, updated_at = ?
+         SET status = ?, kill_reason = ?, clearance_basis = ?, constructed_video_id = ?,
+             revocation_reason = ?, revoked_at = ?, takedown_required = ?, updated_at = ?
        WHERE id = ?
     `).run(
       toStatus,
       detail.killReason ?? row.kill_reason,
       detail.clearanceBasis ?? row.clearance_basis,
       detail.constructedVideoId ?? row.constructed_video_id,
+      detail.revocationReason ?? row.revocation_reason,
+      toStatus === "revoked" ? ts : row.revoked_at,
+      takedownRequired,
       ts, id
     );
 
@@ -236,7 +372,7 @@ export function transition(db, id, toStatus, {
   });
 
   const moved = run();
-  const detail = killReason || clearanceBasis || constructedVideoId;
+  const detail = killReason || clearanceBasis || constructedVideoId || revocationReason;
   logger.info(
     `🎥 incident: candidate ${id} ${moved.from} → ${moved.to}` +
     `${detail ? ` (${detail})` : ""} by ${checkName} [${actor}]`

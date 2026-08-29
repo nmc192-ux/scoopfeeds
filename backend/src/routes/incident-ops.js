@@ -6,16 +6,33 @@
  * re-implement auth: adding a router under that prefix inherits it, and a second
  * implementation is how the two drift apart.
  *
- * NO ENV FLAG, AND THAT IS A DELIBERATE DEPARTURE from "new work ships dark".
- * The convention exists to keep unfinished work off reader surfaces, and nothing
- * here is one: every route is admin-authenticated, writes only to tables added by
- * migration 032, and is read by no render or publish path — Phase 1 cannot put a
- * pixel anywhere. Against that, a dark flag has a real cost this repo has already
- * paid: VIDEO_SUBJECT_VISUALS_ENABLED sat off in production while four PRs were
- * built on top of it. Adding a flag whose only job is to be switched on later
- * manufactures that same hazard for no safety. The dark flag belongs at Phase 5,
- * where pixels are at stake, and the brief puts it there
- * (VIDEO_INCIDENT_MEDIA_ENABLED).
+ * FLAG-GATED FOR WRITES SINCE 2026-08-28 (DrJ, Gate F). This header used to argue
+ * that no flag belonged here, on the grounds that Phase 1 could not put a pixel
+ * anywhere. That was true of Phase 1 and stopped being true by Phase 6: the
+ * router now reaches clearance and the render tap, which are the two decisions
+ * that authorise footage onto a channel.
+ *
+ * The deploy question that forced this: "what must be OFF for the engine to ship
+ * inert?" The honest answer was that selection and rendering are inert BY
+ * CONSTRUCTION — nothing calls the selector — while `VIDEO_INCIDENT_MEDIA_ENABLED`
+ * had no consumer at all, and this router was mounted unconditionally. So the
+ * flag was decorative and the one thing it was supposed to prevent, clearing, was
+ * the one thing available. That is exactly the hazard the old header warned
+ * about, pointed the other way.
+ *
+ * WRITES REFUSE, READS DO NOT — AND THAT IS THE POINT, NOT A COMPROMISE.
+ * Refusing to mount the router entirely would make every endpoint 404, which is
+ * indistinguishable from the engine not being deployed. "Present and provably
+ * dormant" is a stronger post-deploy check than "absent", and it is what the
+ * runbook's dormancy check reads: GET /clearance-rules answering 200 with three
+ * lanes is the engine saying it is here and doing nothing.
+ *
+ * REVOCATION AND TAKEDOWN ARE EXEMPT FROM THE GATE. If the flag is turned OFF
+ * after something has already been published — which is a likely response to
+ * trouble, not a hypothetical — gating the revoke path would mean the act of
+ * disabling the engine also disabled the only way to withdraw what it published.
+ * The one operation that must never be unavailable is the one that stops us
+ * using somebody's footage after they have asked us to stop.
  *
  * WHAT IS NOT HERE. There is no endpoint that sets a status. Verification,
  * clearance and construction each own their transitions and arrive with their
@@ -36,9 +53,59 @@ import { IntakeRefusedError, requiresPosterSuppliedFile } from "../services/inci
 import { runVerification, recordHumanVerdict, readHumanVerdicts, HumanVerdictError } from "../services/incident/incidentVerifyRunner.js";
 import { makeReverseSearch, reverseSearchConfigured } from "../services/incident/incidentReverseSearch.js";
 import { CHECK_NAMES } from "../services/incident/incidentChecks.js";
+import {
+  beginClearing, recordGrantRequest, recordGrantReply, applyClearance,
+  markUncleared, ClearanceLedgerError,
+} from "../services/incident/incidentClearanceLedger.js";
+import { ClearanceRefusedError, LANES, EXCERPT_MAX_SECS } from "../services/incident/incidentClearance.js";
+import { renderGrantDraft, GrantDraftError } from "../services/incident/incidentGrantDraft.js";
+import {
+  buildQueue, approveForRender, withdrawRenderApproval, renderableCandidates, QueueError,
+} from "../services/incident/incidentQueue.js";
+import {
+  revokeClearance, pendingTakedowns, recordTakedownActioned, RevocationError,
+  TAKEDOWN_SURFACES, takedownReality,
+} from "../services/incident/incidentRevocation.js";
+import { REVOCATION_REASONS } from "../services/incident/incidentStatus.js";
+import { incidentMediaEnabled } from "../services/incident/incidentFlags.js";
 
 const router = Router();
 const json = express.json({ limit: "16kb" });
+
+/**
+ * Paths that stay open with the flag off. See the header.
+ *
+ * Matched against the router-relative path, and deliberately anchored: a
+ * substring match would let `/candidates/x/revoke-something-else` through, and
+ * this list is the exception to the gate rather than a hint about it.
+ */
+const ALWAYS_ALLOWED = [
+  /^\/candidates\/[^/]+\/revoke\/?$/,
+  /^\/candidates\/[^/]+\/takedown-actioned\/?$/,
+];
+
+/**
+ * The dark gate.
+ *
+ * GET is never blocked: reads cannot clear, approve or publish anything, and the
+ * dormancy check depends on them answering. Everything else is refused with 503
+ * and a message naming the flag — a refusal an operator can act on beats a 404
+ * they have to diagnose.
+ */
+function incidentWritesGate(req, res, next) {
+  if (incidentMediaEnabled()) return next();
+  if (req.method === "GET" || req.method === "HEAD") return next();
+  if (ALWAYS_ALLOWED.some((re) => re.test(req.path))) return next();
+
+  logger.warn(`🎥 incident: refused ${req.method} ${req.path} — VIDEO_INCIDENT_MEDIA_ENABLED is not "1"`);
+  return res.status(503).json({
+    error: "the incident media engine is disabled (VIDEO_INCIDENT_MEDIA_ENABLED is not \"1\")",
+    code: "incident_engine_disabled",
+    reads: "GET endpoints stay available so the engine can be seen to be present and dormant",
+    exempt: "revoke and takedown-actioned are never gated — disabling the engine must not disable withdrawal",
+  });
+}
+router.use(incidentWritesGate);
 
 /**
  * Turn a thrown error into a response.
@@ -64,6 +131,17 @@ function fail(res, err, where) {
   }
   if (err?.name === "VerificationError") {
     return res.status(422).json({ error: err.message, code: err.code });
+  }
+  if (err instanceof RevocationError) {
+    return res.status(400).json({ error: err.message, code: err.code });
+  }
+  if (err instanceof QueueError) {
+    return res.status(400).json({ error: err.message, code: err.code });
+  }
+  if (err instanceof ClearanceRefusedError || err instanceof GrantDraftError || err instanceof ClearanceLedgerError) {
+    // The messages here are written for the operator and say what to do next,
+    // so they are returned rather than logged and replaced with "bad request".
+    return res.status(400).json({ error: err.message, code: err.code, lane: err.lane ?? null });
   }
   logger.error(`❌ incident-ops ${where}: ${err?.message}`, { stack: err?.stack });
   return res.status(500).json({ error: "internal error" });
@@ -241,6 +319,216 @@ router.get("/candidates/:id/human-verdicts", (req, res) => {
     return res.json({ verdicts: readHumanVerdicts(getDb(), req.params.id) });
   } catch (err) {
     return fail(res, err, "GET /candidates/:id/human-verdicts");
+  }
+});
+
+// ─── Phase 3 — clearance ───────────────────────────────────────────────────
+
+/** POST /scoop-ops/incident/candidates/:id/begin-clearing  { note? } */
+router.post("/candidates/:id/begin-clearing", json, (req, res) => {
+  try {
+    const row = beginClearing(getDb(), req.params.id, { note: req.body?.note ?? null, actor: "operator" });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/begin-clearing");
+  }
+});
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/grant-draft  { operatorName, storyTitle?, outlet? }
+ *
+ * DRAFTS AND RECORDS. DOES NOT SEND. The response body is the message to paste
+ * into a DM by hand, from the operator's own account — there is no send path in
+ * this engine and adding one is a decision, not a convenience.
+ */
+router.post("/candidates/:id/grant-draft", json, (req, res) => {
+  try {
+    const { draft, candidate } = recordGrantRequest(getDb(), req.params.id, {
+      operatorName: req.body?.operatorName,
+      storyTitle: req.body?.storyTitle ?? null,
+      outlet: req.body?.outlet ?? "ScoopFeeds",
+      actor: "operator",
+    });
+    return res.json({
+      draft, rendered: renderGrantDraft(draft),
+      candidate: decorate(candidate),
+      sent: false,
+      note: "Nothing was sent. Paste `draft.body` from your own account, then record the reply at /grant-reply.",
+    });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/grant-draft");
+  }
+});
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/grant-reply
+ * { outcome: "granted"|"refused"|"no_reply", grantReference?, replyText?, fileSuppliedByPoster? }
+ */
+router.post("/candidates/:id/grant-reply", json, (req, res) => {
+  try {
+    const row = recordGrantReply(getDb(), req.params.id, req.body?.outcome, {
+      grantReference: req.body?.grantReference ?? null,
+      replyText: req.body?.replyText ?? null,
+      fileSuppliedByPoster: Boolean(req.body?.fileSuppliedByPoster),
+      actor: "operator",
+    });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/grant-reply");
+  }
+});
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/clear  { lane, ...laneDetail }
+ * Lane 0 (owner) and Lane 3 (fair_use). Lane 2 goes through /grant-reply.
+ */
+router.post("/candidates/:id/clear", json, (req, res) => {
+  try {
+    const { lane, ...detail } = req.body || {};
+    const row = applyClearance(getDb(), req.params.id, lane, detail, { actor: "operator" });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/clear");
+  }
+});
+
+/** POST /scoop-ops/incident/candidates/:id/uncleared  { reason? } */
+router.post("/candidates/:id/uncleared", json, (req, res) => {
+  try {
+    const row = markUncleared(getDb(), req.params.id, { reason: req.body?.reason ?? null, actor: "operator" });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/uncleared");
+  }
+});
+
+// ─── Phase 4 — the review queue and the render tap ─────────────────────────
+
+/**
+ * GET /scoop-ops/incident/queue?perBucket=25
+ *
+ * Everything blocked on a person, bucketed in the order to work them, with the
+ * evidence needed to decide already attached. Deliberately does NOT re-run
+ * verification: opening the queue must not spend a paid reverse search per row.
+ */
+router.get("/queue", (req, res) => {
+  try {
+    return res.json(buildQueue(getDb(), { perBucket: req.query.perBucket }));
+  } catch (err) {
+    return fail(res, err, "GET /queue");
+  }
+});
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/approve-render  { note? }
+ *
+ * The v1 render gate. One tap per asset, even when every check passed — "the
+ * checks passed" and "put this on the channel" are different decisions.
+ */
+router.post("/candidates/:id/approve-render", json, (req, res) => {
+  try {
+    const row = approveForRender(getDb(), req.params.id, { actor: "operator", note: req.body?.note ?? null });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/approve-render");
+  }
+});
+
+/** POST /scoop-ops/incident/candidates/:id/withdraw-render  { reason? } */
+router.post("/candidates/:id/withdraw-render", json, (req, res) => {
+  try {
+    const row = withdrawRenderApproval(getDb(), req.params.id, { actor: "operator", reason: req.body?.reason ?? null });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/withdraw-render");
+  }
+});
+
+/** GET /scoop-ops/incident/renderable — exactly what the renderer may draw. */
+router.get("/renderable", (req, res) => {
+  try {
+    const rows = renderableCandidates(getDb(), {
+      storyKind: req.query.storyKind || null,
+      storyId: req.query.storyId || null,
+      limit: req.query.limit,
+    });
+    return res.json({ count: rows.length, candidates: rows.map(decorate) });
+  } catch (err) {
+    return fail(res, err, "GET /renderable");
+  }
+});
+
+/** GET /scoop-ops/incident/clearance-rules — what the lanes allow, for the queue. */
+router.get("/clearance-rules", (req, res) => {
+  res.json({
+    lanes: LANES,
+    excerptMaxSecs: EXCERPT_MAX_SECS,
+    note: "The excerpt cap is inherited from the cutaway mechanism, not set here. Treatment never affects rights.",
+  });
+});
+
+// ─── Phase 6A — revocation and takedown ────────────────────────────────────
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/revoke  { reason, note }
+ *
+ * Keeps the promise the permission request makes. Works before publication
+ * (stop using it) and after (pull it). Revoking is terminal — a withdrawn grant
+ * cannot be un-withdrawn.
+ */
+router.post("/candidates/:id/revoke", json, (req, res) => {
+  try {
+    const out = revokeClearance(getDb(), req.params.id, req.body?.reason, {
+      note: req.body?.note ?? null, actor: "operator",
+    });
+    return res.json({
+      candidate: decorate(out.candidate),
+      requiresTakedown: out.requiresTakedown,
+      videoId: out.videoId,
+      reasons: REVOCATION_REASONS,
+      next: out.requiresTakedown
+        ? `Video ${out.videoId} is published and must be pulled. Unlist it, then POST /candidates/${req.params.id}/takedown-actioned.`
+        : "Nothing was published, so there is nothing to pull.",
+      ...(out.requiresTakedown
+        ? { surfaces: TAKEDOWN_SURFACES, reality: takedownReality(), runbook: "docs/ops/runbooks/incident_takedown.md" }
+        : {}),
+    });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/revoke");
+  }
+});
+
+/** GET /scoop-ops/incident/takedowns — revoked, published, still up. */
+router.get("/takedowns", (req, res) => {
+  try {
+    const rows = pendingTakedowns(getDb(), { limit: req.query.limit });
+    // The surface checklist travels WITH the outstanding work. An operator
+    // pulling a video at speed should not be recalling which of seven surfaces
+    // is scriptable — six of them are not.
+    return res.json({
+      count: rows.length,
+      pending: rows.map((r) => ({ ...r, surfaces: TAKEDOWN_SURFACES })),
+      reality: takedownReality(),
+      runbook: "docs/ops/runbooks/incident_takedown.md",
+    });
+  } catch (err) {
+    return fail(res, err, "GET /takedowns");
+  }
+});
+
+/**
+ * POST /scoop-ops/incident/candidates/:id/takedown-actioned  { note? }
+ * Records that the published video was ACTUALLY pulled. Only this clears the
+ * pending bucket — deciding to pull it is not the same fact as it being gone.
+ */
+router.post("/candidates/:id/takedown-actioned", json, (req, res) => {
+  try {
+    const row = recordTakedownActioned(getDb(), req.params.id, {
+      note: req.body?.note ?? null, actor: "operator",
+    });
+    return res.json({ candidate: decorate(row) });
+  } catch (err) {
+    return fail(res, err, "POST /candidates/:id/takedown-actioned");
   }
 });
 

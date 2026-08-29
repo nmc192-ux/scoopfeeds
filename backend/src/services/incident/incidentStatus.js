@@ -18,14 +18,15 @@
  *
  *   candidate → verifying → verified | killed
  *   verified  → clearing  → cleared | uncleared
- *   cleared   → constructed
+ *   cleared   → constructed | revoked
+ *   constructed → revoked                 (the post-publish takedown path)
  *
  * There is NO edge from `candidate` or `verifying` to `clearing`, and none from
  * `verified` straight to `constructed`. Both omissions are load-bearing: they
  * are what make "no unverified frame renders" and "no uncleared frame renders"
  * properties of the type rather than of somebody's discipline.
  *
- * KILLS ARE TERMINAL. `killed` and `uncleared` have no outgoing edges at all.
+ * KILLS ARE TERMINAL. `killed`, `uncleared` and `revoked` have no outgoing edges.
  * Over-killing is correct (brief §2 Phase 2), and the cost of a wrong kill is
  * one re-intake under a new candidate id, which leaves both decisions in the
  * trail. Making a kill reversible would make the trail a draft.
@@ -41,10 +42,37 @@ export const STATES = Object.freeze([
   "cleared",
   "uncleared",
   "constructed",
+  "revoked",
 ]);
 
-/** States with no outgoing edges. Reaching one ends the candidate's life. */
-export const TERMINAL_STATES = Object.freeze(["killed", "uncleared", "constructed"]);
+/**
+ * States with no outgoing edges. Reaching one ends the candidate's life.
+ *
+ * `constructed` LEFT THIS LIST when revocation landed, and that is the point of
+ * revocation: a grant can be withdrawn after the video is published, and a
+ * machine in which `constructed` is terminal cannot express that. The permission
+ * request promises "if you say yes and then change your mind before we publish,
+ * tell me and we won't use it" — and a person who changes their mind afterwards
+ * is owed an answer too. Without this edge the promise is one the system cannot
+ * keep.
+ */
+export const TERMINAL_STATES = Object.freeze(["killed", "uncleared", "revoked"]);
+
+/**
+ * Why a clearance stopped holding.
+ *
+ * Distinct from KILL_REASONS because a kill is a finding about the MEDIA — it
+ * is not what it claims to be — and a revocation is a change in the RIGHTS. The
+ * media may be entirely genuine and still not ours to use any more. Collapsing
+ * the two would make the ledger say the wrong thing about a poster who simply
+ * changed their mind.
+ */
+export const REVOCATION_REASONS = Object.freeze([
+  "grantor_withdrew",   // the poster changed their mind
+  "takedown_request",   // a formal request, from the poster or a third party
+  "rights_dispute",     // someone else claims the footage
+  "operator",           // our own decision to stop using it
+]);
 
 /**
  * The complete legal edge set, `from` → allowed `to`.
@@ -55,14 +83,31 @@ export const TERMINAL_STATES = Object.freeze(["killed", "uncleared", "constructe
  * not to the machine.
  */
 export const TRANSITIONS = Object.freeze({
-  candidate:   Object.freeze(["verifying"]),
+  // `candidate → killed` is RETIREMENT, not a verification outcome (DrJ, Gate F).
+  //
+  // Added when migration 037 made a candidate row undeletable. Retiring a row
+  // that should never have existed — a mis-pasted URL, a duplicate, the wrong
+  // post — is a real operator action, and before this edge it had to route
+  // `candidate → verifying → killed`: two audit rows for one decision, the first
+  // of them a lie about having opened a verification that nobody ran.
+  //
+  // It does NOT weaken anything. `killed` still demands a reason from
+  // KILL_REASONS, so the honest one here is `operator` — "a human looked at it
+  // and said no" — and the trail records who and when. There is still no edge
+  // from `candidate` to anything usable: the only ways out remain verification
+  // and the bin.
+  candidate:   Object.freeze(["verifying", "killed"]),
   verifying:   Object.freeze(["verified", "killed"]),
   verified:    Object.freeze(["clearing"]),
   clearing:    Object.freeze(["cleared", "uncleared"]),
-  cleared:     Object.freeze(["constructed"]),
+  // Revocable BEFORE publication (the request's own promise) …
+  cleared:     Object.freeze(["constructed", "revoked"]),
+  // … and after it, which is the takedown path. The rights can stop holding
+  // at any point; only the remedy differs.
+  constructed: Object.freeze(["revoked"]),
   killed:      Object.freeze([]),
   uncleared:   Object.freeze([]),
-  constructed: Object.freeze([]),
+  revoked:     Object.freeze([]),
 });
 
 /**
@@ -73,7 +118,7 @@ export const TRANSITIONS = Object.freeze({
  * a reviewer skims past. Adding "verified → constructed" — the shortcut that
  * would skip clearance entirely — is exactly the change this is here to catch.
  */
-export const LEGAL_TRANSITION_COUNT = 7;
+export const LEGAL_TRANSITION_COUNT = 10;
 
 /** The reasons a candidate may be killed. Free text is not a reason. */
 export const KILL_REASONS = Object.freeze([
@@ -147,7 +192,7 @@ export function assertTransition(from, to, detail = {}) {
     );
   }
 
-  const out = { killReason: null, clearanceBasis: null, constructedVideoId: null };
+  const out = { killReason: null, clearanceBasis: null, constructedVideoId: null, revocationReason: null };
 
   if (to === "killed") {
     if (!KILL_REASONS.includes(detail.killReason)) {
@@ -169,6 +214,17 @@ export function assertTransition(from, to, detail = {}) {
       );
     }
     out.clearanceBasis = detail.clearanceBasis;
+  }
+
+  if (to === "revoked") {
+    if (!REVOCATION_REASONS.includes(detail.revocationReason)) {
+      throw new IllegalTransitionError(
+        `a revocation needs a reason from: ${REVOCATION_REASONS.join(", ")} (got ${JSON.stringify(detail.revocationReason)}). ` +
+        "A revocation is a change in the RIGHTS, not a finding about the media — the ledger has to say which.",
+        { from, to }
+      );
+    }
+    out.revocationReason = detail.revocationReason;
   }
 
   if (to === "constructed") {

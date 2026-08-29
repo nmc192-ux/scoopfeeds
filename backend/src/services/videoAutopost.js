@@ -55,7 +55,8 @@ import { writeVideoSpec, writePackaging, isVideoSpecEnabled } from "./videoSpecW
 import { statesForCard, renderState, fitStatesToDuration, videoDesignKey } from "./videoSlideRenderer.js";
 import { getFFmpegPath } from "./videoGenerator.js";
 import { DEFAULT_ORIENTATION } from "./videoGeometry.js";
-import { assembleSlide, concatSlides, holdForAudio, slideTotalSecs } from "./videoAssembler.js";
+import { assembleSlide, concatSlides, holdForAudio, slideTotalSecs, captionForCard,
+} from "./videoAssembler.js";
 import { deriveShortArc, buildBed, scoreShort } from "./videoMusicBed.js";
 import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.js";
 import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
@@ -611,7 +612,7 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
       const cutAsset = cutawayBySlide.get(i) || null;
       await assembleSlide({
         statePaths: paths, hold, outputPath: seg, driftDir: i, orientation,
-        audioPath: audio[i].path, captionText: card.caption, workDir: work, fontFile: FONT_FILE,
+        audioPath: audio[i].path, captionText: captionForCard(card), workDir: work, fontFile: FONT_FILE,
         underlayPath,
         cutawayPath: cutAsset?.absPath || null,
         cutawaySecs: cutAsset ? CUTAWAY_SECS() : 0,

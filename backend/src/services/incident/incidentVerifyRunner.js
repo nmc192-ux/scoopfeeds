@@ -200,6 +200,14 @@ export async function runVerification(db, candidateId, {
   const { outcome, killedBy, blockers } = outcomeFor(results);
   const summary = summariseForQueue({ outcome, results, blockers });
 
+  // The last machine assessment, kept on the row so the queue can say WHY a
+  // candidate is waiting without re-running paid checks. Written on EVERY run,
+  // including the ones that resolve nothing — which is precisely the case the
+  // queue exists to explain, and the case the trail deliberately does not
+  // record (see migration 034's note).
+  db.prepare("UPDATE media_candidates SET last_verification = ?, updated_at = ? WHERE id = ?")
+    .run(JSON.stringify({ ...summary, ranAt: Date.now() }), Date.now(), candidateId);
+
   if (outcome === "killed") {
     transition(db, candidateId, "killed", {
       checkName: `verification:${killedBy}`,
