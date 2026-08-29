@@ -21,7 +21,6 @@
 export const COLORS = Object.freeze({
   base:        "#090706",
   lime:        "#dde706",
-  limeChrome:  "rgba(221,231,6,0.35)",
   white:       "#f5f2ea",
   sub:         "#cfcabd",
   dim:         "#8a8578",
@@ -231,7 +230,9 @@ export function makePrimitives(G) {
   };
 
   const chrome = ({ slideIndex = 0, slideCount = 1 }) => {
-    const frac = slideCount > 1 ? (slideIndex + 1) / slideCount : 1;
+    // No accent rule. The full-width progress line that lived here read as a
+    // stray line across the frame (DrJ, 2026-08-30) and was removed from BOTH
+    // orientations — the slide counter is the only progress indicator.
     return [
       text("SCOOPFEEDS", {
         position: "absolute", left: G.marginX, top: G.chromeTopY,
@@ -241,11 +242,6 @@ export function makePrimitives(G) {
         position: "absolute", right: G.marginX, top: G.counterTop,
         fontSize: 22, fontWeight: 600, letterSpacing: 2, color: "#3a3830",
       }),
-      // Progress line: full-width track, lime fill to this slide's fraction.
-      // Full-bleed on purpose in BOTH frames — it is chrome, so the vertical
-      // action rail does not apply to it.
-      abs({ left: 0, top: G.progressY, width: G.canvas.w, height: G.progressH, background: "#1a1814" }),
-      abs({ left: 0, top: G.progressY, width: Math.round(G.canvas.w * frac), height: G.progressH, background: C.limeChrome }),
     ];
   };
 

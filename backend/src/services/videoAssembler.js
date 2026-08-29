@@ -94,7 +94,7 @@ const DRIFT_RATE_PX_PER_SEC = Number.parseFloat(process.env.VIDEO_DRIFT_RATE || 
  *     slight crop; removing it is a layout change with its own risk and is a
  *     separate pass.
  *   - DRIFT_SAFE_Y in videoSlideRenderer STAYS. It reserves the bottom band
- *     that the burned captions and the progress line already live in.
+ *     that the burned captions already live in.
  *
  * The 4x SUPERSAMPLE, on the other hand, is skipped when drift is off — it
  * exists ONLY to give an animated crop sub-pixel precision, and there is
@@ -175,13 +175,12 @@ function runFFmpeg(args, ffmpegPath) {
 /**
  * Caption geometry, per orientation.
  *
- * 16:9 — inside the bottom band, above the progress line, clear of the drift
- * margin. Nothing a card draws reaches there; the band exists for exactly this
+ * 16:9 — inside the bottom band, clear of the drift margin. Nothing a card draws reaches there; the band exists for exactly this
  * and for YouTube's auto-hiding controls.
  *
  * 9:16 — THE CAPTION MOVES UP, and this is a vertical-only finding. Placed the
  * 16:9 way it lands in the band where Shorts and Reels draw the video title,
- * the channel handle, their own caption and the progress bar: it renders
+ * the channel handle, their own caption and the platform's progress bar: it renders
  * perfectly and is then covered on the viewer's screen. So it sits ABOVE
  * contentBottom, inside our own area.
  *
@@ -195,11 +194,10 @@ function runFFmpeg(args, ffmpegPath) {
 /**
  * How far down the frame a burned caption may sit. RE-EXPORTED, NOT DEFINED.
  *
- * It moved to videoGeometry when `progressY` became derived (DrJ, Gate F): the
- * accent rule is positioned from the caption block, so the caption block's
- * numbers have to live where the geometry can see them. Re-exported here because
- * this is where callers and tests already import it from, and moving an import
- * surface for a definition that moved is churn with no payer.
+ * It moved to videoGeometry with the caption block's numbers (DrJ, Gate F), so
+ * the geometry can see them. Re-exported here because this is where callers and
+ * tests already import it from, and moving an import surface for a definition
+ * that moved is churn with no payer.
  */
 export { MAX_CAPTION_BOTTOM_FRACTION } from "./videoGeometry.js";
 
@@ -238,11 +236,10 @@ export function captionForCard(card = {}) {
 export function captionGeometry(orientation = "horizontal") {
   const g = geometryFor(orientation);
   if (orientation === "vertical") {
-    // READ OFF THE GEOMETRY, NOT RESTATED. These were literals here while
-    // VERTICAL.progressY was the literal 1296 — two copies of the same
-    // arrangement, agreeing by coincidence. The clamp to 75% of frame height
-    // and the arithmetic that puts the rule above this block both now live in
-    // videoGeometry, so a change to either moves both.
+    // READ OFF THE GEOMETRY, NOT RESTATED. These were literals here and in
+    // the geometry both — two copies of the same arrangement, agreeing by
+    // coincidence. The clamp to 75% of frame height lives in videoGeometry,
+    // so a change there moves this too.
     return Object.freeze({
       fontSize: g.captionFontSize, lineHeight: g.captionLineHeight,
       bottomY: g.captionBottomY,
