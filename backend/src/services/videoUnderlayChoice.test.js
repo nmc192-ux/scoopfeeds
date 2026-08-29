@@ -160,3 +160,70 @@ test("the choice reports WHAT it picked, so a wrong picture is diagnosable", asy
   const reused = await run({ ordinal: 1, _footageEnabled: () => false });
   assert.equal(reused.pickedBy, "article-photo-reused");
 });
+
+// ─── The sensitivity gates, per tier ────────────────────────────────────────
+//
+// Added 2026-08-30. This path previously had NO gate: the same headline got a
+// typographic social card and a full-bleed publisher photograph in the Short.
+// The two bars differ by who vetted the picture against THIS story.
+
+const harmRun = (over = {}) => run({
+  article: { ...ARTICLE, title: "Six killed in Kabul bombing" },
+  ...over,
+});
+
+test("an explicit-harm headline withholds the publisher's photograph", async () => {
+  // The article photo was chosen to illustrate THIS event, which on a massacre
+  // story is exactly what makes it the image most likely to be graphic.
+  const r = await harmRun({ _findFootageStill: async () => null });
+  assert.equal(r.underlayPath, null);
+  assert.equal(r.pickedBy, "none");
+  assert.equal(r.imageUrl, null, "no picture may be carried under any key");
+});
+
+test("an explicit-harm headline withholds ARCHIVE footage too", async () => {
+  // Rights-clean is not the same as suitable. Archive material on a massacre
+  // story is the same problem as stock.
+  const r = await harmRun();
+  assert.equal(r.underlayPath, null);
+  assert.equal(r.footage, null);
+});
+
+test("the reused photo on a later card is withheld as well", async () => {
+  // The ordinal > 0 branch is a second doorway to the same photograph.
+  const r = await harmRun({ ordinal: 1, _findFootageStill: async () => null });
+  assert.equal(r.underlayPath, null);
+});
+
+test("a METAPHOR keeps the publisher photo but still refuses footage", async () => {
+  // The whole point of splitting the tiers. "crash" in a market headline is a
+  // keyword firing on a figure of speech; the picture editor's judgement stands.
+  const market = { ...ARTICLE, title: "Bitcoin crash wipes $200bn off crypto market" };
+
+  const withPhoto = await run({ article: market });
+  assert.equal(withPhoto.pickedBy, "article-photo", "the publisher's own photo must survive a metaphor");
+  assert.equal(withPhoto.imageUrl, market.image_url);
+
+  // ...but with no article photo to fall back on, footage stays refused.
+  const noPhoto = await run({ article: { ...market, image_url: null } });
+  assert.equal(noPhoto.underlayPath, null, "third-party imagery must not ride a broad-tier headline");
+  assert.equal(noPhoto.footage, null);
+});
+
+test("ordinary news is untouched by either gate", async () => {
+  // The regression guard. ~5% of shorts were expected to lose a photograph;
+  // this pins that the other 95% behave exactly as before.
+  const r = await run();
+  assert.equal(r.pickedBy, "article-photo");
+  assert.equal(r.underlayPath, "/tmp/mount-0.png");
+});
+
+test("a withheld picture is LOGGED — silence would look identical to a missing photo", async () => {
+  const lines = [];
+  await harmRun({
+    _findFootageStill: async () => null,
+    _log: { info: (m) => lines.push(m), warn: () => {} },
+  });
+  assert.ok(lines.some((l) => /WITHHELD/.test(l)),
+    `expected a withheld-picture log line, got: ${JSON.stringify(lines)}`);
+});

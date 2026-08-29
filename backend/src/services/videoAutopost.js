@@ -34,6 +34,7 @@
 import { existsSync, statSync } from "fs";
 import path from "path";
 import { logger } from "./logger.js";
+import { isExplicitHarmHeadline, isSensitiveHeadline } from "./editorialSensitivity.js";
 import {
   findFreshUnvideoedArticles, claimVideoPost, markVideoPublished, markVideoFailed,
   countVideosPublishedSince, lastVideoPublishedAt, recordHeartbeat, getHeartbeatRow,
@@ -400,13 +401,34 @@ export async function choosePhotoUnderlay({
   const none = { underlayPath: null, imageCredit: null, imageDate: null, footage: null,
                  imageUrl: null, pickedBy: "none" };
 
-  if (ordinal === 0 && article?.image_url) {
+  // ── The sensitivity gates, per tier (DrJ, 2026-08-30) ────────────────────
+  //
+  // This path had NO gate at all, which is the asymmetry that prompted the
+  // change: the same headline got a typographic social card and a full-bleed
+  // publisher photograph in the Short. editorialSensitivity's own header named
+  // "a stock-or-publisher photo beside a massacre" as the thing it exists to
+  // prevent — the publisher half was written down and never wired up here.
+  //
+  // Two bars, because the picture's provenance changes the cost of being wrong.
+  // The article's photo was chosen for THIS story by a picture editor, so it
+  // gets the narrow bar; footage was vetted against nothing, so it keeps the
+  // broad one. Both fall through to `none` — type on the ground, a path that
+  // already exists and is already tested.
+  const harmHeadline = isExplicitHarmHeadline(article?.title);
+  const sensitiveHeadline = isSensitiveHeadline(article?.title);
+  const publisherPhotoAllowed = !harmHeadline;
+  const thirdPartyImageryAllowed = !sensitiveHeadline;
+
+  if (ordinal === 0 && article?.image_url && publisherPhotoAllowed) {
     const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: article.id });
     if (p) return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null,
                     footage: null, imageUrl: article.image_url, pickedBy: "article-photo" };
   }
 
-  if (_footageEnabled()) {
+  // ARCHIVE MATERIAL ON A MASSACRE STORY IS THE SAME PROBLEM as stock — a
+  // rights-clean picture is not a suitable one. Broad bar, matching the stock
+  // cutaway gate rather than the publisher one.
+  if (_footageEnabled() && thirdPartyImageryAllowed) {
     const found = await _findFootageStill({ subject: card?.subject, title: article?.title });
     if (found) {
       const p = await _buildMount({
@@ -429,7 +451,7 @@ export async function choosePhotoUnderlay({
     }
   }
 
-  if (ordinal > 0 && article?.image_url) {
+  if (ordinal > 0 && article?.image_url && publisherPhotoAllowed) {
     const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: `${article.id}-${ordinal}` });
     if (p) {
       _log.info(`🎬 slide ${slideIndex} photo: no footage for photo card #${ordinal + 1} — reusing the article photo on mount "${mount}"`);
@@ -438,6 +460,20 @@ export async function choosePhotoUnderlay({
     }
   }
 
+  // NO SILENT SUPPRESSION. "Why is this beat type-on-black?" must be answerable
+  // from the logs alone — a missing picture and a withheld one look identical
+  // on screen.
+  if (article?.image_url && !publisherPhotoAllowed) {
+    _log.info(
+      `🎬 slide ${slideIndex} photo: WITHHELD — explicit-harm headline, ` +
+      `no photograph on "${String(article.title || "").slice(0, 70)}"`
+    );
+  } else if (harmHeadline || sensitiveHeadline) {
+    _log.info(
+      `🎬 slide ${slideIndex} photo: no imagery — ` +
+      `${sensitiveHeadline ? "sensitive" : "explicit-harm"} headline`
+    );
+  }
   return none;
 }
 
