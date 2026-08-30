@@ -5,6 +5,9 @@ import {
   noAdjacentRepeat, coverageOf, TIERS,
 } from "./videoBeatImagery.js";
 
+// FIXTURES USE TYPE CARDS, not photo cards: a photo card gets its picture
+// from choosePhotoUnderlay, so the resolver deliberately leaves it alone
+// (SELF_IMAGED_TYPES). Fixtures built on photo cards were testing a bug.
 const ARTICLE = {
   id: "a1", title: "Council votes to reopen the bypass", source_name: "BBC News",
   url: "https://bbc.co.uk/news/1", image_url: "https://i.bbci.co.uk/p.jpg", content: "",
@@ -16,7 +19,7 @@ const cursor = () => ({ used: new Set() });
 // ─── Intent ─────────────────────────────────────────────────────────────────
 
 test("a writer-emitted noun always wins over derivation", () => {
-  const r = intentForBeat({ t: "photo", subject: "flooded streets", caption: "Rain fell for days" });
+  const r = intentForBeat({ t: "turn", visual: "flooded streets", caption: "Rain fell for days" });
   assert.equal(r.intent, "flooded streets");
   assert.equal(r.source, "writer");
 });
@@ -78,7 +81,7 @@ test("a live page that will not load costs the tier, never the video", async () 
 test("body wins first — nothing outranks the picture an editor chose", async () => {
   const pool = [img(1)];
   const r = await resolveBeat({
-    slide: { t: "photo", subject: "the bypass", _i: 1 }, article: ARTICLE,
+    slide: { t: "turn", visual: "the bypass", _i: 1 }, article: ARTICLE,
     pool, poolCursor: cursor(),
     _entityImage: async () => { throw new Error("must not be reached"); },
     _stockImage: async () => { throw new Error("must not be reached"); },
@@ -94,7 +97,7 @@ test("a NAMED subject with no exact image falls to a card, never to stock", asyn
   // the Qalandiya Training Centre is plausible, wrong, and refused.
   let stockCalled = false;
   const r = await resolveBeat({
-    slide: { t: "photo", subject: "Qalandiya Training Centre", _i: 2 }, article: ARTICLE,
+    slide: { t: "turn", visual: "Qalandiya Training Centre", _i: 2 }, article: ARTICLE,
     pool: [], poolCursor: cursor(),
     _entityImage: async () => null,
     _stockImage: async () => { stockCalled = true; return { url: "x", buf: Buffer.from("x"), credit: "c" }; },
@@ -155,7 +158,7 @@ test("a tier that throws costs its beat a picture, not the render", async () => 
 test("an explicit-harm headline withholds body imagery; a metaphor does not", async () => {
   const harm = { ...ARTICLE, title: "Six killed in Kabul bombing" };
   const r = await resolveSpecImagery({
-    slides: [{ t: "photo", subject: "the scene" }], article: harm,
+    slides: [{ t: "turn", visual: "the scene" }], article: harm,
     deps: { _pool: undefined, _log: QUIET, _entityImage: async () => null, _stockImage: async () => null },
   });
   assert.equal(r.picks[0].tier, TIERS.CARD);
@@ -163,7 +166,7 @@ test("an explicit-harm headline withholds body imagery; a metaphor does not", as
 
   const metaphor = { ...ARTICLE, title: "Bitcoin crash wipes $200bn off the market" };
   const ok = await resolveSpecImagery({
-    slides: [{ t: "photo", subject: "the scene" }], article: metaphor,
+    slides: [{ t: "turn", visual: "the scene" }], article: metaphor,
     deps: { _pool: [img(1)], _log: QUIET },
   });
   assert.equal(ok.picks[0].tier, TIERS.BODY, "a metaphor must not cost the publisher's own photo");
@@ -183,7 +186,7 @@ test("the BROAD bar still blocks stock on a metaphor headline", async () => {
 test("ADJACENT beats may both carry pictures — the old count cap is gone", async () => {
   // MAX_CUTAWAYS=2 and never-consecutive were written when a cutaway was a rare
   // garnish. Under imagery-by-default a ceiling of two would cap the format.
-  const slides = [{ t: "photo", subject: "a" }, { t: "photo", subject: "b" }, { t: "photo", subject: "c" }];
+  const slides = [{ t: "turn", visual: "a" }, { t: "stat", visual: "b" }, { t: "diagram", visual: "c" }];
   const r = await resolveSpecImagery({
     slides, article: ARTICLE, deps: { _pool: [img(1), img(2), img(3)], _log: QUIET },
   });
@@ -204,7 +207,7 @@ test("but the TREATMENT must differ between neighbours — the new anti-wallpape
 test("one contributor per video applies to STOCK only, never to the publisher", async () => {
   // Applied to the body tier this rule would outlaw the pool past image #1 —
   // the publisher IS one contributor. It is kept where it was earned.
-  const slides = [{ t: "photo", subject: "a" }, { t: "photo", subject: "b" }];
+  const slides = [{ t: "turn", visual: "a" }, { t: "stat", visual: "b" }];
   const body = await resolveSpecImagery({
     slides, article: ARTICLE, deps: { _pool: [img(1), img(2)], _log: QUIET },
   });
@@ -297,4 +300,25 @@ test("alt and figcaption reach the right URLs, srcset variants included", async 
   assert.equal(m.get("https://cdn/b.jpg"), "Traders react as prices fall", "figcaption text, tags stripped");
   assert.equal(m.get("https://cdn/c.jpg"), undefined, "no description is no entry, not an empty one");
   assert.equal(extractImageContexts(null).size, 0);
+});
+
+test("photo beats do not consume the pool — their picture comes from the underlay path", async () => {
+  // Found by RENDERING, not reading: photo cards always carry a `subject`, so
+  // they always had an intent, so the resolver spent a pool image on each —
+  // and produceVideo then discarded the pick because the beat already had an
+  // underlay. On a 2-image pool the whole pool vanished into beats that never
+  // showed it, and every type card rendered bare.
+  const pool = [{ ...img(1), text: "" }, { ...img(2), text: "" }];
+  const r = await resolveSpecImagery({
+    slides: [
+      { t: "photo", subject: "Dolly Parton on stage" },
+      { t: "stat", visual: "vinyl record", value: 1, caption: "c", source: "s" },
+      { t: "turn", visual: "recording studio" },
+    ],
+    article: ARTICLE, deps: { _pool: pool, _log: QUIET },
+  });
+  assert.equal(r.picks[0].tier, TIERS.CARD, "the photo beat must not take a pool image");
+  assert.equal(r.picks[0].reason, "self-imaged");
+  assert.equal(r.picks[1].tier, TIERS.BODY, "the pool goes to the type beats instead");
+  assert.equal(r.picks[2].tier, TIERS.BODY);
 });

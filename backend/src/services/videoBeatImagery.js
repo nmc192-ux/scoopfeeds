@@ -64,8 +64,22 @@ export const beatImageryMotionEnabled = () => process.env.VIDEO_BEAT_IMAGERY_MOT
 
 /** Wrappers carry the format, not the story. They never take a picture. */
 const WRAPPER_TYPES = new Set(["title", "kicker"]);
-/** These already carry imagery of their own; a second picture would replace it. */
-const SELF_IMAGED_TYPES = new Set(["map"]);
+/**
+ * Cards whose LAYOUT already declares an underlay, and which therefore get
+ * their picture from the existing path rather than from this resolver.
+ *
+ * `photo` is here for a reason found by rendering, not by reading: the
+ * resolver was assigning a pool image to every photo beat (they carry a
+ * `subject`, so they always have an intent), and produceVideo then DISCARDED
+ * that pick because the beat already had an underlay from
+ * choosePhotoUnderlay. On a 2-image pool that silently spent the whole pool on
+ * beats that never showed it, and every type card rendered bare — which is
+ * exactly what the first sample renders looked like.
+ *
+ * Only `photo` and `map` declare an underlay (videoSlideRendererVertical);
+ * everything else takes its picture through #121's cutaway seam.
+ */
+const SELF_IMAGED_TYPES = new Set(["map", "photo"]);
 
 export const TIERS = Object.freeze({ BODY: "body", ENTITY: "entity", STOCK: "stock", CARD: "card" });
 /** Confidence is a label for WHICH TIER ANSWERED, never a computed score. */
