@@ -70,7 +70,7 @@ const GEO_PATH = path.resolve(HERE, "../../assets/geo/countries-50m.geo.json");
  *     dimming the photograph itself. Pass scrim:false for a beat with no text.
  */
 export async function buildFullBleed({ imageUrl, work, out = null, ffmpegPath = null,
-  sourceBuffer = null, ledger = null, scrim = true,
+  sourceBuffer = null, ledger = null,
   width = VERTICAL.canvas.w, height = VERTICAL.canvas.h } = {}) {
   const ff = ffmpegPath || getFFmpegPath();
   if (!ff) { logger.warn("🎬 subject visual: no ffmpeg, skipping the picture"); return null; }
@@ -115,16 +115,48 @@ export async function buildFullBleed({ imageUrl, work, out = null, ffmpegPath = 
   }
 
   const dest = out || path.join(work, "fullbleed.png");
-  // increase + crop is COVER, not contain. force_divisible_by=2 keeps the
-  // chroma grid happy on the yuv420p sources that used to make crops silently
-  // shrink by a pixel and break a downstream alphamerge.
-  const cover = `scale=${width}:${height}:force_original_aspect_ratio=increase:force_divisible_by=2:flags=lanczos,crop=${width}:${height}`;
-  const chain = scrim
-    ? `${cover},drawbox=x=0:y=ih*0.62:w=iw:h=ih*0.38:color=black@0.55:t=fill,format=rgba`
-    : `${cover},format=rgba`;
+
+  // MEASURE THE SOURCE FIRST. Serper's numbers are thumbnails and a CDN can
+  // serve anything, so the decision is made on the real decoded pixels.
+  let W = 0, H = 0;
   try {
-    execFileSync(ff, ["-y", "-loglevel", "error", "-i", flat, "-vf", chain, "-frames:v", "1", dest],
-      { stdio: ["ignore", "ignore", "pipe"] });
+    const probe = execFileSync(ff, ["-hide_banner", "-i", flat], { stdio: ["ignore", "ignore", "pipe"], encoding: "utf8" });
+    throw new Error(probe);
+  } catch (err) {
+    const m = String(err.message || err.stderr || "").match(/,\s*(\d{2,5})x(\d{2,5})/);
+    if (m) { W = Number(m[1]); H = Number(m[2]); }
+  }
+
+  // TWO TREATMENTS, decided by resolution (DrJ, defect 2). A sharp source
+  // covers the frame; a small one must NOT be blown to 1080x1920 — it
+  // pixelates. Small sources get the standard vertical treatment instead: the
+  // same image blurred and darkened as the frame fill, with the sharp image at
+  // its natural aspect centred on top. This also renders editorial 2-up
+  // composites as what they are, instead of cover-cropping across the split.
+  //
+  // NO SCRIM HERE ANY MORE. The old drawbox band had a hard edge that read as
+  // a seam across every photograph (and as a grey card over light ones) — the
+  // defect DrJ called out from the strips. Text legibility is the LAYOUT's
+  // job now: the kinetic block carries its own gradient backing, so the
+  // darkening exists exactly where text sits and nowhere else.
+  const SHARP_MIN_W = 1000;
+  const cover = `scale=${width}:${height}:force_original_aspect_ratio=increase:force_divisible_by=2:flags=lanczos,crop=${width}:${height}`;
+  try {
+    if (W >= SHARP_MIN_W || !W) {
+      execFileSync(ff, ["-y", "-loglevel", "error", "-i", flat, "-vf", `${cover},format=rgba`, "-frames:v", "1", dest],
+        { stdio: ["ignore", "ignore", "pipe"] });
+    } else {
+      // Blur-fill: fill = blurred, darkened cover; subject = natural aspect,
+      // fitted to the frame width, centred. gblur after a heavy downscale is
+      // cheap and looks like every professional vertical channel's fallback.
+      execFileSync(ff, ["-y", "-loglevel", "error", "-i", flat, "-filter_complex",
+        `[0:v]split=2[bg][fg];` +
+        `[bg]${cover},gblur=sigma=28,eq=brightness=-0.18:saturation=0.85[b];` +
+        `[fg]scale=${width}:-2:flags=lanczos[f];` +
+        `[b][f]overlay=(W-w)/2:(H-h)/2:format=auto,format=rgba`,
+        "-frames:v", "1", dest], { stdio: ["ignore", "ignore", "pipe"] });
+      logger.info(`🎬 subject visual: ${W}x${H} source below ${SHARP_MIN_W}px — blur-fill treatment`);
+    }
     return dest;
   } catch (err) {
     logger.warn(`🎬 subject visual: full-bleed render failed — ${String(err.message).slice(0, 110)}`);

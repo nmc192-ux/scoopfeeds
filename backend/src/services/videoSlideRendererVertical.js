@@ -488,7 +488,23 @@ function splitAccent(phrase) {
   return { lead: words.slice(0, -1).join(" "), accent: words[words.length - 1] };
 }
 
-/** Centred, mixed-weight phrase over the picture. */
+/**
+ * Centred, mixed-weight phrase over the picture — with its OWN backing.
+ *
+ * The scrim lives HERE, not in the image (DrJ, defect 3): a hard-edged band
+ * baked into the photograph read as a seam, and lime type over the lime map
+ * vanished ("ATTACKS WITH IMPUNITY", half-hidden). A soft radial gradient
+ * behind the text darkens exactly where the words sit and nothing else, and
+ * because it is part of the state tree it composites ABOVE every underlay —
+ * photograph or map — with the text above it in turn.
+ */
+function kineticBacking(top, height = 340) {
+  return abs({
+    left: 0, top: top - 90, width: G.canvas.w, height,
+    backgroundImage: "linear-gradient(180deg, rgba(9,7,6,0) 0%, rgba(9,7,6,0.72) 28%, rgba(9,7,6,0.72) 72%, rgba(9,7,6,0) 100%)",
+  });
+}
+
 function kineticBlock(phrase, { top = 780 } = {}) {
   const { lead, accent } = splitAccent(phrase);
   // MEASURED, not guessed from character count. fitDisplaySize walks the Anton
@@ -499,6 +515,7 @@ function kineticBlock(phrase, { top = 780 } = {}) {
     nominalSize: 164, maxWidth: G.canvas.w - 2 * G.marginX, minSize: 78,
   });
   return [
+    kineticBacking(top),
     lead ? text(lead, {
       position: "absolute", left: 0, top, width: G.canvas.w,
       fontFamily: F.inter, fontWeight: 600, fontSize: 46, letterSpacing: 2,

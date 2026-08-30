@@ -72,6 +72,10 @@ test("the comparison is loose enough to fire on the case that prompted it", () =
 });
 
 test("a caption that says something new survives", () => {
+  // captionForCard returns null for every VERTICAL card since defect 4; the
+  // dedupe semantics under test here belong to the horizontal/legacy path.
+  process.env.VIDEO_ORIENTATION = "horizontal";
+  try {
   // The mirror: over-eager suppression would silently delete the caption track.
   assert.equal(
     captionForCard({ lines: [["RIVERSIDE BRIDGE"], ["REOPENS"]], caption: "Eleven days closed for inspection" }),
@@ -79,12 +83,18 @@ test("a caption that says something new survives", () => {
   );
   assert.equal(captionForCard({ title: "What happens next", caption: "Weight limits stay for now" }),
     "Weight limits stay for now");
+  } finally { delete process.env.VIDEO_ORIENTATION; }
 });
 
 test("a card with no caption or no headline is handled without inventing one", () => {
+  // captionForCard returns null for every VERTICAL card since defect 4; the
+  // dedupe semantics under test here belong to the horizontal/legacy path.
+  process.env.VIDEO_ORIENTATION = "horizontal";
+  try {
   assert.equal(captionForCard({}), null);
   assert.equal(captionForCard({ caption: "  " }), null);
   assert.equal(captionForCard({ caption: "Standalone" }), "Standalone", "no headline to duplicate");
+  } finally { delete process.env.VIDEO_ORIENTATION; }
 });
 
 // ─── (d) The credit chip ───────────────────────────────────────────────────

@@ -52,9 +52,22 @@ test("NO paragraph is burned under a picture beat", () => {
   assert.equal(captionForCard({ t: "map", caption: "Where it happened." }), null);
 });
 
-test("a TYPE beat keeps its caption — there the burned line IS the beat", () => {
-  assert.equal(captionForCard({ t: "stat", caption: "Seventy percent of faults." }), "Seventy percent of faults.");
-  assert.equal(captionForCard({ t: "turn", caption: "But the real reason is older." }), "But the real reason is older.");
+test("the paragraph track is dead EVERYWHERE in vertical — defect 4", () => {
+  // Earlier this pinned "type beats keep their caption". DrJ's frame-by-frame
+  // review overrode it: the reference has zero bottom paragraphs, on any beat.
+  // The narration carries the prose; the frame carries type or a phrase.
+  const prev = process.env.VIDEO_ORIENTATION;
+  try {
+    delete process.env.VIDEO_ORIENTATION;   // vertical is the default
+    for (const t of ["stat", "turn", "diagram", "bars", "title", "kicker", "photo", "map"]) {
+      assert.equal(captionForCard({ t, caption: "A paragraph." }), null, `${t} must not burn a paragraph`);
+    }
+    // The legacy horizontal path is untouched — nothing vertical ships there.
+    process.env.VIDEO_ORIENTATION = "horizontal";
+    assert.equal(captionForCard({ t: "stat", caption: "Seventy percent." }), "Seventy percent.");
+  } finally {
+    if (prev === undefined) delete process.env.VIDEO_ORIENTATION; else process.env.VIDEO_ORIENTATION = prev;
+  }
 });
 
 test("the eyebrow and the stacked two-line block are gone from picture beats", () => {
@@ -89,6 +102,4 @@ test("a TYPE beat that received a picture loses its paragraph too", async () => 
     "a beat carrying a resolved still must not also burn its caption");
 });
 
-test("a type beat with NO picture keeps its caption — the burned line is the beat there", () => {
-  assert.equal(captionForCard({ t: "stat", caption: "Seventy percent of faults." }), "Seventy percent of faults.");
-});
+
