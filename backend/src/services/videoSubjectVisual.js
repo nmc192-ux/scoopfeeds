@@ -178,16 +178,33 @@ export async function buildFullBleed({ imageUrl, work, out = null, ffmpegPath = 
  * back, and a pre-cut sequence IS such a stream. No graph changes, no new
  * composition path, and the seam's clamp/credit/audio behaviour all hold.
  */
-export function buildStillSequence({ frames, secsEach, out, work, ffmpegPath = null, fps = 25 }) {
+export function buildStillSequence({ frames, secsEach, out, work, ffmpegPath = null, fps = 25, motion = false }) {
   const ff = ffmpegPath || getFFmpegPath();
   if (!ff || !frames?.length) return null;
   mkdirSync(work, { recursive: true });
   const args = ["-y", "-loglevel", "error"];
   for (const f of frames) args.push("-loop", "1", "-t", String(secsEach), "-i", f);
   const labels = frames.map((_, i) => `[v${i}]`).join("");
-  const chain = frames.map((_, i) =>
+  // SUBTLE MOTION, per segment, flag-gated. The reference is ~80% stills with
+  // slight movement; a dead-static still inside a hard-cut sequence reads as a
+  // freeze frame. 4% push over the segment, alternating in/out so consecutive
+  // cuts do not all drift the same way. The slide pan was killed for EYE
+  // STRAIN — that was a 6px/s whole-frame drift for the full slide; this is a
+  // slow push inside a <=3s window, and it ships dark until DrJ judges it on
+  // the sample, exactly as the motion flag was reserved for.
+  const Z = 0.04;
+  const segFrames = Math.max(1, Math.round(secsEach * fps));
+  const cover = (i) =>
     `[${i}:v]scale=${VERTICAL.canvas.w}:${VERTICAL.canvas.h}:force_original_aspect_ratio=increase:force_divisible_by=2,` +
-    `crop=${VERTICAL.canvas.w}:${VERTICAL.canvas.h},setsar=1,fps=${fps}[v${i}]`).join(";");
+    `crop=${VERTICAL.canvas.w}:${VERTICAL.canvas.h},setsar=1,fps=${fps}`;
+  const push = (i) => {
+    const inward = i % 2 === 0;
+    const z0 = inward ? 1 : 1 + Z, z1 = inward ? 1 + Z : 1;
+    return `,scale=${VERTICAL.canvas.w * 2}:${VERTICAL.canvas.h * 2},` +
+      `zoompan=z='${z0.toFixed(3)}+${(z1 - z0).toFixed(3)}*on/${segFrames}':` +
+      `x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${VERTICAL.canvas.w}x${VERTICAL.canvas.h}:fps=${fps}`;
+  };
+  const chain = frames.map((_, i) => `${cover(i)}${motion ? push(i) : ""}[v${i}]`).join(";");
   args.push("-filter_complex", `${chain};${labels}concat=n=${frames.length}:v=1:a=0[o]`,
     "-map", "[o]", "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", out);
   try { execFileSync(ff, args, { stdio: ["ignore", "ignore", "pipe"] }); return out; }

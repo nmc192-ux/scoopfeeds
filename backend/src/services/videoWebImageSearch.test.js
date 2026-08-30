@@ -59,18 +59,23 @@ test("licensing platforms are excluded — a watermarked comp is not a picture",
   assert.deepEqual(out.map((o) => o.host), ["bbc.com"]);
 });
 
-test("confidence comes from the SOURCE, and low candidates are KEPT", async () => {
-  // Gating on the publisher list cost real photographs from time.com, the New
-  // Yorker and the Moscow Times. The domain ranks; it does not admit.
+test("low candidates are RETURNED but ranked low — the resolver is what skips them", async () => {
+  // Two rulings meet here. Gating candidates OUT on domain alone cost real
+  // photographs from time.com and the Moscow Times, so the search module
+  // returns both bands. But USING low candidates put a Target storefront on an
+  // economy short (DrJ, 2026-08-30), so high now needs domain AND a story tie,
+  // and the resolver lets low fall through to the next tier.
   const _fetch = reply([
-    img("https://cdn/a.jpg", "https://someblog.example/post"),
-    img("https://cdn/b.jpg", "https://www.reuters.com/world"),
+    img("https://cdn/a.jpg", "https://someblog.example/post", "Russia gold reserves fall"),
+    img("https://cdn/b.jpg", "https://www.reuters.com/world", "Russia gold reserves at record"),
+    img("https://cdn/c.jpg", "https://www.reuters.com/other", "Unrelated markets roundup"),
   ]);
-  const out = await searchEventImages("gold", { headline: "Russia", _fetch, _log: QUIET });
-  assert.equal(out.length, 2, "a generic hit is low confidence, not excluded");
-  assert.equal(out[0].confidence, "high", "publishers sort first");
+  const out = await searchEventImages("Russia gold reserves", { headline: "Russia", _fetch, _log: QUIET });
+  assert.equal(out.length, 3, "nothing is silently dropped at the search layer");
+  assert.equal(out[0].confidence, "high", "publisher + tied title leads");
   assert.equal(out[0].host, "reuters.com");
-  assert.equal(out[1].confidence, "low");
+  assert.ok(out.slice(1).every((c) => c.confidence === "low"),
+    "generic domain OR untied title is low, and the resolver skips low");
 });
 
 test("domains carrying their own TLD match — the regex bug that under-reported by 13%", () => {
@@ -116,4 +121,40 @@ test("dimensions are NOT returned — the reported ones are thumbnails", async (
   assert.equal(out.length, 1);
   assert.equal(out[0].imageWidth, undefined);
   assert.equal(out[0].imageHeight, undefined);
+});
+
+// ─── The Target/yen lesson: LOW FALLS THROUGH (DrJ, 2026-08-30) ────────────
+
+test("a publisher photo of SOMETHING ELSE is low confidence, not high", async () => {
+  // Rendered evidence: a Target storefront on a K-shape economy short and a
+  // "U.S.-Japan yen intervention" frame on an E-shape beat — both CNBC, both
+  // used because domain alone made them credible. Domain vouches for the
+  // photograph; only the title can tie it to the story.
+  const { titleTiedToStory } = await import("./videoWebImageSearch.js");
+  assert.equal(titleTiedToStory("Target shoppers slow spending in Q3", {
+    intent: "economic chart on computer screen", entitySurfaces: ["K-shape", "Federal Reserve"],
+  }), false);
+  assert.equal(titleTiedToStory("U.S.-Japan yen intervention: Bessent on Squawk Box", {
+    intent: "gas station price display", entitySurfaces: [],
+  }), false);
+  // And the true ties still pass — entity, or intent token.
+  assert.equal(titleTiedToStory("Roger Federer brought to tears at induction", {
+    intent: "tennis court", entitySurfaces: ["Roger Federer"],
+  }), true);
+  assert.equal(titleTiedToStory("Gas prices climb at California stations", {
+    intent: "gas station price display", entitySurfaces: [],
+  }), true);
+});
+
+test("confidence needs BOTH legs — publisher domain AND a story tie", async () => {
+  const _fetch = reply([
+    img("https://cdn/a.jpg", "https://www.cnbc.com/target-story", "Target shoppers slow spending"),
+    img("https://cdn/b.jpg", "https://www.cnbc.com/gas-story", "Gas prices climb at stations nationwide"),
+    img("https://cdn/c.jpg", "https://someblog.example/gas", "Gas prices climb again"),
+  ]);
+  const out = await searchEventImages("gas station price display", { headline: "Economy", _fetch, _log: QUIET });
+  const by = Object.fromEntries(out.map((o) => [o.imageUrl, o.confidence]));
+  assert.equal(by["https://cdn/a.jpg"], "low", "publisher + unrelated title is LOW");
+  assert.equal(by["https://cdn/b.jpg"], "high", "publisher + tied title is HIGH");
+  assert.equal(by["https://cdn/c.jpg"], "low", "tied title + generic domain is LOW");
 });

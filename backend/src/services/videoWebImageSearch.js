@@ -33,6 +33,7 @@
 
 import { logger } from "./logger.js";
 import { imageIdentity } from "./videoImageIdentity.js";
+import { contentTokens } from "./videoImageRelevance.js";
 
 export const webImageSearchEnabled = () =>
   Boolean(process.env.SERPER_API_KEY) && process.env.VIDEO_WEB_IMAGES_ENABLED === "1";
@@ -99,7 +100,35 @@ async function callSerper(q, tbs, _fetch) {
  * deliberately absent: the caller fetches and measures, because the reported
  * ones are thumbnails often enough to matter.
  */
-export async function searchEventImages(intent, { headline = "", days = 14, limit = 8, _fetch = fetch, _log = logger } = {}) {
+/**
+ * Does this candidate's own description tie it to THIS story or THIS beat?
+ *
+ * THE TARGET/YEN LESSON (DrJ, 2026-08-30, from the rendered samples): a
+ * K-shape economy short carried a Target storefront, and an E-shape beat
+ * carried a "U.S.-Japan yen intervention" broadcast frame. Both arrived as
+ * "low confidence" candidates that were USED ANYWAY. Domain said CNBC; nothing
+ * ever asked whether the picture was about the story.
+ *
+ * This is a MEMBERSHIP test, not a scorer: the candidate's title must contain
+ * a named entity of the story, or a content token of the beat's intent. A
+ * yes/no on the candidate's own words — the same posture as the conjunctive
+ * gate, relaxed to membership because search titles never restate a whole
+ * query. Nothing ranks one image against another.
+ */
+export function titleTiedToStory(title, { intent = "", entitySurfaces = [] } = {}) {
+  const t = ` ${String(title || "").toLowerCase()} `;
+  if (!t.trim()) return false;
+  for (const e of entitySurfaces) {
+    const surface = String(e || "").toLowerCase().trim();
+    if (surface.length >= 4 && t.includes(surface)) return true;
+  }
+  for (const tok of contentTokens(intent)) {
+    if (tok.length >= 4 && t.includes(tok)) return true;
+  }
+  return false;
+}
+
+export async function searchEventImages(intent, { headline = "", days = 14, limit = 8, entitySurfaces = [], _fetch = fetch, _log = logger } = {}) {
   if (!process.env.SERPER_API_KEY) return [];
   const queries = buildQueries(intent, { headline, days });
   if (!queries.length) return [];
@@ -123,10 +152,14 @@ export async function searchEventImages(intent, { headline = "", days = 14, limi
     const id = imageIdentity(imageUrl);
     if (!id || seen.has(id)) continue;
     seen.add(id);
+    const title = String(r?.title || "").slice(0, 180);
+    // HIGH needs BOTH legs of DrJ's model: a publisher vouches for the
+    // photograph, and the candidate's own words tie it to this story or beat.
+    // Domain alone produced the Target storefront on an economy short.
+    const tied = titleTiedToStory(title, { intent, entitySurfaces });
     out.push({
-      imageUrl, pageUrl, host,
-      title: String(r?.title || "").slice(0, 180),
-      confidence: PUBLISHER_DOMAINS.test(`${host}.`) ? "high" : "low",
+      imageUrl, pageUrl, host, title, tied,
+      confidence: PUBLISHER_DOMAINS.test(`${host}.`) && tied ? "high" : "low",
     });
   }
   // Publisher sources first; within a band the search engine's own order

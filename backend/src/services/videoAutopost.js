@@ -736,6 +736,7 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
               const seq = buildStillSequence({
                 frames: framesList, secsEach: windowSecs / framesList.length,
                 out: path.join(beatWork, "seq.mp4"), work: beatWork,
+                motion: beatImageryMotionEnabled(),
               });
               if (seq) {
                 logger.info(`🎬 pacing: slide ${i} — ${framesList.length} visuals across ${windowSecs.toFixed(1)}s`);

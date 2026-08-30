@@ -431,12 +431,18 @@ export async function resolveBeat({
   // actual AP photograph of Federer's induction.
   if (_webSearch && _fetchImage) {
     try {
-      const cands = await _webSearch(intent, { headline: article?.title || "", days: webDays });
+      const cands = await _webSearch(intent, {
+        headline: article?.title || "", days: webDays,
+        entitySurfaces: entities.flatMap((e) => [e.label, e.surface]).filter(Boolean),
+      });
       for (const c of cands) {
-        // A low-confidence hit is a real photograph from a source nobody
-        // vouched for. It is allowed, but only where the BROAD sensitivity bar
-        // already permits third-party imagery.
         if (!thirdPartyAllowed) break;
+        // LOW FALLS THROUGH — DrJ's model, now actually enforced. A candidate
+        // whose title ties to neither the story's entities nor the beat's
+        // intent is a picture of SOMETHING ELSE from a good newsroom: the
+        // Target storefront on the K-shape short, the yen-intervention frame
+        // on the E-shape beat. Body, entity and stock still get their turn.
+        if (c.confidence !== "high") continue;
         const got = await _fetchImage(c.imageUrl, c.pageUrl ? `https://${c.host}/` : undefined);
         if (!got?.buf) continue;
         const dims = readImageDimensions(got.buf);
