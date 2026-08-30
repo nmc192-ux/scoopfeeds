@@ -322,3 +322,48 @@ test("photo beats do not consume the pool — their picture comes from the under
   assert.equal(r.picks[1].tier, TIERS.BODY, "the pool goes to the type beats instead");
   assert.equal(r.picks[2].tier, TIERS.BODY);
 });
+
+// ─── The picture, not the URL (found by rendering, 2026-08-30) ──────────────
+
+test("the SAME photograph at two rendition sizes enters the pool once", async () => {
+  // The defect the samples exposed: a CDN serves one photo at many URLs and
+  // many sizes, so the URL set missed it and the dimension signature missed it
+  // too. The result was one Netanyahu portrait on two beats of a video and one
+  // CNBC illustration on three of another.
+  const { execFileSync } = await import("child_process");
+  const { getFFmpegPath } = await import("./videoGenerator.js");
+  const ff = getFFmpegPath();
+  const jpeg = (spec, w) => execFileSync(ff, ["-loglevel", "error", "-f", "lavfi", "-i", spec,
+    "-frames:v", "1", "-vf", `scale=${w}:-2`, "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
+
+  const big = jpeg("testsrc2=size=1200x900", 1200);
+  const small = jpeg("testsrc2=size=1200x900", 700);      // same picture, smaller
+  const other = jpeg("color=c=navy:s=1200x900", 1200);    // genuinely different
+
+  const byUrl = { "https://cdn/a/LANDSCAPE_1200": big, "https://cdn/a/LANDSCAPE_700": small, "https://cdn/b": other };
+  const pool = await buildBodyPool(
+    { ...ARTICLE, content: Object.keys(byUrl).map((u) => `<img src="${u}">`).join("") },
+    { _fetchPage: async () => null, _fetchImage: async (u) => ({ buf: byUrl[u], mime: "image/jpeg" }), _log: QUIET },
+  );
+  assert.equal(pool.length, 2, `expected the two renditions to collapse; got ${pool.map((p) => p.dims.width)}`);
+});
+
+test("a picture whose hash cannot be computed is KEPT, not discarded", async () => {
+  // A hash we could not compute must never silently cost us a usable image.
+  const { averageHash } = await import("./videoBeatImagery.js");
+  assert.equal(averageHash(Buffer.from("not an image")), null);
+});
+
+test("hashDistance separates renditions from different pictures", async () => {
+  const { averageHash, hashDistance, DUPLICATE_BITS } = await import("./videoBeatImagery.js");
+  const { execFileSync } = await import("child_process");
+  const { getFFmpegPath } = await import("./videoGenerator.js");
+  const ff = getFFmpegPath();
+  const jpeg = (spec, w) => execFileSync(ff, ["-loglevel", "error", "-f", "lavfi", "-i", spec,
+    "-frames:v", "1", "-vf", `scale=${w}:-2`, "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
+  const a = averageHash(jpeg("testsrc2=size=900x600", 900));
+  const aSmall = averageHash(jpeg("testsrc2=size=900x600", 320));
+  const b = averageHash(jpeg("color=c=navy:s=900x600", 900));
+  assert.ok(hashDistance(a, aSmall) <= DUPLICATE_BITS, `renditions differ by ${hashDistance(a, aSmall)} bits`);
+  assert.ok(hashDistance(a, b) > DUPLICATE_BITS, `distinct pictures differ by only ${hashDistance(a, b)} bits`);
+});

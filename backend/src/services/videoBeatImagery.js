@@ -43,6 +43,8 @@
  */
 
 import path from "path";
+import { execFileSync } from "child_process";
+import { getFFmpegPath } from "./videoGenerator.js";
 import { logger } from "./logger.js";
 import {
   tryFetchImage, extractImageCandidatesFromHtml, upscaleKnownThumbnailUrl,
@@ -180,6 +182,53 @@ export function extractImageContexts(html) {
 }
 
 /**
+ * A 64-bit average hash of the picture ITSELF, so the same photograph cannot
+ * enter the pool twice wearing different clothes.
+ *
+ * FOUND BY RENDERING (2026-08-30). Two dedupe layers already existed and both
+ * missed it: the URL set, because a CDN serves one photo at many URLs
+ * (`.../LANDSCAPE_120` and `.../LANDSCAPE_660`, `?w=` variants, srcset
+ * renditions), and the size signature, because those renditions genuinely have
+ * different dimensions. The result was the SAME Netanyahu portrait on two beats
+ * of one video and the same CNBC illustration on three of another — the exact
+ * "one photograph presented as several" complaint this whole programme exists
+ * to end, returning in a subtler form.
+ *
+ * aHash rather than a byte hash: different renditions are different bytes by
+ * definition. Decode to 8x8 grey, compare each cell to the mean, and two
+ * renditions of one photo agree within a few bits while two genuinely
+ * different pictures do not. ffmpeg does the decode, so there is no new
+ * dependency.
+ *
+ * Returns null when the decode fails, and the caller treats null as "not
+ * provably a duplicate" — a hash we could not compute must never silently
+ * discard a usable picture.
+ */
+export function averageHash(buf, { _ff = getFFmpegPath, _run = execFileSync } = {}) {
+  try {
+    const ff = _ff();
+    if (!ff) return null;
+    const raw = _run(ff, ["-loglevel", "error", "-i", "pipe:0", "-frames:v", "1",
+      "-vf", "format=gray,scale=8:8:flags=area", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
+      { input: buf, maxBuffer: 1 << 20 });
+    if (!raw || raw.length < 64) return null;
+    const px = [...raw.slice(0, 64)];
+    const mean = px.reduce((a, b) => a + b, 0) / 64;
+    let bits = 0n;
+    px.forEach((v, i) => { if (v >= mean) bits |= (1n << BigInt(i)); });
+    return bits;
+  } catch { return null; }
+}
+
+/** Hamming distance between two aHashes. <= 5 bits of 64 is the same picture. */
+export function hashDistance(a, b) {
+  let x = a ^ b, n = 0;
+  while (x) { n += Number(x & 1n); x >>= 1n; }
+  return n;
+}
+export const DUPLICATE_BITS = 5;
+
+/**
  * Every usable image the article itself carries, best first.
  *
  * TWO SOURCES OF HTML, and the second is the whole lever. Measured across 20
@@ -251,8 +300,17 @@ export async function buildBodyPool(article, {
     // and every beat gets the same photograph — the slideshow, restored.
     const sig = `${dims.width}x${dims.height}:${Math.round(got.buf.length / 4096)}`;
     if (sigs.has(sig)) continue;
+    // THE PICTURE, not the URL and not the dimensions. A CDN serves one photo
+    // at many URLs and many sizes, and both of those dedupe layers wave the
+    // renditions straight through — see averageHash.
+    const hash = averageHash(got.buf);
+    if (hash !== null && pool.some((p) => p.hash !== null && p.hash !== undefined
+        && hashDistance(p.hash, hash) <= DUPLICATE_BITS)) {
+      _log.info(`🖼 body pool: skipping a re-encoding of a picture already held — ${String(url).slice(0, 70)}`);
+      continue;
+    }
     sigs.add(sig);
-    pool.push({ url, buf: got.buf, dims, text: contexts.get(url) || "" });
+    pool.push({ url, buf: got.buf, dims, hash, text: contexts.get(url) || "" });
   }
   const described = pool.filter((p) => p.text).length;
   _log.info(`🖼 body pool: ${pool.length} usable of ${urls.length} candidate(s) ` +
