@@ -11,7 +11,7 @@ const ARTICLE = {
 };
 const QUIET = { info() {}, warn() {} };
 const img = (n) => ({ url: `https://pub/${n}.jpg`, buf: Buffer.from(`IMG${n}`), dims: { width: 900, height: 600 } });
-const cursor = () => ({ i: 0 });
+const cursor = () => ({ used: new Set() });
 
 // ─── Intent ─────────────────────────────────────────────────────────────────
 
@@ -233,4 +233,68 @@ test("coverage counts what it says it counts", () => {
   assert.equal(c.eligible, 4, "a beat with no intent was never eligible for a picture");
   assert.equal(c.imageryShare, 3 / 5);
   assert.equal(c.eligibleShare, 3 / 4);
+});
+
+
+// ─── Matched assignment (ruling 2) ──────────────────────────────────────────
+
+test("a beat takes the pool image whose DESCRIPTION matches its intent, not the next in line", async () => {
+  const pool = [
+    { ...img(1), text: "Traders on the floor of the exchange" },
+    { ...img(2), text: "Gas storage tanks at the Rehden facility" },
+    { ...img(3), text: "" },
+  ];
+  const r = await resolveBeat({
+    slide: { t: "stat", visual: "gas storage tanks", _i: 0 }, article: ARTICLE,
+    pool, poolCursor: cursor(), _log: QUIET,
+  });
+  assert.equal(r.tier, TIERS.BODY);
+  assert.equal(r.bodyMatch, "intent");
+  assert.equal(r.imageUrl, pool[1].url, "the described match must beat slide order");
+});
+
+test("no description matching means slide order — a beat never goes empty because matching exists", async () => {
+  const pool = [{ ...img(1), text: "Something unrelated entirely" }, { ...img(2), text: "" }];
+  const pc = cursor();
+  const a = await resolveBeat({ slide: { t: "stat", visual: "server racks", _i: 0 }, article: ARTICLE, pool, poolCursor: pc, _log: QUIET });
+  assert.equal(a.tier, TIERS.BODY);
+  assert.equal(a.bodyMatch, "order");
+  assert.equal(a.imageUrl, pool[0].url);
+  const b = await resolveBeat({ slide: { t: "turn", visual: "server racks", _i: 1 }, article: ARTICLE, pool, poolCursor: pc, _log: QUIET });
+  assert.equal(b.imageUrl, pool[1].url, "each image is used at most once");
+});
+
+test("a matched image is consumed — the next beat cannot take it again", async () => {
+  const pool = [
+    { ...img(1), text: "" },
+    { ...img(2), text: "Container ship at the port of Rotterdam" },
+  ];
+  const pc = cursor();
+  const first = await resolveBeat({ slide: { t: "stat", visual: "container ship", _i: 0 }, article: ARTICLE, pool, poolCursor: pc, _log: QUIET });
+  assert.equal(first.imageUrl, pool[1].url);
+  assert.equal(first.bodyMatch, "intent");
+  const second = await resolveBeat({ slide: { t: "turn", visual: "container ship", _i: 1 }, article: ARTICLE, pool, poolCursor: pc, _log: QUIET });
+  assert.equal(second.imageUrl, pool[0].url, "the matched image was spent; order fallback takes the remaining one");
+  assert.equal(second.bodyMatch, "order");
+});
+
+// ─── The context extractor ──────────────────────────────────────────────────
+
+test("alt and figcaption reach the right URLs, srcset variants included", async () => {
+  const { extractImageContexts } = await import("./videoBeatImagery.js");
+  const html = `
+    <img src="https://cdn/a.jpg" srcset="https://cdn/a-320.jpg 320w, https://cdn/a-1600.jpg 1600w"
+         alt="Gas storage tanks at Rehden">
+    <figure>
+      <img src="https://cdn/b.jpg" alt="">
+      <figcaption>Traders react as <b>prices</b> fall</figcaption>
+    </figure>
+    <img src="https://cdn/c.jpg">`;
+  const m = extractImageContexts(html);
+  assert.equal(m.get("https://cdn/a.jpg"), "Gas storage tanks at Rehden");
+  assert.equal(m.get("https://cdn/a-1600.jpg"), "Gas storage tanks at Rehden",
+    "the miner picks the largest srcset entry, so the text must follow it");
+  assert.equal(m.get("https://cdn/b.jpg"), "Traders react as prices fall", "figcaption text, tags stripped");
+  assert.equal(m.get("https://cdn/c.jpg"), undefined, "no description is no entry, not an empty one");
+  assert.equal(extractImageContexts(null).size, 0);
 });

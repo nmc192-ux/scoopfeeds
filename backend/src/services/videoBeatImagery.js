@@ -114,6 +114,58 @@ export function intentForBeat(slide = {}, { entities = [] } = {}) {
 }
 
 /**
+ * What the page SAYS each image is — alt text and figcaption, keyed by URL.
+ *
+ * This exists because "twelve beats got A story photo" is not "twelve beats
+ * got the RIGHT one" (DrJ, ruling 2): the pool used to be consumed in slide
+ * order, which assigned the article's fourth photograph to whatever beat came
+ * fourth. Matching needs candidate TEXT, and news CMSes do ship it — alt
+ * attributes and <figcaption> are the publisher's own description of the
+ * picture, written by the same editors the body tier's trust rests on.
+ *
+ * Kept OUT of cardRenderer's miner on purpose: that function's candidate
+ * ordering is the shipped card cascade, and reshaping its return type to add
+ * text would touch a path this change has no business touching.
+ */
+export function extractImageContexts(html) {
+  const map = new Map();
+  if (!html || typeof html !== "string") return map;
+  const put = (url, text) => {
+    if (!url || !text) return;
+    const u = String(url).trim();
+    const t = String(text).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    if (!t) return;
+    map.set(u, map.has(u) ? `${map.get(u)} ${t}` : t);
+  };
+  const urlsOf = (tag) => {
+    const out = [];
+    const src = tag.match(/\bsrc\s*=\s*["']([^"']+)["']/i);
+    if (src) out.push(src[1]);
+    const ss = tag.match(/\bsrcset\s*=\s*["']([^"']+)["']/i);
+    if (ss) for (const entry of ss[1].split(",")) {
+      const u = entry.trim().split(/\s+/)[0];
+      if (u) out.push(u);
+    }
+    return out;
+  };
+  // alt text, attached to every URL the tag can resolve to (src and srcset —
+  // the miner picks the largest srcset entry, so the text must follow it).
+  for (const m of html.matchAll(/<img\b[^>]*>/gi)) {
+    const alt = m[0].match(/\balt\s*=\s*["']([^"']*)["']/i);
+    if (alt?.[1]) for (const u of urlsOf(m[0])) put(u, alt[1]);
+  }
+  // figcaption, attached to every image inside its <figure>.
+  for (const m of html.matchAll(/<figure\b[\s\S]*?<\/figure>/gi)) {
+    const cap = m[0].match(/<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>/i);
+    if (!cap?.[1]) continue;
+    for (const img of m[0].matchAll(/<img\b[^>]*>/gi)) {
+      for (const u of urlsOf(img[0])) put(u, cap[1]);
+    }
+  }
+  return map;
+}
+
+/**
  * Every usable image the article itself carries, best first.
  *
  * TWO SOURCES OF HTML, and the second is the whole lever. Measured across 20
@@ -132,11 +184,15 @@ export async function buildBodyPool(article, {
   const urls = [];
   const push = (u) => { if (u && !seen.has(u)) { seen.add(u); urls.push(u); } };
 
+  const contexts = new Map();
+  const absorb = (html) => { for (const [u, t] of extractImageContexts(html)) contexts.set(u, contexts.has(u) ? `${contexts.get(u)} ${t}` : t); };
+
   if (article?.image_url) {
     push(upscaleKnownThumbnailUrl(article.image_url));
     push(article.image_url);
   }
   for (const c of extractImageCandidatesFromHtml(article?.content || "")) push(c);
+  absorb(article?.content || "");
 
   // EVERY FETCH IS WRAPPED HERE, not only inside the default implementation.
   // This function is on the render path and an injected fetcher is still a
@@ -150,6 +206,16 @@ export async function buildBodyPool(article, {
       const found = extractImageCandidatesFromHtml(html);
       live = found.length;
       for (const c of found) push(c);
+      absorb(html);
+    }
+  }
+
+  // The upscale rewrite changes the URL, so context recorded against the
+  // original must follow the rewritten candidate too.
+  if (article?.image_url) {
+    const up = upscaleKnownThumbnailUrl(article.image_url);
+    if (up !== article.image_url && contexts.has(article.image_url) && !contexts.has(up)) {
+      contexts.set(up, contexts.get(article.image_url));
     }
   }
 
@@ -172,9 +238,11 @@ export async function buildBodyPool(article, {
     const sig = `${dims.width}x${dims.height}:${Math.round(got.buf.length / 4096)}`;
     if (sigs.has(sig)) continue;
     sigs.add(sig);
-    pool.push({ url, buf: got.buf, dims });
+    pool.push({ url, buf: got.buf, dims, text: contexts.get(url) || "" });
   }
-  _log.info(`🖼 body pool: ${pool.length} usable of ${urls.length} candidate(s) (live page contributed ${live})`);
+  const described = pool.filter((p) => p.text).length;
+  _log.info(`🖼 body pool: ${pool.length} usable of ${urls.length} candidate(s) ` +
+    `(live page contributed ${live}; ${described}/${pool.length} carry alt/figcaption text)`);
   return pool;
 }
 
@@ -215,10 +283,23 @@ export async function resolveBeat({
   const publisherAllowed = !isExplicitHarmHeadline(article?.title);
   const thirdPartyAllowed = !isSensitiveHeadline(article?.title);
 
-  // ── 1. BODY ───────────────────────────────────────────────────────────────
-  if (publisherAllowed && pool && poolCursor.i < pool.length) {
-    const img = pool[poolCursor.i++];
+  // ── 1. BODY — MATCHED, then slide order as the tiebreak only ─────────────
+  //
+  // The pool used to be consumed strictly in slide order, which handed the
+  // article's fourth photograph to whatever beat came fourth — "twelve beats
+  // getting A story photo is not twelve beats getting the RIGHT one" (DrJ,
+  // ruling 2). Candidates now try to MATCH the beat's intent first, through
+  // the same conjunctive gate stock uses, against the publisher's own
+  // description of the picture (alt / figcaption). Only when no description
+  // matches does the old order-based assignment apply — every image is still
+  // used at most once, and a beat never goes empty because matching exists.
+  if (publisherAllowed && pool?.length && poolCursor.used.size < pool.length) {
+    const unused = pool.map((img, idx) => ({ img, idx })).filter(({ idx }) => !poolCursor.used.has(idx));
+    const hit = unused.find(({ img }) => img.text && candidateMatches(intent, img.text));
+    const { img, idx } = hit || unused[0];
+    poolCursor.used.add(idx);
     return { ...base, tier: TIERS.BODY, confidence: CONFIDENCE.body,
+             bodyMatch: hit ? "intent" : "order",
              imageUrl: img.url, buffer: img.buf, credit: article?.source_name || null };
   }
 
@@ -293,7 +374,7 @@ export async function resolveSpecImagery({
 
   const pool = _pool !== undefined ? _pool
     : (isExplicitHarmHeadline(article?.title) ? [] : await buildBodyPool(article, { _log }));
-  const poolCursor = { i: 0 };
+  const poolCursor = { used: new Set() };
   const picks = [];
   const stockCreators = new Set();
 

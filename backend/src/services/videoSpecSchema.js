@@ -638,19 +638,21 @@ const SHARE_EXEMPT_TYPES = new Set(["title", "kicker"]);
 const CARD_FIELDS = {
   // `outlet` and `date` are CODE-INJECTED onto the title by decorateTitleCard,
   // never model-emitted — they are the absorbed attribution card (see below).
-  title:   { required: ["lines", "caption"],                 optional: ["eyebrow", "sub", "outlet", "date"] },
-  // `visual` is the optional cutaway hint: a concrete noun naming something the
-  // beat makes visible, resolved at render time against the curated library.
-  // It is offered ONLY on the four type-only cards. `photo` and `map` already
-  // carry imagery of their own, and a cutaway over them would replace the
-  // picture the card exists to show; `title` and `kicker` are the wrappers.
-  // Most beats have no visual, and that is the normal case — see the selection
-  // rules in videoStockLibrary.js.
+  title:   { required: ["lines", "caption"],                 optional: ["eyebrow", "sub", "outlet", "date", "visual"] },
+  // `visual` is the beat's visual intent: a concrete, photographable noun
+  // phrase, accepted on EVERY card type (DrJ, 2026-08-30 — cards are
+  // punctuation, imagery is the default). On `photo` the `subject` field
+  // remains the primary intent and `visual` is auxiliary; on `map`, `title`
+  // and `kicker` it is stored as data the renderer does not yet consume —
+  // deliberately, because the beat-per-slide assumption is scheduled to die
+  // (the reference cut is ~1 visual per second) and the intent must not be
+  // welded to today's composition. Resolution order and the named-subject
+  // rules live in videoBeatImagery.js.
   stat:    { required: ["value", "caption", "source"],       optional: ["eyebrow", "unit", "lines", "hi", "visual"] },
   diagram: { required: ["nodes", "caption"],                 optional: ["eyebrow", "marker", "visual"] },
   bars:    { required: ["bars", "caption", "source"],        optional: ["eyebrow", "source_note", "visual"] },
   turn:    { required: ["lines", "caption"],                 optional: ["eyebrow", "sub", "visual"] },
-  kicker:  { required: ["top", "bottom", "caption"],         optional: ["sub"] },
+  kicker:  { required: ["top", "bottom", "caption"],         optional: ["sub", "visual"] },
   // `photo` carries NO image field. The photograph is the article's own
   // (image_url), and the MOUNT is a design decision made in code — a model
   // choosing between a polaroid and a torn cutting is a model art-directing.
@@ -658,11 +660,11 @@ const CARD_FIELDS = {
   // the photograph is expected to SHOW. Without it the renderer takes image_url
   // on trust and nothing anywhere can notice a mismatch — which is the tariffs
   // failure with a new name (DrJ, 2026-08-15).
-  photo:   { required: ["lines", "caption", "subject"],      optional: ["eyebrow", "sub"] },
+  photo:   { required: ["lines", "caption", "subject"],      optional: ["eyebrow", "sub", "visual"] },
   // `codes` are ISO 3166-1 alpha-3. `exception` is the ONE member of the set
   // the story excludes — the "all but one" case, which is unreadable without a
   // callout because the excepted country is often a couple of pixels wide.
-  map:     { required: ["codes", "caption"],                 optional: ["eyebrow", "exception", "lines"] },
+  map:     { required: ["codes", "caption"],                 optional: ["eyebrow", "exception", "lines", "visual"] },
 };
 
 // Card types the MODEL is allowed to emit. The `attribution` card is GONE —

@@ -483,7 +483,11 @@ export async function choosePhotoUnderlay({
 
 // ─── Produce one video ──────────────────────────────────────────────────────
 
-async function produceVideo(article, spec, attribution = resolveAttribution(article)) {
+// Exported for the offline sample harness and for tests: the full render path
+// (voice, slides, imagery, assembly, score) WITHOUT the cycle around it — no
+// selection, no upload, no marking. Publishing stays reachable only through
+// runVideoCycle, which is where assertPublishAllowed sits.
+export async function produceVideo(article, spec, attribution = resolveAttribution(article)) {
   // ORIENTATION. Vertical by default — Shorts and Reels are the only surfaces
   // that push video to people who have not heard of the channel, and a vertical
   // MP4 under the length limit uploaded through the existing YouTube API IS a
