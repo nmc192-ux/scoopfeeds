@@ -748,6 +748,23 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
       });
       segments.push(seg);
     }
+    // THE TRUSTWORTHY PICTURE COUNT, by source bytes.
+    //
+    // Counting distinct pictures off the finished frames measures the LAYOUT,
+    // not the picture: measured on a real render, two different photographs
+    // sharing a mount hashed 4 bits apart (below the duplicate threshold)
+    // while one photograph at two crops hashed 27 apart — both readings
+    // backwards. The ledger hashed each source before any treatment, so this
+    // line is the honest answer to "how many different photographs are in this
+    // video", and the frame strip is how you check they are on screen.
+    if (imageLedger) {
+      const placed = imageLedger.entries();
+      logger.info(
+        `🖼 PICTURES PLACED [${article.id}]: ${placed.length} distinct photograph(s) across ` +
+        `${slides.length} beats — ${placed.map((e) => String(e.label).slice(0, 58)).join(" | ") || "none"}`
+      );
+    }
+
     const out = path.join(VIDEOS_DIR, `${article.id}-${videoDesignKey()}.mp4`);
     await concatSlides({ segmentPaths: segments, outputPath: out, workDir: work });
     if (!existsSync(out) || statSync(out).size < 10_000) {

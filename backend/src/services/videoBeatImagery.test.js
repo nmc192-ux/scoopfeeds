@@ -453,3 +453,79 @@ test("a photograph already spent sends the beat to the next tier, not to a repea
   assert.equal(r.picks[0].tier, TIERS.CARD);
   assert.match(r.picks[0].reason, /already used/);
 });
+
+// ─── The entity tier is ADDITIVE (DrJ, 2026-08-30) ─────────────────────────
+
+test("a NAMED subject takes its P18 portrait even when body candidates exist", async () => {
+  // The pool-depth lever. Measured before this change: the entity tier fired
+  // ONCE across twenty articles, because body ran first and exhausted the
+  // pool — while P18 was available for 27 of 45 extracted entities. Running
+  // entity ahead of body for named subjects turns a fallback nobody reaches
+  // into a SECOND picture on the same article.
+  const ents = [{ qid: "Q7747", label: "Benjamin Netanyahu", surface: "Netanyahu" }];
+  const r = await resolveBeat({
+    slide: { t: "turn", visual: "Benjamin Netanyahu", _i: 1 }, article: ARTICLE,
+    pool: [{ ...img(1), text: "" }], poolCursor: cursor(), entities: ents,
+    _entityImage: async (e) => ({ url: `commons/${e.qid}.jpg`, buf: Buffer.from("PORTRAIT"), credit: "Wikimedia Commons" }),
+    _log: QUIET,
+  });
+  assert.equal(r.tier, TIERS.ENTITY, "the portrait must win over an unrelated article photo");
+  assert.equal(r.qid, "Q7747");
+});
+
+test("the body pool is left INTACT when the entity tier answers", async () => {
+  // Additive means the article's photographs are still there for other beats.
+  const ents = [{ qid: "Q7747", label: "Benjamin Netanyahu", surface: "Netanyahu" }];
+  const pc = cursor();
+  const pool = [{ ...img(1), text: "" }, { ...img(2), text: "" }];
+  await resolveBeat({
+    slide: { t: "turn", visual: "Benjamin Netanyahu", _i: 0 }, article: ARTICLE,
+    pool, poolCursor: pc, entities: ents,
+    _entityImage: async () => ({ url: "c.jpg", buf: Buffer.from("P"), credit: "Wikimedia Commons" }),
+    _log: QUIET,
+  });
+  assert.equal(pc.used.size, 0, "an entity answer must not spend a pool image");
+});
+
+test("an ABSTRACT beat still goes body-first — the ordering change is named-only", async () => {
+  const r = await resolveBeat({
+    slide: { t: "stat", visual: "winter landscape", _i: 0 }, article: ARTICLE,
+    pool: [{ ...img(1), text: "" }], poolCursor: cursor(), entities: [],
+    _entityImage: async () => { throw new Error("must not be consulted for an abstract beat"); },
+    _log: QUIET,
+  });
+  assert.equal(r.tier, TIERS.BODY);
+});
+
+test("a P18 portrait already spent falls through to body, not to a repeat", async () => {
+  const ents = [{ qid: "Q1", label: "Benjamin Netanyahu", surface: "Netanyahu" }];
+  const portrait = execFileSync(getFFmpegPath(), ["-loglevel", "error", "-f", "lavfi",
+    "-i", "testsrc2=size=800x600", "-frames:v", "1", "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
+  const { createImageLedger } = await import("./videoBeatImagery.js");
+  const ledger = createImageLedger({ _log: QUIET });
+  ledger.claim(portrait, { label: "already on screen" });
+  const r = await resolveBeat({
+    slide: { t: "turn", visual: "Benjamin Netanyahu", _i: 1 }, article: ARTICLE,
+    pool: [{ ...img(1), text: "" }], poolCursor: cursor(), entities: ents, ledger,
+    _entityImage: async () => ({ url: "c.jpg", buf: portrait, credit: "Wikimedia Commons" }),
+    _log: QUIET,
+  });
+  assert.equal(r.tier, TIERS.BODY, "a spent portrait must not be shown twice");
+});
+
+test("the ledger reports its distinct photographs by SOURCE bytes", async () => {
+  // The trustworthy count. Counting off final frames measures the layout:
+  // two different photographs on one mount hashed 4 bits apart, one photograph
+  // at two crops hashed 27 apart. Both backwards.
+  const { createImageLedger } = await import("./videoBeatImagery.js");
+  const ff = getFFmpegPath();
+  const jpeg = (spec) => execFileSync(ff, ["-loglevel", "error", "-f", "lavfi", "-i", spec,
+    "-frames:v", "1", "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
+  const l = createImageLedger({ _log: QUIET });
+  l.claim(jpeg("testsrc2=size=900x600"), { label: "one" });
+  l.claim(jpeg("color=c=navy:s=900x600"), { label: "two" });
+  const e = l.entries();
+  assert.equal(e.length, 2);
+  assert.deepEqual(e.map((x) => x.label), ["one", "two"]);
+  assert.ok(typeof e[0].hash === "bigint");
+});

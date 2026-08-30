@@ -149,6 +149,7 @@ export function intentForBeat(slide = {}, { entities = [] } = {}) {
  */
 export function createImageLedger({ _hash = averageHash, _log = logger } = {}) {
   const spent = [];
+  const labels = [];
   return {
     /** True when this picture is new and now claimed; false when already spent. */
     claim(buf, { label = "" } = {}) {
@@ -161,11 +162,24 @@ export function createImageLedger({ _hash = averageHash, _log = logger } = {}) {
         return false;
       }
       spent.push(h);
+      labels.push(String(label || "unlabelled"));
       return true;
     },
     /** Claim without a caller — used to hold the article photo for its card. */
     reserve(buf, label = "reserved") { return this.claim(buf, { label }); },
     get size() { return spent.length; },
+    /**
+     * Every distinct photograph this video actually placed, by SOURCE bytes.
+     *
+     * This is the trustworthy count, and the reason it exists: counting
+     * distinct pictures off the FINAL FRAMES is measuring the layout. Measured
+     * 2026-08-30 on a real render — two different photographs sharing a mount
+     * hashed 4 bits apart (below the duplicate threshold) while one photograph
+     * at two crops hashed 27 bits apart. Both readings backwards. The ledger
+     * hashes the source before any treatment, which is the only place the
+     * picture is still the picture.
+     */
+    entries() { return labels.map((label, i) => ({ label, hash: spent[i] })); },
   };
 }
 
@@ -395,6 +409,33 @@ export async function resolveBeat({
   const publisherAllowed = !isExplicitHarmHeadline(article?.title);
   const thirdPartyAllowed = !isSensitiveHeadline(article?.title);
 
+  // ── ENTITY FIRST for a NAMED subject — the tier is ADDITIVE, not a fallback.
+  //
+  // Measured (DrJ, 2026-08-30): the entity tier fired once across twenty
+  // articles, because body ran first and exhausted the pool. But P18 is
+  // available for 27 of 45 extracted entities, and an exact QID -> portrait
+  // beats "whatever photograph the article happened to carry" on relevance for
+  // the one thing it names. Running it ahead of body for named subjects turns
+  // it from a fallback nobody reaches into a SECOND picture on the same
+  // article — which is the pool-depth lever, not a re-ordering nicety.
+  //
+  // Abstract beats are untouched: they go body-first exactly as before.
+  const namedEntity = qid ? { qid, label: intent }
+    : entities.find((e) => {
+        const label = norm(e.label || e.surface);
+        return label.length >= 4 && (norm(intent).includes(label) || label.includes(norm(intent)));
+      });
+  if (thirdPartyAllowed && _entityImage && namedEntity?.qid) {
+    try {
+      const got = await _entityImage(namedEntity);
+      if (got && (!ledger || ledger.claim(got.buf, { label: `P18 ${namedEntity.qid}` }))) {
+        return { ...base, tier: TIERS.ENTITY, confidence: CONFIDENCE.entity,
+                 imageUrl: got.url, buffer: got.buf, credit: got.credit,
+                 entity: namedEntity.label || intent, qid: namedEntity.qid };
+      }
+    } catch (err) { _log.warn(`🖼 entity tier failed for ${namedEntity.qid} — ${String(err.message).slice(0, 80)}`); }
+  }
+
   // ── 1. BODY — MATCHED, then slide order as the tiebreak only ─────────────
   //
   // The pool used to be consumed strictly in slide order, which handed the
@@ -421,28 +462,15 @@ export async function resolveBeat({
              imageUrl: img.url, buffer: img.buf, credit: article?.source_name || null };
   }
 
-  // ── 2. ENTITY ─────────────────────────────────────────────────────────────
-  if (thirdPartyAllowed && _entityImage) {
-    const ent = qid ? { qid, label: intent }
-      : entities.find((e) => {
-          const label = norm(e.label || e.surface);
-          return label.length >= 4 && (norm(intent).includes(label) || label.includes(norm(intent)));
-        });
-    if (ent?.qid) {
-      try {
-        const got = await _entityImage(ent);
-        if (got) {
-          return { ...base, tier: TIERS.ENTITY, confidence: CONFIDENCE.entity,
-                   imageUrl: got.url, buffer: got.buf, credit: got.credit, entity: ent.label || intent, qid: ent.qid };
-        }
-      } catch (err) { _log.warn(`🖼 entity tier failed for ${ent.qid} — ${String(err.message).slice(0, 80)}`); }
-    }
-    // A NAMED SUBJECT WITH NO PORTRAIT DOES NOT FALL TO STOCK. This is the rule
-    // that keeps a plausible-but-wrong stock building off a named facility.
-    if (ent?.qid || !isAbstractQuery(intent)) {
-      return { ...base, tier: TIERS.CARD, confidence: null,
-               reason: "named subject, no exact image — stock is forbidden here" };
-    }
+  // ── 2. A NAMED SUBJECT NEVER FALLS TO STOCK ──────────────────────────────
+  //
+  // The entity attempt above already ran and found nothing usable. Stock is
+  // forbidden here whatever it might return: a plausible stock "school gate"
+  // for the Qalandiya Training Centre is plausible, wrong, and the exact
+  // failure this rule exists to prevent.
+  if (thirdPartyAllowed && (namedEntity?.qid || !isAbstractQuery(intent))) {
+    return { ...base, tier: TIERS.CARD, confidence: null,
+             reason: "named subject, no exact image — stock is forbidden here" };
   }
 
   // ── 3. STOCK, abstract only ───────────────────────────────────────────────

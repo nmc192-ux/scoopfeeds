@@ -125,3 +125,35 @@ test("Pexels results are normalised, and no key means no search", async () => {
     if (prev === undefined) delete process.env.PEXELS_API_KEY; else process.env.PEXELS_API_KEY = prev;
   }
 });
+
+// ─── P18 is not always a photograph (measured 2026-08-30) ──────────────────
+
+test("a locator map, a flag or a satellite tile is not a picture of the subject", async () => {
+  const { looksLikeAPhotograph } = await import("./videoBeatSources.js");
+  // Real P18 values, looked up for entities that actually appeared in specs.
+  for (const [file, want] of [
+    ["Young-Dolly-Parton.jpg", true],
+    ["Qalandia checkpoint - panoramio (535).jpg", true],
+    ["Benjamin Netanyahu 2023.jpg", true],
+    ["India-locator-map-blank.svg", false],        // Commons rasterises SVG on request
+    ["Russia 87.74494E 66.20034N.jpg", false],     // a satellite tile named by coordinates
+    ["Flag of Iceland.svg", false],
+    ["Coat of arms of Nepal.png", false],
+    ["Diagram of the Roman telescope.png", false],
+  ]) {
+    assert.equal(looksLikeAPhotograph(file), want, `${file} should be ${want ? "a photograph" : "rejected"}`);
+  }
+  assert.equal(looksLikeAPhotograph(""), false);
+  assert.equal(looksLikeAPhotograph(null), false);
+});
+
+test("the entity fetcher refuses a non-photographic P18 before fetching it", async () => {
+  const { makeEntityImageFetcher } = await import("./videoBeatSources.js");
+  let fetched = false;
+  const f = makeEntityImageFetcher({
+    _fetchJson: async () => ({ entities: { Q668: { claims: { P18: [{ mainsnak: { datavalue: { value: "India-locator-map-blank.svg" } } }] } } } }),
+    _fetchImage: async () => { fetched = true; return { buf: Buffer.from("X"), mime: "image/png" }; },
+  });
+  assert.equal(await f({ qid: "Q668", label: "India" }), null);
+  assert.equal(fetched, false, "a blank locator map must not even be downloaded");
+});

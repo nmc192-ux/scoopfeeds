@@ -69,6 +69,40 @@ const UA = "Scoopfeeds/1.0 (+https://scoopfeeds.com; contact: ops@scoopfeeds.com
  * confidence while stock does not — it cannot return a picture of something
  * else, only no picture at all.
  */
+/**
+ * Is this P18 file an actual PHOTOGRAPH of the thing?
+ *
+ * Measured against real entities on 2026-08-30, and the reason this exists:
+ *
+ *   Dolly Parton      -> Young-Dolly-Parton.jpg              a portrait ✓
+ *   West Bank         -> Qalandia checkpoint - panoramio.jpg a place ✓
+ *   India             -> India-locator-map-blank.svg         A BLANK LOCATOR MAP
+ *   Russia            -> Russia 87.74494E 66.20034N.jpg      a satellite tile
+ *
+ * Commons rasterises SVG when a width is requested, so the locator map fetches
+ * perfectly happily as a PNG and lands on a beat — a blank outline map, next to
+ * the map card already drawing the same country. The satellite tile illustrates
+ * nothing a viewer can read at all.
+ *
+ * Filename-based and deliberately over-broad, the same posture as
+ * videoFootage's looksPhotographic and editorialSensitivity: a false reject
+ * costs one beat a picture it can get from another tier, a false accept puts a
+ * blank map on screen. Countries and other geographies are exactly where P18 is
+ * least photographic, which is also where the map card already serves.
+ */
+export function looksLikeAPhotograph(file) {
+  const f = String(file || "").toLowerCase();
+  if (!f) return false;
+  // Maps, diagrams, insignia, and vector artwork of any kind.
+  if (/\b(locator|location|blank|outline|map|karte|mapa)\b/.test(f)) return false;
+  if (/\b(flag|coat[ _-]?of[ _-]?arms|emblem|seal|logo|insignia|crest|banner|arms)\b/.test(f)) return false;
+  if (/\b(diagram|chart|graph|schematic|plan|drawing|icon|symbol)\b/.test(f)) return false;
+  if (/\.svgs?$/.test(f)) return false;
+  // A satellite tile named by its coordinates: "Russia 87.74494E 66.20034N.jpg".
+  if (/\d+\.\d+[ _]?[ew]\b.*\d+\.\d+[ _]?[ns]\b/.test(f)) return false;
+  return true;
+}
+
 export function makeEntityImageFetcher({ _fetchJson = defaultFetchJson, _fetchImage = tryFetchImage } = {}) {
   return async function entityImage(entity) {
     const qid = entity?.qid;
@@ -84,6 +118,11 @@ export function makeEntityImageFetcher({ _fetchJson = defaultFetchJson, _fetchIm
       cacheWrite("p18", qid, file);
     }
     if (!file) return null;
+    // A locator map or a coat of arms is not a picture OF the subject.
+    if (!looksLikeAPhotograph(file)) {
+      logger.info(`🖼 entity: P18 for ${qid} is "${String(file).slice(0, 50)}" — not a photograph, skipping`);
+      return null;
+    }
 
     const url = commonsFilePath(file);
     const got = await _fetchImage(url, "https://commons.wikimedia.org/");
