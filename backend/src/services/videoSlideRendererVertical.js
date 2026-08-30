@@ -71,9 +71,13 @@ const base = (card, ctx) => [...chrome(ctx), eyebrowV(card.eyebrow || "")];
 
 // ─── title ──────────────────────────────────────────────────────────────────
 
-const TITLE_NOMINAL = 104;
+// PHRASES FILL THE WIDTH (DrJ, defect 6): a small phrase floating in a void
+// reads as dead air. The nominal is the size a SHORT phrase gets; long ones
+// still fit down through the same fitLineGroup. 104 was sized for the old
+// paragraph-adjacent grammar.
+const TITLE_NOMINAL = 148;
 const TITLE_MIN = 64;
-const KICKER_NOMINAL = 96;
+const KICKER_NOMINAL = 140;
 
 /**
  * ONE size for a GROUP of display lines, decided by the widest of them.
@@ -125,7 +129,6 @@ function titleStatesV(card, ctx) {
     : null;
   const b = () => base(card, ctx);
   return [
-    { key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) },
     { key: "s2", lime: limeIdx === 0, tree: root(GROUND.INK, [...b(), line(l1, VY.titleLine1)].filter(Boolean)) },
     { key: "s3", lime: limeIdx >= 0, tree: root(GROUND.INK, [...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2)].filter(Boolean)) },
     { key: "s4", lime: limeIdx >= 0, tree: root(GROUND.INK, [
@@ -241,7 +244,6 @@ function statStatesV(card, ctx) {
   };
   const limeAfterLines = hi >= 0 && Boolean((card.lines || [])[hi]);
   return [
-    { key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) },
     { key: "s2", lime: false, tree: root(GROUND.INK, [...b(), value]) },
     { key: "s3", lime: hi === 0, tree: root(GROUND.INK, [...b(), value, supportLine(0, VY.statLine1)].filter(Boolean)) },
     { key: "s4", lime: limeAfterLines, tree: root(GROUND.INK, [...b(), value, supportLine(0, VY.statLine1), supportLine(1, VY.statLine2)].filter(Boolean)) },
@@ -301,7 +303,8 @@ function barsStatesV(card, ctx) {
   };
 
   const b = () => base(card, ctx);
-  const states = [{ key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) }];
+  // NO EMPTY OPENING STATE (DrJ, defect 6) — beats open on content.
+  const states = [];
   const groups = bars.length <= 4 ? bars.map((_, i) => [i]) : [[0], [1], [2], [3, 4]];
   let shown = [];
   groups.forEach((g, gi) => {
@@ -362,7 +365,8 @@ function diagramStatesV(card, ctx) {
     ].filter(Boolean);
   });
 
-  const states = [{ key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) }];
+  // NO EMPTY OPENING STATE (DrJ, defect 6) — beats open on content.
+  const states = [];
   const groups = n <= 4 ? nodes.map((_, i) => i + 1) : [1, 2, 3, n];
   groups.forEach((upto, gi) => {
     states.push({ key: `node${gi + 1}`, lime: false, tree: root(GROUND.INK, [...b(), ...rowsFor(upto, false)]) });
@@ -441,6 +445,94 @@ const imageCredit = (label) => label
     })
   : null;
 
+/**
+ * THE KINETIC PHRASE — one short phrase per photo beat, centred, over the image.
+ *
+ * The reference grammar (DrJ, 2026-08-30): a beat carrying a photograph shows
+ * ONE word or short phrase, large, centred, mixed weights, and NOTHING else.
+ * No bottom subtitle, no paragraph, never more than about six words. The word
+ * IS the layout.
+ *
+ * WHY MIXED WEIGHTS RATHER THAN ONE RUN. The reference sets the operative word
+ * apart from its qualifiers inside a single phrase — "a village UNDER SIEGE" —
+ * so the eye lands on the noun before it reads the line. Anton carries the
+ * accent word; Inter semibold carries the rest. Two families, one type system,
+ * which is the whole vocabulary this format is allowed.
+ *
+ * SIZED TO THE LONGEST WORD, not to the phrase. A centred block that overflows
+ * the measure is worse than a smaller one, and the words arrive at different
+ * lengths every beat.
+ *
+ * NO TIMING ASSUMPTION IS BAKED IN. The phrase enters with the beat and holds;
+ * word-level synchronisation arrives with TTS timestamps next sprint, and
+ * nothing here encodes a slide duration.
+ */
+const KINETIC_MAX_WORDS = 6;
+
+export function kineticPhrase(card) {
+  // Prefer what the writer already emitted as display type; fall back to the
+  // beat's own subject. Both are short by contract.
+  const fromLines = (card.lines || []).map((l) => (Array.isArray(l) ? l[0] : l)).filter(Boolean).join(" ");
+  const raw = String(fromLines || card.top || card.visual || card.subject || "").trim();
+  if (!raw) return null;
+  const words = raw.split(/\s+/).filter(Boolean);
+  // Truncation is a real risk here: a long headline fragment would run off a
+  // centred block. Six words is the ceiling the reference keeps to.
+  return words.slice(0, KINETIC_MAX_WORDS).join(" ");
+}
+
+/**
+ * Which word takes the accent. The LAST word of the phrase by default —
+ * English puts the operative noun at the end far more often than not, and a
+ * lime-on-the-first-word reads as a stutter when the phrase continues.
+ */
+function splitAccent(phrase) {
+  const words = String(phrase).split(/\s+/);
+  if (words.length === 1) return { lead: "", accent: words[0] };
+  return { lead: words.slice(0, -1).join(" "), accent: words[words.length - 1] };
+}
+
+/**
+ * Centred, mixed-weight phrase over the picture — with its OWN backing.
+ *
+ * The scrim lives HERE, not in the image (DrJ, defect 3): a hard-edged band
+ * baked into the photograph read as a seam, and lime type over the lime map
+ * vanished ("ATTACKS WITH IMPUNITY", half-hidden). A soft radial gradient
+ * behind the text darkens exactly where the words sit and nothing else, and
+ * because it is part of the state tree it composites ABOVE every underlay —
+ * photograph or map — with the text above it in turn.
+ */
+function kineticBacking(top, height = 340) {
+  return abs({
+    left: 0, top: top - 90, width: G.canvas.w, height,
+    backgroundImage: "linear-gradient(180deg, rgba(9,7,6,0) 0%, rgba(9,7,6,0.72) 28%, rgba(9,7,6,0.72) 72%, rgba(9,7,6,0) 100%)",
+  });
+}
+
+function kineticBlock(phrase, { top = 780 } = {}) {
+  const { lead, accent } = splitAccent(phrase);
+  // MEASURED, not guessed from character count. fitDisplaySize walks the Anton
+  // metrics down until the word fits the measure — the same machinery the
+  // title cards use. A centred block that overflows is worse than a smaller
+  // one, and accent words arrive at every length.
+  const { size: accentSize } = fitDisplaySize((sz) => antonWidth(accent, sz), {
+    nominalSize: 164, maxWidth: G.canvas.w - 2 * G.marginX, minSize: 78,
+  });
+  return [
+    kineticBacking(top),
+    lead ? text(lead, {
+      position: "absolute", left: 0, top, width: G.canvas.w,
+      fontFamily: F.inter, fontWeight: 600, fontSize: 46, letterSpacing: 2,
+      color: C.white, textAlign: "center", justifyContent: "center",
+    }) : null,
+    text(accent, {
+      position: "absolute", left: 0, top: top + (lead ? 66 : 0), width: G.canvas.w,
+      fontFamily: F.anton, fontSize: accentSize, lineHeight: 1.0,
+      color: C.lime, textAlign: "center", justifyContent: "center",
+    }),
+  ].filter(Boolean);
+}
+
 function overStates(card, ctx, { underlay, lineTop = 1470, size = 84, credit = null }) {
   const [l1, l2] = (card.lines || []).slice(0, 2);
   const ch = () => chrome(ctx);
@@ -454,12 +546,18 @@ function overStates(card, ctx, { underlay, lineTop = 1470, size = 84, credit = n
   const cr = imageCredit(credit);
   // Only ever beside a credit: a date with no source is not provenance.
   const dt = credit ? imageDateLine(ctx?.imageDate) : null;
+  // THE REFERENCE LAYOUT. The stacked bottom-left display lines with a heavy
+  // gradient scrim are replaced by ONE centred phrase over the picture (DrJ,
+  // 2026-08-30). The eyebrow and the two-line stack go with them: they are the
+  // paragraph grammar this ruling removes.
+  const phrase = kineticPhrase(card);
+  const block = phrase ? kineticBlock(phrase) : [];
   return [
     // The image alone, briefly. A photograph that arrives already captioned has
-    // no moment of being looked at.
+    // no moment of being looked at — kept, because it is the reference's own
+    // move too.
     st("v1", [...ch(), cr, dt]),
-    st("v2", [...ch(), ...eb, overScrim(), L(l1, lineTop), cr, dt]),
-    st("v3", [...ch(), ...eb, overScrim(), L(l1, lineTop), L(l2, lineTop + 96), cr, dt]),
+    st("v2", [...ch(), ...block, cr, dt]),
   ];
 }
 
@@ -506,7 +604,6 @@ function turnStatesV(card, ctx) {
     : null;
   const b = () => base(card, ctx);
   return [
-    { key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) },
     { key: "s2", lime: limeIdx === 0, tree: root(GROUND.INK, [...b(), line(l1, VY.titleLine1)].filter(Boolean)) },
     { key: "s3", lime: limeIdx >= 0, tree: root(GROUND.INK, [...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2)].filter(Boolean)) },
     { key: "s4", lime: limeIdx >= 0, tree: root(GROUND.INK, [
@@ -525,7 +622,6 @@ function kickerStatesV(card, ctx) {
   // same 936px measure. Fitted as one group so the pair keeps a single size.
   const kSize = fitLineGroup([card.top, card.bottom], { nominal: KICKER_NOMINAL, what: "kicker" });
   return [
-    { key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) },
     { key: "s2", lime: false, tree: root(GROUND.INK, [...b(), antonLine(card.top, { top: VY.kickTop, size: kSize, color: C.white })]) },
     { key: "s3", lime: true, tree: root(GROUND.INK, [
         ...b(),

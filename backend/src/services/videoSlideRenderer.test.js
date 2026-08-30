@@ -527,7 +527,9 @@ test("a word that fits is NOT shrunk — the fit is a ceiling, not a policy", ()
   const ctx = { outlet: "R", slideIndex: 1, slideCount: 7, orientation: "vertical" };
   const card = { t: "title", eyebrow: "B", lines: [["CABLE", "white"], ["CUT", "lime"]], sub: "s", date: "AUG 14", caption: "c" };
   const st = statesForCard(card, ctx).find(s => s.key === "s3");
-  assert.equal(widestAntonInTree(st.tree).find(r => r.text === "CABLE").size, 104,
+  // 104 -> 148 with defect 6 (DrJ, 2026-08-30): phrases fill the width, so the
+  // nominal a short headline renders at rose. The pinned value tracks it.
+  assert.equal(widestAntonInTree(st.tree).find(r => r.text === "CABLE").size, 148,
     "short headlines must render at the shipped nominal size");
 });
 

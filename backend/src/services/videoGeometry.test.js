@@ -148,7 +148,10 @@ test("the two-tier lime rule holds vertically: the final state carries the accen
   for (const [name, card] of Object.entries(CARDS)) {
     const states = verticalStatesForCard(card, CTX_V);
     assert.equal(states[states.length - 1].lime, true, `${name}: final state carries no content lime`);
-    assert.equal(states[0].lime, false, `${name}: the empty opening state should carry none`);
+    // The second half of this test asserted the EMPTY opening state carried no
+    // lime. Empty opening states are gone (DrJ, defect 6 — a chrome-only frame
+    // is a black screen), so beats open on content, and content may carry the
+    // accent from its first frame. The surviving invariant is the one above.
   }
 });
 

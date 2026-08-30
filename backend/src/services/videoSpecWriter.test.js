@@ -761,3 +761,43 @@ test("the RETRY message says what to do instead, not only what was wrong", async
   assert.match(err, /IS the stakes/, "the correction must carry the reasoning, not just the verdict");
   assert.match(err, /never an adjective/);
 });
+
+// ─── "visual" rides the SHAPES (2026-08-30) ────────────────────────────────
+//
+// Measured: a 20-line prose section produced 35% emission and +1 slide on 5 of
+// 6 articles (the length-signal class). The model copies worked shapes, so the
+// field lives there, and the prose is six lines.
+
+test("with beat imagery ON, every card shape carries the visual field", () => {
+  process.env.VIDEO_BEAT_IMAGERY_ENABLED = "1";
+  process.env.VIDEO_SUBJECT_VISUALS_ENABLED = "1";
+  try {
+    const p = buildSpecPrompt({
+      article: { id: "x", title: "T", source_name: "BBC News", content: "b ".repeat(60), image_url: "https://x/i.jpg" },
+      allowedSources: ["BBC News"],
+    });
+    const shapes = (p.match(/"visual":"\.\.\."/g) || []).length;
+    assert.equal(shapes, 8, `every card type's shape must carry "visual" — found ${shapes} of 8`);
+    // The rule text stays SMALL: prompt mass is a length signal, and the +1
+    // beat regression came from a heavy section, not from the field itself.
+    const section = p.slice(p.indexOf('"visual" — on every card'), p.indexOf("CARD GRAMMAR"));
+    assert.ok(section.split("\n").length <= 10,
+      `the visual rule has grown to ${section.split("\n").length} lines — prompt mass pulls beat discovery`);
+    assert.match(section, /never changes which beats you found/i);
+  } finally {
+    delete process.env.VIDEO_BEAT_IMAGERY_ENABLED;
+    delete process.env.VIDEO_SUBJECT_VISUALS_ENABLED;
+  }
+});
+
+test("with beat imagery OFF, the prompt is byte-free of the feature", () => {
+  // Prod runs with the flag off until DrJ flips it; the prompt there must be
+  // exactly the pre-change prompt, or the merge is not inert.
+  delete process.env.VIDEO_BEAT_IMAGERY_ENABLED;
+  const p = buildSpecPrompt({
+    article: { id: "x", title: "T", source_name: "BBC News", content: "b ".repeat(60), image_url: "https://x/i.jpg" },
+    allowedSources: ["BBC News"],
+  });
+  assert.ok(!p.includes('"visual":"..."'), "shapes must not carry the field when the flag is off");
+  assert.ok(!p.includes("PHOTOGRAPHABLE NOUN PHRASE"), "the rule text must not appear when the flag is off");
+});

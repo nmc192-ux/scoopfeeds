@@ -56,6 +56,7 @@ import {
   displayStrings, motiveVerdict,
 } from "./videoSpecSchema.js";
 import { stockCutawaysEnabled } from "./videoStockLibrary.js";
+import { beatImageryEnabled } from "./videoBeatImagery.js";
 import { resolveAttribution } from "./videoAttribution.js";
 
 // TWO PINS, deliberately different tiers for two different jobs.
@@ -398,7 +399,7 @@ async function callModel(prompt, { articleId, tag, model, maxOutputTokens }) {
  * types must appear only when the prompt is asking for them, and `photo` only
  * when there is a photograph, so the text is no longer the same for every call.
  */
-const cardGrammar = ({ visualsOn = false, hasPhoto = false } = {}) => `
+const cardGrammarBase = ({ visualsOn = false, hasPhoto = false } = {}) => `
 "title"   — the opener. { "t":"title", "eyebrow":"SHORT LABEL", "lines":[["TEXT","white"],["TEXT","lime"]], "sub":"one line", "caption":"..." }
 "stat"    — ONE dominant number. { "t":"stat", "eyebrow":"...", "value":70, "unit":"%", "lines":["short line","short line"], "hi":1, "source":"OUTLET NAME", "caption":"..." }
             "hi" is the index of the line to emphasise. "value" MUST be a number, not a string.
@@ -454,6 +455,19 @@ ${hasPhoto ? `"photo"   — a NAMED PERSON or a specific place: the article's ow
 `.trim();
 
 /**
+ * The "visual" field rides in the SHAPES, not in a prose rule. Measured
+ * 2026-08-30: a 20-line prose section produced 35% emission AND pulled beat
+ * discovery (+1 slide on 5 of 6 articles — the length-signal class, burn
+ * five). The model copies the worked shapes; a field present in every shape is
+ * emitted, a field described in prose above them is not.
+ */
+const cardGrammar = ({ visualsOn = false, hasPhoto = false, imageryOn = false } = {}) => {
+  const base = cardGrammarBase({ visualsOn, hasPhoto });
+  if (!imageryOn) return base;
+  return base.replaceAll('"caption":"..." }', '"caption":"...", "visual":"..." }');
+};
+
+/**
  * THE PROMPT CONTAINS NO SLIDE COUNT. Not a target, not a ceiling, not a floor.
  *
  * Measured 2026-08-02, second live run: told to emit "AT LEAST 6 and AT MOST
@@ -503,7 +517,15 @@ export function buildSpecPrompt({ article, allowedSources = [], bodyText = null 
   const visualsOn = subjectVisualsEnabled();
   // The cutaway rule is asked for only when the feature that consumes it is on.
   // A prompt rule with nothing behind it reads as covered while doing nothing.
-  const cutawaysOn = stockCutawaysEnabled();
+  //
+  // Two consumers of "visual" now exist, and they want DIFFERENT prompts. The
+  // beat-imagery resolver wants an intent on EVERY card (the dry run measured
+  // the writer emitting one on ~a third of beats, and that — not image
+  // scarcity — capped coverage at 33%); the library cutaway wants a rare noun
+  // resolved against a fixed list. When both are on, the resolver's rule wins:
+  // it consumes everything the cutaway path consumed and more.
+  const imageryOn = beatImageryEnabled();
+  const cutawaysOn = stockCutawaysEnabled() && !imageryOn;
   const emittable = MODEL_EMITTABLE.filter(t => {
     if (t === "sources") return false;
     if (!SUBJECT_VISUAL_TYPES.includes(t)) return true;
@@ -544,6 +566,14 @@ WHY THIS RULE EXISTS, stated plainly so you can apply it rather than pattern-mat
 
 AT MOST ONE subject-visual card per video. It is the establishing shot, and it belongs early — normally the second or third card. Two of them is a slideshow.
 ${hasPhoto ? "" : "This article has NO photograph, so \"photo\" is not on your list of card types. Do not ask for one."}
+` : ""}${imageryOn ? `
+"visual" — on every card: a CONCRETE PHOTOGRAPHABLE NOUN PHRASE, two to six words, naming the one
+thing a camera would point at during this beat. Named things get their FULL exact name ("Qalandiya
+Training Centre", "Michael Miebach"); abstract beats get the plain physical thing behind them ("gas
+storage tanks", "container ship at port"); an incident names the place or institution, never the
+scene. Not a caption fragment, not a hedge. Omit it only when nothing photographable exists.
+It is METADATA, filled in after every other decision: it never changes which beats you found, how
+many cards you emit, or what any other field says.
 ` : ""}${cutawaysOn ? `
 "visual" — AN OPTIONAL CUTAWAY, ON A CARD THAT NAMES SOMETHING YOU COULD POINT A CAMERA AT.
 You may add "visual" to a "stat", "diagram", "bars" or "turn" card. It is a SHORT NOUN naming the
@@ -566,7 +596,7 @@ a hedge between two things.
      a protest, a strike — that is exactly the case where you must omit the field, because any
      footage shown there would be mistaken for the event and it is not.
 ` : ""}CARD GRAMMAR — field names and types are exact:
-${cardGrammar({ visualsOn, hasPhoto })}
+${cardGrammar({ visualsOn, hasPhoto, imageryOn })}
 
 HARD RULES — violating any of these makes the output unusable:
 
@@ -629,7 +659,7 @@ ${multiSource ? `   THE ONE EXCEPTION: if a figure comes from a DIFFERENT outlet
    Each beat is an object: { "kind": "...", "beat": "one sentence stating it", "evidence": "the short verbatim phrase from the source material that grounds it" }.
    These are KINDS, not a checklist. A rich story may have six figures and three consequences; list every instance separately. Two sentences restating the same fact are ONE beat. A quote that adds no new fact is not a beat.
 
-   THEN emit exactly ONE CARD PER BEAT, choosing the card type that fits, wrapped by the opening "title" card and the closing "kicker" card. Do not merge beats to be brief, and do not split or invent beats to be long — how many beats the source holds is a discovery you make, never a decision.
+   THEN emit exactly ONE CARD PER BEAT, choosing the card type that fits, wrapped by the opening "title" card and the closing "kicker" card. Do not merge beats to be brief, and do not split or invent beats to be long — how many beats the source holds is a discovery you make, never a decision — and never a function of what would look good on screen: a beat exists because the source supports it, whether or not any "visual" could illustrate it.
 
    THE TITLE AND THE KICKER CARRY NO BEAT AND ARE NOT COUNTED. "One card per beat" governs the cards BETWEEN them: every beat you enumerate gets exactly one content card, and no content card exists without a beat. The two wrappers sit outside that arithmetic entirely.
 

@@ -53,7 +53,7 @@ import axios from "axios";
 //   3. URL-thumbnail problem — RSS feeds advertise tiny thumbnail URLs (BBC's
 //      /240x135/ path, Hill's ?w=900). We rewrite these to high-res variants,
 //      with a fallback to the original URL if the upscale doesn't work.
-function upscaleKnownThumbnailUrl(url) {
+export function upscaleKnownThumbnailUrl(url) {
   // Skip upscaling URLs with signed-token params — changing width breaks the
   // signature (Guardian: ?s=..., AWS-signed: ?X-Amz-Signature=..., etc.).
   if (/[?&](?:s|sig|signature|x-amz-signature|token)=/i.test(url)) return url;
@@ -146,7 +146,7 @@ export const IMAGE_FETCH_ACCEPT = "image/jpeg,image/png,image/*;q=0.8";
 // the native fetch shipped with Node 18 on Hostinger's container wasn't
 // reliably reaching external CDNs (axios works through the same routing as
 // Gemini calls, which we know are reachable).
-async function tryFetchImage(urlToFetch, refererHint) {
+export async function tryFetchImage(urlToFetch, refererHint) {
   try {
     const referer = refererHint || "https://www.google.com/";
     const { data, status, headers } = await axios.get(urlToFetch, {
@@ -188,7 +188,7 @@ async function tryFetchImage(urlToFetch, refererHint) {
 // Many articles ship a tiny RSS-thumbnail in image_url but embed a 1600px+
 // hero in the article body. We scan the body's <img> tags for higher-quality
 // candidates and return them in preference order.
-function extractImageCandidatesFromHtml(html) {
+export function extractImageCandidatesFromHtml(html) {
   if (!html || typeof html !== "string") return [];
   const candidates = [];
   const seen = new Set();

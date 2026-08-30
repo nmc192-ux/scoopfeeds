@@ -72,18 +72,28 @@ test("footage is never credited to the article's publisher", async () => {
   }
 });
 
-test("with footage off, a later card falls back to the article photo on a DIFFERENT mount", async () => {
-  // A relevant picture repeated still beats a black slide — but on the same
-  // mount it reads as a stuck frame, which is the whole complaint. So the
-  // mount actually handed to buildMount is what gets asserted, not a stand-in.
-  const seen = [];
-  const spy = async ({ imageUrl, mount }) => { seen.push(mount); return `/tmp/m-${mount}.png`; };
-  const first = await run({ ordinal: 0, _footageEnabled: () => false, _buildMount: spy });
-  const later = await run({ ordinal: 1, _footageEnabled: () => false, _buildMount: spy });
-  assert.ok(first.underlayPath && later.underlayPath);
-  assert.equal(later.imageCredit, "Reuters");
-  assert.equal(seen.length, 2);
-  assert.notEqual(seen[0], seen[1], "the repeated photograph landed on the same mount");
+test("with footage off, the SAME photograph is not served twice", async () => {
+  // This used to assert the repeat landed on a different MOUNT — a relevant
+  // picture repeated beat a black slide, so long as the treatment varied. The
+  // mounts are deleted (DrJ, 2026-08-30) and the answer is no longer a
+  // different dressing on one photograph: the ledger refuses the second use
+  // outright, and the beat renders without a picture.
+  const { createImageLedger } = await import("./videoBeatImagery.js");
+  const { execFileSync } = await import("node:child_process");
+  const { getFFmpegPath } = await import("./videoGenerator.js");
+  const real = execFileSync(getFFmpegPath(), ["-loglevel", "error", "-f", "lavfi",
+    "-i", "testsrc2=size=1200x800", "-frames:v", "1", "-f", "image2", "-c:v", "mjpeg", "pipe:1"],
+    { maxBuffer: 1 << 24 });
+  const ledger = createImageLedger({ _log: QUIET });
+  // A buildMount stand-in that claims through the ledger the way the real
+  // buildFullBleed does, so the second call meets a spent photograph.
+  const spy = async ({ ledger: l }) => (l && !l.claim(real, { label: "article photo" }) ? null : "/tmp/fb.png");
+
+  const first = await run({ ordinal: 0, ledger, _footageEnabled: () => false, _buildMount: spy });
+  const later = await run({ ordinal: 1, ledger, _footageEnabled: () => false, _buildMount: spy });
+  assert.ok(first.underlayPath, "the first beat gets the photograph");
+  assert.equal(later.underlayPath, null, "the second must not get it again in a new costume");
+  assert.equal(later.imageCredit, null, "and no credit for a picture that is not on screen");
 });
 
 test("no picture means no credit", async () => {

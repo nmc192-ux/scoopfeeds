@@ -17,6 +17,10 @@ footage (decided Aug 14) is:
 - **Selection at render time is a lookup against known-good assets, never a live search.**
   Live keyword search is explicitly rejected: it is the mechanism that produced the
   globe-on-a-gold-story and bar-chart-on-a-displacement-story mismatches.
+  > **SUPERSEDED 2026-08-30 — see §7a.** The local library is abandoned and render-time
+  > search is now permitted, under a named replacement for the human eye. What this
+  > bullet was actually protecting against was *unreviewed relevance*, which is a
+  > different property from *local storage*; the two were welded together here.
 - **The editorial rule:** stock illustrates the **SUBJECT**, never the **EVENT**. A flag, a
   building, a category texture, a locator map. Never a scene a viewer could mistake for what
   actually happened; never an unnamed human face standing in for real people; never anything on
@@ -227,7 +231,7 @@ charts applies to footage.
 
 - No render-loop, videoAssembler, videoSpecWriter or videoSpecSchema changes. **Zero.**
 - No render-time selection logic, no `visual` field consumption. Later brief.
-- No live search at render time under any framing.
+- ~~No live search at render time under any framing.~~ **Superseded 2026-08-30 — see §7a.**
 - No publishing surface of any kind; nothing here needs `assertPublishAllowed` because nothing
   here publishes.
 - No committing of media binaries or the live manifest.
@@ -237,6 +241,67 @@ charts applies to footage.
 - No new npm dependencies (§2b), no VPS acquisition path or container service (§2e), and no
   provider keys in any production environment or compose file (§2d).
 - No MPT source vendored, copied wholesale, or added to the dependency tree in any language.
+
+---
+
+## 7a. What replaced the human eye (2026-08-30)
+
+This section exists because §7 forbade live search at render time "under any framing",
+and we now do it. Rewriting a non-goal quietly is how a rule becomes folklore, so this
+records what changed, what it cost, and what stands in the place of the thing removed.
+
+**What changed, and why the original rule could not simply be kept.** The curated local
+library is abandoned by decision (DrJ, 2026-08-30): no hours of footage on the box, no
+tons of storage. Storage and CPU there are already spoken for. That deletes the thing
+render-time lookup was looking *up*. Separately, the editorial target inverted — cards
+are punctuation and imagery is the default — and a library of a few hundred hand-tagged
+subject-class assets cannot answer most beats of most stories.
+
+**What §7 was really protecting.** Not local storage. The failures it cites —
+globe-on-a-gold-story, bar-chart-on-a-displacement-story — are failures of *unreviewed
+relevance*: a keyword search returned something plausible and nobody checked it against
+the story. The brief welded that concern to the storage model because, at the time, the
+human curator was the only available answer to it. The concern survives the model; the
+mechanism had to be replaced rather than dropped.
+
+**What replaced the curator, concretely.** Four things, none of which is a scorer judging
+an image against an intent:
+
+1. **A trust-ordered source cascade** (`videoBeatImagery.js`). Body-mined images come
+   first — a picture editor chose them for *this* story, which is the curator's judgement
+   inherited rather than simulated. Then an entity's own portrait by exact identifier
+   (QID → Wikidata P18), which cannot return a picture of something else. Stock is third
+   and last before a card.
+
+2. **Stock is confined to beats where any plausible image is correct by construction** —
+   "winter landscape", "gas pipeline". A named subject has a right answer, so a plausible
+   wrong one is refused: a named subject with no exact image falls to a card and never to
+   stock. That single rule is what the globe-on-a-gold-story would have failed.
+
+3. **A conjunctive relevance gate** (`videoImageRelevance.js`), replacing the token-overlap
+   gate in `videoFootage.js`, which was *measured wrong in production*: it matched a USAF
+   exercise named "Polar Bear Charge" to the query "a polar bear on ice" — one of three
+   cached hits. Every content token of a query must now appear in the candidate. It is
+   deliberately conservative and rejects true matches; a miss falls to a card, which is
+   always a correct video. That case is a named test and the acceptance bar for any
+   future relevance model.
+
+4. **Confidence that is not a judgement.** It falls out of which tier answered — body and
+   entity mean "we found *this* thing", stock means "we found something matching the
+   words". There is no scorer, because the scorer is what produced the polar bear.
+
+**What is genuinely lost.** A person no longer looks at every frame before it can be
+selected. Nothing above recovers that; they are guards, not a curator. The trade is
+stated rather than hidden: at twelve unattended renders a day a human gate was never
+going to run, so the honest comparison is not *curated vs searched* but *searched with
+these guards vs the one article photo reused on rotated mounts*.
+
+**What did NOT change.** The operator/runtime boundary
+(`stockLibraryBoundary.test.js`) stands untouched — the plan was to cross it and reuse
+the existing provider client, but that client searches videos, and this path needs
+photos. There was nothing to cross for. Provider keys stay out of the acquisition
+tooling's reach on the server, and the editorial subject-never-event rule of §1 is
+unchanged and now enforced in code rather than by review.
 
 ---
 

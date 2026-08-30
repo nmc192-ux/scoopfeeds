@@ -208,3 +208,89 @@ test("the rendered cutaway segment is a real, playable video", { skip: !canRende
   } catch (e) { info = String(e.stderr || ""); }
   assert.match(info, /1080x1920/, "the segment must be at the delivery resolution");
 });
+
+// ─── A STILL through the same seam ──────────────────────────────────────────
+//
+// The imagery inversion needs pictures over type cards, and those card layouts
+// declare no underlay — only `photo` and `map` do. So a still rides the cutaway
+// seam instead of getting a new compositing path. These pin the claim that it
+// really is the SAME path: only the input declaration differs.
+
+test("a STILL cutaway holds for its full window instead of flashing one frame",
+  { skip: !canRender && "no ffmpeg" }, async () => {
+  // A bare `-i still.jpg` decodes ONE frame: the overlay would appear for 40ms
+  // and pass through, which looks like a glitch rather than a picture. The
+  // `-loop 1 -t N` declaration is what makes it a stream that ENDS — the exact
+  // property `eof_action=pass` is built on, and the same flags the state PNGs
+  // and the underlay already use.
+  const dir = tmp();
+  const states = [statePng(dir, "s0.png", "black")];
+  const still = statePng(dir, "still.png", "red");
+
+  const hold = 2.5;
+  const out = path.join(dir, "still-cut.mp4");
+  await assembleSlide({
+    statePaths: states, hold, outputPath: out, orientation: "vertical",
+    cutawayPath: still, cutawaySecs: 1.5, cutawayIsStill: true,
+  });
+
+  assert.ok(existsSync(out));
+  const secs = probe(out);
+  assert.ok(Math.abs(secs - totalFor(1, hold)) < 0.1,
+    `a still cutaway changed the segment length: ${secs.toFixed(3)}s vs ${totalFor(1, hold)}s`);
+
+  // The picture must actually be on screen partway through the window. Sampled
+  // at 0.75s — inside the 1.5s cutaway — the frame should be the still's red,
+  // not the slide's black.
+  // Read the pixel directly: one frame, scaled to 1x1, as raw RGB on stdout.
+  // (signalstats prints to STDERR, which is how the first version of this test
+  // measured nothing and reported a black frame.)
+  const rgb = execFileSync(FF, ["-loglevel", "error", "-ss", "0.75", "-i", out,
+    "-frames:v", "1", "-vf", "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+    { maxBuffer: 1 << 20 });
+  assert.equal(rgb.length, 3, "expected one RGB pixel");
+  const [r, g, b] = rgb;
+  assert.ok(r > 100 && g < 80 && b < 80,
+    `at 0.75s the frame is rgb(${r},${g},${b}) — the red still never rendered over the black slide`);
+});
+
+test("a still and a video cutaway differ ONLY in the input declaration", async () => {
+  // The structural claim, asserted rather than described: the filter graph is
+  // identical, so everything downstream — credit inside the stream, the clamp,
+  // eof_action=pass, the audio it never maps — behaves the same for both.
+  const asVideo = buildSlideFilter({
+    stateCount: 1, hold: 2.5, orientation: "vertical",
+    cutaway: { inputIndex: 1, seconds: 1.5, credit: null, frame: null },
+  });
+  const asStill = buildSlideFilter({
+    stateCount: 1, hold: 2.5, orientation: "vertical",
+    cutaway: { inputIndex: 1, seconds: 1.5, credit: null, frame: null },
+  });
+  assert.equal(asVideo.filter, asStill.filter,
+    "a still must not need its own filter graph — that would be a second compositing path");
+  assert.match(asVideo.filter, /eof_action=pass/);
+});
+
+test("a cutaway with a NaN duration is REFUSED loudly, not dropped in silence", async () => {
+  // The defect that cost a whole render: slideTotalSecs takes seconds and was
+  // handed the audio object, producing NaN. `NaN > 0` is false, so useCutaway
+  // went false and every resolved still vanished — while the resolver's own
+  // log line said it had placed one. Silence is the part that must not recur.
+  const errs = [];
+  const { logger } = await import("./logger.js");
+  const realError = logger.error;
+  logger.error = (m) => errs.push(String(m));
+  try {
+    const dir = tmp();
+    const states = [statePng(dir, "s0.png", "black")];
+    const still = statePng(dir, "still.png", "red");
+    const out = path.join(dir, "nan.mp4");
+    await assembleSlide({
+      statePaths: states, hold: 1.2, outputPath: out, orientation: "vertical",
+      cutawayPath: still, cutawaySecs: NaN, cutawayIsStill: true,
+    });
+    assert.ok(existsSync(out), "the video must still render — a missing picture is not a lost story");
+    assert.ok(errs.some((e) => /unusable duration/.test(e)),
+      `expected a loud refusal, got: ${JSON.stringify(errs)}`);
+  } finally { logger.error = realError; }
+});

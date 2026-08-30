@@ -36,6 +36,13 @@ import path from "path";
 import { logger } from "./logger.js";
 import { isExplicitHarmHeadline, isSensitiveHeadline } from "./editorialSensitivity.js";
 import {
+  beatImageryEnabled, beatImageryMotionEnabled, resolveSpecImagery, noAdjacentRepeat, TIERS,
+  createImageLedger,
+} from "./videoBeatImagery.js";
+import { makeEntityImageFetcher, makeStockImageFetcher } from "./videoBeatSources.js";
+import { searchEventImages, webImageSearchEnabled } from "./videoWebImageSearch.js";
+import { imageIdentity } from "./videoImageIdentity.js";
+import {
   findFreshUnvideoedArticles, claimVideoPost, markVideoPublished, markVideoFailed,
   countVideosPublishedSince, lastVideoPublishedAt, recordHeartbeat, getHeartbeatRow,
   markVideoFacebook, countFacebookPostsSince,
@@ -43,7 +50,7 @@ import {
   markVideoThreads, countThreadsPostsSince,
   markVideoBluesky, countBlueskyPostsSince,
   markVideoTikTok, countTikTokPostsSince,
-  markVideoX, countXPostsSince, getArticleEntitiesForTagging,
+  markVideoX, countXPostsSince, getArticleEntitiesForTagging, getArticleEntitiesWithQids,
   getDb,
 } from "../models/database.js";
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
@@ -66,7 +73,7 @@ import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from ".
 import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js";
 import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
 import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
-import { buildMount, buildMapPng, MOUNT_NAMES } from "./videoSubjectVisual.js";
+import { buildFullBleed, buildMapPng, buildStillSequence, buildTightCrop } from "./videoSubjectVisual.js";
 import { findFootageStill, footageEnabled, footageCreditLines, footageDateLabel } from "./videoFootage.js";
 import { withDeadline } from "./httpRetry.js";
 import { isTikTokConfigured, uploadToTikTok, tiktokPrivacyLevel } from "./tiktokClient.js";
@@ -257,22 +264,6 @@ export const VIDEO_FACEBOOK_MAX_PER_DAY = () => {
   return Number.isFinite(n) && n >= 0 ? n : VIDEO_MAX_PER_DAY();
 };
 
-/**
- * ONE MOUNT PER VIDEO, chosen deterministically from the article id.
- *
- * Deterministic so a re-render is identical (the render cache means a video
- * rebuilt tomorrow must not arrive in a different frame), and varied across
- * articles so the channel does not look like one template. The ground never
- * changes, so varying the mount is where variety comes from without
- * inconsistency — DrJ's decision, 2026-08-14.
- */
-export function mountFor(articleId, ordinal = 0) {
-  const h = [...String(articleId || "x")].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
-  // ORDINAL, because one video can hold more than one photo card and they were
-  // all landing on the same mount. Stable per article as before at ordinal 0,
-  // so nothing that does not ask for variety sees any change.
-  return MOUNT_NAMES[(h + ordinal) % MOUNT_NAMES.length];
-}
 
 const SITE_ORIGIN = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 
@@ -394,9 +385,8 @@ export function rateGate({ now = Date.now() } = {}) {
  * Injectable collaborators, because the real ones fetch over the network.
  */
 export async function choosePhotoUnderlay({
-  card, article, attribution, ordinal, work, slideIndex = 0,
-  mount = mountFor(article?.id, ordinal),
-  _buildMount = buildMount, _findFootageStill = findFootageStill, _footageEnabled = footageEnabled,
+  card, article, attribution, ordinal, work, slideIndex = 0, ledger = null,
+  _buildMount = buildFullBleed, _findFootageStill = findFootageStill, _footageEnabled = footageEnabled,
   _log = logger,
 } = {}) {
   const none = { underlayPath: null, imageCredit: null, imageDate: null, footage: null,
@@ -421,7 +411,7 @@ export async function choosePhotoUnderlay({
   const thirdPartyImageryAllowed = !sensitiveHeadline;
 
   if (ordinal === 0 && article?.image_url && publisherPhotoAllowed) {
-    const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: article.id });
+    const p = await _buildMount({ imageUrl: article.image_url, work, ledger });
     if (p) return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null,
                     footage: null, imageUrl: article.image_url, pickedBy: "article-photo" };
   }
@@ -433,8 +423,7 @@ export async function choosePhotoUnderlay({
     const found = await _findFootageStill({ subject: card?.subject, title: article?.title });
     if (found) {
       const p = await _buildMount({
-        imageUrl: found.imageUrl, mount,
-        work: path.join(work, "footage"), seed: `${article?.id}-${ordinal}`,
+        imageUrl: found.imageUrl, ledger, work: path.join(work, "footage"),
       });
       if (p) {
         // ARCHIVE MATERIAL IS DATED ON SCREEN. Recency ranking prefers newer
@@ -453,9 +442,9 @@ export async function choosePhotoUnderlay({
   }
 
   if (ordinal > 0 && article?.image_url && publisherPhotoAllowed) {
-    const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: `${article.id}-${ordinal}` });
+    const p = await _buildMount({ imageUrl: article.image_url, work, ledger });
     if (p) {
-      _log.info(`🎬 slide ${slideIndex} photo: no footage for photo card #${ordinal + 1} — reusing the article photo on mount "${mount}"`);
+      _log.info(`🎬 slide ${slideIndex} photo: no footage for photo card #${ordinal + 1} — reusing the article photograph`);
       return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null,
                footage: null, imageUrl: article.image_url, pickedBy: "article-photo-reused" };
     }
@@ -527,7 +516,11 @@ export function pingVideoOutcome({ produced = 0, tried = 0, skipped = null,
 
 // ─── Produce one video ──────────────────────────────────────────────────────
 
-async function produceVideo(article, spec, attribution = resolveAttribution(article)) {
+// Exported for the offline sample harness and for tests: the full render path
+// (voice, slides, imagery, assembly, score) WITHOUT the cycle around it — no
+// selection, no upload, no marking. Publishing stays reachable only through
+// runVideoCycle, which is where assertPublishAllowed sits.
+export async function produceVideo(article, spec, attribution = resolveAttribution(article)) {
   // ORIENTATION. Vertical by default — Shorts and Reels are the only surfaces
   // that push video to people who have not heard of the channel, and a vertical
   // MP4 under the length limit uploaded through the existing YouTube API IS a
@@ -573,6 +566,61 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
     // classifier, not a guard. So a flagged headline suppresses every cutaway in
     // the video — the same over-broad, cheap-false-positive posture the card
     // renderer already takes when it drops to a typographic card.
+    // ── Per-beat imagery (dark: VIDEO_BEAT_IMAGERY_ENABLED=1) ───────────────
+    //
+    // Resolved ONCE for the whole video, before any slide is assembled, for the
+    // same reason the stock picks are: "one contributor per video" and "no two
+    // neighbours share a treatment" are properties of the VIDEO, and a
+    // per-slide decision cannot see them.
+    //
+    // Where the picture goes depends on the card. `photo` and `map` layouts
+    // declare an underlay and take one; every other layout declares none, so
+    // its picture rides #121's cutaway seam as a still. That is a routing
+    // decision, not a second compositing path — see videoAssembler's
+    // cutawayIsStill.
+    // ONE LEDGER PER VIDEO, consulted by both imagery paths. See
+    // createImageLedger: the same photograph appearing mounted, then
+    // full-bleed, then halftoned is the failure this exists to stop, and it
+    // was invisible to both subsystems on their own.
+    const imageLedger = beatImageryEnabled() ? createImageLedger() : null;
+
+    const beatImagery = new Map();
+    let beatLeftovers = [];
+    if (beatImageryEnabled()) {
+      try {
+        const entities = getArticleEntitiesWithQids(article.id, 12);
+        const resolved = await resolveSpecImagery({
+          slides, article, entities, ledger: imageLedger,
+          // How far back the date-proximate query reaches. Anchored on the
+          // article's own age so a story published today searches today, and a
+          // week-old one still finds its own coverage.
+          webDays: Math.max(2, Math.min(30,
+            Math.ceil((Date.now() - (article.published_at || Date.now())) / 86_400_000) + 2)),
+          deps: {
+            _entityImage: makeEntityImageFetcher(),
+            _stockImage: makeStockImageFetcher(),
+            // The open web, top of the cascade — off unless BOTH the key and
+            // the flag are present.
+            _webSearch: webImageSearchEnabled() ? searchEventImages : null,
+          },
+        });
+        for (const p of noAdjacentRepeat(resolved.picks)) {
+          if (p.tier !== TIERS.CARD) beatImagery.set(p.slideIndex, p);
+        }
+        beatLeftovers = resolved.leftovers || [];
+        const c = resolved.bySource;
+        logger.info(
+          `🖼 beat imagery [${article.id}]: ${resolved.beats} beats — ` +
+          `web ${c.web} · body ${c.body} · entity ${c.entity} · stock ${c.stock} · card ${c.card} ` +
+          `(${Math.round(resolved.eligibleShare * 100)}% of eligible beats carry a picture, pool ${resolved.poolSize})`
+        );
+      } catch (err) {
+        // The resolver is an ENHANCEMENT. Its failure costs pictures, never the
+        // video — the loop below simply finds an empty map.
+        logger.warn(`🖼 beat imagery failed, falling back to the old path — ${String(err.message).slice(0, 140)}`);
+      }
+    }
+
     const cutawayBySlide = new Map();
     const cutawayGate = cutawaysAllowedFor(article);
     if (!cutawayGate.allowed) {
@@ -628,6 +676,7 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
           if (wants === "photo") {
             const chosen = await choosePhotoUnderlay({
               card, article, attribution, ordinal: photosUsed++, work: svWork, slideIndex: i,
+              ledger: imageLedger,
             });
             underlayPath = chosen.underlayPath;
             imageCredit = chosen.imageCredit;
@@ -694,16 +743,119 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
       // timeline independently from slideTotalSecs — stays in sync by not
       // having anything to be out of sync with.
       const cutAsset = cutawayBySlide.get(i) || null;
+
+      // A resolved picture for a card whose layout has no underlay slot rides
+      // the cutaway seam instead. It never displaces a real stock cutaway.
+      let beatStill = null;
+      const beat = beatImagery.get(i);
+      if (beat && !underlayPath && !cutAsset && beat.buffer) {
+        try {
+          // FULL-BLEED, COLOUR, UNTOUCHED. This routed through buildMount
+          // earlier today; DrJ's ruling of 2026-08-30 deletes the mounts
+          // outright, so that is superseded rather than left as a second path.
+          // The bytes are already fetched and validated, so sourceBuffer skips
+          // a request a CDN might answer with a different rendition.
+          const beatWork = path.join(work, `beat${String(i).padStart(2, "0")}`);
+          const bp = await buildFullBleed({ sourceBuffer: beat.buffer, work: beatWork });
+          if (!bp) throw new Error("full-bleed render produced nothing");
+
+          // ── PACING (DrJ, defect 5): no visual holds past ~3 seconds ──────
+          //
+          // A long beat becomes two or three visuals cut hard. The second
+          // visual is a leftover pool photograph when one exists (claimed
+          // through the ledger AT USE, so an unused leftover stays free);
+          // otherwise a tight reframe of the same photograph — wide, then
+          // close — which cuts like coverage rather than repeating a slide.
+          const windowSecs = slideTotalSecs(audioSecs);
+          const MAX_VISUAL_SECS = 3;
+          if (windowSecs > MAX_VISUAL_SECS + 0.5) {
+            const wanted = Math.min(3, Math.ceil(windowSecs / MAX_VISUAL_SECS));
+            const framesList = [bp];
+            while (framesList.length < wanted && beatLeftovers.length) {
+              const cand = beatLeftovers.shift();
+              // CROPS DEFEAT THE BYTE HASH (the known crop-mode gap), and a
+              // leftover that is a crop of an already-placed photograph made
+              // one picture count as two "distinct". URL identity catches the
+              // rendition before the ledger ever sees the bytes.
+              const candId = imageIdentity(cand.url);
+              if (candId && imageLedger &&
+                  imageLedger.entries().some((e) => imageIdentity(e.label) === candId)) continue;
+              if (imageLedger && !imageLedger.claim(cand.buf, { label: cand.url })) continue;
+              const extra = await buildFullBleed({ sourceBuffer: cand.buf, work: path.join(beatWork, `x${framesList.length}`) });
+              if (extra) framesList.push(extra);
+            }
+            if (framesList.length < wanted) {
+              const tight = buildTightCrop({ sourcePath: bp, out: path.join(beatWork, "tight.png") });
+              if (tight) framesList.push(tight);
+            }
+            if (framesList.length > 1) {
+              const seq = buildStillSequence({
+                frames: framesList, secsEach: windowSecs / framesList.length,
+                out: path.join(beatWork, "seq.mp4"), work: beatWork,
+                motion: beatImageryMotionEnabled(),
+              });
+              if (seq) {
+                logger.info(`🎬 pacing: slide ${i} — ${framesList.length} visuals across ${windowSecs.toFixed(1)}s`);
+                beatStill = { path: seq, credit: beat.credit || null, isSequence: true };
+              }
+            }
+          }
+          if (!beatStill) beatStill = { path: bp, credit: beat.credit || null };
+          logger.info(
+            `🖼 slide ${i} [${beat.tier}/${beat.confidence}] intent "${beat.intent}" ` +
+            `(${beat.intentSource}) → ${String(beat.imageUrl).slice(0, 90)}`
+          );
+        } catch (err) {
+          logger.warn(`🖼 slide ${i}: could not stage the picture — ${String(err.message).slice(0, 90)}`);
+        }
+      }
+
       await assembleSlide({
         statePaths: paths, hold, outputPath: seg, driftDir: i, orientation,
-        audioPath: audio[i].path, captionText: captionForCard(card), workDir: work, fontFile: FONT_FILE,
+        audioPath: audio[i].path,
+        // NO PARAGRAPH OVER A PICTURE. captionForCard already refuses photo and
+        // map beats, whose layouts carry their own centred phrase — but a TYPE
+        // beat that the resolver filled is also a picture beat now, and it was
+        // still burning its paragraph across the photograph. Seen in the
+        // acceptance render: a full-bleed France 24 frame with three lines of
+        // prose over it, which is precisely the grammar Ruling 3 removes.
+        //
+        // The decision belongs here because this is the only place that knows
+        // a picture was actually placed.
+        captionText: beatStill ? null : captionForCard(card),
+        workDir: work, fontFile: FONT_FILE,
         underlayPath,
-        cutawayPath: cutAsset?.absPath || null,
-        cutawaySecs: cutAsset ? CUTAWAY_SECS() : 0,
-        cutawayCredit: cutAsset ? cutawayCredit(cutAsset) : null,
+        cutawayPath: cutAsset?.absPath || beatStill?.path || null,
+        // slideTotalSecs takes SECONDS, not the audio object. Passing the object
+        // produced NaN, and `useCutaway = cutawaySecs > 0` is false for NaN — so
+        // every resolved still was silently dropped while the resolver logged
+        // that it had placed one. Nothing failed; the picture simply was not
+        // there. Hence beatSecs below, and the assertion in assembleSlide.
+        cutawaySecs: cutAsset ? CUTAWAY_SECS() : (beatStill ? slideTotalSecs(audioSecs) : 0),
+        cutawayCredit: cutAsset ? cutawayCredit(cutAsset) : (beatStill?.credit || null),
+        // A pre-cut sequence is already a video stream; only a single frame
+        // needs the -loop 1 -t declaration.
+        cutawayIsStill: Boolean(!cutAsset && beatStill && !beatStill.isSequence),
       });
       segments.push(seg);
     }
+    // THE TRUSTWORTHY PICTURE COUNT, by source bytes.
+    //
+    // Counting distinct pictures off the finished frames measures the LAYOUT,
+    // not the picture: measured on a real render, two different photographs
+    // sharing a mount hashed 4 bits apart (below the duplicate threshold)
+    // while one photograph at two crops hashed 27 apart — both readings
+    // backwards. The ledger hashed each source before any treatment, so this
+    // line is the honest answer to "how many different photographs are in this
+    // video", and the frame strip is how you check they are on screen.
+    if (imageLedger) {
+      const placed = imageLedger.entries();
+      logger.info(
+        `🖼 PICTURES PLACED [${article.id}]: ${placed.length} distinct photograph(s) across ` +
+        `${slides.length} beats — ${placed.map((e) => String(e.label).slice(0, 58)).join(" | ") || "none"}`
+      );
+    }
+
     const out = path.join(VIDEOS_DIR, `${article.id}-${videoDesignKey()}.mp4`);
     await concatSlides({ segmentPaths: segments, outputPath: out, workDir: work });
     if (!existsSync(out) || statSync(out).size < 10_000) {

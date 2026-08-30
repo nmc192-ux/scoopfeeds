@@ -201,6 +201,8 @@ function runFFmpeg(args, ffmpegPath) {
  */
 export { MAX_CAPTION_BOTTOM_FRACTION } from "./videoGeometry.js";
 
+// (The per-type caption set is gone — see captionForCard.)
+
 /**
  * The caption for a card, or null when it would only repeat what is on screen.
  *
@@ -220,6 +222,14 @@ export { MAX_CAPTION_BOTTOM_FRACTION } from "./videoGeometry.js";
  * prompted this.
  */
 export function captionForCard(card = {}) {
+  // THE PARAGRAPH TRACK IS DEAD — everywhere, not just on picture beats
+  // (DrJ, defect 4, 2026-08-30). The reference has zero bottom paragraphs:
+  // beats carry their display type or their kinetic phrase, and the narration
+  // carries the prose. This function is kept (rather than deleted) because the
+  // dedupe logic below still guards the horizontal/legacy path, and because a
+  // caller that expects a string API keeps getting one.
+  if (String(process.env.VIDEO_ORIENTATION || "vertical") !== "horizontal") return null;
+
   const caption = String(card.caption || "").trim();
   if (!caption) return null;
 
@@ -787,6 +797,7 @@ export async function assembleSlide({
   audioPath = null, captionText = null, workDir = null, fontFile = null,
   orientation = "horizontal", underlayPath = null,
   cutawayPath = null, cutawaySecs = 0, cutawayCredit = null, cutawayFrame = null,
+  cutawayIsStill = false,
 }) {
   const ff = ffmpegPath || getFFmpegPath();
   if (!ff) throw new Error("videoAssembler: ffmpeg not available");
@@ -799,9 +810,31 @@ export async function assembleSlide({
   if (underlayPath) args.push("-loop", "1", "-t", String(hold * statePaths.length), "-i", underlayPath);
   // The cutaway sits AFTER the underlay and BEFORE the audio, so both indices
   // below stay arithmetic on the counts rather than on which options are set.
-  const useCutaway = Boolean(cutawayPath) && cutawaySecs > 0;
+  // A cutaway path with an unusable duration is a BUG UPSTREAM, not a reason to
+  // render a silent near-miss: NaN fails `> 0` quietly, which is how a whole
+  // video's worth of resolved stills went missing while every log line claimed
+  // they were placed. Say so loudly; still render, because a video without a
+  // picture beats no video.
+  if (cutawayPath && !(Number.isFinite(cutawaySecs) && cutawaySecs > 0)) {
+    logger.error(`videoAssembler: cutaway "${String(cutawayPath).slice(-40)}" has an unusable duration ` +
+      `(${cutawaySecs}) — the picture will NOT appear. This is a caller bug.`);
+  }
+  const useCutaway = Boolean(cutawayPath) && Number.isFinite(cutawaySecs) && cutawaySecs > 0;
   const cutawayIdx = statePaths.length + (underlayPath ? 1 : 0);
-  if (useCutaway) args.push("-i", cutawayPath);
+  if (useCutaway) {
+    // A STILL IS A SPECIAL CASE OF THE EXISTING PATH, not a second one.
+    //
+    // Everything downstream of this input — scale/crop/setsar/fps, the
+    // trim, the credit composited INSIDE the cutaway stream, and
+    // `eof_action=pass` handing the frame back — is media-agnostic. The one
+    // thing a still lacks is a duration: a bare `-i still.jpg` decodes a
+    // single frame, the overlay flashes and passes through. `-loop 1 -t N`
+    // makes it a stream that ENDS at N seconds, which is exactly the property
+    // the graph is built on — and exactly how the state PNGs and the underlay
+    // are already declared a few lines above.
+    if (cutawayIsStill) args.push("-loop", "1", "-t", String(cutawaySecs));
+    args.push("-i", cutawayPath);
+  }
   const audioIdx = cutawayIdx + (useCutaway ? 1 : 0);
   if (audioPath) args.push("-i", audioPath);
 
