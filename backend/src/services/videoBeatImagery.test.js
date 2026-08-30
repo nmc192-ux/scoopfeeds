@@ -367,3 +367,76 @@ test("hashDistance separates renditions from different pictures", async () => {
   assert.ok(hashDistance(a, aSmall) <= DUPLICATE_BITS, `renditions differ by ${hashDistance(a, aSmall)} bits`);
   assert.ok(hashDistance(a, b) > DUPLICATE_BITS, `distinct pictures differ by only ${hashDistance(a, b)} bits`);
 });
+
+// ─── The shared ledger (DrJ, 2026-08-30) ───────────────────────────────────
+
+test("the ledger is TWO-WAY — whichever path claims first wins, either order", async () => {
+  // Not "the resolver reads the photo path's output": that fixes today's
+  // ordering and breaks the moment the order changes. Both write, both check.
+  const { createImageLedger } = await import("./videoBeatImagery.js");
+  const { execFileSync } = await import("child_process");
+  const { getFFmpegPath } = await import("./videoGenerator.js");
+  const ff = getFFmpegPath();
+  const jpeg = (spec, w) => execFileSync(ff, ["-loglevel", "error", "-f", "lavfi", "-i", spec,
+    "-frames:v", "1", "-vf", `scale=${w}:-2`, "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
+  const photo = jpeg("testsrc2=size=1000x700", 1000);
+  const sameSmaller = jpeg("testsrc2=size=1000x700", 420);   // the SAME picture, another rendition
+  const different = jpeg("color=c=navy:s=1000x700", 1000);
+
+  // resolver first, photo path second
+  const a = createImageLedger({ _log: QUIET });
+  assert.equal(a.claim(photo, { label: "resolver" }), true);
+  assert.equal(a.claim(sameSmaller, { label: "photo path" }), false, "a rendition of a spent picture is spent");
+  assert.equal(a.claim(different, { label: "photo path" }), true);
+
+  // photo path first, resolver second — the same answers
+  const b = createImageLedger({ _log: QUIET });
+  assert.equal(b.claim(sameSmaller, { label: "photo path" }), true);
+  assert.equal(b.claim(photo, { label: "resolver" }), false);
+  assert.equal(b.size, 1);
+});
+
+test("an unhashable image is let through — 'we could not tell' never costs a picture", async () => {
+  const { createImageLedger } = await import("./videoBeatImagery.js");
+  const l = createImageLedger({ _log: QUIET });
+  assert.equal(l.claim(Buffer.from("not an image")), true);
+  assert.equal(l.claim(Buffer.from("also not an image")), true);
+});
+
+test("the article's own photograph is RESERVED for its photo card", async () => {
+  // Otherwise a type beat takes it first and the card that exists to show it
+  // renders bare — the resolver running before the slide loop guarantees it.
+  const { createImageLedger } = await import("./videoBeatImagery.js");
+  const ledger = createImageLedger({ _log: QUIET });
+  const own = { ...img(1), url: ARTICLE.image_url, text: "" };
+  const other = { ...img(2), text: "" };
+  const r = await resolveSpecImagery({
+    slides: [{ t: "photo", subject: "the bypass" }, { t: "turn", visual: "the bypass at dusk" }],
+    article: ARTICLE, ledger, deps: { _pool: [own, other], _log: QUIET },
+  });
+  assert.equal(r.picks[0].tier, TIERS.CARD, "the photo beat is self-imaged");
+  assert.equal(r.picks[1].tier, TIERS.BODY);
+  assert.notEqual(r.picks[1].imageUrl, ARTICLE.image_url,
+    "the type beat must not take the picture the photo card is going to show");
+});
+
+test("a photograph already spent sends the beat to the next tier, not to a repeat", async () => {
+  const { createImageLedger } = await import("./videoBeatImagery.js");
+  const { execFileSync } = await import("child_process");
+  const { getFFmpegPath } = await import("./videoGenerator.js");
+  const ff = getFFmpegPath();
+  // REAL bytes: img() carries a placeholder Buffer, which hashes to null, and
+  // a null hash is deliberately let through — so a fake image cannot exercise
+  // the ledger at all.
+  const real = execFileSync(ff, ["-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=900x600",
+    "-frames:v", "1", "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
+  const ledger = createImageLedger({ _log: QUIET });
+  const only = { ...img(1), buf: real, text: "" };
+  ledger.claim(only.buf, { label: "claimed by the photo path first" });
+  const r = await resolveSpecImagery({
+    slides: [{ t: "turn", visual: "the bypass" }],
+    article: ARTICLE, ledger, deps: { _pool: [only], _log: QUIET },
+  });
+  assert.equal(r.picks[0].tier, TIERS.CARD);
+  assert.match(r.picks[0].reason, /already used/);
+});

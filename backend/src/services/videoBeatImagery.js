@@ -130,6 +130,46 @@ export function intentForBeat(slide = {}, { entities = [] } = {}) {
 }
 
 /**
+ * The per-video image ledger — one record of every photograph already spent,
+ * written to and read by BOTH imagery paths.
+ *
+ * WHY IT IS SHARED RATHER THAN ONE-WAY (DrJ, 2026-08-30). The strip of a
+ * rendered video showed the same Netanyahu portrait three times: mounted by
+ * choosePhotoUnderlay, full-bleed by the resolver, halftoned by the mount
+ * rotation. Perceptual dedupe inside the pool could not see it, because the
+ * duplication was ACROSS two subsystems that each believed they had used one
+ * picture once. Having the resolver read the photo path's output would fix
+ * today's ordering and break the moment that order changes — so neither path
+ * is the authority. Both claim here, and whoever asks first gets the picture.
+ *
+ * KEYED ON SOURCE BYTES, before treatment. Treatment is precisely what makes
+ * one photograph look like three: mounted, full-bleed and halftoned versions
+ * of one image hash differently at every stage and are one photograph to a
+ * viewer.
+ */
+export function createImageLedger({ _hash = averageHash, _log = logger } = {}) {
+  const spent = [];
+  return {
+    /** True when this picture is new and now claimed; false when already spent. */
+    claim(buf, { label = "" } = {}) {
+      const h = _hash(buf);
+      // An unhashable image is ALLOWED THROUGH. "We could not tell" must never
+      // silently cost a beat its picture — the same rule the pool follows.
+      if (h === null) return true;
+      if (spent.some((prev) => hashDistance(prev, h) <= DUPLICATE_BITS)) {
+        _log.info(`🖼 ledger: already used this photograph — ${String(label).slice(0, 70)}`);
+        return false;
+      }
+      spent.push(h);
+      return true;
+    },
+    /** Claim without a caller — used to hold the article photo for its card. */
+    reserve(buf, label = "reserved") { return this.claim(buf, { label }); },
+    get size() { return spent.length; },
+  };
+}
+
+/**
  * What the page SAYS each image is — alt text and figcaption, keyed by URL.
  *
  * This exists because "twelve beats got A story photo" is not "twelve beats
@@ -344,7 +384,7 @@ async function defaultFetchPage(url) {
  * beat with no picture is a card, which is a correct video.
  */
 export async function resolveBeat({
-  slide, article, entities = [], pool, poolCursor,
+  slide, article, entities = [], pool, poolCursor, ledger = null,
   _entityImage, _stockImage, _log = logger,
 } = {}) {
   const { intent, source, reason, qid } = intentForBeat(slide, { entities });
@@ -370,6 +410,12 @@ export async function resolveBeat({
     const hit = unused.find(({ img }) => img.text && candidateMatches(intent, img.text));
     const { img, idx } = hit || unused[0];
     poolCursor.used.add(idx);
+    if (ledger && !ledger.claim(img.buf, { label: img.url })) {
+      // Already on screen somewhere in this video. Fall through to the next
+      // tier rather than showing it twice.
+      return { ...base, tier: TIERS.CARD, confidence: null,
+               reason: "this photograph is already used in this video" };
+    }
     return { ...base, tier: TIERS.BODY, confidence: CONFIDENCE.body,
              bodyMatch: hit ? "intent" : "order",
              imageUrl: img.url, buffer: img.buf, credit: article?.source_name || null };
@@ -440,7 +486,7 @@ export async function resolveBeat({
  *   sensitive suppression   → now per-tier, per PR #132, rather than whole-video.
  */
 export async function resolveSpecImagery({
-  slides = [], article, entities = [], deps = {},
+  slides = [], article, entities = [], ledger = null, deps = {},
 } = {}) {
   const { _pool, _entityImage, _stockImage, _log = logger } = deps;
 
@@ -450,9 +496,18 @@ export async function resolveSpecImagery({
   const picks = [];
   const stockCreators = new Set();
 
+  // RESERVE THE ARTICLE'S OWN PHOTOGRAPH when the spec has a photo card: that
+  // card exists to show it, and a type beat taking it first would leave the
+  // photo card bare. The reservation is a normal ledger claim, so the photo
+  // path's own claim later finds it already spent and skips its fetch.
+  if (ledger && slides.some((sl) => sl?.t === "photo") && pool.length) {
+    const own = pool.find((p) => p.url === article?.image_url) || pool[0];
+    if (own) { ledger.reserve(own.buf, article?.image_url || own.url); poolCursor.used.add(pool.indexOf(own)); }
+  }
+
   for (let i = 0; i < slides.length; i++) {
     const slide = { ...slides[i], _i: i };
-    let pick = await resolveBeat({ slide, article, entities, pool, poolCursor, _entityImage, _stockImage, _log });
+    let pick = await resolveBeat({ slide, article, entities, pool, poolCursor, ledger, _entityImage, _stockImage, _log });
 
     // ONE CONTRIBUTOR PER VIDEO — stock only. Publisher-owned body imagery is
     // exempt: the publisher IS the single contributor, and the rule would

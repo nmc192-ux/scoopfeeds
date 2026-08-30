@@ -37,6 +37,7 @@ import { logger } from "./logger.js";
 import { isExplicitHarmHeadline, isSensitiveHeadline } from "./editorialSensitivity.js";
 import {
   beatImageryEnabled, beatImageryMotionEnabled, resolveSpecImagery, noAdjacentRepeat, TIERS,
+  createImageLedger,
 } from "./videoBeatImagery.js";
 import { makeEntityImageFetcher, makeStockImageFetcher } from "./videoBeatSources.js";
 import {
@@ -397,7 +398,7 @@ export function rateGate({ now = Date.now() } = {}) {
  * Injectable collaborators, because the real ones fetch over the network.
  */
 export async function choosePhotoUnderlay({
-  card, article, attribution, ordinal, work, slideIndex = 0,
+  card, article, attribution, ordinal, work, slideIndex = 0, ledger = null,
   mount = mountFor(article?.id, ordinal),
   _buildMount = buildMount, _findFootageStill = findFootageStill, _footageEnabled = footageEnabled,
   _log = logger,
@@ -424,7 +425,7 @@ export async function choosePhotoUnderlay({
   const thirdPartyImageryAllowed = !sensitiveHeadline;
 
   if (ordinal === 0 && article?.image_url && publisherPhotoAllowed) {
-    const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: article.id });
+    const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: article.id, ledger });
     if (p) return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null,
                     footage: null, imageUrl: article.image_url, pickedBy: "article-photo" };
   }
@@ -436,7 +437,7 @@ export async function choosePhotoUnderlay({
     const found = await _findFootageStill({ subject: card?.subject, title: article?.title });
     if (found) {
       const p = await _buildMount({
-        imageUrl: found.imageUrl, mount,
+        imageUrl: found.imageUrl, mount, ledger,
         work: path.join(work, "footage"), seed: `${article?.id}-${ordinal}`,
       });
       if (p) {
@@ -456,7 +457,7 @@ export async function choosePhotoUnderlay({
   }
 
   if (ordinal > 0 && article?.image_url && publisherPhotoAllowed) {
-    const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: `${article.id}-${ordinal}` });
+    const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: `${article.id}-${ordinal}`, ledger });
     if (p) {
       _log.info(`🎬 slide ${slideIndex} photo: no footage for photo card #${ordinal + 1} — reusing the article photo on mount "${mount}"`);
       return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null,
@@ -545,12 +546,18 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
     // its picture rides #121's cutaway seam as a still. That is a routing
     // decision, not a second compositing path — see videoAssembler's
     // cutawayIsStill.
+    // ONE LEDGER PER VIDEO, consulted by both imagery paths. See
+    // createImageLedger: the same photograph appearing mounted, then
+    // full-bleed, then halftoned is the failure this exists to stop, and it
+    // was invisible to both subsystems on their own.
+    const imageLedger = beatImageryEnabled() ? createImageLedger() : null;
+
     const beatImagery = new Map();
     if (beatImageryEnabled()) {
       try {
         const entities = getArticleEntitiesWithQids(article.id, 12);
         const resolved = await resolveSpecImagery({
-          slides, article, entities,
+          slides, article, entities, ledger: imageLedger,
           deps: {
             _entityImage: makeEntityImageFetcher(),
             _stockImage: makeStockImageFetcher(),
@@ -627,6 +634,7 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
           if (wants === "photo") {
             const chosen = await choosePhotoUnderlay({
               card, article, attribution, ordinal: photosUsed++, work: svWork, slideIndex: i,
+              ledger: imageLedger,
             });
             underlayPath = chosen.underlayPath;
             imageCredit = chosen.imageCredit;
@@ -700,9 +708,20 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
       const beat = beatImagery.get(i);
       if (beat && !underlayPath && !cutAsset && beat.buffer) {
         try {
-          const bp = path.join(work, `beat${String(i).padStart(2, "0")}.jpg`);
-          const { writeFileSync: wf } = await import("fs");
-          wf(bp, beat.buffer);
+          // THROUGH THE HOUSE TREATMENT, not straight to the frame. Rendered
+          // untreated, these stills came out full-bleed and in colour against a
+          // monochrome format and read as clips from a different video. The
+          // mount rotation (cutting / polaroid / pinned) is the same one the
+          // photo cards use, so a resolved picture now looks like it belongs.
+          // The bytes are already fetched and validated — sourceBuffer skips a
+          // second request that a CDN might answer with a different rendition.
+          const bp = await buildMount({
+            sourceBuffer: beat.buffer,
+            mount: beat.mount || mountFor(article.id, i),
+            work: path.join(work, `beat${String(i).padStart(2, "0")}`),
+            seed: `${article.id}-beat-${i}`,
+          });
+          if (!bp) throw new Error("mount produced nothing");
           beatStill = { path: bp, credit: beat.credit || null };
           logger.info(
             `🖼 slide ${i} [${beat.tier}/${beat.confidence}] intent "${beat.intent}" ` +

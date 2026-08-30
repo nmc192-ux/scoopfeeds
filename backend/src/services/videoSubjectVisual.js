@@ -173,21 +173,42 @@ export const MOUNT_NAMES = Object.freeze(Object.keys(MOUNTS));
  * Returns null rather than throwing on every failure path — a missing or
  * unfetchable photo means "no photo card", never "no video".
  */
-export async function buildMount({ imageUrl, mount, work, seed, ffmpegPath = null }) {
+export async function buildMount({ imageUrl, mount, work, seed, ffmpegPath = null,
+  // BYTES WE ALREADY HAVE. The beat resolver has fetched and validated its
+  // picture before it ever gets here; re-fetching would be a second request for
+  // the same image and, on a CDN that varies renditions, potentially a
+  // different one. Given sourceBuffer, the fetch below is skipped entirely.
+  sourceBuffer = null,
+  // The per-video image ledger (videoBeatImagery.createImageLedger). Both this
+  // path and the resolver claim through it, so whichever runs first wins the
+  // picture and the other renders without one rather than repeating it.
+  ledger = null,
+} = {}) {
   const ff = ffmpegPath || getFFmpegPath();
   if (!ff) { logger.warn("🎬 subject visual: no ffmpeg, skipping the mount"); return null; }
   if (!MOUNTS[mount]) { logger.warn(`🎬 subject visual: unknown mount "${mount}"`); return null; }
-  if (!imageUrl) return null;
+  if (!imageUrl && !sourceBuffer) return null;
   mkdirSync(work, { recursive: true });
   const raw = path.join(work, "sv-source.img");
   try {
-    const res = await fetch(imageUrl, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; ScoopBot/1.0; +https://scoopfeeds.com)" },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) { logger.warn(`🎬 subject visual: photo fetch ${res.status} for ${imageUrl.slice(0, 80)}`); return null; }
-    const buf = Buffer.from(await res.arrayBuffer());
+    let buf = sourceBuffer;
+    if (!buf) {
+      const res = await fetch(imageUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; ScoopBot/1.0; +https://scoopfeeds.com)" },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) { logger.warn(`🎬 subject visual: photo fetch ${res.status} for ${imageUrl.slice(0, 80)}`); return null; }
+      buf = Buffer.from(await res.arrayBuffer());
+    }
     if (buf.length < 8 * 1024) { logger.warn(`🎬 subject visual: photo is ${buf.length}B — too small to mount`); return null; }
+    // CLAIM BEFORE TREATING. The ledger is keyed on the SOURCE bytes, because
+    // treatment is exactly what makes one photograph look like three: the same
+    // picture mounted, then full-bleed, then halftoned, hashes differently at
+    // every stage but is one photograph to a viewer.
+    if (ledger && !ledger.claim(buf, { label: imageUrl || "resolved bytes" })) {
+      logger.info(`🎬 subject visual: this photograph is already in the video — rendering without it`);
+      return null;
+    }
     writeFileSync(raw, buf);
   } catch (err) {
     logger.warn(`🎬 subject visual: photo fetch failed — ${err.message}`);
