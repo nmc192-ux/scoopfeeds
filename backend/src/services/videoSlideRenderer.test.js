@@ -57,16 +57,18 @@ test("every card lands on EXACTLY one lime by its final state", () => {
   }
 });
 
-test("the chrome progress line is never full-strength lime", () => {
-  // It is present in every frame; at full strength it would BE the one accent
-  // permanently and no content could ever be accented.
+test("the chrome carries NO lime at all — the accent rule is gone", () => {
+  // The dimmed progress line was chrome's one lime element; it read as a stray
+  // line across the frame and was deleted (DrJ, 2026-08-30). The opening state
+  // is chrome plus eyebrow only, so lime of ANY strength appearing here means
+  // the rule (or a successor) has crept back into every frame.
   const s1 = statesForCard(CARDS.title, ctx)[0];
   assert.equal(limeCount(s1.tree), 0, "opening state should carry no content lime");
-  assert.ok(styles(s1.tree).some(s => String(s.background).includes("221,231,6")),
-    "the dimmed chrome lime should still be present");
+  assert.ok(!styles(s1.tree).some(s => String(s.background).includes("221,231,6")),
+    "no chrome element may carry the lime hue at any alpha");
 });
 
-// ─── Drift-safe geometry ────────────────────────────────────────────────────
+// ─── Drift-safe geometry// ─── Drift-safe geometry ────────────────────────────────────────────────────
 
 test("nothing is positioned inside the drift crop margin", () => {
   // Found the hard way: the progress line sat 8px from the bottom and was

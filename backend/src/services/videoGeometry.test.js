@@ -35,7 +35,6 @@ test("16:9 is unchanged, and its exported names still resolve to it", () => {
   assert.deepEqual({ ...HORIZONTAL.canvas }, { w: 1920, h: 1080 });
   assert.equal(HORIZONTAL.marginX, 96);
   assert.equal(HORIZONTAL.contentW, 1728);
-  assert.equal(HORIZONTAL.progressY, 1046);
   // The module's long-standing public surface, which videoAssembler and three
   // test files import. A rename here is a breakage there.
   assert.deepEqual({ ...CANVAS }, { w: 1920, h: 1080 });
@@ -49,47 +48,38 @@ test("9:16 is 1080x1920 with an asymmetric safe area", () => {
   // at the bottom. If someone "tidies" these to match, this fails.
   assert.ok(VERTICAL.safeBottom > VERTICAL.safeTop * 2, "the bottom reservation must dominate");
   assert.equal(VERTICAL.contentBottom, 1600);
-  // The progress line MOVED UP (Gate C): it was 1594 — 83% of frame height —
-  // which is under TikTok's own furniture and below the burned caption band.
-  // The invariant it was pinning is unchanged and now asserted as an invariant
-  // rather than as a literal: it sits inside OUR content area, and it now also
-  // sits above the captions it belongs to.
-  assert.ok(VERTICAL.progressY < VERTICAL.contentBottom, "the progress line sits inside our area, not the platform's");
-  assert.ok(VERTICAL.progressY / VERTICAL.canvas.h <= 0.75,
-    `the progress line is at ${(VERTICAL.progressY / VERTICAL.canvas.h * 100).toFixed(1)}% — platform furniture starts around 85%`);
-  assert.equal(VERTICAL.progressY, 1296);
   assert.ok(VERTICAL.contentWRail < VERTICAL.contentW, "content must have a rail-safe measure");
 });
 
-test("progressY is DERIVED from the caption block, not a literal that agrees with it", () => {
-  // It was `1296` — which is exactly what this arithmetic produces, so the rule
-  // and the caption agreed by coincidence. Move captionBottomY, captionLineHeight
-  // or captionMaxLines and the literal would have stayed put, silently stopping
-  // being "just above the caption", with nothing failing (DrJ, Gate F).
-  assert.equal(
-    VERTICAL.progressY,
-    VERTICAL.captionBottomY - VERTICAL.captionMaxLines * VERTICAL.captionLineHeight - VERTICAL.ruleAir,
-    "the rule sits ruleAir above the top of a caption at its maximum length"
-  );
-  // Every input named, so none can quietly go missing and leave NaN behind.
-  for (const k of ["captionBottomY", "captionLineHeight", "captionMaxLines", "ruleAir"]) {
+test("the accent rule is GONE, from both frames", () => {
+  // The full-width progress line read as a stray line across the frame and was
+  // deleted (DrJ, 2026-08-30) — the constant, the derivation (V_RULE_AIR,
+  // progressY, progressH) and the two chrome elements that drew it. This pins
+  // the deletion: the keys must not quietly return under either name.
+  for (const g of [HORIZONTAL, VERTICAL]) {
+    for (const k of ["progressY", "progressH", "ruleAir"]) {
+      assert.equal(g[k], undefined, `${g.name}.${k} must stay deleted`);
+    }
+  }
+});
+
+test("the caption block survives the rule it used to position", () => {
+  // These numbers exist for the burned captions (read back by
+  // videoAssembler.captionGeometry), not for the deleted rule. Every input
+  // named, so none can quietly go missing and leave NaN behind.
+  for (const k of ["captionBottomY", "captionLineHeight", "captionMaxLines", "captionFontSize"]) {
     assert.equal(typeof VERTICAL[k], "number", `${k} must be a number`);
     assert.ok(Number.isFinite(VERTICAL[k]) && VERTICAL[k] > 0, `${k} must be positive and finite`);
   }
-  // The clamp is the caption's ceiling, and the rule is above the caption, so
-  // the rule is necessarily above the ceiling too. Stated as the consequence it
-  // is rather than as a second rule about frame fractions — "67.5% of frame
-  // height" is an OUTPUT of this arithmetic, never an input to it.
+  // The platform ceiling on the caption block is unchanged by the deletion.
   assert.ok(VERTICAL.captionBottomY <= Math.round(VERTICAL.canvas.h * MAX_CAPTION_BOTTOM_FRACTION));
 });
 
-test("16:9 keeps its own arrangement — the rule stays BELOW its caption there", () => {
-  // The vertical pass may not move a horizontal number (this file's header), and
-  // the two frames genuinely differ: nothing crops or overlays a landscape
-  // upload, so there is no platform furniture for the rule to dodge.
-  assert.equal(HORIZONTAL.progressY, 1046);
-  assert.equal(HORIZONTAL.captionBottomY, undefined,
-    "16:9 does not derive its rule from a caption block, and must not pretend to");
+test("16:9 has no caption block, and must not pretend to", () => {
+  // The burned-caption geometry is a vertical concern; horizontal renders keep
+  // captions off (see videoAssembler). A caption block appearing here would be
+  // a sign someone unified the frames by copying numbers across.
+  assert.equal(HORIZONTAL.captionBottomY, undefined);
 });
 
 test("an unknown orientation THROWS rather than defaulting to 16:9", () => {
@@ -169,13 +159,12 @@ test("the primitives are ONE definition bound twice, not two copies", () => {
   // root() takes an explicit ground as of the B1 contract — see videoSlideChrome.
   assert.equal(h.root(GROUND.INK, []).props.style.width, 1920);
   assert.equal(v.root(GROUND.INK, []).props.style.width, 1080);
-  // Same shape, different coordinates — the progress track is full-bleed in
-  // BOTH, because it is chrome and the action rail does not apply to chrome.
+  // Same shape, different coordinates. Chrome is masthead + counter only —
+  // the third and fourth elements were the accent rule, now deleted.
   const hc = h.chrome({ slideIndex: 0, slideCount: 4 });
   const vc = v.chrome({ slideIndex: 0, slideCount: 4 });
+  assert.equal(hc.length, 2, "chrome is masthead + counter, nothing else");
   assert.equal(hc.length, vc.length);
-  assert.equal(hc[2].props.style.width, 1920);
-  assert.equal(vc[2].props.style.width, 1080);
 });
 
 test("vertical content clears the platform's bottom band", () => {
