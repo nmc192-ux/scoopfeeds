@@ -2553,6 +2553,31 @@ export function countTikTokPostsSince(sinceMs) {
  * "Iran's"). Even the resolved ones need the title filter in xHashtags — this
  * query is where the data comes from, not where it is judged.
  */
+/**
+ * The article's entities WITH their QIDs, for the beat-imagery entity tier.
+ *
+ * Separate from getArticleEntitiesForTagging because that one deliberately
+ * projects away the qid (hashtags need a label and a count, nothing more) and
+ * widening it would change what every X post is built from. The entity tier
+ * needs the identifier itself: it resolves QID -> Wikidata P18, which is an
+ * exact match and the reason that tier carries high confidence.
+ */
+export function getArticleEntitiesWithQids(articleId, limit = 12) {
+  try {
+    return getDb().prepare(`
+      SELECT e.qid, e.label, e.surface, e.entity_type, COUNT(*) AS mentions
+      FROM article_entities e
+      WHERE e.article_id = ? AND e.qid IS NOT NULL
+      GROUP BY e.qid
+      ORDER BY mentions DESC
+      LIMIT ?
+    `).all(articleId, limit);
+  } catch {
+    // A missing table must not cost a video. No entities means no entity tier.
+    return [];
+  }
+}
+
 export function getArticleEntitiesForTagging(articleId, limit = 12) {
   try {
     return getDb().prepare(`

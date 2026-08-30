@@ -790,6 +790,7 @@ export async function assembleSlide({
   audioPath = null, captionText = null, workDir = null, fontFile = null,
   orientation = "horizontal", underlayPath = null,
   cutawayPath = null, cutawaySecs = 0, cutawayCredit = null, cutawayFrame = null,
+  cutawayIsStill = false,
 }) {
   const ff = ffmpegPath || getFFmpegPath();
   if (!ff) throw new Error("videoAssembler: ffmpeg not available");
@@ -804,7 +805,20 @@ export async function assembleSlide({
   // below stay arithmetic on the counts rather than on which options are set.
   const useCutaway = Boolean(cutawayPath) && cutawaySecs > 0;
   const cutawayIdx = statePaths.length + (underlayPath ? 1 : 0);
-  if (useCutaway) args.push("-i", cutawayPath);
+  if (useCutaway) {
+    // A STILL IS A SPECIAL CASE OF THE EXISTING PATH, not a second one.
+    //
+    // Everything downstream of this input — scale/crop/setsar/fps, the
+    // trim, the credit composited INSIDE the cutaway stream, and
+    // `eof_action=pass` handing the frame back — is media-agnostic. The one
+    // thing a still lacks is a duration: a bare `-i still.jpg` decodes a
+    // single frame, the overlay flashes and passes through. `-loop 1 -t N`
+    // makes it a stream that ENDS at N seconds, which is exactly the property
+    // the graph is built on — and exactly how the state PNGs and the underlay
+    // are already declared a few lines above.
+    if (cutawayIsStill) args.push("-loop", "1", "-t", String(cutawaySecs));
+    args.push("-i", cutawayPath);
+  }
   const audioIdx = cutawayIdx + (useCutaway ? 1 : 0);
   if (audioPath) args.push("-i", audioPath);
 

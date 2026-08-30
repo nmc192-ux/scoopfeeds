@@ -36,6 +36,10 @@ import path from "path";
 import { logger } from "./logger.js";
 import { isExplicitHarmHeadline, isSensitiveHeadline } from "./editorialSensitivity.js";
 import {
+  beatImageryEnabled, beatImageryMotionEnabled, resolveSpecImagery, noAdjacentRepeat, TIERS,
+} from "./videoBeatImagery.js";
+import { makeEntityImageFetcher, makeStockImageFetcher } from "./videoBeatSources.js";
+import {
   findFreshUnvideoedArticles, claimVideoPost, markVideoPublished, markVideoFailed,
   countVideosPublishedSince, lastVideoPublishedAt, recordHeartbeat, getHeartbeatRow,
   markVideoFacebook, countFacebookPostsSince,
@@ -43,7 +47,7 @@ import {
   markVideoThreads, countThreadsPostsSince,
   markVideoBluesky, countBlueskyPostsSince,
   markVideoTikTok, countTikTokPostsSince,
-  markVideoX, countXPostsSince, getArticleEntitiesForTagging,
+  markVideoX, countXPostsSince, getArticleEntitiesForTagging, getArticleEntitiesWithQids,
   getDb,
 } from "../models/database.js";
 import { filterAtSelection, assertPublishAllowed } from "./videoPakistanBlock.js";
@@ -525,6 +529,45 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
     // classifier, not a guard. So a flagged headline suppresses every cutaway in
     // the video — the same over-broad, cheap-false-positive posture the card
     // renderer already takes when it drops to a typographic card.
+    // ── Per-beat imagery (dark: VIDEO_BEAT_IMAGERY_ENABLED=1) ───────────────
+    //
+    // Resolved ONCE for the whole video, before any slide is assembled, for the
+    // same reason the stock picks are: "one contributor per video" and "no two
+    // neighbours share a treatment" are properties of the VIDEO, and a
+    // per-slide decision cannot see them.
+    //
+    // Where the picture goes depends on the card. `photo` and `map` layouts
+    // declare an underlay and take one; every other layout declares none, so
+    // its picture rides #121's cutaway seam as a still. That is a routing
+    // decision, not a second compositing path — see videoAssembler's
+    // cutawayIsStill.
+    const beatImagery = new Map();
+    if (beatImageryEnabled()) {
+      try {
+        const entities = getArticleEntitiesWithQids(article.id, 12);
+        const resolved = await resolveSpecImagery({
+          slides, article, entities,
+          deps: {
+            _entityImage: makeEntityImageFetcher(),
+            _stockImage: makeStockImageFetcher(),
+          },
+        });
+        for (const p of noAdjacentRepeat(resolved.picks)) {
+          if (p.tier !== TIERS.CARD) beatImagery.set(p.slideIndex, p);
+        }
+        const c = resolved.bySource;
+        logger.info(
+          `🖼 beat imagery [${article.id}]: ${resolved.beats} beats — ` +
+          `body ${c.body} · entity ${c.entity} · stock ${c.stock} · card ${c.card} ` +
+          `(${Math.round(resolved.eligibleShare * 100)}% of eligible beats carry a picture, pool ${resolved.poolSize})`
+        );
+      } catch (err) {
+        // The resolver is an ENHANCEMENT. Its failure costs pictures, never the
+        // video — the loop below simply finds an empty map.
+        logger.warn(`🖼 beat imagery failed, falling back to the old path — ${String(err.message).slice(0, 140)}`);
+      }
+    }
+
     const cutawayBySlide = new Map();
     const cutawayGate = cutawaysAllowedFor(article);
     if (!cutawayGate.allowed) {
@@ -646,13 +689,34 @@ async function produceVideo(article, spec, attribution = resolveAttribution(arti
       // timeline independently from slideTotalSecs — stays in sync by not
       // having anything to be out of sync with.
       const cutAsset = cutawayBySlide.get(i) || null;
+
+      // A resolved picture for a card whose layout has no underlay slot rides
+      // the cutaway seam instead. It never displaces a real stock cutaway.
+      let beatStill = null;
+      const beat = beatImagery.get(i);
+      if (beat && !underlayPath && !cutAsset && beat.buffer) {
+        try {
+          const bp = path.join(work, `beat${String(i).padStart(2, "0")}.jpg`);
+          const { writeFileSync: wf } = await import("fs");
+          wf(bp, beat.buffer);
+          beatStill = { path: bp, credit: beat.credit || null };
+          logger.info(
+            `🖼 slide ${i} [${beat.tier}/${beat.confidence}] intent "${beat.intent}" ` +
+            `(${beat.intentSource}) → ${String(beat.imageUrl).slice(0, 90)}`
+          );
+        } catch (err) {
+          logger.warn(`🖼 slide ${i}: could not stage the picture — ${String(err.message).slice(0, 90)}`);
+        }
+      }
+
       await assembleSlide({
         statePaths: paths, hold, outputPath: seg, driftDir: i, orientation,
         audioPath: audio[i].path, captionText: captionForCard(card), workDir: work, fontFile: FONT_FILE,
         underlayPath,
-        cutawayPath: cutAsset?.absPath || null,
-        cutawaySecs: cutAsset ? CUTAWAY_SECS() : 0,
-        cutawayCredit: cutAsset ? cutawayCredit(cutAsset) : null,
+        cutawayPath: cutAsset?.absPath || beatStill?.path || null,
+        cutawaySecs: cutAsset ? CUTAWAY_SECS() : (beatStill ? slideTotalSecs(audio[i]) : 0),
+        cutawayCredit: cutAsset ? cutawayCredit(cutAsset) : (beatStill?.credit || null),
+        cutawayIsStill: Boolean(!cutAsset && beatStill),
       });
       segments.push(seg);
     }
