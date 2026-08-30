@@ -233,7 +233,7 @@ test("coverage counts what it says it counts", () => {
     { tier: "body", intent: "x" }, { tier: "body", intent: "y" },
     { tier: "stock", intent: "z" }, { tier: "card", intent: "w" }, { tier: "card", intent: null },
   ]);
-  assert.deepEqual(c.bySource, { body: 2, entity: 0, stock: 1, card: 2 });
+  assert.deepEqual(c.bySource, { web: 0, body: 2, entity: 0, stock: 1, card: 2 });
   assert.equal(c.beats, 5);
   assert.equal(c.eligible, 4, "a beat with no intent was never eligible for a picture");
   assert.equal(c.imageryShare, 3 / 5);
@@ -528,4 +528,82 @@ test("the ledger reports its distinct photographs by SOURCE bytes", async () => 
   assert.equal(e.length, 2);
   assert.deepEqual(e.map((x) => x.label), ["one", "two"]);
   assert.ok(typeof e[0].hash === "bigint");
+});
+
+// ─── The web tier sits at the TOP (2026-08-30) ─────────────────────────────
+
+const webCand = (imageUrl, host, confidence = "high") => ({ imageUrl, pageUrl: `https://${host}/a`, host, title: "t", confidence });
+
+test("a publisher photograph of the EVENT outranks the article's own picture", async () => {
+  // The article's photo is frequently a file photo; the date-proximate search
+  // is there to prefer coverage of the event itself.
+  const real = execFileSync(getFFmpegPath(), ["-loglevel", "error", "-f", "lavfi",
+    "-i", "testsrc2=size=1200x800", "-frames:v", "1", "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
+  const r = await resolveBeat({
+    slide: { t: "turn", visual: "settlers in Qusra", _i: 1 }, article: ARTICLE,
+    pool: [{ ...img(1), text: "" }], poolCursor: cursor(),
+    _webSearch: async () => [webCand("https://reuters.com/photo.jpg", "reuters.com")],
+    _fetchImage: async () => ({ buf: real }),
+    _log: QUIET,
+  });
+  assert.equal(r.tier, TIERS.WEB);
+  assert.equal(r.confidence, "high");
+  assert.equal(r.credit, "reuters.com");
+});
+
+test("the web tier respects the BROAD sensitivity bar — searched images are vetted by nobody", async () => {
+  const harm = { ...ARTICLE, title: "Six killed in Kabul bombing" };
+  let searched = false;
+  const r = await resolveBeat({
+    slide: { t: "turn", visual: "the scene", _i: 0 }, article: harm,
+    pool: [], poolCursor: cursor(),
+    _webSearch: async () => { searched = true; return [webCand("https://a/b.jpg", "reuters.com")]; },
+    _fetchImage: async () => ({ buf: Buffer.from("x") }),
+    _log: QUIET,
+  });
+  assert.equal(r.tier, TIERS.CARD);
+  assert.ok(!searched || r.tier === TIERS.CARD, "a harm headline must not place a searched photograph");
+});
+
+test("an undersized web candidate is skipped and the next one tried", async () => {
+  const ff = getFFmpegPath();
+  const jpeg = (w, h) => execFileSync(ff, ["-loglevel", "error", "-f", "lavfi", "-i", `testsrc2=size=${w}x${h}`,
+    "-frames:v", "1", "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
+  const small = jpeg(320, 200), big = jpeg(1400, 900);
+  const r = await resolveBeat({
+    slide: { t: "turn", visual: "gas terminal", _i: 0 }, article: ARTICLE,
+    pool: [], poolCursor: cursor(),
+    _webSearch: async () => [webCand("https://a/small.jpg", "bbc.com"), webCand("https://a/big.jpg", "bbc.com")],
+    _fetchImage: async (u) => ({ buf: u.includes("small") ? small : big }),
+    _log: QUIET,
+  });
+  assert.equal(r.tier, TIERS.WEB);
+  assert.equal(r.imageUrl, "https://a/big.jpg");
+});
+
+test("a web photograph already in the ledger is skipped, not repeated", async () => {
+  const real = execFileSync(getFFmpegPath(), ["-loglevel", "error", "-f", "lavfi",
+    "-i", "testsrc2=size=1000x700", "-frames:v", "1", "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
+  const { createImageLedger } = await import("./videoBeatImagery.js");
+  const ledger = createImageLedger({ _log: QUIET });
+  ledger.claim(real, { label: "already used" });
+  const r = await resolveBeat({
+    slide: { t: "turn", visual: "gas terminal", _i: 0 }, article: ARTICLE,
+    pool: [], poolCursor: cursor(), ledger,
+    _webSearch: async () => [webCand("https://a/b.jpg", "bbc.com")],
+    _fetchImage: async () => ({ buf: real }),
+    _log: QUIET,
+  });
+  assert.notEqual(r.tier, TIERS.WEB);
+});
+
+test("a failing web search falls through to body rather than losing the beat", async () => {
+  const r = await resolveBeat({
+    slide: { t: "turn", visual: "gas terminal", _i: 0 }, article: ARTICLE,
+    pool: [{ ...img(1), text: "" }], poolCursor: cursor(),
+    _webSearch: async () => { throw new Error("serper down"); },
+    _fetchImage: async () => null,
+    _log: QUIET,
+  });
+  assert.equal(r.tier, TIERS.BODY);
 });

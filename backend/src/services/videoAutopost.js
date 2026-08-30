@@ -40,6 +40,7 @@ import {
   createImageLedger,
 } from "./videoBeatImagery.js";
 import { makeEntityImageFetcher, makeStockImageFetcher } from "./videoBeatSources.js";
+import { searchEventImages, webImageSearchEnabled } from "./videoWebImageSearch.js";
 import {
   findFreshUnvideoedArticles, claimVideoPost, markVideoPublished, markVideoFailed,
   countVideosPublishedSince, lastVideoPublishedAt, recordHeartbeat, getHeartbeatRow,
@@ -558,9 +559,17 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
         const entities = getArticleEntitiesWithQids(article.id, 12);
         const resolved = await resolveSpecImagery({
           slides, article, entities, ledger: imageLedger,
+          // How far back the date-proximate query reaches. Anchored on the
+          // article's own age so a story published today searches today, and a
+          // week-old one still finds its own coverage.
+          webDays: Math.max(2, Math.min(30,
+            Math.ceil((Date.now() - (article.published_at || Date.now())) / 86_400_000) + 2)),
           deps: {
             _entityImage: makeEntityImageFetcher(),
             _stockImage: makeStockImageFetcher(),
+            // The open web, top of the cascade — off unless BOTH the key and
+            // the flag are present.
+            _webSearch: webImageSearchEnabled() ? searchEventImages : null,
           },
         });
         for (const p of noAdjacentRepeat(resolved.picks)) {
@@ -569,7 +578,7 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
         const c = resolved.bySource;
         logger.info(
           `🖼 beat imagery [${article.id}]: ${resolved.beats} beats — ` +
-          `body ${c.body} · entity ${c.entity} · stock ${c.stock} · card ${c.card} ` +
+          `web ${c.web} · body ${c.body} · entity ${c.entity} · stock ${c.stock} · card ${c.card} ` +
           `(${Math.round(resolved.eligibleShare * 100)}% of eligible beats carry a picture, pool ${resolved.poolSize})`
         );
       } catch (err) {

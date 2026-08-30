@@ -52,6 +52,7 @@ import {
 } from "./cardRenderer.js";
 import { isExplicitHarmHeadline, isSensitiveHeadline } from "./editorialSensitivity.js";
 import { isAbstractQuery, candidateMatches } from "./videoImageRelevance.js";
+import { imageIdentity } from "./videoImageIdentity.js";
 
 /** Default OFF. The merge is inert until DrJ has ruled on a sample. */
 export const beatImageryEnabled = () => process.env.VIDEO_BEAT_IMAGERY_ENABLED === "1";
@@ -83,9 +84,14 @@ const WRAPPER_TYPES = new Set(["title", "kicker"]);
  */
 const SELF_IMAGED_TYPES = new Set(["map", "photo"]);
 
-export const TIERS = Object.freeze({ BODY: "body", ENTITY: "entity", STOCK: "stock", CARD: "card" });
+export const TIERS = Object.freeze({ WEB: "web", BODY: "body", ENTITY: "entity", STOCK: "stock", CARD: "card" });
 /** Confidence is a label for WHICH TIER ANSWERED, never a computed score. */
-export const CONFIDENCE = Object.freeze({ body: "high", entity: "high", stock: "medium", card: null });
+export const CONFIDENCE = Object.freeze({
+  // The web tier carries the confidence its SOURCE earned, so it is resolved
+  // per candidate rather than per tier — a publisher photograph is "high", a
+  // generic web hit "low". Everything else is a property of the tier itself.
+  body: "high", entity: "high", stock: "medium", card: null,
+});
 
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 
@@ -398,8 +404,8 @@ async function defaultFetchPage(url) {
  * beat with no picture is a card, which is a correct video.
  */
 export async function resolveBeat({
-  slide, article, entities = [], pool, poolCursor, ledger = null,
-  _entityImage, _stockImage, _log = logger,
+  slide, article, entities = [], pool, poolCursor, ledger = null, webDays = 14,
+  _entityImage, _stockImage, _webSearch = null, _fetchImage = tryFetchImage, _log = logger,
 } = {}) {
   const { intent, source, reason, qid } = intentForBeat(slide, { entities });
   const base = { slideIndex: slide?._i ?? null, intent, intentSource: source };
@@ -408,6 +414,40 @@ export async function resolveBeat({
 
   const publisherAllowed = !isExplicitHarmHeadline(article?.title);
   const thirdPartyAllowed = !isSensitiveHeadline(article?.title);
+
+  // ── 0. THE OPEN WEB — above body, because it is where the EVENT is ───────
+  //
+  // The pool-depth ceiling that capped a typical short at ONE photograph was an
+  // artefact of where this function was allowed to look. Measured across ten
+  // real stories: the open web yields 5.7 usable photographs per story, 2.6 of
+  // them from news publishers, against 2.2 from the article page.
+  //
+  // It sits ABOVE body because a searched publisher photograph is of THE EVENT,
+  // while the article's own picture is frequently a file photo — and the whole
+  // point of the date-proximate query is to prefer the former.
+  //
+  // Candidates are FETCHED AND MEASURED here, never trusted on reported size:
+  // Serper's dimensions are the thumbnail's often enough to have discarded the
+  // actual AP photograph of Federer's induction.
+  if (_webSearch && _fetchImage) {
+    try {
+      const cands = await _webSearch(intent, { headline: article?.title || "", days: webDays });
+      for (const c of cands) {
+        // A low-confidence hit is a real photograph from a source nobody
+        // vouched for. It is allowed, but only where the BROAD sensitivity bar
+        // already permits third-party imagery.
+        if (!thirdPartyAllowed) break;
+        const got = await _fetchImage(c.imageUrl, c.pageUrl ? `https://${c.host}/` : undefined);
+        if (!got?.buf) continue;
+        const dims = readImageDimensions(got.buf);
+        if (!dims || dims.width < MIN_PHOTO_WIDTH || dims.height < MIN_PHOTO_HEIGHT) continue;
+        if (ledger && !ledger.claim(got.buf, { label: c.imageUrl })) continue;
+        return { ...base, tier: TIERS.WEB, confidence: c.confidence,
+                 imageUrl: c.imageUrl, buffer: got.buf,
+                 credit: c.host || null, sourcePage: c.pageUrl || null, webTitle: c.title };
+      }
+    } catch (err) { _log.warn(`🔎 web tier failed for "${String(intent).slice(0, 40)}" — ${String(err.message).slice(0, 80)}`); }
+  }
 
   // ── ENTITY FIRST for a NAMED subject — the tier is ADDITIVE, not a fallback.
   //
@@ -514,9 +554,9 @@ export async function resolveBeat({
  *   sensitive suppression   → now per-tier, per PR #132, rather than whole-video.
  */
 export async function resolveSpecImagery({
-  slides = [], article, entities = [], ledger = null, deps = {},
+  slides = [], article, entities = [], ledger = null, webDays = 14, deps = {},
 } = {}) {
-  const { _pool, _entityImage, _stockImage, _log = logger } = deps;
+  const { _pool, _entityImage, _stockImage, _webSearch, _fetchImage, _log = logger } = deps;
 
   const pool = _pool !== undefined ? _pool
     : (isExplicitHarmHeadline(article?.title) ? [] : await buildBodyPool(article, { _log }));
@@ -541,7 +581,8 @@ export async function resolveSpecImagery({
 
   for (let i = 0; i < slides.length; i++) {
     const slide = { ...slides[i], _i: i };
-    let pick = await resolveBeat({ slide, article, entities, pool, poolCursor, ledger, _entityImage, _stockImage, _log });
+    let pick = await resolveBeat({ slide, article, entities, pool, poolCursor, ledger, webDays,
+      _entityImage, _stockImage, _webSearch, _fetchImage, _log });
 
     // ONE CONTRIBUTOR PER VIDEO — stock only. Publisher-owned body imagery is
     // exempt: the publisher IS the single contributor, and the rule would
@@ -580,7 +621,7 @@ export function noAdjacentRepeat(picks = [], mounts = ["cutting", "polaroid", "p
 
 /** The acceptance numbers, computed where the picks are so they cannot drift. */
 export function coverageOf(picks = []) {
-  const by = { body: 0, entity: 0, stock: 0, card: 0 };
+  const by = { web: 0, body: 0, entity: 0, stock: 0, card: 0 };
   for (const p of picks) by[p.tier] = (by[p.tier] || 0) + 1;
   const eligible = picks.filter((p) => p.intent || p.tier !== TIERS.CARD).length;
   const withImage = by.body + by.entity + by.stock;
