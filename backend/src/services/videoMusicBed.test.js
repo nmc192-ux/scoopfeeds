@@ -3,6 +3,7 @@
 // daily; what is new here — and what can silently produce a broken filter
 // expression — is the mapping from a short's slide list to arc/sections.
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { deriveShortArc, envelope } from "./videoMusicBed.js";
 
@@ -53,4 +54,34 @@ test("malformed starts are clamped into range", () => {
   const s = slides(["title", "turn", "kicker"]);
   const { arc } = deriveShortArc(s, [0, -5, 500], 60);
   assert.ok(arc.every(([t]) => t >= 0 && t <= 60), "clamped");
+});
+
+// ─── The loudness chain (fixed 2026-08-30) ─────────────────────────────────
+//
+// Shipped defect, measured on a live published short: −12.5 LUFS / −0.2 dBTP
+// against the chain's own −14 / −2.0 targets. Root cause was alimiter's
+// auto-level default boosting loudnorm's on-target output back up ~+1.4 dB.
+
+test("secondPassLoudnorm builds a LINEAR pass from the measured values", async () => {
+  const { secondPassLoudnorm, LOUDNESS_TARGET } = await import("./videoMusicBed.js");
+  const f = secondPassLoudnorm({
+    input_i: "-11.2", input_tp: "-0.3", input_lra: "4.9", input_thresh: "-21.5", target_offset: "0.1",
+  });
+  assert.match(f, /linear=true/, "the second pass must be linear — dynamic mode is the defect");
+  assert.match(f, /measured_I=-11\.2/);
+  assert.match(f, /measured_thresh=-21\.5/);
+  assert.match(f, new RegExp(`I=${LOUDNESS_TARGET.I}:TP=${LOUDNESS_TARGET.TP}`));
+  // Missing measurements throw rather than silently normalizing from nothing.
+  assert.throws(() => secondPassLoudnorm({ input_i: "-11" }), /missing input_tp/);
+});
+
+test("the final limiter must never auto-level — that WAS the shipped defect", async () => {
+  const src = readFileSync(new URL("./videoMusicBed.js", import.meta.url), "utf8");
+  const scoreBody = src.slice(src.indexOf("export async function scoreShort"));
+  const finalLimiters = [...scoreBody.matchAll(/alimiter=[^,\[\]`]*/g)].map((m) => m[0]);
+  assert.ok(finalLimiters.length >= 1, "scoreShort no longer has a safety limiter at all");
+  for (const l of finalLimiters) {
+    assert.match(l, /level=false/,
+      `${l} — alimiter auto-levels by default, boosting the on-target mix ~+1.4 dB (the −12.5 LUFS defect)`);
+  }
 });
