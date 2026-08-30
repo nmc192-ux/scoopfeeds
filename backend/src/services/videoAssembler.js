@@ -201,6 +201,9 @@ function runFFmpeg(args, ffmpegPath) {
  */
 export { MAX_CAPTION_BOTTOM_FRACTION } from "./videoGeometry.js";
 
+/** Beats whose layout carries its own centred phrase over a picture. */
+const CAPTIONLESS_TYPES = new Set(["photo", "map"]);
+
 /**
  * The caption for a card, or null when it would only repeat what is on screen.
  *
@@ -220,6 +223,15 @@ export { MAX_CAPTION_BOTTOM_FRACTION } from "./videoGeometry.js";
  * prompted this.
  */
 export function captionForCard(card = {}) {
+  // NO BURNED PARAGRAPH ON A PICTURE BEAT (DrJ, 2026-08-30). A beat carrying a
+  // photograph shows ONE centred phrase over the image and nothing else — the
+  // word IS the layout. A three-line caption burned across the bottom of the
+  // same frame is the paragraph grammar the reference does not have, and it
+  // competes with the phrase for the one thing the viewer should read.
+  //
+  // Type-only beats keep their caption: there the burned line IS the beat.
+  if (CAPTIONLESS_TYPES.has(card?.t)) return null;
+
   const caption = String(card.caption || "").trim();
   if (!caption) return null;
 

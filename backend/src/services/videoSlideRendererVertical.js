@@ -441,6 +441,77 @@ const imageCredit = (label) => label
     })
   : null;
 
+/**
+ * THE KINETIC PHRASE — one short phrase per photo beat, centred, over the image.
+ *
+ * The reference grammar (DrJ, 2026-08-30): a beat carrying a photograph shows
+ * ONE word or short phrase, large, centred, mixed weights, and NOTHING else.
+ * No bottom subtitle, no paragraph, never more than about six words. The word
+ * IS the layout.
+ *
+ * WHY MIXED WEIGHTS RATHER THAN ONE RUN. The reference sets the operative word
+ * apart from its qualifiers inside a single phrase — "a village UNDER SIEGE" —
+ * so the eye lands on the noun before it reads the line. Anton carries the
+ * accent word; Inter semibold carries the rest. Two families, one type system,
+ * which is the whole vocabulary this format is allowed.
+ *
+ * SIZED TO THE LONGEST WORD, not to the phrase. A centred block that overflows
+ * the measure is worse than a smaller one, and the words arrive at different
+ * lengths every beat.
+ *
+ * NO TIMING ASSUMPTION IS BAKED IN. The phrase enters with the beat and holds;
+ * word-level synchronisation arrives with TTS timestamps next sprint, and
+ * nothing here encodes a slide duration.
+ */
+const KINETIC_MAX_WORDS = 6;
+
+export function kineticPhrase(card) {
+  // Prefer what the writer already emitted as display type; fall back to the
+  // beat's own subject. Both are short by contract.
+  const fromLines = (card.lines || []).map((l) => (Array.isArray(l) ? l[0] : l)).filter(Boolean).join(" ");
+  const raw = String(fromLines || card.top || card.visual || card.subject || "").trim();
+  if (!raw) return null;
+  const words = raw.split(/\s+/).filter(Boolean);
+  // Truncation is a real risk here: a long headline fragment would run off a
+  // centred block. Six words is the ceiling the reference keeps to.
+  return words.slice(0, KINETIC_MAX_WORDS).join(" ");
+}
+
+/**
+ * Which word takes the accent. The LAST word of the phrase by default —
+ * English puts the operative noun at the end far more often than not, and a
+ * lime-on-the-first-word reads as a stutter when the phrase continues.
+ */
+function splitAccent(phrase) {
+  const words = String(phrase).split(/\s+/);
+  if (words.length === 1) return { lead: "", accent: words[0] };
+  return { lead: words.slice(0, -1).join(" "), accent: words[words.length - 1] };
+}
+
+/** Centred, mixed-weight phrase over the picture. */
+function kineticBlock(phrase, { top = 780 } = {}) {
+  const { lead, accent } = splitAccent(phrase);
+  // MEASURED, not guessed from character count. fitDisplaySize walks the Anton
+  // metrics down until the word fits the measure — the same machinery the
+  // title cards use. A centred block that overflows is worse than a smaller
+  // one, and accent words arrive at every length.
+  const { size: accentSize } = fitDisplaySize((sz) => antonWidth(accent, sz), {
+    nominalSize: 164, maxWidth: G.canvas.w - 2 * G.marginX, minSize: 78,
+  });
+  return [
+    lead ? text(lead, {
+      position: "absolute", left: 0, top, width: G.canvas.w,
+      fontFamily: F.inter, fontWeight: 600, fontSize: 46, letterSpacing: 2,
+      color: C.white, textAlign: "center", justifyContent: "center",
+    }) : null,
+    text(accent, {
+      position: "absolute", left: 0, top: top + (lead ? 66 : 0), width: G.canvas.w,
+      fontFamily: F.anton, fontSize: accentSize, lineHeight: 1.0,
+      color: C.lime, textAlign: "center", justifyContent: "center",
+    }),
+  ].filter(Boolean);
+}
+
 function overStates(card, ctx, { underlay, lineTop = 1470, size = 84, credit = null }) {
   const [l1, l2] = (card.lines || []).slice(0, 2);
   const ch = () => chrome(ctx);
@@ -454,12 +525,18 @@ function overStates(card, ctx, { underlay, lineTop = 1470, size = 84, credit = n
   const cr = imageCredit(credit);
   // Only ever beside a credit: a date with no source is not provenance.
   const dt = credit ? imageDateLine(ctx?.imageDate) : null;
+  // THE REFERENCE LAYOUT. The stacked bottom-left display lines with a heavy
+  // gradient scrim are replaced by ONE centred phrase over the picture (DrJ,
+  // 2026-08-30). The eyebrow and the two-line stack go with them: they are the
+  // paragraph grammar this ruling removes.
+  const phrase = kineticPhrase(card);
+  const block = phrase ? kineticBlock(phrase) : [];
   return [
     // The image alone, briefly. A photograph that arrives already captioned has
-    // no moment of being looked at.
+    // no moment of being looked at — kept, because it is the reference's own
+    // move too.
     st("v1", [...ch(), cr, dt]),
-    st("v2", [...ch(), ...eb, overScrim(), L(l1, lineTop), cr, dt]),
-    st("v3", [...ch(), ...eb, overScrim(), L(l1, lineTop), L(l2, lineTop + 96), cr, dt]),
+    st("v2", [...ch(), ...block, cr, dt]),
   ];
 }
 
