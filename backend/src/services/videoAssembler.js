@@ -800,7 +800,16 @@ export async function assembleSlide({
   if (underlayPath) args.push("-loop", "1", "-t", String(hold * statePaths.length), "-i", underlayPath);
   // The cutaway sits AFTER the underlay and BEFORE the audio, so both indices
   // below stay arithmetic on the counts rather than on which options are set.
-  const useCutaway = Boolean(cutawayPath) && cutawaySecs > 0;
+  // A cutaway path with an unusable duration is a BUG UPSTREAM, not a reason to
+  // render a silent near-miss: NaN fails `> 0` quietly, which is how a whole
+  // video's worth of resolved stills went missing while every log line claimed
+  // they were placed. Say so loudly; still render, because a video without a
+  // picture beats no video.
+  if (cutawayPath && !(Number.isFinite(cutawaySecs) && cutawaySecs > 0)) {
+    logger.error(`videoAssembler: cutaway "${String(cutawayPath).slice(-40)}" has an unusable duration ` +
+      `(${cutawaySecs}) — the picture will NOT appear. This is a caller bug.`);
+  }
+  const useCutaway = Boolean(cutawayPath) && Number.isFinite(cutawaySecs) && cutawaySecs > 0;
   const cutawayIdx = statePaths.length + (underlayPath ? 1 : 0);
   if (useCutaway) {
     // A STILL IS A SPECIAL CASE OF THE EXISTING PATH, not a second one.

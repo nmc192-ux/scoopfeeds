@@ -718,7 +718,12 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
         audioPath: audio[i].path, captionText: captionForCard(card), workDir: work, fontFile: FONT_FILE,
         underlayPath,
         cutawayPath: cutAsset?.absPath || beatStill?.path || null,
-        cutawaySecs: cutAsset ? CUTAWAY_SECS() : (beatStill ? slideTotalSecs(audio[i]) : 0),
+        // slideTotalSecs takes SECONDS, not the audio object. Passing the object
+        // produced NaN, and `useCutaway = cutawaySecs > 0` is false for NaN — so
+        // every resolved still was silently dropped while the resolver logged
+        // that it had placed one. Nothing failed; the picture simply was not
+        // there. Hence beatSecs below, and the assertion in assembleSlide.
+        cutawaySecs: cutAsset ? CUTAWAY_SECS() : (beatStill ? slideTotalSecs(audioSecs) : 0),
         cutawayCredit: cutAsset ? cutawayCredit(cutAsset) : (beatStill?.credit || null),
         cutawayIsStill: Boolean(!cutAsset && beatStill),
       });

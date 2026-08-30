@@ -270,3 +270,27 @@ test("a still and a video cutaway differ ONLY in the input declaration", async (
     "a still must not need its own filter graph — that would be a second compositing path");
   assert.match(asVideo.filter, /eof_action=pass/);
 });
+
+test("a cutaway with a NaN duration is REFUSED loudly, not dropped in silence", async () => {
+  // The defect that cost a whole render: slideTotalSecs takes seconds and was
+  // handed the audio object, producing NaN. `NaN > 0` is false, so useCutaway
+  // went false and every resolved still vanished — while the resolver's own
+  // log line said it had placed one. Silence is the part that must not recur.
+  const errs = [];
+  const { logger } = await import("./logger.js");
+  const realError = logger.error;
+  logger.error = (m) => errs.push(String(m));
+  try {
+    const dir = tmp();
+    const states = [statePng(dir, "s0.png", "black")];
+    const still = statePng(dir, "still.png", "red");
+    const out = path.join(dir, "nan.mp4");
+    await assembleSlide({
+      statePaths: states, hold: 1.2, outputPath: out, orientation: "vertical",
+      cutawayPath: still, cutawaySecs: NaN, cutawayIsStill: true,
+    });
+    assert.ok(existsSync(out), "the video must still render — a missing picture is not a lost story");
+    assert.ok(errs.some((e) => /unusable duration/.test(e)),
+      `expected a loud refusal, got: ${JSON.stringify(errs)}`);
+  } finally { logger.error = realError; }
+});
