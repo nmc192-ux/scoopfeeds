@@ -8,6 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { verticalStatesForCard, kineticPhrase } from "./videoSlideRendererVertical.js";
 import { captionForCard } from "./videoAssembler.js";
+import { readFileSync } from "node:fs";
 
 const CTX = { orientation: "vertical", outlet: "The Hindu", slideIndex: 1, slideCount: 6 };
 const strings = (tree) => JSON.stringify(tree).match(/"children":"([^"]*)"/g)?.map((m) => m.slice(12, -1)) ?? [];
@@ -75,4 +76,19 @@ test("the picture still gets a beat of its own before any text arrives", () => {
 test("the credit survives — it belongs to the picture, not to the paragraph", () => {
   const st = verticalStatesForCard(photo({ lines: [["A VILLAGE", "white"]] }), CTX);
   assert.ok(strings(st[st.length - 1].tree).includes("THE HINDU"));
+});
+
+test("a TYPE beat that received a picture loses its paragraph too", async () => {
+  // Found in the acceptance render, not in a unit test: captionForCard refuses
+  // photo and map beats, but a stat/turn/diagram beat filled by the resolver is
+  // ALSO a picture beat, and it was burning three lines of prose across a
+  // full-bleed France 24 photograph. The suppression lives in produceVideo
+  // because that is the only place that knows a picture was placed.
+  const src = readFileSync(new URL("./videoAutopost.js", import.meta.url), "utf8");
+  assert.match(src, /captionText:\s*beatStill \? null : captionForCard\(card\)/,
+    "a beat carrying a resolved still must not also burn its caption");
+});
+
+test("a type beat with NO picture keeps its caption — the burned line is the beat there", () => {
+  assert.equal(captionForCard({ t: "stat", caption: "Seventy percent of faults." }), "Seventy percent of faults.");
 });

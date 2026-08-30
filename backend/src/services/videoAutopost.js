@@ -721,7 +721,18 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
 
       await assembleSlide({
         statePaths: paths, hold, outputPath: seg, driftDir: i, orientation,
-        audioPath: audio[i].path, captionText: captionForCard(card), workDir: work, fontFile: FONT_FILE,
+        audioPath: audio[i].path,
+        // NO PARAGRAPH OVER A PICTURE. captionForCard already refuses photo and
+        // map beats, whose layouts carry their own centred phrase — but a TYPE
+        // beat that the resolver filled is also a picture beat now, and it was
+        // still burning its paragraph across the photograph. Seen in the
+        // acceptance render: a full-bleed France 24 frame with three lines of
+        // prose over it, which is precisely the grammar Ruling 3 removes.
+        //
+        // The decision belongs here because this is the only place that knows
+        // a picture was actually placed.
+        captionText: beatStill ? null : captionForCard(card),
+        workDir: work, fontFile: FONT_FILE,
         underlayPath,
         cutawayPath: cutAsset?.absPath || beatStill?.path || null,
         // slideTotalSecs takes SECONDS, not the audio object. Passing the object

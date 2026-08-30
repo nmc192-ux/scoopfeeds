@@ -624,7 +624,10 @@ export function coverageOf(picks = []) {
   const by = { web: 0, body: 0, entity: 0, stock: 0, card: 0 };
   for (const p of picks) by[p.tier] = (by[p.tier] || 0) + 1;
   const eligible = picks.filter((p) => p.intent || p.tier !== TIERS.CARD).length;
-  const withImage = by.body + by.entity + by.stock;
+  // `web` was missing here, so the log line read "0% of eligible beats carry a
+  // picture" on a video that had just placed three. The PICTURES PLACED line
+  // (source bytes) was right; this one was not.
+  const withImage = by.web + by.body + by.entity + by.stock;
   return {
     bySource: by,
     beats: picks.length,
