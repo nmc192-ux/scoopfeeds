@@ -220,13 +220,18 @@ test("the once-per-process unset warning is unchanged", async () => {
   assert.match(unsetLines[0].msg, /NO external dead-man switch/);
 });
 
-test("the three cycles have three INDEPENDENT check vars", () => {
+test("every check has its own INDEPENDENT var — including the outcome switch", () => {
   // One shared check would go red for the wrong subsystem and, worse, a healthy
-  // cycle would keep resetting a check the broken one needed to leave red.
+  // cycle would keep resetting a check the broken one needed to leave red. The
+  // video cycle deliberately carries TWO: the dead-man on the cycle itself, and
+  // the outcome switch on video_posts — sharing a URL between those would let a
+  // green cycle keep resetting the check that exists to notice its output is
+  // zero (the 2026-08-12 / 2026-08-30 shape).
   const vars = Object.values(HEARTBEAT_PING_URLS);
-  assert.equal(new Set(vars).size, 3);
-  assert.deepEqual(vars.sort(), [
-    "INGESTION_HEARTBEAT_PING_URL", "SOCIAL_HEARTBEAT_PING_URL", "VIDEO_HEARTBEAT_PING_URL",
+  assert.equal(new Set(vars).size, vars.length, "no two checks may share a var");
+  assert.deepEqual([...vars].sort(), [
+    "INGESTION_HEARTBEAT_PING_URL", "SOCIAL_HEARTBEAT_PING_URL",
+    "VIDEO_HEARTBEAT_PING_URL", "VIDEO_OUTCOME_PING_URL",
   ]);
 });
 

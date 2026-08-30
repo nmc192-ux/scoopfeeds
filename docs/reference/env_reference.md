@@ -370,6 +370,8 @@ monitor is visible in the boot log rather than indistinguishable from a healthy 
 |---|---|---|---|---|
 | `SOCIAL_HEARTBEAT_PING_URL` | unset (**no switch**) | **set** | restart | Social posting cycle. Runs `*/30` **from a host crontab**, not node-cron — see the social note below. |
 | `VIDEO_HEARTBEAT_PING_URL` | unset (**no switch**) | **set** | restart | Video render/publish cycle (`videoAutopost`), hourly at **`:12`**. |
+| `VIDEO_OUTCOME_PING_URL` | unset (**no switch**) | unset — **DrJ creates the check, grace 2–3h** | restart | The OUTCOME switch: pinged from the video cycle's end, but the verdict comes from `video_posts` — rows published in the last `VIDEO_OUTCOME_WINDOW_HOURS` → success, none → `/fail` with the last-publish age and cycle shape. Exists because the cycle dead-man ran green through two zero-output outages (2026-08-12, 2026-08-30 — cause upstream of the runner both times; the second short-circuited at the daily cap without attempting a spec). Piggybacked on the cycle so a dead runner pages by silence and a starved one pages immediately. A deliberate pause (`VIDEO_AUTOPOST_ENABLED` unset) goes silent rather than lying success — pause the monitor alongside the loop. |
+| `VIDEO_OUTCOME_WINDOW_HOURS` | `6` | unset (code default) | restart | The outcome window, measured not chosen: 30 days of publishes show healthy gaps at p50 2.0h / p90 3.0h; every gap over 6h in that window was an outage or a deliberate pause. |
 | `INGESTION_HEARTBEAT_PING_URL` | unset (**no switch**) | **set** | restart | RSS ingestion, **`2,32`** — the **root** cycle; breaking-push hangs off it. |
 
 > ⚠️ **These minutes have moved once and will move again.** The 2026-08-09 collision fix

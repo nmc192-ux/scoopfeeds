@@ -79,6 +79,7 @@ import { HEARTBEAT_PING_URLS, pingStart, pingSuccess, pingFail, uniformFailure }
 
 export const VIDEO_CYCLE_HEARTBEAT = "video_cycle";
 const VIDEO_PING = HEARTBEAT_PING_URLS.video;
+const OUTCOME_PING = HEARTBEAT_PING_URLS.videoOutcome;
 
 /**
  * Staleness threshold for the video cycle — 3 missed hourly runs.
@@ -475,6 +476,53 @@ export async function choosePhotoUnderlay({
     );
   }
   return none;
+}
+
+/**
+ * The OUTCOME switch (VIDEO_OUTCOME_PING_URL) — decided by video_posts, not by
+ * the cycle's shape, because the shape has lied twice. On 2026-08-30 the
+ * Gemini balance died after the daily cap was full, so every subsequent cycle
+ * short-circuited at the cap check and pinged success WITHOUT ATTEMPTING A
+ * SPEC: no attempt, no uniform failure, nothing for the cycle dead-man to see.
+ * Green checks, zero videos — the 2026-08-12 outage wore the same face.
+ *
+ * CALLED FROM THE CYCLE END, not from its own cron, ON PURPOSE: if the runner
+ * itself dies this ping stops arriving and the monitor pages on the absence —
+ * the dead-man property survives. One placement, both failure classes:
+ * runner-dead pages by silence, runner-alive-but-starved pages immediately,
+ * with the reason in the /fail body.
+ *
+ * The window is MEASURED, not chosen: 30 days of real publishes show healthy
+ * gaps at p50 2.0h / p90 3.0h, and every gap over 6h in that window was an
+ * outage or a deliberate pause. A deliberate pause (VIDEO_AUTOPOST_ENABLED
+ * unset) returns before the cycle reaches this call, so the check goes SILENT
+ * rather than lying success — the operator pauses the monitor alongside the
+ * loop, in the monitor's own UI.
+ *
+ * Telemetry rules apply in full: never awaited, never throws, unset URL is a
+ * no-op (pingHeartbeat's own contract).
+ */
+export function pingVideoOutcome({ produced = 0, tried = 0, skipped = null,
+  _count = countVideosPublishedSince, _lastAt = lastVideoPublishedAt, _now = Date.now } = {}) {
+  try {
+    const windowH = Number(process.env.VIDEO_OUTCOME_WINDOW_HOURS || "") || 6;
+    const inWindow = _count(_now() - windowH * 3600_000);
+    if (inWindow > 0) { pingSuccess(OUTCOME_PING); return { ok: true, inWindow, windowH }; }
+    const lastAt = _lastAt();
+    const ago = lastAt ? ((_now() - lastAt) / 3600_000).toFixed(1) + "h ago" : "never";
+    const detail =
+      `no video published in ${windowH}h — last publish ${ago}` +
+      `${lastAt ? ` (${new Date(lastAt).toISOString()})` : ""}; ` +
+      `this cycle: produced=${produced}, tried=${tried}, ${skipped ? `skipped=${skipped}` : "completed"}`;
+    pingFail(OUTCOME_PING, detail);
+    return { ok: false, inWindow: 0, windowH, detail };
+  } catch (err) {
+    // The outcome switch is telemetry about telemetry; it must never take the
+    // cycle down. A broken count reads as nothing, and the monitor's grace
+    // period catches the resulting silence.
+    logger.warn(`🫀 outcome ping failed internally — ${String(err?.message).slice(0, 120)}`);
+    return { ok: false, error: true };
+  }
 }
 
 // ─── Produce one video ──────────────────────────────────────────────────────
@@ -1962,6 +2010,8 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       }
       if (detail) pingFail(VIDEO_PING, detail);
       else pingSuccess(VIDEO_PING);
+
+      pingVideoOutcome({ produced: produced ? 1 : 0, tried, skipped: extra?.skipped ?? null });
     }
     return { ...extra, tried, specCalls, attempts, spendUsd, produced };
   }

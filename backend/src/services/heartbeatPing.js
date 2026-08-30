@@ -48,9 +48,14 @@ const PING_TIMEOUT_MS = 3000;
 
 /** Env vars holding each check's base URL. One check per cycle, independent. */
 export const HEARTBEAT_PING_URLS = {
-  social:    "SOCIAL_HEARTBEAT_PING_URL",
-  video:     "VIDEO_HEARTBEAT_PING_URL",
-  ingestion: "INGESTION_HEARTBEAT_PING_URL",
+  social:       "SOCIAL_HEARTBEAT_PING_URL",
+  video:        "VIDEO_HEARTBEAT_PING_URL",
+  // OUTCOME, not process. The video check above watches whether the CYCLE ran;
+  // twice now (2026-08-12, 2026-08-30) the cycle ran green while nothing
+  // published — cause upstream of the runner both times. This check's ping is
+  // decided by video_posts: rows in the window → success, none → /fail.
+  videoOutcome: "VIDEO_OUTCOME_PING_URL",
+  ingestion:    "INGESTION_HEARTBEAT_PING_URL",
 };
 
 // An unset switch is silent BY DESIGN, which makes "not configured" and
