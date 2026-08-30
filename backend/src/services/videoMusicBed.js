@@ -35,6 +35,7 @@
 // the unscored file.
 
 import { execFile } from "child_process";
+import { unlinkSync } from "fs";
 import { promisify } from "util";
 
 const execFileP = promisify(execFile);
@@ -201,21 +202,80 @@ export async function buildBed(seconds, out, { arc = null, sections = [], phases
  * Mix the bed under the finished short, ducked by the narration.
  * Gentle ratio (2.5): the bed is meant to be heard — it steps back under
  * speech, it does not disappear. Video stream is copied untouched.
+ *
+ * LOUDNORM RUNS TWICE, AND THE SECOND PASS IS LINEAR. The original single-pass
+ * chain shipped MEASURED defects (2026-08-30, on a live published short):
+ * −12.5 LUFS integrated against the −14 target and −0.2 dBTP against −2.0.
+ * Single-pass loudnorm is DYNAMIC — a per-window gain ride that only
+ * approximates the integrated target on programme material, and its output was
+ * then re-peaked by the limiter and the AAC encode. The fix is the filter's own
+ * documented protocol: measure first, then apply with `linear=true` and the
+ * measured values, which is one constant gain and honours both targets by
+ * construction.
+ *
+ * The intermediate is float WAV so the unnormalized amix cannot clip before
+ * loudnorm ever sees it, and the 0.85 limiter stays LAST as a safety — with
+ * TP at −2.0 it should never engage (−2.0 < −1.41); if it does, something
+ * upstream regressed and quiet clamping is still better than a hot upload.
  */
+export const LOUDNESS_TARGET = Object.freeze({ I: -14, TP: -2.0, LRA: 11 });
+
+export async function measureLoudness(file, { ffmpegPath }) {
+  // stderr, not stdout: loudnorm prints its JSON to the log stream.
+  const { stderr } = await execFileP(ffmpegPath,
+    ["-nostdin", "-hide_banner", "-i", file,
+     "-af", `loudnorm=I=${LOUDNESS_TARGET.I}:TP=${LOUDNESS_TARGET.TP}:LRA=${LOUDNESS_TARGET.LRA}:print_format=json`,
+     "-f", "null", "-"], { maxBuffer: 1 << 26 });
+  const m = stderr.match(/\{[\s\S]*?"input_i"[\s\S]*?\}/);
+  if (!m) throw new Error("videoMusicBed: loudnorm printed no measurement");
+  return JSON.parse(m[0]);
+}
+
+export function secondPassLoudnorm(measured, t = LOUDNESS_TARGET) {
+  for (const k of ["input_i", "input_tp", "input_lra", "input_thresh", "target_offset"]) {
+    if (!(k in measured)) throw new Error(`videoMusicBed: measurement is missing ${k}`);
+  }
+  return `loudnorm=I=${t.I}:TP=${t.TP}:LRA=${t.LRA}` +
+    `:measured_I=${measured.input_i}:measured_TP=${measured.input_tp}` +
+    `:measured_LRA=${measured.input_lra}:measured_thresh=${measured.input_thresh}` +
+    `:offset=${measured.target_offset}:linear=true`;
+}
+
 export async function scoreShort(fileIn, bed, fileOut, { ffmpegPath }) {
   if (!ffmpegPath) throw new Error("videoMusicBed: ffmpegPath is required");
   const ff = (args) => execFileP(ffmpegPath, ["-y", "-nostdin", "-hide_banner", "-loglevel", "error", ...args],
     { maxBuffer: 1 << 26 });
+
+  // Pass 1: the mix itself — voice, sidechain-ducked bed — to float PCM.
+  const mixed = `${fileOut}.mix.wav`;
   await ff([
     "-i", fileIn, "-i", bed,
     "-filter_complex",
       `[0:a]asplit=2[voice][key];` +
       `[1:a][key]sidechaincompress=threshold=0.12:ratio=2.5:attack=20:release=380:makeup=1[ducked];` +
-      `[voice][ducked]amix=inputs=2:duration=first:normalize=0,` +
-      `loudnorm=I=-14:TP=-2.0:LRA=11,alimiter=limit=0.85[a]`,
-    "-map", "0:v", "-map", "[a]",
-    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
-    "-movflags", "+faststart", fileOut,
+      `[voice][ducked]amix=inputs=2:duration=first:normalize=0[a]`,
+    "-map", "[a]", "-c:a", "pcm_f32le", "-ar", "48000", "-ac", "2", mixed,
   ]);
+
+  try {
+    // Pass 2: measure, then apply linearly against the measured values.
+    const measured = await measureLoudness(mixed, { ffmpegPath });
+    await ff([
+      "-i", fileIn, "-i", mixed,
+      // level=false IS THE ACTUAL FIX. alimiter AUTO-LEVELS by default — it
+      // normalizes its output UP toward the ceiling — so the original chain
+      // took loudnorm's on-target mix and boosted it ~+1.4 dB, which is
+      // precisely the +1.5 LU / −0.2 dBTP signature measured on the published
+      // file. The bed's INTERNAL limiter keeps auto-level: it was part of the
+      // sound the bed was tuned to, and its output passes through this
+      // correctly-behaved stage anyway.
+      "-filter_complex", `[1:a]${secondPassLoudnorm(measured)},alimiter=limit=0.85:level=false[a]`,
+      "-map", "0:v", "-map", "[a]",
+      "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+      "-movflags", "+faststart", fileOut,
+    ]);
+  } finally {
+    try { unlinkSync(mixed); } catch { /* already gone */ }
+  }
   return fileOut;
 }
