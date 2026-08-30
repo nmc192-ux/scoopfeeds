@@ -75,24 +75,14 @@ test("a query with no significant words never reaches the network", async () => 
   } finally { delete process.env.VIDEO_FOOTAGE_ENABLED; }
 });
 
-// ─── mount variety ──────────────────────────────────────────────────────────
+// ─── mount variety: REMOVED ─────────────────────────────────────────────────
+//
+// mountFor and the mount library are deleted (DrJ, 2026-08-30). Variety between
+// successive photo cards is no longer a treatment rotation — it is a different
+// PHOTOGRAPH per beat, enforced by the image ledger and measured by the
+// PICTURES PLACED line. The tests that pinned mount rotation pinned a feature
+// that no longer exists, and are gone with it rather than adapted.
 
-import { mountFor } from "./videoAutopost.js";
-import { MOUNT_NAMES } from "./videoSubjectVisual.js";
-
-test("mountFor is unchanged for callers that do not ask for variety", () => {
-  // Stable per article, as it always was. Ordinal 0 must not move.
-  assert.equal(mountFor("abc"), mountFor("abc", 0));
-  assert.ok(MOUNT_NAMES.includes(mountFor("abc")));
-});
-
-test("successive photo cards in one video land on different mounts", () => {
-  // The defect: one video may hold several photo cards, and every one of them
-  // was drawing the same picture on the same mount — one photograph presented
-  // as if it were two.
-  const seen = MOUNT_NAMES.map((_, i) => mountFor("some-article-id", i));
-  assert.equal(new Set(seen).size, MOUNT_NAMES.length, "ordinals collide before the mounts are exhausted");
-});
 
 // ─── recency ────────────────────────────────────────────────────────────────
 

@@ -655,7 +655,9 @@ const CARD_FIELDS = {
   kicker:  { required: ["top", "bottom", "caption"],         optional: ["sub", "visual"] },
   // `photo` carries NO image field. The photograph is the article's own
   // (image_url), and the MOUNT is a design decision made in code — a model
-  // choosing between a polaroid and a torn cutting is a model art-directing.
+  // choosing how a photograph is treated is a model art-directing. There is
+  // no treatment vocabulary any more in any case: news photographs render
+  // full-bleed and in colour (DrJ, 2026-08-30).
   // `subject` is REQUIRED and is the whole point of the card: it declares what
   // the photograph is expected to SHOW. Without it the renderer takes image_url
   // on trust and nothing anywhere can notice a mismatch — which is the tariffs

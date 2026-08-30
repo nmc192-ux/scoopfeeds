@@ -1180,10 +1180,11 @@ test("BRIDGE_PUNCT still counts a trailing question as a bridge", () => {
   assert.equal(captionBridges("So who actually pays for this?"), true);
 });
 
-test("nothing in the schema still RECOMMENDS ending on a question", () => {
+test("nothing in the schema still RECOMMENDS ending on a question", async () => {
   // The kicker's own error message used to say the closer may end on "an open
   // question" — it was teaching the failure this now rejects.
-  const src = readFileSync(new URL("./videoSpecSchema.js", import.meta.url), "utf8");
+  const { readFileSync: rf } = await import("node:fs");
+  const src = rf(new URL("./videoSpecSchema.js", import.meta.url), "utf8");
   const recommending = src.split("\n").filter(l =>
     /or an open question/.test(l) && !/used to (say|offer)/.test(l));
   assert.deepEqual(recommending, [], "a stale recommendation would argue with the new gate");
@@ -1196,7 +1197,7 @@ test("nothing in the schema still RECOMMENDS ending on a question", () => {
 // happened to carry one — the failure this whole feature exists to prevent.
 
 const { SUBJECT_VISUAL_TYPES } = await import("./videoSpecSchema.js");
-const { knownCountry, MOUNT_NAMES, buildLocatorMap } = await import("./videoSubjectVisual.js");
+const { knownCountry, buildLocatorMap } = await import("./videoSubjectVisual.js");
 
 // MIN_SLIDES is 5, at least one card must be an OWN_LAYER type (diagram or
 // turn), and a spec needs its `beats` enumeration — so a three-card wrapper is
@@ -1308,11 +1309,24 @@ test("the 50m atlas carries the small island states 110m dropped", () => {
   assert.ok(!knownCountry("ZZZ"));
 });
 
-test("taped is NOT in the mount library", () => {
-  // It has no border, so the print's dark edges meet the ground with nothing
-  // between them — the one mount of the four that still risked reading as a
-  // hole. It needs a bone border before it belongs.
-  assert.deepEqual([...MOUNT_NAMES].sort(), ["cutting", "pinned", "polaroid"]);
+test("the spec carries no mount vocabulary — the collage look is deleted", async () => {
+  // "taped is NOT in the mount library" used to guard which paper treatments
+  // were allowed. There is no mount library now: news photographs render
+  // full-bleed and in colour (DrJ, 2026-08-30), so nothing in a spec may name
+  // a treatment at all.
+  // Read the schema's own source: no card type, field or enum may name a paper
+  // treatment, because there is no longer any such thing to name.
+  const { readFileSync: rf } = await import("node:fs");
+  const src = rf(new URL("./videoSpecSchema.js", import.meta.url), "utf8");
+  // Whole words: "pinned by the first/last rules" is ordinary English and has
+  // nothing to do with the deleted pinned-photograph mount.
+  for (const gone of ["cutting", "polaroid", "taped", "halftone", "PAPER_BONE"]) {
+    assert.ok(!new RegExp(`\\b${gone}\\b`).test(src), `videoSpecSchema still names the "${gone}" treatment`);
+  }
+  // And the renderer that draws them is gone too, not merely unreferenced.
+  const visual = rf(new URL("./videoSubjectVisual.js", import.meta.url), "utf8");
+  assert.ok(!/export const MOUNTS/.test(visual), "the mount library still exists");
+  assert.ok(/export async function buildFullBleed/.test(visual), "the full-bleed treatment must exist in its place");
 });
 
 // ─── Motive, and the photo card's declared subject ──────────────────────────

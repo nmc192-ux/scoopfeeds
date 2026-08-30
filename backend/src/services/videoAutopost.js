@@ -72,7 +72,7 @@ import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from ".
 import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js";
 import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
 import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
-import { buildMount, buildMapPng, MOUNT_NAMES } from "./videoSubjectVisual.js";
+import { buildFullBleed, buildMapPng } from "./videoSubjectVisual.js";
 import { findFootageStill, footageEnabled, footageCreditLines, footageDateLabel } from "./videoFootage.js";
 import { withDeadline } from "./httpRetry.js";
 import { isTikTokConfigured, uploadToTikTok, tiktokPrivacyLevel } from "./tiktokClient.js";
@@ -262,22 +262,6 @@ export const VIDEO_FACEBOOK_MAX_PER_DAY = () => {
   return Number.isFinite(n) && n >= 0 ? n : VIDEO_MAX_PER_DAY();
 };
 
-/**
- * ONE MOUNT PER VIDEO, chosen deterministically from the article id.
- *
- * Deterministic so a re-render is identical (the render cache means a video
- * rebuilt tomorrow must not arrive in a different frame), and varied across
- * articles so the channel does not look like one template. The ground never
- * changes, so varying the mount is where variety comes from without
- * inconsistency — DrJ's decision, 2026-08-14.
- */
-export function mountFor(articleId, ordinal = 0) {
-  const h = [...String(articleId || "x")].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
-  // ORDINAL, because one video can hold more than one photo card and they were
-  // all landing on the same mount. Stable per article as before at ordinal 0,
-  // so nothing that does not ask for variety sees any change.
-  return MOUNT_NAMES[(h + ordinal) % MOUNT_NAMES.length];
-}
 
 const SITE_ORIGIN = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 
@@ -400,8 +384,7 @@ export function rateGate({ now = Date.now() } = {}) {
  */
 export async function choosePhotoUnderlay({
   card, article, attribution, ordinal, work, slideIndex = 0, ledger = null,
-  mount = mountFor(article?.id, ordinal),
-  _buildMount = buildMount, _findFootageStill = findFootageStill, _footageEnabled = footageEnabled,
+  _buildMount = buildFullBleed, _findFootageStill = findFootageStill, _footageEnabled = footageEnabled,
   _log = logger,
 } = {}) {
   const none = { underlayPath: null, imageCredit: null, imageDate: null, footage: null,
@@ -426,7 +409,7 @@ export async function choosePhotoUnderlay({
   const thirdPartyImageryAllowed = !sensitiveHeadline;
 
   if (ordinal === 0 && article?.image_url && publisherPhotoAllowed) {
-    const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: article.id, ledger });
+    const p = await _buildMount({ imageUrl: article.image_url, work, ledger });
     if (p) return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null,
                     footage: null, imageUrl: article.image_url, pickedBy: "article-photo" };
   }
@@ -438,8 +421,7 @@ export async function choosePhotoUnderlay({
     const found = await _findFootageStill({ subject: card?.subject, title: article?.title });
     if (found) {
       const p = await _buildMount({
-        imageUrl: found.imageUrl, mount, ledger,
-        work: path.join(work, "footage"), seed: `${article?.id}-${ordinal}`,
+        imageUrl: found.imageUrl, ledger, work: path.join(work, "footage"),
       });
       if (p) {
         // ARCHIVE MATERIAL IS DATED ON SCREEN. Recency ranking prefers newer
@@ -458,9 +440,9 @@ export async function choosePhotoUnderlay({
   }
 
   if (ordinal > 0 && article?.image_url && publisherPhotoAllowed) {
-    const p = await _buildMount({ imageUrl: article.image_url, mount, work, seed: `${article.id}-${ordinal}`, ledger });
+    const p = await _buildMount({ imageUrl: article.image_url, work, ledger });
     if (p) {
-      _log.info(`🎬 slide ${slideIndex} photo: no footage for photo card #${ordinal + 1} — reusing the article photo on mount "${mount}"`);
+      _log.info(`🎬 slide ${slideIndex} photo: no footage for photo card #${ordinal + 1} — reusing the article photograph`);
       return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null,
                footage: null, imageUrl: article.image_url, pickedBy: "article-photo-reused" };
     }
@@ -717,20 +699,16 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
       const beat = beatImagery.get(i);
       if (beat && !underlayPath && !cutAsset && beat.buffer) {
         try {
-          // THROUGH THE HOUSE TREATMENT, not straight to the frame. Rendered
-          // untreated, these stills came out full-bleed and in colour against a
-          // monochrome format and read as clips from a different video. The
-          // mount rotation (cutting / polaroid / pinned) is the same one the
-          // photo cards use, so a resolved picture now looks like it belongs.
-          // The bytes are already fetched and validated — sourceBuffer skips a
-          // second request that a CDN might answer with a different rendition.
-          const bp = await buildMount({
+          // FULL-BLEED, COLOUR, UNTOUCHED. This routed through buildMount
+          // earlier today; DrJ's ruling of 2026-08-30 deletes the mounts
+          // outright, so that is superseded rather than left as a second path.
+          // The bytes are already fetched and validated, so sourceBuffer skips
+          // a request a CDN might answer with a different rendition.
+          const bp = await buildFullBleed({
             sourceBuffer: beat.buffer,
-            mount: beat.mount || mountFor(article.id, i),
             work: path.join(work, `beat${String(i).padStart(2, "0")}`),
-            seed: `${article.id}-beat-${i}`,
           });
-          if (!bp) throw new Error("mount produced nothing");
+          if (!bp) throw new Error("full-bleed render produced nothing");
           beatStill = { path: bp, credit: beat.credit || null };
           logger.info(
             `🖼 slide ${i} [${beat.tier}/${beat.confidence}] intent "${beat.intent}" ` +
