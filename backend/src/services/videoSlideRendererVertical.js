@@ -71,9 +71,13 @@ const base = (card, ctx) => [...chrome(ctx), eyebrowV(card.eyebrow || "")];
 
 // ─── title ──────────────────────────────────────────────────────────────────
 
-const TITLE_NOMINAL = 104;
+// PHRASES FILL THE WIDTH (DrJ, defect 6): a small phrase floating in a void
+// reads as dead air. The nominal is the size a SHORT phrase gets; long ones
+// still fit down through the same fitLineGroup. 104 was sized for the old
+// paragraph-adjacent grammar.
+const TITLE_NOMINAL = 148;
 const TITLE_MIN = 64;
-const KICKER_NOMINAL = 96;
+const KICKER_NOMINAL = 140;
 
 /**
  * ONE size for a GROUP of display lines, decided by the widest of them.
@@ -125,7 +129,6 @@ function titleStatesV(card, ctx) {
     : null;
   const b = () => base(card, ctx);
   return [
-    { key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) },
     { key: "s2", lime: limeIdx === 0, tree: root(GROUND.INK, [...b(), line(l1, VY.titleLine1)].filter(Boolean)) },
     { key: "s3", lime: limeIdx >= 0, tree: root(GROUND.INK, [...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2)].filter(Boolean)) },
     { key: "s4", lime: limeIdx >= 0, tree: root(GROUND.INK, [
@@ -241,7 +244,6 @@ function statStatesV(card, ctx) {
   };
   const limeAfterLines = hi >= 0 && Boolean((card.lines || [])[hi]);
   return [
-    { key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) },
     { key: "s2", lime: false, tree: root(GROUND.INK, [...b(), value]) },
     { key: "s3", lime: hi === 0, tree: root(GROUND.INK, [...b(), value, supportLine(0, VY.statLine1)].filter(Boolean)) },
     { key: "s4", lime: limeAfterLines, tree: root(GROUND.INK, [...b(), value, supportLine(0, VY.statLine1), supportLine(1, VY.statLine2)].filter(Boolean)) },
@@ -301,7 +303,8 @@ function barsStatesV(card, ctx) {
   };
 
   const b = () => base(card, ctx);
-  const states = [{ key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) }];
+  // NO EMPTY OPENING STATE (DrJ, defect 6) — beats open on content.
+  const states = [];
   const groups = bars.length <= 4 ? bars.map((_, i) => [i]) : [[0], [1], [2], [3, 4]];
   let shown = [];
   groups.forEach((g, gi) => {
@@ -362,7 +365,8 @@ function diagramStatesV(card, ctx) {
     ].filter(Boolean);
   });
 
-  const states = [{ key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) }];
+  // NO EMPTY OPENING STATE (DrJ, defect 6) — beats open on content.
+  const states = [];
   const groups = n <= 4 ? nodes.map((_, i) => i + 1) : [1, 2, 3, n];
   groups.forEach((upto, gi) => {
     states.push({ key: `node${gi + 1}`, lime: false, tree: root(GROUND.INK, [...b(), ...rowsFor(upto, false)]) });
@@ -600,7 +604,6 @@ function turnStatesV(card, ctx) {
     : null;
   const b = () => base(card, ctx);
   return [
-    { key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) },
     { key: "s2", lime: limeIdx === 0, tree: root(GROUND.INK, [...b(), line(l1, VY.titleLine1)].filter(Boolean)) },
     { key: "s3", lime: limeIdx >= 0, tree: root(GROUND.INK, [...b(), line(l1, VY.titleLine1), line(l2, VY.titleLine2)].filter(Boolean)) },
     { key: "s4", lime: limeIdx >= 0, tree: root(GROUND.INK, [
@@ -619,7 +622,6 @@ function kickerStatesV(card, ctx) {
   // same 936px measure. Fitted as one group so the pair keeps a single size.
   const kSize = fitLineGroup([card.top, card.bottom], { nominal: KICKER_NOMINAL, what: "kicker" });
   return [
-    { key: "s1", lime: false, tree: root(GROUND.INK, [...b()]) },
     { key: "s2", lime: false, tree: root(GROUND.INK, [...b(), antonLine(card.top, { top: VY.kickTop, size: kSize, color: C.white })]) },
     { key: "s3", lime: true, tree: root(GROUND.INK, [
         ...b(),

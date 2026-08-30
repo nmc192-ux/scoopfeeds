@@ -597,7 +597,13 @@ export async function resolveSpecImagery({
     picks.push(pick);
   }
 
-  return { picks, poolSize: pool.length, ...coverageOf(picks) };
+  // LEFTOVERS, for the pacing pass (DrJ defect 5): a beat longer than ~3s cuts
+  // to a second visual, and the first place to find one is the pool images no
+  // beat consumed. Returned as-is — the caller claims through the ledger at
+  // the moment of use, not before, so an unused leftover stays available to
+  // the photo path.
+  const leftovers = pool.filter((_, idx) => !poolCursor.used.has(idx));
+  return { picks, poolSize: pool.length, leftovers, ...coverageOf(picks) };
 }
 
 /**

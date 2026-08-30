@@ -72,7 +72,7 @@ import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from ".
 import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js";
 import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
 import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
-import { buildFullBleed, buildMapPng } from "./videoSubjectVisual.js";
+import { buildFullBleed, buildMapPng, buildStillSequence, buildTightCrop } from "./videoSubjectVisual.js";
 import { findFootageStill, footageEnabled, footageCreditLines, footageDateLabel } from "./videoFootage.js";
 import { withDeadline } from "./httpRetry.js";
 import { isTikTokConfigured, uploadToTikTok, tiktokPrivacyLevel } from "./tiktokClient.js";
@@ -536,6 +536,7 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
     const imageLedger = beatImageryEnabled() ? createImageLedger() : null;
 
     const beatImagery = new Map();
+    let beatLeftovers = [];
     if (beatImageryEnabled()) {
       try {
         const entities = getArticleEntitiesWithQids(article.id, 12);
@@ -557,6 +558,7 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
         for (const p of noAdjacentRepeat(resolved.picks)) {
           if (p.tier !== TIERS.CARD) beatImagery.set(p.slideIndex, p);
         }
+        beatLeftovers = resolved.leftovers || [];
         const c = resolved.bySource;
         logger.info(
           `🖼 beat imagery [${article.id}]: ${resolved.beats} beats — ` +
@@ -704,12 +706,44 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
           // outright, so that is superseded rather than left as a second path.
           // The bytes are already fetched and validated, so sourceBuffer skips
           // a request a CDN might answer with a different rendition.
-          const bp = await buildFullBleed({
-            sourceBuffer: beat.buffer,
-            work: path.join(work, `beat${String(i).padStart(2, "0")}`),
-          });
+          const beatWork = path.join(work, `beat${String(i).padStart(2, "0")}`);
+          const bp = await buildFullBleed({ sourceBuffer: beat.buffer, work: beatWork });
           if (!bp) throw new Error("full-bleed render produced nothing");
-          beatStill = { path: bp, credit: beat.credit || null };
+
+          // ── PACING (DrJ, defect 5): no visual holds past ~3 seconds ──────
+          //
+          // A long beat becomes two or three visuals cut hard. The second
+          // visual is a leftover pool photograph when one exists (claimed
+          // through the ledger AT USE, so an unused leftover stays free);
+          // otherwise a tight reframe of the same photograph — wide, then
+          // close — which cuts like coverage rather than repeating a slide.
+          const windowSecs = slideTotalSecs(audioSecs);
+          const MAX_VISUAL_SECS = 3;
+          if (windowSecs > MAX_VISUAL_SECS + 0.5) {
+            const wanted = Math.min(3, Math.ceil(windowSecs / MAX_VISUAL_SECS));
+            const framesList = [bp];
+            while (framesList.length < wanted && beatLeftovers.length) {
+              const cand = beatLeftovers.shift();
+              if (imageLedger && !imageLedger.claim(cand.buf, { label: cand.url })) continue;
+              const extra = await buildFullBleed({ sourceBuffer: cand.buf, work: path.join(beatWork, `x${framesList.length}`) });
+              if (extra) framesList.push(extra);
+            }
+            if (framesList.length < wanted) {
+              const tight = buildTightCrop({ sourcePath: bp, out: path.join(beatWork, "tight.png") });
+              if (tight) framesList.push(tight);
+            }
+            if (framesList.length > 1) {
+              const seq = buildStillSequence({
+                frames: framesList, secsEach: windowSecs / framesList.length,
+                out: path.join(beatWork, "seq.mp4"), work: beatWork,
+              });
+              if (seq) {
+                logger.info(`🎬 pacing: slide ${i} — ${framesList.length} visuals across ${windowSecs.toFixed(1)}s`);
+                beatStill = { path: seq, credit: beat.credit || null, isSequence: true };
+              }
+            }
+          }
+          if (!beatStill) beatStill = { path: bp, credit: beat.credit || null };
           logger.info(
             `🖼 slide ${i} [${beat.tier}/${beat.confidence}] intent "${beat.intent}" ` +
             `(${beat.intentSource}) → ${String(beat.imageUrl).slice(0, 90)}`
@@ -742,7 +776,9 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
         // there. Hence beatSecs below, and the assertion in assembleSlide.
         cutawaySecs: cutAsset ? CUTAWAY_SECS() : (beatStill ? slideTotalSecs(audioSecs) : 0),
         cutawayCredit: cutAsset ? cutawayCredit(cutAsset) : (beatStill?.credit || null),
-        cutawayIsStill: Boolean(!cutAsset && beatStill),
+        // A pre-cut sequence is already a video stream; only a single frame
+        // needs the -loop 1 -t declaration.
+        cutawayIsStill: Boolean(!cutAsset && beatStill && !beatStill.isSequence),
       });
       segments.push(seg);
     }

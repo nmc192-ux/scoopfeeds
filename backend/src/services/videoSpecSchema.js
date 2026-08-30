@@ -603,7 +603,12 @@ export const CAPTION_MAX_CHARS = 160;
 // dropped beat does. It needs no separate warning either: fitStatesToDuration
 // already logs every collapse, so a caption under this floor announces itself
 // in the cycle log as the beat it dropped.
-export const CAPTION_MIN_CHARS = 70;
+// RE-DERIVED 2026-08-30: removing the empty opening states (defect 6 — a
+// chrome-only frame is a black screen) left every card one state shorter, so
+// the collapse rule bites later. Measured on the same stat-card probe the
+// pinning test uses: every state survives at 55 chars, one drops at 50. The
+// value follows the machinery, exactly as the test demands.
+export const CAPTION_MIN_CHARS = 55;
 
 // §3b/5 — THE PIPELINE'S OWN LAYER. A spec made only of title + stat + kicker
 // is a restatement of someone else's article with numbers pulled out: no

@@ -164,6 +164,59 @@ export async function buildFullBleed({ imageUrl, work, out = null, ffmpegPath = 
   }
 }
 
+/**
+ * A HARD-CUT SEQUENCE OF STILLS, as one video clip for the cutaway seam.
+ *
+ * The pacing rule (DrJ, defect 5): no single visual holds longer than ~3
+ * seconds. A 7-second narration beat becomes two or three visuals cut hard —
+ * a second photograph where one exists, else a reframed crop of the same one
+ * (wide, then tight). The reference shows a new visual roughly every second;
+ * this is the interim, beat-level version until TTS word timestamps land.
+ *
+ * Implemented as a tiny mp4 rather than by widening the assembler: the
+ * cutaway seam already takes a video stream that ends and hands the frame
+ * back, and a pre-cut sequence IS such a stream. No graph changes, no new
+ * composition path, and the seam's clamp/credit/audio behaviour all hold.
+ */
+export function buildStillSequence({ frames, secsEach, out, work, ffmpegPath = null, fps = 25 }) {
+  const ff = ffmpegPath || getFFmpegPath();
+  if (!ff || !frames?.length) return null;
+  mkdirSync(work, { recursive: true });
+  const args = ["-y", "-loglevel", "error"];
+  for (const f of frames) args.push("-loop", "1", "-t", String(secsEach), "-i", f);
+  const labels = frames.map((_, i) => `[v${i}]`).join("");
+  const chain = frames.map((_, i) =>
+    `[${i}:v]scale=${VERTICAL.canvas.w}:${VERTICAL.canvas.h}:force_original_aspect_ratio=increase:force_divisible_by=2,` +
+    `crop=${VERTICAL.canvas.w}:${VERTICAL.canvas.h},setsar=1,fps=${fps}[v${i}]`).join(";");
+  args.push("-filter_complex", `${chain};${labels}concat=n=${frames.length}:v=1:a=0[o]`,
+    "-map", "[o]", "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", out);
+  try { execFileSync(ff, args, { stdio: ["ignore", "ignore", "pipe"] }); return out; }
+  catch (err) {
+    logger.warn(`🎬 still sequence failed — ${String(err.message).slice(0, 100)}`);
+    return null;
+  }
+}
+
+/**
+ * The TIGHT reframe of a photograph — the second "visual" when a beat has only
+ * one image. Centre 62% of the frame, re-covered, so the cut reads as wide →
+ * close rather than as the same slide twice.
+ */
+export function buildTightCrop({ sourcePath, out, ffmpegPath = null, zoom = 1.6 }) {
+  const ff = ffmpegPath || getFFmpegPath();
+  if (!ff) return null;
+  const f = (1 / zoom).toFixed(4);
+  try {
+    execFileSync(ff, ["-y", "-loglevel", "error", "-i", sourcePath, "-vf",
+      `crop=iw*${f}:ih*${f},scale=${VERTICAL.canvas.w}:${VERTICAL.canvas.h}:force_original_aspect_ratio=increase:force_divisible_by=2,crop=${VERTICAL.canvas.w}:${VERTICAL.canvas.h},format=rgba`,
+      "-frames:v", "1", out], { stdio: ["ignore", "ignore", "pipe"] });
+    return out;
+  } catch (err) {
+    logger.warn(`🎬 tight crop failed — ${String(err.message).slice(0, 100)}`);
+    return null;
+  }
+}
+
 // ─── The locator map ────────────────────────────────────────────────────────
 
 let _geo = null;
