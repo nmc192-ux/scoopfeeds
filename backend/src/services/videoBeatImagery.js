@@ -429,7 +429,21 @@ export async function resolveBeat({
   // Candidates are FETCHED AND MEASURED here, never trusted on reported size:
   // Serper's dimensions are the thumbnail's often enough to have discarded the
   // actual AP photograph of Federer's induction.
-  if (_webSearch && _fetchImage) {
+  // WEB LEADS ONLY FOR NAMED SUBJECTS (amended on rendered evidence,
+  // 2026-08-30). Every good web pick was a named thing — Federer at the
+  // podium, the settlement outpost. Every bad one was an ABSTRACT intent:
+  // "economic chart" drew a Target storefront, "gas station price display"
+  // drew a yen-intervention broadcast frame, because a title ties to the
+  // ARTICLE and an abstract article's hero can be a picture of anything.
+  // The article's own photographs are story-relevant by construction, so for
+  // abstract beats body keeps first refusal and the web answers afterwards.
+  const namedEntity = qid ? { qid, label: intent }
+    : entities.find((e) => {
+        const label = norm(e.label || e.surface);
+        return label.length >= 4 && (norm(intent).includes(label) || label.includes(norm(intent)));
+      });
+  const webFirst = Boolean(namedEntity?.qid) || !isAbstractQuery(intent);
+  if (_webSearch && _fetchImage && webFirst) {
     try {
       const cands = await _webSearch(intent, {
         headline: article?.title || "", days: webDays,
@@ -466,11 +480,7 @@ export async function resolveBeat({
   // article — which is the pool-depth lever, not a re-ordering nicety.
   //
   // Abstract beats are untouched: they go body-first exactly as before.
-  const namedEntity = qid ? { qid, label: intent }
-    : entities.find((e) => {
-        const label = norm(e.label || e.surface);
-        return label.length >= 4 && (norm(intent).includes(label) || label.includes(norm(intent)));
-      });
+
   if (thirdPartyAllowed && _entityImage && namedEntity?.qid) {
     try {
       const got = await _entityImage(namedEntity);
@@ -506,6 +516,27 @@ export async function resolveBeat({
     return { ...base, tier: TIERS.BODY, confidence: CONFIDENCE.body,
              bodyMatch: hit ? "intent" : "order",
              imageUrl: img.url, buffer: img.buf, credit: article?.source_name || null };
+  }
+
+  // ── 1b. THE WEB, for ABSTRACT beats the body pool could not serve ────────
+  if (_webSearch && _fetchImage && !webFirst && thirdPartyAllowed) {
+    try {
+      const cands = await _webSearch(intent, {
+        headline: article?.title || "", days: webDays,
+        entitySurfaces: entities.flatMap((e) => [e.label, e.surface]).filter(Boolean),
+      });
+      for (const c of cands) {
+        if (c.confidence !== "high") continue;
+        const got = await _fetchImage(c.imageUrl, c.pageUrl ? `https://${c.host}/` : undefined);
+        if (!got?.buf) continue;
+        const dims = readImageDimensions(got.buf);
+        if (!dims || dims.width < MIN_PHOTO_WIDTH || dims.height < MIN_PHOTO_HEIGHT) continue;
+        if (ledger && !ledger.claim(got.buf, { label: c.imageUrl })) continue;
+        return { ...base, tier: TIERS.WEB, confidence: c.confidence,
+                 imageUrl: c.imageUrl, buffer: got.buf,
+                 credit: c.host || null, sourcePage: c.pageUrl || null, webTitle: c.title };
+      }
+    } catch (err) { _log.warn(`🔎 web tier (post-body) failed — ${String(err.message).slice(0, 80)}`); }
   }
 
   // ── 2. A NAMED SUBJECT NEVER FALLS TO STOCK ──────────────────────────────

@@ -41,6 +41,7 @@ import {
 } from "./videoBeatImagery.js";
 import { makeEntityImageFetcher, makeStockImageFetcher } from "./videoBeatSources.js";
 import { searchEventImages, webImageSearchEnabled } from "./videoWebImageSearch.js";
+import { imageIdentity } from "./videoImageIdentity.js";
 import {
   findFreshUnvideoedArticles, claimVideoPost, markVideoPublished, markVideoFailed,
   countVideosPublishedSince, lastVideoPublishedAt, recordHeartbeat, getHeartbeatRow,
@@ -724,6 +725,13 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
             const framesList = [bp];
             while (framesList.length < wanted && beatLeftovers.length) {
               const cand = beatLeftovers.shift();
+              // CROPS DEFEAT THE BYTE HASH (the known crop-mode gap), and a
+              // leftover that is a crop of an already-placed photograph made
+              // one picture count as two "distinct". URL identity catches the
+              // rendition before the ledger ever sees the bytes.
+              const candId = imageIdentity(cand.url);
+              if (candId && imageLedger &&
+                  imageLedger.entries().some((e) => imageIdentity(e.label) === candId)) continue;
               if (imageLedger && !imageLedger.claim(cand.buf, { label: cand.url })) continue;
               const extra = await buildFullBleed({ sourceBuffer: cand.buf, work: path.join(beatWork, `x${framesList.length}`) });
               if (extra) framesList.push(extra);
