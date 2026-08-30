@@ -607,3 +607,23 @@ test("a failing web search falls through to body rather than losing the beat", a
   });
   assert.equal(r.tier, TIERS.BODY);
 });
+
+test("the ledger refuses a CROP RENDITION by URL identity — across any two tiers", async () => {
+  // One photograph entered a video twice: the photo card claimed one CDN
+  // rendition, the web tier a crop of it. Crops defeat the byte hash (27 bits,
+  // measured), so the ledger now checks URL identity BEFORE hashing. The two
+  // buffers here are genuinely different pixels; only the URL ties them.
+  const { createImageLedger } = await import("./videoBeatImagery.js");
+  const ff = getFFmpegPath();
+  const jpeg = (spec) => execFileSync(ff, ["-loglevel", "error", "-f", "lavfi", "-i", spec,
+    "-frames:v", "1", "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
+  const l = createImageLedger({ _log: QUIET });
+  assert.equal(l.claim(jpeg("testsrc2=size=1200x800"), {
+    label: "https://image.cnbcfm.com/api/v1/image/108352868-x.jpg?v=1&w=1920" }), true);
+  assert.equal(l.claim(jpeg("color=c=navy:s=1200x800"), {           // different pixels!
+    label: "https://image.cnbcfm.com/api/v1/image/108352868-x.jpg?v=9&w=750" }), false,
+    "same URL identity is the same photograph, whatever the pixels hash to");
+  assert.equal(l.claim(jpeg("color=c=navy:s=1200x800"), {
+    label: "https://image.cnbcfm.com/api/v1/image/999999-y.jpg" }), true,
+    "a genuinely different image still claims");
+});

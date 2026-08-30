@@ -159,6 +159,17 @@ export function createImageLedger({ _hash = averageHash, _log = logger } = {}) {
   return {
     /** True when this picture is new and now claimed; false when already spent. */
     claim(buf, { label = "" } = {}) {
+      // URL IDENTITY FIRST, then bytes. A CDN's crop rendition defeats the
+      // byte hash (27 bits apart, measured), and one photograph entered a
+      // video twice through two different tiers — the photo card claimed one
+      // rendition, the web tier a crop of it. The label is a URL on every
+      // path, and two labels naming the same underlying image are the same
+      // photograph regardless of what the pixels hash to.
+      const id = imageIdentity(label);
+      if (id && labels.some((prev) => imageIdentity(prev) === id)) {
+        _log.info(`🖼 ledger: same image identity already placed — ${String(label).slice(0, 70)}`);
+        return false;
+      }
       const h = _hash(buf);
       // An unhashable image is ALLOWED THROUGH. "We could not tell" must never
       // silently cost a beat its picture — the same rule the pool follows.
