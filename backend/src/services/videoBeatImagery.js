@@ -496,13 +496,19 @@ export async function resolveSpecImagery({
   const picks = [];
   const stockCreators = new Set();
 
-  // RESERVE THE ARTICLE'S OWN PHOTOGRAPH when the spec has a photo card: that
-  // card exists to show it, and a type beat taking it first would leave the
-  // photo card bare. The reservation is a normal ledger claim, so the photo
-  // path's own claim later finds it already spent and skips its fetch.
-  if (ledger && slides.some((sl) => sl?.t === "photo") && pool.length) {
+  // HOLD THE ARTICLE'S OWN PHOTOGRAPH for its photo card when the spec has one:
+  // that card exists to show it, and the resolver runs before the slide loop,
+  // so without this a type beat takes the picture and the card renders bare.
+  //
+  // THE HOLD IS ON THE POOL, NOT THE LEDGER. Claiming it here marked the
+  // photograph as spent, so the photo path's own claim then came back
+  // "already used" and the video rendered with NO pictures at all — worse than
+  // the repetition this was fixing. The reservation's job is to stop the
+  // RESOLVER taking it; the photo path still claims it normally, and if that
+  // path fails the picture is simply unspent.
+  if (slides.some((sl) => sl?.t === "photo") && pool.length) {
     const own = pool.find((p) => p.url === article?.image_url) || pool[0];
-    if (own) { ledger.reserve(own.buf, article?.image_url || own.url); poolCursor.used.add(pool.indexOf(own)); }
+    if (own) poolCursor.used.add(pool.indexOf(own));
   }
 
   for (let i = 0; i < slides.length; i++) {

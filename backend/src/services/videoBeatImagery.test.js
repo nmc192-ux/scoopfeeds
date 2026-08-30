@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { getFFmpegPath } from "./videoGenerator.js";
 import {
   intentForBeat, buildBodyPool, resolveBeat, resolveSpecImagery,
   noAdjacentRepeat, coverageOf, TIERS,
@@ -308,7 +310,10 @@ test("photo beats do not consume the pool — their picture comes from the under
   // and produceVideo then discarded the pick because the beat already had an
   // underlay. On a 2-image pool the whole pool vanished into beats that never
   // showed it, and every type card rendered bare.
-  const pool = [{ ...img(1), text: "" }, { ...img(2), text: "" }];
+  // THREE images, because a photo card in the spec now HOLDS one for itself —
+  // that hold is a separate rule, tested below; this test is about the photo
+  // beat not consuming a pool slot for a picture it never shows.
+  const pool = [{ ...img(1), text: "" }, { ...img(2), text: "" }, { ...img(3), text: "" }];
   const r = await resolveSpecImagery({
     slides: [
       { t: "photo", subject: "Dolly Parton on stage" },
@@ -330,8 +335,6 @@ test("the SAME photograph at two rendition sizes enters the pool once", async ()
   // many sizes, so the URL set missed it and the dimension signature missed it
   // too. The result was one Netanyahu portrait on two beats of a video and one
   // CNBC illustration on three of another.
-  const { execFileSync } = await import("child_process");
-  const { getFFmpegPath } = await import("./videoGenerator.js");
   const ff = getFFmpegPath();
   const jpeg = (spec, w) => execFileSync(ff, ["-loglevel", "error", "-f", "lavfi", "-i", spec,
     "-frames:v", "1", "-vf", `scale=${w}:-2`, "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
@@ -356,8 +359,6 @@ test("a picture whose hash cannot be computed is KEPT, not discarded", async () 
 
 test("hashDistance separates renditions from different pictures", async () => {
   const { averageHash, hashDistance, DUPLICATE_BITS } = await import("./videoBeatImagery.js");
-  const { execFileSync } = await import("child_process");
-  const { getFFmpegPath } = await import("./videoGenerator.js");
   const ff = getFFmpegPath();
   const jpeg = (spec, w) => execFileSync(ff, ["-loglevel", "error", "-f", "lavfi", "-i", spec,
     "-frames:v", "1", "-vf", `scale=${w}:-2`, "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
@@ -374,8 +375,6 @@ test("the ledger is TWO-WAY — whichever path claims first wins, either order",
   // Not "the resolver reads the photo path's output": that fixes today's
   // ordering and breaks the moment the order changes. Both write, both check.
   const { createImageLedger } = await import("./videoBeatImagery.js");
-  const { execFileSync } = await import("child_process");
-  const { getFFmpegPath } = await import("./videoGenerator.js");
   const ff = getFFmpegPath();
   const jpeg = (spec, w) => execFileSync(ff, ["-loglevel", "error", "-f", "lavfi", "-i", spec,
     "-frames:v", "1", "-vf", `scale=${w}:-2`, "-f", "image2", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 1 << 24 });
@@ -418,12 +417,26 @@ test("the article's own photograph is RESERVED for its photo card", async () => 
   assert.equal(r.picks[1].tier, TIERS.BODY);
   assert.notEqual(r.picks[1].imageUrl, ARTICLE.image_url,
     "the type beat must not take the picture the photo card is going to show");
+  // AND THE HOLD MUST NOT SPEND IT. Reserving through the ledger marked the
+  // photograph used, so the photo path's own claim came back "already used"
+  // and the whole video rendered with no pictures — worse than the repetition
+  // it was fixing. Asserted with REAL bytes, because the img() fixture's
+  // placeholder Buffer hashes to null and a null hash is never recorded.
+  const realOwn = execFileSync(getFFmpegPath(), ["-loglevel", "error", "-f", "lavfi",
+    "-i", "testsrc2=size=880x600", "-frames:v", "1", "-f", "image2", "-c:v", "mjpeg", "pipe:1"],
+    { maxBuffer: 1 << 24 });
+  const l2 = createImageLedger({ _log: QUIET });
+  await resolveSpecImagery({
+    slides: [{ t: "photo", subject: "the bypass" }, { t: "turn", visual: "the bypass at dusk" }],
+    article: ARTICLE, ledger: l2,
+    deps: { _pool: [{ ...own, buf: realOwn }, other], _log: QUIET },
+  });
+  assert.equal(l2.claim(realOwn, { label: "the photo path, later" }), true,
+    "the photo card must still be able to claim the picture held for it");
 });
 
 test("a photograph already spent sends the beat to the next tier, not to a repeat", async () => {
   const { createImageLedger } = await import("./videoBeatImagery.js");
-  const { execFileSync } = await import("child_process");
-  const { getFFmpegPath } = await import("./videoGenerator.js");
   const ff = getFFmpegPath();
   // REAL bytes: img() carries a placeholder Buffer, which hashes to null, and
   // a null hash is deliberately let through — so a fake image cannot exercise
