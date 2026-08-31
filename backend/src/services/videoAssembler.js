@@ -795,7 +795,7 @@ export function totalFor(stateCount, hold, crossfade = CROSSFADE_SECS) {
 export async function assembleSlide({
   statePaths, hold, outputPath, driftDir = 0, ffmpegPath = null,
   audioPath = null, captionText = null, workDir = null, fontFile = null,
-  orientation = "horizontal", underlayPath = null,
+  orientation = "horizontal", underlayPath = null, underlayIsVideo = false,
   cutawayPath = null, cutawaySecs = 0, cutawayCredit = null, cutawayFrame = null,
   cutawayIsStill = false,
 }) {
@@ -807,7 +807,13 @@ export async function assembleSlide({
   for (const p of statePaths) args.push("-loop", "1", "-t", String(hold), "-i", p);
   // Input ORDER is the contract with buildSlideFilter: states, then the
   // underlay, then audio. The filter addresses them by index.
-  if (underlayPath) args.push("-loop", "1", "-t", String(hold * statePaths.length), "-i", underlayPath);
+  // `-loop 1` is an IMAGE demuxer option. A pre-cut pacing sequence is already a
+  // video stream and must not carry it; `-t` still bounds both so the underlay
+  // can never outlive the slide.
+  if (underlayPath) {
+    if (!underlayIsVideo) args.push("-loop", "1");
+    args.push("-t", String(hold * statePaths.length), "-i", underlayPath);
+  }
   // The cutaway sits AFTER the underlay and BEFORE the audio, so both indices
   // below stay arithmetic on the counts rather than on which options are set.
   // A cutaway path with an unusable duration is a BUG UPSTREAM, not a reason to

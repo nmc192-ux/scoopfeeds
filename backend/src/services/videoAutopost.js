@@ -734,27 +734,6 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
         }
       }
 
-      // Now the real states, credited to whoever actually owns what was fetched.
-      let states = statesForCard(card, { ...ctxBase, imageCredit, imageDate });
-      states = fitStatesToDuration(states, audioSecs, { cardType: card.t, slideIndex: i });
-      const hold = holdForAudio(audioSecs, states.length);
-
-      const paths = [];
-      for (const st of states) {
-        const p = path.join(work, `s${String(i).padStart(2, "0")}-${st.key}.png`);
-        const { writeFileSync } = await import("fs");
-        writeFileSync(p, await renderState(st, { orientation }));
-        paths.push(p);
-      }
-
-      const seg = path.join(work, `slide${String(i).padStart(2, "0")}.mp4`);
-      // The cutaway sits INSIDE this slide's segment and is clamped against its
-      // length, so the finished video is exactly as long with cutaways on as
-      // off. Nothing new is concatenated, and the music bed — which derives its
-      // timeline independently from slideTotalSecs — stays in sync by not
-      // having anything to be out of sync with.
-      const cutAsset = cutawayBySlide.get(i) || null;
-
       // A resolved picture for a card whose layout has no underlay slot rides
       // the cutaway seam instead. It never displaces a real stock cutaway.
       let beatStill = null;
@@ -860,6 +839,41 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
         }
       }
 
+      // Now the real states, credited to whoever actually owns what was fetched.
+      // beatPicture routes a TYPE card through the same transparent
+      // GROUND.OVER states that photo and map use, so the phrase is composited
+      // ABOVE the photograph instead of being buried under it. Set only when a
+      // picture actually staged — a card that declared one and failed must not
+      // render transparent over nothing.
+      // WHOEVER OWNS THE PICTURE GETS THE CREDIT. The beat picture used to be
+      // credited by cutawayCredit, drawn into the cutaway chain; now that it is
+      // an underlay, the credit travels the way photo cards' does — through the
+      // state tree — or it silently disappears with the seam it moved off.
+      const shownCredit = beatStill ? (beatStill.credit || null) : imageCredit;
+      let states = statesForCard(card, {
+        ...ctxBase, imageCredit: shownCredit, imageDate,
+        beatPicture: Boolean(beatStill),
+      });
+      states = fitStatesToDuration(states, audioSecs, { cardType: card.t, slideIndex: i });
+      const hold = holdForAudio(audioSecs, states.length);
+
+      const paths = [];
+      for (const st of states) {
+        const p = path.join(work, `s${String(i).padStart(2, "0")}-${st.key}.png`);
+        const { writeFileSync } = await import("fs");
+        writeFileSync(p, await renderState(st, { orientation }));
+        paths.push(p);
+      }
+
+      const seg = path.join(work, `slide${String(i).padStart(2, "0")}.mp4`);
+      // The cutaway sits INSIDE this slide's segment and is clamped against its
+      // length, so the finished video is exactly as long with cutaways on as
+      // off. Nothing new is concatenated, and the music bed — which derives its
+      // timeline independently from slideTotalSecs — stays in sync by not
+      // having anything to be out of sync with.
+      const cutAsset = cutawayBySlide.get(i) || null;
+
+
       await assembleSlide({
         statePaths: paths, hold, outputPath: seg, driftDir: i, orientation,
         audioPath: audio[i].path,
@@ -874,18 +888,28 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
         // a picture was actually placed.
         captionText: beatStill ? null : captionForCard(card),
         workDir: work, fontFile: FONT_FILE,
-        underlayPath,
-        cutawayPath: cutAsset?.absPath || beatStill?.path || null,
+        // THE BEAT PICTURE IS AN UNDERLAY, NOT A CUTAWAY.
+        //
+        // It rode the cutaway seam until 2026-08-31, and the assembler
+        // composites that with `[base][cut]overlay=0:0` at full canvas — over
+        // the finished card, and so over every word on it. A live render placed
+        // four correct photographs and showed not one legible line of type.
+        // The underlay is the seam that puts the picture BEHIND the states,
+        // which is what photo and map have always used.
+        //
+        // A real stock-footage cutaway keeps the cutaway seam: it is a B-roll
+        // insert that is SUPPOSED to take the frame.
+        underlayPath: beatStill ? beatStill.path : underlayPath,
+        underlayIsVideo: Boolean(beatStill?.isSequence),
+        cutawayPath: cutAsset?.absPath || null,
         // slideTotalSecs takes SECONDS, not the audio object. Passing the object
         // produced NaN, and `useCutaway = cutawaySecs > 0` is false for NaN — so
         // every resolved still was silently dropped while the resolver logged
         // that it had placed one. Nothing failed; the picture simply was not
         // there. Hence beatSecs below, and the assertion in assembleSlide.
-        cutawaySecs: cutAsset ? CUTAWAY_SECS() : (beatStill ? slideTotalSecs(audioSecs) : 0),
-        cutawayCredit: cutAsset ? cutawayCredit(cutAsset) : (beatStill?.credit || null),
-        // A pre-cut sequence is already a video stream; only a single frame
-        // needs the -loop 1 -t declaration.
-        cutawayIsStill: Boolean(!cutAsset && beatStill && !beatStill.isSequence),
+        cutawaySecs: cutAsset ? CUTAWAY_SECS() : 0,
+        cutawayCredit: cutAsset ? cutawayCredit(cutAsset) : null,
+        cutawayIsStill: false,
       });
       segments.push(seg);
     }

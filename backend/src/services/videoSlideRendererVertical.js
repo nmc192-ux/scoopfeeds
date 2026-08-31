@@ -472,12 +472,27 @@ const KINETIC_MAX_WORDS = 6;
 export function kineticPhrase(card) {
   // Prefer what the writer already emitted as display type; fall back to the
   // beat's own subject. Both are short by contract.
-  const fromLines = (card.lines || []).map((l) => (Array.isArray(l) ? l[0] : l)).filter(Boolean).join(" ");
-  const raw = String(fromLines || card.top || card.visual || card.subject || "").trim();
+  const lines = (card.lines || []).map((l) => (Array.isArray(l) ? l[0] : l)).filter(Boolean);
+  const raw = String(lines.join(" ") || card.top || card.visual || card.subject || "").trim();
   if (!raw) return null;
-  const words = raw.split(/\s+/).filter(Boolean);
-  // Truncation is a real risk here: a long headline fragment would run off a
-  // centred block. Six words is the ceiling the reference keeps to.
+  let words = raw.split(/\s+/).filter(Boolean);
+
+  // A WHOLE LINE BEATS A TRUNCATED CONCATENATION.
+  //
+  // Slicing the first six words off a two-line card drops the payload and then
+  // splitAccent — which accents the LAST word precisely because English puts the
+  // operative noun at the end — lands the accent on the stump. Rendered:
+  // "THE NEW COLD WAR / FOR NATURAL GAS" became "THE NEW COLD WAR FOR NATURAL",
+  // with NATURAL in lime and the subject of the sentence gone.
+  //
+  // The writer already split these into display lines, so the last line is a
+  // complete thought at display length. Prefer it whole.
+  if (words.length > KINETIC_MAX_WORDS && lines.length > 1) {
+    const lastLine = String(lines[lines.length - 1]).split(/\s+/).filter(Boolean);
+    if (lastLine.length && lastLine.length <= KINETIC_MAX_WORDS) words = lastLine;
+  }
+  // Still the ceiling: a single line longer than six words has no better split
+  // available, and a centred block that runs off the frame is worse than a trim.
   return words.slice(0, KINETIC_MAX_WORDS).join(" ");
 }
 
@@ -649,7 +664,37 @@ const BUILDERS_V = {
 
 /** Every keyframe state for one card, at 9:16. Throws on an unknown type — the
  *  closed set is closed in both orientations. */
+/**
+ * Cards that already own their picture, and must not be re-routed below.
+ * Mirrors SELF_IMAGED_TYPES in videoBeatImagery.js — these two declare an
+ * underlay in their own layout and are the reason overStates exists at all.
+ */
+const SELF_IMAGED_V = new Set(["photo", "map"]);
+
 export function verticalStatesForCard(card, ctx = {}) {
+  // A TYPE CARD THAT HAS A PICTURE IS A PICTURE CARD.
+  //
+  // The bug this fixes, seen on a live render: the resolver's photograph rode
+  // the CUTAWAY seam, which the assembler composites with
+  // `[base][cut]overlay=0:0` at full canvas — over the finished card, and
+  // therefore over every word on it. Four beats carried a correct, relevant
+  // photograph and not one carried a legible line of text.
+  //
+  // Reaching for the z-order is the wrong instinct: an opaque card behind a
+  // full-frame picture has nothing to show through, so putting its type "in
+  // front" would drop the existing layout onto the photograph with no scrim and
+  // no measured position. The seam that already solves this is the UNDERLAY,
+  // used by photo and map: transparent GROUND.OVER states with their own
+  // backing panel, composited ABOVE the image by the assembler. A type card
+  // holding a picture wants exactly that treatment, so it gets exactly that
+  // function — not a second implementation of it.
+  //
+  // This is also the grammar DrJ ruled for on 2026-08-30: over a picture, one
+  // centred phrase, no eyebrow, no two-line stack, no paragraph.
+  if (ctx.beatPicture && !SELF_IMAGED_V.has(card?.t)) {
+    return overStates(card, ctx, { underlay: "photo", credit: creditFor(ctx, ctx.outlet || null) });
+  }
+
   const build = BUILDERS_V[card?.t];
   if (!build) throw new Error(`videoSlideRendererVertical: no layout for card type "${card?.t}"`);
   return build(card, ctx);
