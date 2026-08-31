@@ -1,0 +1,59 @@
+{
+  "_note": "Higgsfield grounds for the xylitol film (brief §7.3). Stills only — the three video stings (HV-01..03, 37.5 credits) were NOT generated; see _rule2 below.",
+  "_spend": {
+    "estimate_for_whole_film": 49.5,
+    "ceiling": 60,
+    "spent_so_far": 12,
+    "detail": "6 stills x 2 credits. Cost preflighted with get_cost before submitting: 2 credits each, matching §7.2.",
+    "not_spent": "37.5 — the three 480p seedance_2_5 stings."
+  },
+  "_rule2": {
+    "status": "UNVERIFIED — REQUIRES A HUMAN LOOK BEFORE USE",
+    "why": "§7.4 rule 2 says an asset containing anything resembling a letter, number, tick mark or axis must be discarded, not cropped around. This session cannot download the results: the environment's egress policy returns 403 CONNECT for the Higgsfield CDN host, so the images were never inspected here. Every prompt forbade text explicitly, but a prompt is not an inspection.",
+    "action": "Open each URL, confirm it is textless, then treat as approved. Discard and regenerate once (rule 5) if not."
+  },
+  "grounds": [
+    {
+      "id": "HG-01",
+      "for": "D1 — the five-cohort bars (beats 31-34)",
+      "job_id": "63d728bb-b8e4-48e2-8a36-be40d0f68da6",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3GPM3poLdBGPfy3TFHzp5RNamYe/hf_20260831_185128_63d728bb-b8e4-48e2-8a36-be40d0f68da6.png",
+      "prompt": "Deep near-black field. Faint warm-neutral topographic contour lines receding into darkness. A single soft acid-lime light bloom low on the left. Fine film grain. Abstract, atmospheric, entirely non-representational. Absolutely no text, no letters, no numbers, no symbols, no tick marks, no axis lines, no chart or graph shapes of any kind."
+    },
+    {
+      "id": "HG-02",
+      "for": "D2 — the decay curve (beats 50, 54)",
+      "job_id": "34fcc9e7-3909-426d-b350-fa7e37a820bd",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3GPM3poLdBGPfy3TFHzp5RNamYe/hf_20260831_185128_34fcc9e7-3909-426d-b350-fa7e37a820bd.png",
+      "prompt": "A dark liquid surface seen from directly above. Slow concentric ripple rings fading outward from a single point. Desaturated, near-black, one subtle acid-lime highlight catching the innermost ring. Macro, atmospheric, abstract. Absolutely no text, no letters, no numbers, no symbols, no measurement marks."
+    },
+    {
+      "id": "HG-03",
+      "for": "D4 — relative vs absolute (beat 86)",
+      "job_id": "5f0832fc-d422-464b-8175-d7241f6656f7",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3GPM3poLdBGPfy3TFHzp5RNamYe/hf_20260831_185128_5f0832fc-d422-464b-8175-d7241f6656f7.png",
+      "prompt": "A split dark field. The left half is dense particulate texture, fine suspended grain. The right half is an almost empty smooth void. A hard vertical seam divides them down the centre. Near-black, desaturated, abstract. Absolutely no text, no letters, no numbers, no symbols, no panels or frames."
+    },
+    {
+      "id": "HG-04",
+      "for": "Ch 1 title ground (beat 13)",
+      "job_id": "1551ce16-0441-458f-949a-096eb36b0041",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3GPM3poLdBGPfy3TFHzp5RNamYe/hf_20260831_185128_1551ce16-0441-458f-949a-096eb36b0041.png",
+      "prompt": "Abstract crystalline white granular texture, extreme macro, very shallow depth of field, scattered sugar-like crystals catching a cold light against a near-black background. Atmospheric, tactile, abstract. Absolutely no text, no letters, no numbers, no symbols, no packaging."
+    },
+    {
+      "id": "HG-05",
+      "for": "Ch 6 argument ground (beat 75)",
+      "job_id": "40084e82-040b-49f0-b5f6-31d07dc0edc2",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3GPM3poLdBGPfy3TFHzp5RNamYe/hf_20260831_185128_40084e82-040b-49f0-b5f6-31d07dc0edc2.png",
+      "prompt": "A dark surface with two large overlapping translucent planes set at slight angles to each other, cool neutral tones, faint light catching their edges. Minimal, architectural, abstract. Absolutely no text, no letters, no numbers, no symbols, no diagrams."
+    },
+    {
+      "id": "HG-06",
+      "for": "Ch 9 closer ground (beats 114-115)",
+      "job_id": "f3d935e2-d473-4cff-8dec-388f405b65f5",
+      "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3GPM3poLdBGPfy3TFHzp5RNamYe/hf_20260831_185128_f3d935e2-d473-4cff-8dec-388f405b65f5.png",
+      "prompt": "A warm dark gradient with soft out-of-focus bokeh points drifting through it, calm and resolving, amber and deep brown against near-black. Atmospheric, abstract, quiet. Absolutely no text, no letters, no numbers, no symbols."
+    }
+  ]
+}
