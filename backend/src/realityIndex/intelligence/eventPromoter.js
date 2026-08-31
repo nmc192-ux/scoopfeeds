@@ -27,6 +27,7 @@
 
 import crypto from "crypto";
 import { getDb } from "../../models/database.js";
+import { makeYielder, DEFAULT_YIELD_MS } from "../../utils/cooperativeYield.js";
 import {
   buildAffinityCtx, affinity, isIncoherent, BANDS, logDecision,
 } from "./storyAffinity.js";
@@ -286,8 +287,35 @@ function loadEventCore(db, ids, idfMap, catSpanMap, minFrac = CORE_FRAC, topK = 
   return new Set(core);
 }
 
-export async function runEventPromoter({ now = Date.now() } = {}) {
+/**
+ * How long the promoter may hold the thread between yields, in ms.
+ *
+ * Read at call time, not at import: this is the knob you reach for at 3am when
+ * something else in the worker is being starved, and it must not need a rebuild.
+ * `0` disables yielding entirely and restores the pre-2026-08-31 behaviour —
+ * available as an escape hatch, and the only value for which this cycle can
+ * again monopolise the process.
+ */
+export function promoterYieldMs() {
+  const raw = Number.parseInt(process.env.PROMOTER_YIELD_MS ?? "", 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_YIELD_MS;
+}
+
+export async function runEventPromoter({ now = Date.now(), _yielder = null } = {}) {
   const db = getDb();
+
+  // COOPERATIVE YIELD (2026-08-31). This cycle used to hold the worker's single
+  // JS thread for a p50 of 939s and occupy 59.8% of wall-clock, measured over 12
+  // days from background_job_runs. Nothing else in the process ran during it —
+  // not RSS fetch timeouts, not BullMQ lock renewal. See cooperativeYield.js for
+  // the forensics and for why a timeout could not have bounded this.
+  //
+  // The yields live in the READ AND SCORE phases below (candidate load, cluster
+  // load, merge scoring, the quadratic assignment scoring) and DELIBERATELY NOT
+  // in the apply phases: sections 4-apply and 6 write rows that a reader must not
+  // observe half-applied. The scoring phases hold no partial state worth
+  // protecting and are where the time actually goes.
+  const yieldToLoop = _yielder || makeYielder({ everyMs: promoterYieldMs() });
 
   // The unified affinity context: ONE measure, ONE hub filter, shared by qualifies,
   // tryMerge and the breaker (storyAffinity.js). This is the matcher's vocabulary.
@@ -374,14 +402,20 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     // alive — this also back-fills signatures for events created before the signature
     // system existed (they become chainable within one cycle of being a candidate).
     if (ENTITY_MIN > 0) upsertSignature(db, e.id, core, idfMap, fallbackIdf, now);
+    await yieldToLoop();
   }
 
   // ── 3. Cluster centroids + article sets ─────────────────────────────────────
-  const clusters = eligible.map((c) => {
+  const clusters = [];
+  for (const c of eligible) {
+    clusters.push(buildClusterState(c));
+    await yieldToLoop();
+  }
+  function buildClusterState(c) {
     let aids = []; try { aids = JSON.parse(c.article_ids || "[]"); } catch { /* skip */ }
     const vmap = loadArticleVectors(db, aids);
     return { c, aids, idSet: new Set(aids), centroid: meanCentroid([...vmap.values()]), entKeys: ENTITY_MIN > 0 ? loadEntityKeys(db, aids, idfMap, catSpanMap) : null, entSet: affCtx.entitySet(aids), market_count: c.market_count };
-  });
+  }
 
   // qualifies — entity gate (step 3): every accept path ALSO requires entity overlap ≥ ENTITY_MIN.
   // Unified judgment. Structural evidence (shared article / cosine)
@@ -441,6 +475,11 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
   for (const cl of clusters) {
     const evs = [...new Set([...eventState.values()].filter((ev) => qualifies(cl, ev).ok).map((ev) => find(ev.id)))];
     for (let i = 0; i < evs.length; i++) for (let j = i + 1; j < evs.length; j++) tryMerge(evs[i], evs[j]);
+    // Between clusters, never between the pairs of one cluster: tryMerge mutates
+    // the union-find in place and a half-applied cluster is not a state another
+    // reader of `parent` should ever see. Nothing here writes to the DB — the
+    // merges are applied below, uninterrupted.
+    await yieldToLoop();
   }
   for (const { survivor, absorbed: absorbedId, minSide } of merges) {
     const sEv = eventState.get(survivor), aEv = eventState.get(absorbedId);
@@ -477,7 +516,7 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
   const bestQual = new Map();   // ci → { eventId, score }
   const bestReject = new Map(); // ci → { slug, cos, ent, shared, band? }
   const bestHold = new Map();   // ci → { slug, ent, band } — best AMBIGUOUS rejection (Wave 2 hysteresis)
-  clusters.forEach((cl, ci) => {
+  for (const [ci, cl] of clusters.entries()) {
     for (const ev of eventState.values()) {
       const q = qualifies(cl, ev);
       if (q.ok) {
@@ -494,7 +533,11 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
         }
       }
     }
-  });
+    // The quadratic phase: clusters × candidate events, and the single biggest
+    // consumer of the block this whole change exists to break up. Pure scoring —
+    // no writes — so a yield here is free of ordering consequences.
+    await yieldToLoop();
+  }
   pairs.sort((a, b) => b.score - a.score);
   const clusterDone = new Set(), eventTaken = new Set();
   const assignment = new Map();
@@ -667,7 +710,15 @@ export async function runEventPromoter({ now = Date.now() } = {}) {
     ).run(now, now - CLOSE_AFTER_MS).changes;
   }
 
-  const stats = { eligible: eligible.length, promoted, matched, absorbed, held, merged: merges.length, reactivated, dormanted, closed, skippedStale, chained };
+  // `yields` rides the stats line on purpose. It is the one number that says
+  // whether this cycle actually stepped aside or merely contains code that says
+  // it does — a 15-minute run reporting yields:0 is a regression, not a quiet
+  // day, and it is the first thing to grep when the RSS timings inflate again.
+  const stats = {
+    eligible: eligible.length, promoted, matched, absorbed, held, merged: merges.length,
+    reactivated, dormanted, closed, skippedStale, chained,
+    yields: yieldToLoop.count ? yieldToLoop.count() : null,
+  };
   logger.info(`🗂️  eventPromoter done — ${JSON.stringify(stats)}`);
   return stats;
 }
