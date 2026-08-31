@@ -11,15 +11,29 @@ set -euo pipefail
 
 SLUG="${1:-}"
 [ -z "$SLUG" ] && { echo "usage: bash engine/new-project.sh <slug> [parent-dir]"; exit 1; }
+# ABSOLUTE, ALWAYS. The toolchain check at the bottom passes $DIR to require(),
+# which treats a path not starting with "./" or "/" as a MODULE NAME — so a
+# relative parent dir ("engine/new-project.sh slug some/where") scaffolded the
+# project correctly and then failed its own verification with
+# "Cannot find module", which reads as a broken symlink and is not one.
 PARENT="${2:-$PWD}"
+mkdir -p "$PARENT"
+PARENT="$(cd "$PARENT" && pwd)"
 DIR="$PARENT/$SLUG"
-# Derived from this script's own location: the engine sits at
-# <repo>/.claude/skills/video-factory/engine, so the repo is four levels up.
-# Hardcoding one developer's checkout path here meant the skill only ran on one
-# machine.
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-BACKEND="$REPO_ROOT/backend"
-SKILL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# ANCHOR ON BACKEND, NOT ON THE REPO ROOT — the same rule _deps.mjs follows, and
+# for the same reason. The engine moved from .claude/skills/video-factory/engine
+# into backend/src/services/longform/engine so it would ship in the production
+# image, and this script's own derivation was not updated with it: REPO_ROOT
+# resolved to <repo>/backend, BACKEND to <repo>/backend/backend, and SKILL to
+# the longform service directory, so every template copy below pointed at a path
+# that does not exist. deployment.test.js pinned _deps.mjs through the move but
+# never looked at this file, so it broke in silence.
+ENGINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND="$(cd "$ENGINE_DIR/../../../.." && pwd)"
+REPO_ROOT="$(cd "$BACKEND/.." && pwd)"
+# The SKILL keeps only SKILL.md, references/, assets/ and template/ — the engine
+# no longer lives under it.
+SKILL="$REPO_ROOT/.claude/skills/video-factory"
 
 [ -e "$DIR" ] && { echo "refusing: $DIR already exists"; exit 1; }
 
@@ -40,11 +54,11 @@ node -e "require('$DIR/node_modules/@ffmpeg-installer/ffmpeg')" \
 cat <<TXT
 
 next:
-  1. node $SKILL/engine/demand.mjs "<candidate title>"     # before writing anything
+  1. node $ENGINE_DIR/demand.mjs "<candidate title>"     # before writing anything
   2. rewrite script.md and storyboard.mjs for this topic
-  3. node $SKILL/engine/narrate.mjs
-  4. node $SKILL/engine/build.mjs
-  5. node $SKILL/engine/music.mjs
-  6. node $SKILL/engine/shorts.mjs
-  7. node $SKILL/engine/qc.mjs out/<slug>-scored.mp4
+  3. node $ENGINE_DIR/narrate.mjs
+  4. node $ENGINE_DIR/build.mjs
+  5. node $ENGINE_DIR/music.mjs
+  6. node $ENGINE_DIR/shorts.mjs
+  7. node $ENGINE_DIR/qc.mjs out/<slug>-scored.mp4
 TXT

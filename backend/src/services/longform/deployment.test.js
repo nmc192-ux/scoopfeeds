@@ -23,6 +23,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, mkdtempSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
@@ -92,6 +93,35 @@ test("project working directories honour SCOOP_PERSISTENT_DATA_DIR", async () =>
   } finally {
     if (prev === undefined) delete process.env.SCOOP_PERSISTENT_DATA_DIR;
     else process.env.SCOOP_PERSISTENT_DATA_DIR = prev;
+  }
+});
+
+test("new-project.sh scaffolds a working project from the engine's new home", () => {
+  // THE SHELL SCRIPT HAS ITS OWN PATH DERIVATION, and the relocation broke it
+  // exactly as it broke _deps.mjs — but nothing here looked at it, so it stayed
+  // broken. It counted four levels up to the REPO ROOT, which from
+  // backend/src/services/longform/engine lands on backend/, making BACKEND
+  // backend/backend and SKILL the longform service directory. Every template
+  // copy then pointed at a path that does not exist.
+  //
+  // Asserting on the script's TEXT would only pin today's spelling. Running it
+  // pins the thing that matters: the symlinks resolve and the templates arrive.
+  const dir = mkdtempSync(path.join(os.tmpdir(), "newproj-"));
+  const script = new URL(`${ENGINE}/new-project.sh`, import.meta.url).pathname;
+  // A RELATIVE parent, deliberately: $DIR is handed to require() by the
+  // script's own toolchain check, and require() reads a bare relative path as
+  // a module name, so this used to fail its own verification after scaffolding
+  // correctly. cwd is the temp dir, so "." exercises that path.
+  execFileSync("bash", [script, "demo-slug", "."], { cwd: dir, encoding: "utf8" });
+
+  const proj = path.join(dir, "demo-slug");
+  assert.ok(existsSync(path.join(proj, "node_modules", "satori")),
+    "the node_modules symlink does not reach the backend's toolchain");
+  assert.ok(existsSync(path.join(proj, "fonts", "Anton-Regular.ttf")),
+    "the fonts symlink does not reach the skill's assets");
+  for (const f of ["storyboard.mjs", "script.md"]) {
+    assert.ok(readFileSync(path.join(proj, f), "utf8").length > 500,
+      `${f} was not copied from the skill's template — SKILL is pointing at the wrong directory`);
   }
 });
 
