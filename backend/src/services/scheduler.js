@@ -682,6 +682,15 @@ export function startScheduler() {
 // therefore mid-flight, holding a 30s lock renewed every 15s, when a 10.2s
 // block landed — which is what produced "could not renew lock" every cycle.
 //
+// THAT 10.2s NUMBER IS STALE, AND THE MOVE TO :39 WAS NEVER GOING TO BE ENOUGH.
+// Re-measured 2026-08-31 from background_job_runs over 12 days: the promote
+// cycle's block is p50 939s / p90 1164s and it occupies 59.8% of wall-clock.
+// There is no minute of the hour a render can hide in — :39 is inside a promote
+// window roughly four times in five (measured on four consecutive live shorts:
+// 80%, 83%, 80%, 80% overlap). The cycle now yields cooperatively
+// (PROMOTER_YIELD_MS), which is what makes any of this scheduling reasoning
+// true again; the durable fix is to stop sharing a thread at all.
+//
 // :39 chosen from the full 60-minute occupancy map, not by eye:
 //   - nothing at all is registered on :39, so it also satisfies the
 //     no-dispatch-shares-a-minute-with-an-in-process-cron invariant
