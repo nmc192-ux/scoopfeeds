@@ -4,7 +4,7 @@
       "footage": "F_GUM_PACKET_HAND"
     },
     "2": {
-      "footage": "F_GUM_PACKET_HAND"
+      "footage": "F_SUPERMARKET_AISLE"
     },
     "3": {
       "footage": "F_GUM_PACKET_HAND"
@@ -18,7 +18,7 @@
       "roll": true
     },
     "5": {
-      "footage": "F_GUM_PACKET_HAND"
+      "footage": "F_HEADLINES_SCROLL"
     },
     "6": {
       "card": "statement",
@@ -40,7 +40,7 @@
       "footage": "F_LAB_TUBES_RACK"
     },
     "9": {
-      "footage": "F_LAB_TUBES_RACK"
+      "footage": "F_BIRCH_FOREST"
     },
     "10": {
       "footage": "F_LAB_TUBES_RACK"
@@ -72,10 +72,10 @@
       "footage": "F_LAB_TUBES_RACK"
     },
     "16": {
-      "footage": "F_LAB_TUBES_RACK"
+      "footage": "F_CENTRIFUGE_SPINNING"
     },
     "17": {
-      "footage": "F_LAB_TUBES_RACK"
+      "footage": "F_SCIENTIST_PIPETTE"
     },
     "18": {
       "card": "stat",
@@ -109,7 +109,7 @@
       "name": "Why this one is harder to dismiss"
     },
     "23": {
-      "footage": "F_CROWD_STREET_SLOMO"
+      "footage": "F_HOSPITAL_CORRIDOR"
     },
     "24": {
       "footage": "F_CROWD_STREET_SLOMO"
@@ -146,7 +146,7 @@
       "name": "Five cohorts, two sweeteners, one direction"
     },
     "30": {
-      "footage": "F_KETO_SHELF"
+      "footage": "F_POURING_SWEETENER"
     },
     "31": {
       "card": "bars",
@@ -317,7 +317,7 @@
       "footage": "F_DROPLET_COLLISION_MACRO"
     },
     "43": {
-      "footage": "F_DROPLET_COLLISION_MACRO"
+      "footage": "F_NARROW_PIPE_INTERIOR"
     },
     "44": {
       "card": "stat",
@@ -409,7 +409,7 @@
       "src": "EUR HEART J 2024;45:2439–2452"
     },
     "52": {
-      "footage": "F_STOPWATCH_MACRO"
+      "footage": "F_EMPTY_BREAKFAST_TABLE"
     },
     "53": {
       "card": "statement",
@@ -472,7 +472,7 @@
       "src": "EUR HEART J 2024;45:2439–2452"
     },
     "55": {
-      "footage": "F_STOPWATCH_MACRO"
+      "footage": "F_BLOOD_DRAW_VIAL"
     },
     "56": {
       "footage": "F_STOPWATCH_MACRO"
@@ -501,7 +501,7 @@
       ]
     },
     "62": {
-      "footage": "F_STOPWATCH_MACRO"
+      "footage": "F_SMOKE_ALARM_CEILING"
     },
     "63": {
       "card": "chapter",
@@ -537,10 +537,10 @@
       "src": "EUR HEART J COMMENTARY, 2024"
     },
     "72": {
-      "footage": "F_IV_DRIP_BAG"
+      "footage": "F_DENTIST_CHAIR"
     },
     "73": {
-      "footage": "F_IV_DRIP_BAG"
+      "footage": "F_TOOTHBRUSH_MACRO"
     },
     "74": {
       "footage": "F_IV_DRIP_BAG"
@@ -619,10 +619,10 @@
       "src": "≈ A PINT OF XYLITOL-SWEETENED ICE CREAM — THE RESEARCHERS' OWN COMPARISON"
     },
     "81": {
-      "footage": "F_KITCHEN_SCALE_POWDER"
+      "footage": "F_BAKING_MIXING_BOWL"
     },
     "82": {
-      "footage": "F_KITCHEN_SCALE_POWDER"
+      "footage": "F_ICE_CREAM_TUB"
     },
     "83": {
       "footage": "F_KITCHEN_SCALE_POWDER"
@@ -652,16 +652,35 @@
       "footage": "F_KITCHEN_SCALE_POWDER"
     },
     "88": {
-      "card": "doc",
-      "docKey": "DOC_NUTRITION_PANEL",
-      "eyebrow": "SUGAR ALCOHOLS",
+      "card": "ledger",
+      "kicker": "WHAT THE PANEL DOES NOT TELL YOU",
+      "title": "Sugar alcohols are not required to be listed individually.",
+      "rows": [
+        {
+          "who": "Xylitol",
+          "what": ""
+        },
+        {
+          "who": "Erythritol",
+          "what": ""
+        },
+        {
+          "who": "Sorbitol",
+          "what": ""
+        },
+        {
+          "who": "Maltitol",
+          "what": ""
+        }
+      ],
+      "muted": true,
       "src": "NIH"
     },
     "89": {
-      "footage": "F_KITCHEN_SCALE_POWDER"
+      "footage": "F_NUTRITION_LABEL_MACRO"
     },
     "90": {
-      "footage": "F_KITCHEN_SCALE_POWDER"
+      "footage": "F_NUTRITION_LABEL_MACRO"
     },
     "91": {
       "footage": "F_KITCHEN_SCALE_POWDER"
@@ -711,10 +730,10 @@
       "src": "FDA · MERCK VETERINARY MANUAL"
     },
     "99": {
-      "footage": "F_DOG_KITCHEN_COUNTER"
+      "footage": "F_HANDBAG_ON_CHAIR"
     },
     "100": {
-      "footage": "F_DOG_KITCHEN_COUNTER"
+      "footage": "F_VET_EXAMINING_DOG"
     },
     "101": {
       "footage": "F_DOG_KITCHEN_COUNTER"
@@ -751,7 +770,7 @@
       "footage": "F_GUM_PACKET_HAND"
     },
     "110": {
-      "footage": "F_GUM_PACKET_HAND"
+      "footage": "F_TOOTHBRUSH_MACRO"
     },
     "111": {
       "footage": "F_GUM_PACKET_HAND"
@@ -760,7 +779,7 @@
       "footage": "F_GUM_PACKET_HAND"
     },
     "113": {
-      "footage": "F_GUM_PACKET_HAND"
+      "footage": "F_SUPERMARKET_AISLE"
     },
     "114": {
       "card": "ledger",
@@ -803,19 +822,19 @@
       "file": "footage/F_GUM_PACKET_HAND.mp4"
     },
     "2": {
-      "file": "footage/F_GUM_PACKET_HAND.mp4"
+      "file": "footage/F_SUPERMARKET_AISLE.mp4"
     },
     "3": {
       "file": "footage/F_GUM_PACKET_HAND.mp4"
     },
     "5": {
-      "file": "footage/F_GUM_PACKET_HAND.mp4"
+      "file": "footage/F_HEADLINES_SCROLL.mp4"
     },
     "8": {
       "file": "footage/F_LAB_TUBES_RACK.mp4"
     },
     "9": {
-      "file": "footage/F_LAB_TUBES_RACK.mp4"
+      "file": "footage/F_BIRCH_FOREST.mp4"
     },
     "10": {
       "file": "footage/F_LAB_TUBES_RACK.mp4"
@@ -830,16 +849,16 @@
       "file": "footage/F_LAB_TUBES_RACK.mp4"
     },
     "16": {
-      "file": "footage/F_LAB_TUBES_RACK.mp4"
+      "file": "footage/F_CENTRIFUGE_SPINNING.mp4"
     },
     "17": {
-      "file": "footage/F_LAB_TUBES_RACK.mp4"
+      "file": "footage/F_SCIENTIST_PIPETTE.mp4"
     },
     "20": {
       "file": "footage/F_LAB_TUBES_RACK.mp4"
     },
     "23": {
-      "file": "footage/F_CROWD_STREET_SLOMO.mp4"
+      "file": "footage/F_HOSPITAL_CORRIDOR.mp4"
     },
     "24": {
       "file": "footage/F_CROWD_STREET_SLOMO.mp4"
@@ -854,7 +873,7 @@
       "file": "footage/F_CROWD_STREET_SLOMO.mp4"
     },
     "30": {
-      "file": "footage/F_KETO_SHELF.mp4"
+      "file": "footage/F_POURING_SWEETENER.mp4"
     },
     "35": {
       "file": "footage/F_KETO_SHELF.mp4"
@@ -875,7 +894,7 @@
       "file": "footage/F_DROPLET_COLLISION_MACRO.mp4"
     },
     "43": {
-      "file": "footage/F_DROPLET_COLLISION_MACRO.mp4"
+      "file": "footage/F_NARROW_PIPE_INTERIOR.mp4"
     },
     "47": {
       "file": "footage/F_DROPLET_COLLISION_MACRO.mp4"
@@ -884,10 +903,10 @@
       "file": "footage/F_STOPWATCH_MACRO.mp4"
     },
     "52": {
-      "file": "footage/F_STOPWATCH_MACRO.mp4"
+      "file": "footage/F_EMPTY_BREAKFAST_TABLE.mp4"
     },
     "55": {
-      "file": "footage/F_STOPWATCH_MACRO.mp4"
+      "file": "footage/F_BLOOD_DRAW_VIAL.mp4"
     },
     "56": {
       "file": "footage/F_STOPWATCH_MACRO.mp4"
@@ -902,7 +921,7 @@
       "file": "footage/F_STOPWATCH_MACRO.mp4"
     },
     "62": {
-      "file": "footage/F_STOPWATCH_MACRO.mp4"
+      "file": "footage/F_SMOKE_ALARM_CEILING.mp4"
     },
     "64": {
       "file": "footage/F_IV_DRIP_BAG.mp4"
@@ -926,10 +945,10 @@
       "file": "footage/F_IV_DRIP_BAG.mp4"
     },
     "72": {
-      "file": "footage/F_IV_DRIP_BAG.mp4"
+      "file": "footage/F_DENTIST_CHAIR.mp4"
     },
     "73": {
-      "file": "footage/F_IV_DRIP_BAG.mp4"
+      "file": "footage/F_TOOTHBRUSH_MACRO.mp4"
     },
     "74": {
       "file": "footage/F_IV_DRIP_BAG.mp4"
@@ -938,10 +957,10 @@
       "file": "footage/F_IV_DRIP_BAG.mp4"
     },
     "81": {
-      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+      "file": "footage/F_BAKING_MIXING_BOWL.mp4"
     },
     "82": {
-      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+      "file": "footage/F_ICE_CREAM_TUB.mp4"
     },
     "83": {
       "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
@@ -956,10 +975,10 @@
       "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
     },
     "89": {
-      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+      "file": "footage/F_NUTRITION_LABEL_MACRO.mp4"
     },
     "90": {
-      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+      "file": "footage/F_NUTRITION_LABEL_MACRO.mp4"
     },
     "91": {
       "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
@@ -971,10 +990,10 @@
       "file": "footage/F_DOG_KITCHEN_COUNTER.mp4"
     },
     "99": {
-      "file": "footage/F_DOG_KITCHEN_COUNTER.mp4"
+      "file": "footage/F_HANDBAG_ON_CHAIR.mp4"
     },
     "100": {
-      "file": "footage/F_DOG_KITCHEN_COUNTER.mp4"
+      "file": "footage/F_VET_EXAMINING_DOG.mp4"
     },
     "101": {
       "file": "footage/F_DOG_KITCHEN_COUNTER.mp4"
@@ -998,7 +1017,7 @@
       "file": "footage/F_GUM_PACKET_HAND.mp4"
     },
     "110": {
-      "file": "footage/F_GUM_PACKET_HAND.mp4"
+      "file": "footage/F_TOOTHBRUSH_MACRO.mp4"
     },
     "111": {
       "file": "footage/F_GUM_PACKET_HAND.mp4"
@@ -1007,13 +1026,7 @@
       "file": "footage/F_GUM_PACKET_HAND.mp4"
     },
     "113": {
-      "file": "footage/F_GUM_PACKET_HAND.mp4"
-    }
-  },
-  "docs": {
-    "DOC_NUTRITION_PANEL": {
-      "title": "Nutrition Facts — sugar alcohols",
-      "note": "NEEDS CAPTURE: real panel, macro, zoomed to the Sugar Alcohols line."
+      "file": "footage/F_SUPERMARKET_AISLE.mp4"
     }
   },
   "shorts": [

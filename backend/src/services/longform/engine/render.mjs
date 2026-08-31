@@ -1114,7 +1114,17 @@ ${beyond ? `<line x1="${(W - PAD_R).toFixed(1)}" y1="${baseY.toFixed(1)}" x2="${
    * Recession only applies when SOMETHING is hot — beat 60 introduces all three
    * with nothing highlighted, and receding every row leaves no subject at all.
    */
-  ledger: ({ kicker, title, rows, src }, p) => frame([
+  /**
+   * `muted: true` recedes EVERY row, for a list the viewer is being shown they
+   * cannot see — the four sugar alcohols a Nutrition Facts panel is not
+   * required to name. Without it a hot-less ledger lights every row white,
+   * which is right for a plain list and exactly backwards for an absent one:
+   * white reads "here they are", and the claim is that they are hidden.
+   *
+   * Opt-in, so every existing ledger renders byte-identically. `muted` with a
+   * `hot` row is a contradiction — the schema rejects that rather than picking.
+   */
+  ledger: ({ kicker, title, rows, src, muted }, p) => frame([
     ...(kicker ? [eyebrow(kicker, p)] : []),
     ...(title ? [h("div", {
       fontFamily: "Anton", fontSize: 68, color: C.white, marginBottom: 54, lineHeight: 1.1,
@@ -1123,12 +1133,12 @@ ${beyond ? `<line x1="${(W - PAD_R).toFixed(1)}" y1="${baseY.toFixed(1)}" x2="${
     col({ flexGrow: 1, justifyContent: "center" },
       rows.map((r, i) => {
         const anyHot = rows.some((x) => x.hot);
-        const lit = r.hot || !anyHot;
+        const lit = r.hot || (!anyHot && !muted);
         const a = r.hot ? 0.44 : 0.12 + i * 0.10;
         return row({ marginBottom: 46, ...enter(p, a, a + 0.26, 20) }, [
           h("div", {
             width: 9, alignSelf: "stretch", marginRight: 32,
-            backgroundColor: r.hot ? C.lime : anyHot ? C.recededFill : C.track,
+            backgroundColor: r.hot ? C.lime : (anyHot || muted) ? C.recededFill : C.track,
           }),
           col({}, [
             h("div", {

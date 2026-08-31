@@ -325,3 +325,16 @@ test("split: a panel carries a figure OR a stamp, never both and never neither",
   assert.match(panels({ figure: "+57%" }, { label: "y", stamp: "NONE" }),
     /exactly one of figure\/stamp/);
 });
+
+test("ledger: `muted` and a `hot` row contradict each other", () => {
+  // muted recedes every row, hot lights one. The renderer would honour hot and
+  // silently drop the author's intent, so the pair is refused instead.
+  const errs = validateStoryboard(ok({
+    beats: { 1: { card: "ledger", muted: true, rows: [{ who: "Xylitol", what: "", hot: true }] } },
+  }));
+  assert.match(errs.join("\n"), /"muted" recedes every row/);
+  // Either alone is fine.
+  assert.deepEqual(validateStoryboard(ok({
+    beats: { 1: { card: "ledger", muted: true, rows: [{ who: "Xylitol", what: "" }] } },
+  })), []);
+});

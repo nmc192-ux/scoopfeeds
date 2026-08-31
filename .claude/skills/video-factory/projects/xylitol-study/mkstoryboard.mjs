@@ -140,7 +140,19 @@ const CARDS = {
         left: { label: "Relative risk increase — top vs bottom quartile", figure: "+57%" },
         right: { label: "Events per 1,000 people", stamp: "NOT PUBLISHED" },
         note: "Without the underlying event rate, nobody can convert this into your risk.", src: SRC_ESC },
-  88: { card: "doc", docKey: "DOC_NUTRITION_PANEL", eyebrow: "SUGAR ALCOHOLS", src: "NIH" },
+  // D5. NOT a `doc` card. `doc` captures a WEB DOCUMENT with phrase highlights
+  // (capture-measured.mjs, Chromium, local-only) — but the brief's D5 has
+  // "Ground: none (real label footage)", i.e. the graphic sits OVER footage of
+  // a real panel, which in this engine means a card beside footage beats, not a
+  // screenshot. The brief's own description of the frame — the line splitting
+  // into "stacked ghost rows — xylitol / erythritol / sorbitol / maltitol — all
+  // greyed, all unlabelled" — is precisely what `ledger` renders when no row is
+  // hot and every `what` is empty. Modelling it as `doc` also made the beat
+  // un-renderable anywhere without Chromium, for no gain.
+  88: { card: "ledger", kicker: "WHAT THE PANEL DOES NOT TELL YOU", title: "Sugar alcohols are not required to be listed individually.",
+        rows: [{ who: "Xylitol", what: "" }, { who: "Erythritol", what: "" },
+               { who: "Sorbitol", what: "" }, { who: "Maltitol", what: "" }],
+        muted: true, src: "NIH" },
   92: { card: "statement", kicker: "THE PUBLIC HEALTH PROBLEM", lines: ["YOU CANNOT MEASURE", "AN EXPOSURE YOU ARE", "NOT PERMITTED TO SEE"] },
 
   // ── ch 8 — D6 ──
@@ -172,9 +184,30 @@ const CHAPTER_FOOTAGE = {
   "CH 9 — HOW I READ IT": "F_GUM_PACKET_HAND",
 };
 
-const doc = { beats: {}, footage: {}, docs: {}, shorts: [], reveal: 54 };
+/**
+ * Footage that is about THIS beat rather than this chapter. The chapter default
+ * is a bed; these are the shots the narration actually names, so they override.
+ * D5's real Nutrition Facts panel lives here (Tier 2 #22): the ghost-row card at
+ * 88 is the graphic, and 89-90 are the label itself under the lines about it.
+ */
+const FOOTAGE_AT = {
+  2: "F_SUPERMARKET_AISLE", 5: "F_HEADLINES_SCROLL", 9: "F_BIRCH_FOREST",
+  16: "F_CENTRIFUGE_SPINNING", 17: "F_SCIENTIST_PIPETTE",
+  23: "F_HOSPITAL_CORRIDOR", 27: "F_CROWD_STREET_SLOMO",
+  30: "F_POURING_SWEETENER", 43: "F_NARROW_PIPE_INTERIOR", 44: "F_STIRRING_GLASS",
+  52: "F_EMPTY_BREAKFAST_TABLE", 55: "F_BLOOD_DRAW_VIAL", 62: "F_SMOKE_ALARM_CEILING",
+  68: "F_IV_DRIP_BAG", 72: "F_DENTIST_CHAIR", 73: "F_TOOTHBRUSH_MACRO",
+  81: "F_BAKING_MIXING_BOWL", 82: "F_ICE_CREAM_TUB",
+  89: "F_NUTRITION_LABEL_MACRO", 90: "F_NUTRITION_LABEL_MACRO",
+  99: "F_HANDBAG_ON_CHAIR", 100: "F_VET_EXAMINING_DOG",
+  110: "F_TOOTHBRUSH_MACRO", 113: "F_SUPERMARKET_AISLE",
+};
+
+const doc = { beats: {}, footage: {}, shorts: [], reveal: 54 };
 for (const b of beats) {
-  doc.beats[String(b.id)] = CARDS[b.id] ? { ...CARDS[b.id] } : { footage: CHAPTER_FOOTAGE[b.chapter] };
+  doc.beats[String(b.id)] = CARDS[b.id]
+    ? { ...CARDS[b.id] }
+    : { footage: FOOTAGE_AT[b.id] || CHAPTER_FOOTAGE[b.chapter] };
 }
 // Strip the authoring-only `key` field d1() leaves behind, and drop empty kickers.
 for (const b of Object.values(doc.beats)) {
@@ -183,14 +216,8 @@ for (const b of Object.values(doc.beats)) {
 for (const [id, b] of Object.entries(doc.beats)) {
   if (b.footage) doc.footage[id] = { file: `footage/${b.footage}.mp4` };
 }
-// D5's panel is a REAL Nutrition Facts label, captured by capture-measured.mjs.
-// That step needs Chromium and is local-only by design (deployment.test.js
-// pins that it refuses rather than emitting empty rects), so the capture has
-// not run here and this entry is the contract it must satisfy.
-doc.docs.DOC_NUTRITION_PANEL = {
-  title: "Nutrition Facts — sugar alcohols",
-  note: "NEEDS CAPTURE: real panel, macro, zoomed to the Sugar Alcohols line.",
-};
+// The film uses no `doc` cards — see the D5 note above. Nothing to capture, so
+// nothing here is waiting on Chromium.
 
 doc.shorts = [
   { name: "13-minutes", from: 49, to: 55, title: "The 13 Minutes Nobody Reported", hook: "The study measured xylitol after an overnight fast. Its half-life is thirteen minutes." },

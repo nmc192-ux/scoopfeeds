@@ -114,3 +114,32 @@ test("split: the stamped panel is what changes across the payoff", async () => {
                   await render(other, "stamp-end-b", 1.0),
                   "by p=1 the stamp must have landed");
 });
+
+// ── ledger `muted` ──────────────────────────────────────────────────────────
+
+const LEDGER = {
+  card: "ledger", kicker: "WHAT THE PANEL DOES NOT TELL YOU",
+  title: "Sugar alcohols are not required to be listed individually.",
+  rows: [{ who: "Xylitol", what: "" }, { who: "Erythritol", what: "" },
+         { who: "Sorbitol", what: "" }, { who: "Maltitol", what: "" }],
+  src: "NIH",
+};
+
+test("ledger: `muted` is opt-in — without it a hot-less ledger is unchanged", async () => {
+  // The additive proof. Every shipped ledger passes no `muted`, so every
+  // shipped ledger must render exactly as it did before the flag existed.
+  const plain = await render(LEDGER, "ledger-plain", 1.0);
+  const alsoPlain = await render({ ...LEDGER, muted: false }, "ledger-false", 1.0);
+  assert.equal(plain, alsoPlain, "muted:false must be identical to omitting it");
+  assert.notEqual(plain, await render({ ...LEDGER, muted: true }, "ledger-muted", 1.0),
+    "muted:true must actually change the frame");
+});
+
+test("ledger: `muted` recedes rows that a hot row would otherwise light", async () => {
+  // A hot-less ledger lights every row white, which is right for a list and
+  // backwards for one the viewer is being told they cannot see.
+  const hot = { ...LEDGER, rows: LEDGER.rows.map((r, i) => (i === 0 ? { ...r, hot: true } : r)) };
+  const muted = await render({ ...LEDGER, muted: true }, "ledger-muted-2", 1.0);
+  assert.notEqual(muted, await render(hot, "ledger-hot", 1.0),
+    "muted and hot are different pictures");
+});

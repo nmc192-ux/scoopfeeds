@@ -55,7 +55,7 @@ export const CARD_SPECS = Object.freeze({
   dotgrid:   { req: ["label"],                                  opt: ["kicker", "title", "total", "out", "src"] },
   pipeline:  { req: ["stages"],                                 opt: ["kicker", "title", "broken", "note", "src", "map"] },
   statement: { req: ["lines"],                                  opt: ["kicker", "src"] },
-  ledger:    { req: ["rows"],                                   opt: ["kicker", "title", "src"] },
+  ledger:    { req: ["rows"],                                   opt: ["kicker", "title", "src", "muted"] },
   // The curve is COMPUTED from peak/halfLife/xMax — see render.mjs. Authoring
   // a decay as points would let a typo draw a curve that contradicts the
   // half-life the card prints beside it.
@@ -237,6 +237,11 @@ export function validateStoryboard(doc, { statementIds = [], docKeys: capturedDo
           }
         }
       }
+    }
+    // `muted` recedes every row; `hot` lights one. Asking for both is an author
+    // who means one of them, and the renderer would silently honour hot.
+    if (b.card === "ledger" && b.muted && Array.isArray(b.rows) && b.rows.some((r) => r?.hot)) {
+      errs.push(`${at} (ledger): "muted" recedes every row, so a "hot" row contradicts it — pick one`);
     }
     const allowed = new Set(["card", ...spec.req, ...spec.opt]);
     for (const f of Object.keys(b)) {
