@@ -73,6 +73,7 @@ import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from ".
 import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js";
 import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
 import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
+import { upscaleKnownThumbnailUrl } from "./cardRenderer.js";
 import { buildFullBleed, buildMapPng, buildStillSequence, buildTightCrop } from "./videoSubjectVisual.js";
 import { findFootageStill, footageEnabled, footageCreditLines, footageDateLabel } from "./videoFootage.js";
 import { withDeadline } from "./httpRetry.js";
@@ -410,10 +411,20 @@ export async function choosePhotoUnderlay({
   const publisherPhotoAllowed = !harmHeadline;
   const thirdPartyImageryAllowed = !sensitiveHeadline;
 
-  if (ordinal === 0 && article?.image_url && publisherPhotoAllowed) {
-    const p = await _buildMount({ imageUrl: article.image_url, work, ledger });
+  // UPSCALE FIRST, the way every other consumer of article.image_url already
+  // does. cardRenderer's cascade and the body-pool builder both run the URL
+  // through upscaleKnownThumbnailUrl; this path was handed the raw one, so an
+  // unsigned thumbnail (VentureBeat's Contentful `?w=` URLs, 15 a week) reached
+  // the size gate at its feed width and was rejected. The helper returns the URL
+  // untouched when it cannot help — signed URLs, the Guardian's included, are
+  // skipped by its own first line, which is why those are fixed at the feed
+  // instead.
+  const heroUrl = article?.image_url ? upscaleKnownThumbnailUrl(article.image_url) : null;
+
+  if (ordinal === 0 && heroUrl && publisherPhotoAllowed) {
+    const p = await _buildMount({ imageUrl: heroUrl, work, ledger });
     if (p) return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null,
-                    footage: null, imageUrl: article.image_url, pickedBy: "article-photo" };
+                    footage: null, imageUrl: heroUrl, pickedBy: "article-photo" };
   }
 
   // ARCHIVE MATERIAL ON A MASSACRE STORY IS THE SAME PROBLEM as stock — a
@@ -441,12 +452,12 @@ export async function choosePhotoUnderlay({
     }
   }
 
-  if (ordinal > 0 && article?.image_url && publisherPhotoAllowed) {
-    const p = await _buildMount({ imageUrl: article.image_url, work, ledger });
+  if (ordinal > 0 && heroUrl && publisherPhotoAllowed) {
+    const p = await _buildMount({ imageUrl: heroUrl, work, ledger });
     if (p) {
       _log.info(`🎬 slide ${slideIndex} photo: no footage for photo card #${ordinal + 1} — reusing the article photograph`);
       return { underlayPath: p, imageCredit: attribution?.publisher || null, imageDate: null,
-               footage: null, imageUrl: article.image_url, pickedBy: "article-photo-reused" };
+               footage: null, imageUrl: heroUrl, pickedBy: "article-photo-reused" };
     }
   }
 
