@@ -33,6 +33,7 @@ not exist before; `backend/.env.example` documented 77 of the ~262 vars the code
 | `EVENT_UNIFIED_AFFINITY` | `false` | **`true`** | yes | Wave 2. One `storyAffinity` measure shared by promoter/merge/breaker. Killed the create-merge-split treadmill. |
 | `EVENT_MIN_ARTICLES` | `5` | default | yes | Cluster size (or ≥1 bound market) required to promote an event. |
 | `PROMOTER_YIELD_MS` | `50` | default | yes | Ceiling on how long the promoter may hold the worker's JS thread between yields. `0` disables yielding and restores the pre-2026-08-31 monopolising behaviour — the only value for which a promote cycle can again starve RSS timeouts and BullMQ lock renewal. Garbage or negative falls back to `50` rather than to `0`. |
+| `WORKER_QUEUES` | unset = every queue | `ingestion,video,video_render,longform,social,enrichment` on `worker`; `analysis,reality-index` on `worker-graph` | no (restart) | Which queues a worker container consumes. The two lists must PARTITION the queue set — a queue in both runs its cycle twice (the `isRunning` guards are process-local), a queue in neither goes silently dark. `workerQueues.test.js` reads the compose file and fails on either. An unknown name refuses the boot. |
 | `EVENT_MATCH_TAU` | `0.78` | default | yes | Cluster↔event centroid-cosine floor for a match. |
 | `EVENT_MERGE_TAU` | `0.86` | default | yes | Event↔event cosine floor confirming a convergence merge. |
 | `EVENT_MATCH_COSINE_FLOOR` | = `MATCH_TAU` | default | yes | Override the match cosine floor independently. |

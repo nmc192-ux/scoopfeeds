@@ -21,6 +21,7 @@ import { runSocialCycleWithTimeout } from "../services/socialPublisher.js";
 import { runXTextCycle } from "../services/xTextPoster.js";
 import { withJobRunLogging } from "./jobLogger.js";
 import { queueConcurrency, queueLockDuration, DEFAULT_LOCK_MS, JOB_NAMES, QUEUE_NAMES, BULLMQ_PREFIX } from "./jobOptions.js";
+import { resolveWorkerQueues } from "./workerQueues.js";
 import { assertRedisAvailable, assertRedisStartup, closeRedisConnections, createRedisConnection } from "./redis.js";
 
 const PROCESS_ROLE = "worker";
@@ -129,13 +130,23 @@ try {
   if (!assertRedisAvailable({ role: PROCESS_ROLE })) {
     logger.warn(`[${PROCESS_ROLE}] Redis not configured; queue workers will not start`);
   } else {
-    registerWorker(
+    // WHICH QUEUES THIS CONTAINER OWNS. Unset means all of them, so a
+    // single-worker deployment is byte-identical to before the split. Throws on
+    // an unknown name — see workerQueues.js for why a silent subset is worse
+    // than a refused boot.
+    const mine = new Set(resolveWorkerQueues());
+    const registerIfMine = (queue, ...rest) => {
+      if (!mine.has(queue)) return;
+      registerWorker(queue, ...rest);
+    };
+
+    registerIfMine(
       QUEUE_NAMES.ingestion,
       JOB_NAMES.newsIngestAll,
       queueConcurrency.ingestion,
       async () => runIngestionCycle()
     );
-    registerWorker(
+    registerIfMine(
       QUEUE_NAMES.video,
       JOB_NAMES.videosIngestAll,
       queueConcurrency.video,
@@ -143,7 +154,7 @@ try {
     );
     // The autopost loop renders HERE, in the worker — ffmpeg and satori both
     // need a process that can spawn, and the scheduler only enqueues.
-    registerWorker(
+    registerIfMine(
       QUEUE_NAMES.videoRender,
       JOB_NAMES.videoRenderCycle,
       queueConcurrency.videoRender,
@@ -154,13 +165,13 @@ try {
     // single videoRender slot. The job itself never throws: a BullMQ retry
     // would re-render and possibly re-publish a film, and a second subscriber
     // notification cannot be recalled.
-    registerWorker(
+    registerIfMine(
       QUEUE_NAMES.longform,
       JOB_NAMES.longformCycle,
       queueConcurrency.longform,
       async (job) => longformCycleJob(job.data || {})
     );
-    registerWorker(
+    registerIfMine(
       QUEUE_NAMES.enrichment,
       JOB_NAMES.articlesEnrichBatch,
       queueConcurrency.enrichment,
@@ -173,7 +184,7 @@ try {
     // everything it needs to stand alone: a stale-overridable single-flight
     // guard, its own heartbeat, per-platform interval gating and its own
     // dead-man switch.
-    registerWorker(
+    registerIfMine(
       QUEUE_NAMES.social,
       JOB_NAMES.socialPostAll,
       queueConcurrency.social,
@@ -188,7 +199,7 @@ try {
     // Folding them would mean one channel's stall taking the other's turn —
     // which is exactly the fault that cost four channels a render on
     // 2026-08-25.
-    registerWorker(
+    registerIfMine(
       QUEUE_NAMES.social,
       JOB_NAMES.xTextPost,
       queueConcurrency.social,
@@ -204,7 +215,7 @@ try {
     //
     // Here they block a worker that has nothing to keep punctual, which is the
     // point: the scheduler's only job is to be on time.
-    registerWorker(
+    registerIfMine(
       QUEUE_NAMES.analysis,
       JOB_NAMES.analysisRefresh,
       queueConcurrency.analysis,
@@ -213,7 +224,7 @@ try {
     // Three jobs share the realityIndex queue and a concurrency of 1, so they
     // serialise against each other — they contend for the same tables, and
     // running them in parallel would trade a scheduler stall for lock contention.
-    registerWorker(
+    registerIfMine(
       QUEUE_NAMES.realityIndex,
       JOB_NAMES.eventsRefresh,
       queueConcurrency.realityIndex,
@@ -234,9 +245,13 @@ try {
       }
     );
 
+    // REPORT WHAT WAS REGISTERED, not a hand-maintained list of what might have
+    // been. The previous literal had already drifted — it omitted `longform`,
+    // whose worker is registered a few lines above — so the one line an operator
+    // greps to answer "is this container consuming my queue?" was wrong.
     logger.info(`[${PROCESS_ROLE}] ready`, {
-      queues: [QUEUE_NAMES.ingestion, QUEUE_NAMES.video, QUEUE_NAMES.videoRender, QUEUE_NAMES.social,
-               QUEUE_NAMES.enrichment, QUEUE_NAMES.analysis, QUEUE_NAMES.realityIndex],
+      queues: [...mine],
+      partitioned: Boolean(String(process.env.WORKER_QUEUES ?? "").trim()),
       concurrency: queueConcurrency,
     });
   }
