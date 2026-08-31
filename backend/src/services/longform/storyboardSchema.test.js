@@ -249,3 +249,79 @@ test("a photo beat may reference an ACQUIRED key before its table row exists, an
   assert.match(validateStoryboard(badKen, { photoKeys: ["P_STREET_1"] }).join("\n"),
     /the only moves are "in" and "out"/);
 });
+
+// ── decay and split (the xylitol film's D2 and D4) ───────────────────────────
+//
+// Both cards were added because the film needed a claim the existing types
+// could not make. `decay` draws a computed exponential curve on a REAL time
+// axis — linechart plots authored points at index spacing, which would have
+// drawn "13 minutes" and "12 hours" the same distance apart. `split` shows a
+// figure beside a panel stamped NOT PUBLISHED, so a card can say a number is
+// missing. The tests below pin the ways each can be authored into a lie.
+
+const decay = (over = {}) => ok({
+  beats: { 1: { card: "decay", peak: 1000, baseline: 1, halfLife: 13, xMax: 360, ...over } },
+});
+
+test("decay: a well-formed curve validates", () => {
+  assert.deepEqual(validateStoryboard(decay({
+    xAxis: [{ at: 0, label: "DRINK" }, { at: 240, label: "4 HRS" }],
+    yAxis: [{ at: 1000, label: "1,000×" }],
+    marks: [{ at: 13, label: "Half-life" }],
+    beyond: { label: "SAMPLE AT 12 HRS" },
+  })), []);
+});
+
+test("decay: a curve that would rise is refused", () => {
+  // peak below baseline draws a line going UP and labels it a decay.
+  assert.match(validateStoryboard(decay({ peak: 1, baseline: 1000 })).join("\n"),
+    /peak \(1\) must be above baseline \(1000\)/);
+});
+
+test("decay: halfLife must be positive — zero divides the curve into NaN", () => {
+  assert.match(validateStoryboard(decay({ halfLife: 0 })).join("\n"),
+    /"halfLife" must be a positive number/);
+});
+
+test("decay: an annotation past the axis is refused, and told about `beyond`", () => {
+  // Pinned at the axis edge, a 12-hour sample would render as if it happened
+  // at 6 hours — the exact opposite of the point the card exists to make.
+  const errs = validateStoryboard(decay({ marks: [{ at: 720, label: "SAMPLE" }] }));
+  assert.match(errs.join("\n"), /outside the axis \(0–360\)/);
+  assert.match(errs.join("\n"), /use "beyond"/, "the message must name the supported way");
+});
+
+test("decay: x ticks too close together are refused before they overprint", () => {
+  // This is the "DRISKMIN" case: DRINK at 0 and 13 MIN at 13 on a 360 axis
+  // rendered the two labels on top of each other.
+  const errs = validateStoryboard(decay({
+    xAxis: [{ at: 0, label: "DRINK" }, { at: 13, label: "13 MIN" }],
+  }));
+  assert.match(errs.join("\n"), /"DRINK" and "13 MIN" are 13 apart/);
+  assert.match(errs.join("\n"), /overprint/);
+});
+
+test("decay: ticks given out of order are still compared as neighbours", () => {
+  const errs = validateStoryboard(decay({
+    xAxis: [{ at: 300, label: "5 HRS" }, { at: 0, label: "DRINK" }, { at: 310, label: "OOPS" }],
+  }));
+  assert.match(errs.join("\n"), /"5 HRS" and "OOPS" are 10 apart/);
+});
+
+test("split: a panel carries a figure OR a stamp, never both and never neither", () => {
+  const panels = (left, right) => validateStoryboard(ok({
+    beats: { 1: { card: "split", left, right } },
+  })).join("\n");
+
+  assert.equal(panels({ label: "Relative", figure: "+57%" },
+                      { label: "Absolute", stamp: "NOT PUBLISHED" }), "");
+  // Both: the author meant one of them and the renderer silently picks.
+  assert.match(panels({ label: "x", figure: "+57%", stamp: "NOT PUBLISHED" },
+                      { label: "y", stamp: "NONE" }), /exactly one of figure\/stamp/);
+  // Neither: an empty panel with no explanation of why it is empty.
+  assert.match(panels({ label: "x" }, { label: "y", stamp: "NONE" }),
+    /exactly one of figure\/stamp/);
+  // A panel with no label at all.
+  assert.match(panels({ figure: "+57%" }, { label: "y", stamp: "NONE" }),
+    /exactly one of figure\/stamp/);
+});

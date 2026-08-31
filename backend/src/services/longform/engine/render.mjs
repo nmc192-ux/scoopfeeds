@@ -47,7 +47,7 @@ export const H = 1080;
 /** Boundary between the entrance phase and the payoff phase. */
 export const PAYOFF_P = 0.35;
 /** Card types that hold something back for the payoff phase. */
-export const HAS_PAYOFF = new Set(["stat", "statement", "equation", "bars", "ledger", "doc", "dotgrid", "pipeline", "map", "linechart", "multiline"]);
+export const HAS_PAYOFF = new Set(["stat", "statement", "equation", "bars", "ledger", "doc", "dotgrid", "pipeline", "map", "linechart", "multiline", "decay", "split"]);
 
 export const C = {
   base: "#090706",
@@ -648,6 +648,194 @@ ${paths.filter((q) => q.s.hot).map((q) => `<path d="${q.d}" fill="none" stroke="
         ...(note ? [h("div", {
           fontFamily: "Inter", fontWeight: 700, fontSize: 34, color: C.white,
           marginTop: 18, maxWidth: 1500, lineHeight: 1.3, ...enter(p, 0.62, 0.92, 20),
+        }, note)] : []),
+      ]),
+      ...(src ? [source(src, p)] : []),
+    ], p);
+  },
+
+  /**
+   * Exponential decay against time — for "it was gone before anyone measured it".
+   *
+   * WHY THIS IS NOT `linechart`. linechart plots authored points at INDEX
+   * spacing and hangs a 340px value label off every one: it is a sparse chart of
+   * reference readings, and past ~5 points the labels collide. A decay argument
+   * needs the opposite — a dense smooth curve on a REAL time axis, where the
+   * whole claim is *where along that axis* something happened. Drawing 0, 13min,
+   * 4h and 12h at equal spacing would render the one relationship the card
+   * exists to show as a straight lie.
+   *
+   * THE CURVE IS COMPUTED, NOT AUTHORED:
+   *   y(t) = baseline + (peak − baseline) · 2^(−t / halfLife)
+   * A half-life is the datum sources actually report, so that is what the card
+   * takes. Hand-authoring 160 points would let a typo bend the curve away from
+   * the physics it claims to draw and nobody would see it. This is DATA driving
+   * a fixed renderer — no storyboard-supplied code is executed.
+   *
+   * LINEAR Y, DELIBERATELY. A log axis turns exponential decay into a straight
+   * line, which reads as a gentle ramp. Linear draws what happens: a near
+   * vertical fall, then a floor. The floor IS the argument.
+   *
+   * `beyond` marks a moment off the right edge, drawn as an arrow leaving the
+   * chart. Fitting "12 hours" inside a 6-hour axis would mean compressing time;
+   * saying it is off the chart is both honest and the stronger picture.
+   *
+   * Entrance draws the axes and the curve and is FINISHED BY 0.34. The marks and
+   * the `beyond` arrow are the payoff — see the equation card's note on why
+   * nothing may straddle PAYOFF_P.
+   */
+  decay: ({ kicker, title, peak, halfLife, xMax, baseline = 0, xAxis = [], yAxis = [],
+            marks = [], beyond, note, src }, p) => {
+    // PAD_L is the y-label gutter. It is wide because these labels are authored
+    // words ("1,000× BASELINE"), not reconstructed numbers — too narrow a
+    // gutter wraps one onto two lines and the second line lands in the plot.
+    const W = 1460, H = 450, PAD_L = 250, PAD_B = 84, PAD_T = 52;
+    const PAD_R = beyond ? 290 : 90;
+    const span = Math.max(1e-9, peak - baseline);
+    const px = (t) => PAD_L + clamp01(t / xMax) * (W - PAD_L - PAD_R);
+    const py = (v) => PAD_T + (1 - clamp01((v - baseline) / span)) * (H - PAD_T - PAD_B);
+    const yOf = (t) => baseline + span * Math.pow(2, -t / halfLife);
+
+    // 160 samples: smooth at 1920 wide without bloating the path string, which
+    // is base64'd into a data URI on every one of ~40 frames per beat.
+    const N = 160;
+    const pts = Array.from({ length: N + 1 }, (_, i) => {
+      const t = (i / N) * xMax;
+      return [px(t), py(yOf(t))];
+    });
+    let len = 0;
+    for (let i = 1; i <= N; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    const path = pts.map((q, i) => `${i ? "L" : "M"}${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(" ");
+    const draw = at(p, 0.08, 0.34);
+
+    const markAt = at(p, 0.42, 0.72);
+    const beyondAt = at(p, 0.60, 0.90);
+    const baseY = py(baseline);
+
+    // Shapes only — satori renders <text> inside a nested SVG as nothing, so
+    // every label is a positioned div, the same rule maps and linechart follow.
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+${yAxis.map((t) => `<line x1="${PAD_L}" y1="${py(t.at).toFixed(1)}" x2="${(W - PAD_R + 10).toFixed(1)}" y2="${py(t.at).toFixed(1)}" stroke="${C.rule}" stroke-width="2"/>`).join("")}
+${xAxis.map((t) => `<line x1="${px(t.at).toFixed(1)}" y1="${PAD_T}" x2="${px(t.at).toFixed(1)}" y2="${(H - PAD_B).toFixed(1)}" stroke="${C.rule}" stroke-width="2"/>`).join("")}
+<path d="${path}" fill="none" stroke="${C.lime}" stroke-width="7" stroke-linecap="round"
+      stroke-linejoin="round" stroke-dasharray="${len.toFixed(0)}"
+      stroke-dashoffset="${((1 - draw) * len).toFixed(0)}"/>
+${marks.map((m) => {
+  const x = px(m.at), y = py(yOf(m.at));
+  return `<line x1="${x.toFixed(1)}" y1="${(y - 12).toFixed(1)}" x2="${x.toFixed(1)}" y2="${(y - 62).toFixed(1)}" stroke="${C.white}" stroke-width="3" opacity="${markAt.toFixed(2)}"/>`
+       + `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="11" fill="${C.white}" opacity="${markAt.toFixed(2)}"/>`;
+}).join("")}
+${beyond ? `<line x1="${(W - PAD_R).toFixed(1)}" y1="${baseY.toFixed(1)}" x2="${(W - 74).toFixed(1)}" y2="${baseY.toFixed(1)}" stroke="${C.white}" stroke-width="5" stroke-dasharray="14 10" opacity="${beyondAt.toFixed(2)}"/>`
+         + `<polygon points="${(W - 70).toFixed(1)},${baseY.toFixed(1)} ${(W - 100).toFixed(1)},${(baseY - 17).toFixed(1)} ${(W - 100).toFixed(1)},${(baseY + 17).toFixed(1)}" fill="${C.white}" opacity="${beyondAt.toFixed(2)}"/>` : ""}
+</svg>`;
+
+    return frame([
+      ...(kicker ? [eyebrow(kicker, p)] : []),
+      ...(title ? [h("div", {
+        fontFamily: "Anton", fontSize: 56, color: C.white, marginBottom: 10,
+        maxWidth: 1560, lineHeight: 1.1, ...enter(p, 0.02, 0.20, 22),
+      }, title)] : []),
+      col({ flexGrow: 1, justifyContent: "center" }, [
+        h("div", { display: "flex", position: "relative", width: W, height: H }, [
+          hsvg(svg, { position: "absolute", left: 0, top: 0, width: W, height: H,
+                      opacity: at(p, 0.02, 0.16) }),
+          // y axis — authored labels, never reconstructed from the values. The
+          // linechart above carries the scar from a hardcoded "$" axis unit.
+          ...yAxis.map((t) => h("div", {
+            position: "absolute", left: 0, top: py(t.at) - 18, width: PAD_L - 28,
+            textAlign: "right", fontFamily: "Inter", fontWeight: 600, fontSize: 26,
+            color: C.dim, opacity: at(p, 0.04, 0.20),
+          }, t.label)),
+          // x axis
+          ...xAxis.map((t) => h("div", {
+            position: "absolute", left: px(t.at) - 80, top: H - PAD_B + 24, width: 160,
+            textAlign: "center", fontFamily: "Inter", fontWeight: 600, fontSize: 25,
+            color: C.dim, opacity: at(p, 0.06, 0.22),
+          }, t.label)),
+          // Marks sit above a leader line. The left clamp keeps a mark near the
+          // start of the axis out of the y-label gutter — centred on its line it
+          // would otherwise overprint the axis, which is what "1,000× BASELINE"
+          // colliding with "HALF-LIFE" looked like the first time.
+          ...marks.map((m) => h("div", {
+            position: "absolute",
+            left: Math.min(Math.max(px(m.at) - 200, PAD_L - 30), W - PAD_R - 200),
+            top: py(yOf(m.at)) - 118, width: 400, textAlign: "center",
+            fontFamily: "Inter", fontWeight: 700, fontSize: 30, letterSpacing: 1.5,
+            textTransform: "uppercase", color: C.white, lineHeight: 1.25,
+            opacity: markAt,
+          }, m.label)),
+          ...(beyond ? [h("div", {
+            position: "absolute", left: W - PAD_R + 10, top: baseY + 34, width: PAD_R,
+            fontFamily: "Anton", fontSize: 38, color: C.white, lineHeight: 1.15,
+            opacity: beyondAt,
+          }, beyond.label)] : []),
+        ]),
+        ...(note ? [h("div", {
+          fontFamily: "Inter", fontWeight: 700, fontSize: 34, color: C.white,
+          marginTop: 16, maxWidth: 1500, lineHeight: 1.3, ...enter(p, 0.68, 0.94, 20),
+        }, note)] : []),
+      ]),
+      ...(src ? [source(src, p)] : []),
+    ], p);
+  },
+
+  /**
+   * Two panels, one seam — for "here is what we know, and here is what nobody
+   * has published". A panel carries either a `figure` or a `stamp`, and the
+   * stamped-absent panel is usually the point of the card: an empty box that
+   * says NOT PUBLISHED is a claim about the evidence base, and it is a claim
+   * most charts have no way to make.
+   *
+   * The stamp is the payoff. Everything else finishes by 0.34.
+   */
+  split: ({ kicker, title, left, right, note, src }, p) => {
+    const panel = (d, side) => {
+      const stamped = !!d.stamp;
+      // The left panel arrives first so the eye is already there when the right
+      // one turns out to be empty.
+      //
+      // BOTH PANELS AND BOTH FIGURES FINISH BY 0.34. These windows were
+      // 0.10/0.20 +0.18 with the figure at +0.06→+0.24, which put the right
+      // panel's entrance (→0.38) and its figure (0.22→0.40) astride PAYOFF_P —
+      // the exact stall the equation card documents. Only the stamp, which is
+      // this card's payoff, animates after the cut.
+      const a = side === "left" ? 0.06 : 0.14;
+      return col({
+        width: 760, height: 470, padding: "44px 46px", justifyContent: "space-between",
+        backgroundColor: stamped ? "transparent" : C.recededFill,
+        border: stamped ? `3px dashed ${C.track}` : "none",
+        ...enter(p, a, a + 0.18, 24),
+      }, [
+        h("div", {
+          fontFamily: "Inter", fontWeight: 700, fontSize: 27, letterSpacing: 3,
+          textTransform: "uppercase", color: C.dim, lineHeight: 1.3,
+        }, d.label),
+        ...(stamped
+          ? [h("div", {
+              fontFamily: "Anton", fontSize: 74, lineHeight: 1.05, color: C.alert,
+              letterSpacing: 1, opacity: at(p, 0.44, 0.80),
+            }, d.stamp)]
+          : [h("div", {
+              fontFamily: "Anton", fontSize: 150, lineHeight: 1, color: C.lime,
+              opacity: at(p, a + 0.10, a + 0.20),
+            }, d.figure)]),
+      ]);
+    };
+    return frame([
+      ...(kicker ? [eyebrow(kicker, p)] : []),
+      ...(title ? [h("div", {
+        fontFamily: "Anton", fontSize: 56, color: C.white, marginBottom: 30,
+        maxWidth: 1560, lineHeight: 1.1, ...enter(p, 0.02, 0.20, 22),
+      }, title)] : []),
+      col({ flexGrow: 1, justifyContent: "center" }, [
+        row({ alignItems: "stretch" }, [
+          panel(left, "left"),
+          h("div", { width: 4, backgroundColor: C.rule, margin: "0 40px" }),
+          panel(right, "right"),
+        ]),
+        ...(note ? [h("div", {
+          fontFamily: "Inter", fontWeight: 700, fontSize: 34, color: C.white,
+          marginTop: 30, maxWidth: 1500, lineHeight: 1.3, ...enter(p, 0.68, 0.94, 20),
         }, note)] : []),
       ]),
       ...(src ? [source(src, p)] : []),

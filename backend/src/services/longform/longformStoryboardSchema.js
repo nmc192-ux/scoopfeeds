@@ -31,7 +31,7 @@ import { validateGeo } from "./engine/mapGeo.mjs";
 export const CARD_TYPES = Object.freeze([
   "title", "chapter", "stat", "bars", "outro", "quote", "tweet", "map",
   "linechart", "multiline", "equation", "doc", "dotgrid", "pipeline",
-  "statement", "ledger",
+  "statement", "ledger", "decay", "split",
 ]);
 
 /**
@@ -56,6 +56,11 @@ export const CARD_SPECS = Object.freeze({
   pipeline:  { req: ["stages"],                                 opt: ["kicker", "title", "broken", "note", "src", "map"] },
   statement: { req: ["lines"],                                  opt: ["kicker", "src"] },
   ledger:    { req: ["rows"],                                   opt: ["kicker", "title", "src"] },
+  // The curve is COMPUTED from peak/halfLife/xMax — see render.mjs. Authoring
+  // a decay as points would let a typo draw a curve that contradicts the
+  // half-life the card prints beside it.
+  decay:     { req: ["peak", "halfLife", "xMax"],               opt: ["kicker", "title", "baseline", "xAxis", "yAxis", "marks", "beyond", "note", "src"] },
+  split:     { req: ["left", "right"],                          opt: ["kicker", "title", "note", "src"] },
 });
 
 /** The widest beat range a short may cut. See the shorts check below. */
@@ -91,7 +96,25 @@ const FIELD_SHAPE = {
   n:      (v) => isStr(v) || isNum(v) || "must be a string or number",
   total:  (v) => isNum(v) || "must be a number",
   out:    (v) => isNum(v) || "must be a number",
+  // decay. `xMax` is shared with multiline, where it is also a number.
+  peak:     (v) => isNum(v) || "must be a number",
+  baseline: (v) => isNum(v) || "must be a number",
+  halfLife: (v) => (isNum(v) && v > 0) || "must be a positive number",
+  xMax:     (v) => (isNum(v) && v > 0) || "must be a positive number",
+  xAxis:    (v) => isTickList(v) || "must be a non-empty array of { at:number, label:string }",
+  yAxis:    (v) => isTickList(v) || "must be a non-empty array of { at:number, label:string }",
+  marks:    (v) => isTickList(v) || "must be a non-empty array of { at:number, label:string }",
+  beyond:   (v) => (v && typeof v === "object" && isStr(v.label)) || "must be { label:string }",
+  // split. A panel shows a figure OR declares one absent with a stamp — never
+  // both, because a panel with both is an author who meant one and got the
+  // other rendered.
+  left:   (v) => isPanel(v) || 'must be { label, figure } or { label, stamp } — exactly one of figure/stamp',
+  right:  (v) => isPanel(v) || 'must be { label, figure } or { label, stamp } — exactly one of figure/stamp',
 };
+
+const isTickList = (v) => isArr(v) && v.every((t) => isNum(t?.at) && isStr(t?.label));
+const isPanel = (v) => !!v && typeof v === "object" && isStr(v.label)
+  && (isStr(v.figure) ? !v.stamp : isStr(v.stamp));
 
 /**
  * Validate a storyboard document.
@@ -183,6 +206,37 @@ export function validateStoryboard(doc, { statementIds = [], docKeys: capturedDo
     // here called it.
     if (b.card === "map" && b.geo !== undefined) {
       for (const e of validateGeo(b.geo)) errs.push(`${at} (map): geo ${e}`);
+    }
+    // A decay curve that falls the wrong way, or an annotation pinned to the
+    // edge of the axis because it sits past xMax, renders happily and argues
+    // for the opposite of what the author meant. `beyond` is the supported way
+    // to point at a moment off the chart.
+    if (b.card === "decay") {
+      const base = b.baseline ?? 0;
+      if (isNum(b.peak) && isNum(base) && b.peak <= base) {
+        errs.push(`${at} (decay): peak (${b.peak}) must be above baseline (${base}) — the curve decays to the baseline`);
+      }
+      for (const key of ["marks", "xAxis"]) {
+        if (!Array.isArray(b[key]) || !isNum(b.xMax)) continue;
+        for (const m of b[key]) {
+          if (isNum(m?.at) && (m.at < 0 || m.at > b.xMax)) {
+            errs.push(`${at} (decay): ${key} entry "${m.label}" at ${m.at} is outside the axis (0–${b.xMax}) — use "beyond" for a moment off the chart`);
+          }
+        }
+      }
+      // X TICKS THAT OVERPRINT. Labels render in a fixed ~160px box on a ~920px
+      // plot, so two ticks closer than ~17% of the axis overlap. The first cut
+      // of this card put "DRINK" at 0 and "13 MIN" at 13 on a 360-minute axis
+      // and rendered the word "DRISKMIN". Caught here rather than in a frame,
+      // and left slightly permissive (12%) because short labels pack tighter.
+      if (Array.isArray(b.xAxis) && isNum(b.xMax)) {
+        const sorted = b.xAxis.filter((t) => isNum(t?.at)).slice().sort((x, y) => x.at - y.at);
+        for (let i = 1; i < sorted.length; i++) {
+          if (sorted[i].at - sorted[i - 1].at < b.xMax * 0.12) {
+            errs.push(`${at} (decay): xAxis labels "${sorted[i - 1].label}" and "${sorted[i].label}" are ${sorted[i].at - sorted[i - 1].at} apart on a ${b.xMax} axis — they will overprint; keep ticks ≥${(b.xMax * 0.12).toFixed(0)} apart and put the detail in "marks"`);
+          }
+        }
+      }
     }
     const allowed = new Set(["card", ...spec.req, ...spec.opt]);
     for (const f of Object.keys(b)) {
