@@ -108,7 +108,10 @@ const CARDS = {
   32: d1("xylVal", "XYLITOL · EUROPEAN HEART JOURNAL 2024"),
   33: d1("xylClsa", "XYLITOL · ESC CONGRESS 2026", "Fifty-seven"),
   34: d1(null, "FIVE COHORTS"),
-  37: { card: "statement", kicker: "READ THE CHART CAREFULLY", lines: ["TERTILES", "≠", "QUARTILES"], src: D1_FOOTNOTE },
+  // WORDS, NOT "≠". Anton's not-equal glyph is drawn as an equals sign, so this
+  // card rendered "TERTILES = QUARTILES" — the opposite of the caveat it exists
+  // to make. engine/confusables.mjs now refuses the character outright.
+  37: { card: "statement", kicker: "READ THE CHART CAREFULLY", lines: ["TERTILES", "ARE NOT", "QUARTILES"], src: D1_FOOTNOTE },
 
   // ── ch 4 ──
   41: { card: "chapter", n: "04", name: "Clotting, not cholesterol" },

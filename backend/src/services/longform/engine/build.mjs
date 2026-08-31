@@ -37,6 +37,7 @@ import { createRequire } from "module";
 import { renderCard, HAS_PAYOFF, PAYOFF_P } from "./render.mjs";
 import { ffmpegPath, P, loadStoryboard, projectSlug } from "./_deps.mjs";
 import { findAnchor, clampReveal } from "./wordTimings.mjs";
+import { cardWords } from "./cardWords.mjs";
 import { parallaxFilter, validateParallax, FG_HEIGHT_FRAC } from "./parallax.mjs";
 import { srtTime } from "./srtTime.mjs";
 import { loadStatement } from "./statement.mjs";
@@ -74,18 +75,6 @@ const LEAD_IN = 1.0;
 const READ_WPS = 3.0;       // display-type reading speed, words/second
 const MAX_HOLD = 1.8;       // most we will extend a shot to make it readable
 
-/** Every word that actually appears on a card. */
-function cardWords(v) {
-  const bits = [];
-  if (v.lines) bits.push(...v.lines);
-  for (const k of ["title", "label", "note", "figure", "name", "unit", "text", "who", "role"]) {
-    if (v[k]) bits.push(String(v[k]));
-  }
-  if (v.items) v.items.forEach((i) => bits.push(i.label, i.display));
-  if (v.rows) v.rows.forEach((r) => bits.push(r.who, r.what));
-  if (v.stages) v.stages.forEach((x) => bits.push(x.name, x.sub || ""));
-  return bits.join(" ").replace(/\*/g, "").split(/\s+/).filter(Boolean).length;
-}
 
 const ff = (args) => execFileP(FFMPEG, ["-y", "-nostdin", "-hide_banner", "-loglevel", "error", ...args],
   { maxBuffer: 1 << 26 });

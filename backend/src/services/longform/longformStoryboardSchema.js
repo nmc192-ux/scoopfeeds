@@ -27,6 +27,8 @@
 
 /** Card types the renderer actually exports. Anything else is a typo. */
 import { validateGeo } from "./engine/mapGeo.mjs";
+import { confusablesIn } from "./engine/confusables.mjs";
+import { cardStrings } from "./engine/cardWords.mjs";
 
 export const CARD_TYPES = Object.freeze([
   "title", "chapter", "stat", "bars", "outro", "quote", "tweet", "map",
@@ -254,6 +256,14 @@ export function validateStoryboard(doc, { statementIds = [], docKeys: capturedDo
           }
         }
       }
+    }
+    // CHARACTERS THAT DRAW AS A DIFFERENT CHARACTER. Anton's "≠" outline is an
+    // equals sign, so a caveat card authored as TERTILES ≠ QUARTILES rendered
+    // TERTILES = QUARTILES — the opposite claim, and nothing caught it. See
+    // engine/confusables.mjs.
+    for (const c of confusablesIn(cardStrings(b))) {
+      errs.push(`${at} (${b.card}): ${JSON.stringify(c.char)} renders as ${JSON.stringify(c.renders)} in this font — `
+        + `${c.why}. In "${c.inText}". Instead, ${c.instead}.`);
     }
     // `muted` recedes every row; `hot` lights one. Asking for both is an author
     // who means one of them, and the renderer would silently honour hot.
