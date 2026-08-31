@@ -1,0 +1,64 @@
+GROUNDING CORPUS — the verified fact bank (Section 2/3 of the brief).
+Used as `sourceText` for the editorial gates. Nothing goes on screen that is not here.
+
+=== ESC CONGRESS 2026, MUNICH, PRESENTED 29 AUG 2026 ===
+'The association of Xylitol and incident cardiovascular events: the CLSA and EPIC-Norfolk cohort studies'
+17,710 participants, two prospective observational cohorts: Canadian Longitudinal Study on Aging plus EPIC-Norfolk (UK).
+MACE = death, myocardial infarction, or stroke.
+CLSA, 6-year follow-up: 57% higher risk, highest versus lowest quartile, adjusted for age, sex, smoking, lipids, diabetes, hypertension.
+EPIC-Norfolk, 30-year follow-up: 18% higher risk.
+Middle quartiles suggested dose-dependence. Held irrespective of age and sex; independent of BMI, hypertension, diabetes, lipids.
+Presenter: Dr Marco Witkowski, Charite University Hospital, Berlin. No conflicts of interest declared.
+Funding: Canada First Research Excellence Fund; Fonds de recherche du Quebec (D2R, McGill); Corona Foundation; Berlin Institute of Health.
+The cohorts are Canadian and British; the presenter is Berlin-based. The funding is largely Canadian.
+
+=== EUR HEART J 2024;45:2439-2452 — THE XYLITOL GROUNDWORK ===
+Discovery n=1,157; validation n=2,149 — both cardiac patients, not general population.
+3-year MACE, third versus first tertile: adjusted HR 1.57 (95% CI 1.12-2.21).
+Xylitol enhanced platelet reactivity and in vivo thrombus formation.
+Interventional arm: 10 healthy volunteers, 30 g xylitol drink, platelet reactivity up within 30 minutes; plasma up to about 1,000 times baseline; back to baseline in 4 to 6 hours.
+Half-life approximately 13 (plus or minus 4) minutes.
+The authors wrote that fasting plasma levels in the observational cohort reflect variations in endogenous production, and not food intake.
+
+=== NATURE MEDICINE 2023;29:710-718 — THE ERYTHRITOL PRECEDENT, SAME LAB ===
+US validation cohort n=2,149: adjusted HR 1.80 (1.18-2.77), Q4 versus Q1, 3-year MACE.
+European cohort n=833, Charite Berlin: adjusted HR 2.21 (1.20-4.07).
+Follow-up interventional study (ATVB, 2024): 20 healthy volunteers, dose equal to a sugarless soda or muffin, levels rose over 1,000 times.
+Erythritol is GRAS in the US — no requirement for long-term safety studies.
+Dr Stanley Hazen is a co-inventor on Cleveland Clinic patents in cardiovascular diagnostics and therapeutics.
+Hazen has said added xylitol dwarfs endogenous levels by over 1,000 times, so a fasting measurement may understate what a dietary spike does.
+Hazen has noted the people most often steered toward sugar substitutes — obesity, diabetes, metabolic syndrome — are the ones already at highest cardiovascular risk, and said he would prefer small occasional real sugar for people at elevated thrombosis risk.
+
+=== THE PUBLISHED DISSENT, ALL IN EUROPEAN HEART JOURNAL ===
+Wolnerhanssen, Meyer-Gerspach and Arduini (2024), doi 10.1093/eurheartj/ehae730: the title is misleading; xylitol was given intravenously in Germany from the 1970s at doses far above dietary levels, and serious harm (oxalosis, a kidney complication) appeared only above 300 g/day.
+Bonomini et al. (2024), doi 10.1093/eurheartj/ehae731: "active component or innocent bystander?"
+Dental commentary (2025), PMC12257477: caries and periodontal disease are themselves associated with stroke and death; xylitol reduces both.
+A separate double-blinded study found 7 g of dietary xylitol produced no detectable plasma rise.
+Attia's methodological critique: mice absorb dietary xylitol poorly so it had to be injected; platelet-rich plasma is not representative of normal platelet concentration.
+
+=== CLINICIAN QUOTES, ON THE RECORD ===
+Dr Marco Witkowski (Charite, Berlin, presenter): people assume sweeteners are healthier than sugar and regulators broadly treat them as safe; the findings highlight how little is known about xylitol's cardiovascular safety as amounts in products keep rising.
+Prof. Dan Atar (ESC Communication Committee): safety ratings had been good; the study is observational so causality is hard to infer, but further study is mandated.
+
+=== DOSE REALITY ===
+Xylitol gum: approximately 0.2 to 1 g per piece.
+Dental effective dose: approximately 5 to 10 g/day, split across 3 or more exposures.
+Interventional test dose: 30 g — the researchers' own comparison is roughly a pint of xylitol-sweetened ice cream.
+Adults generally tolerate 10 to 30 g/day; above about 14 g total sugar alcohols commonly causes GI upset.
+Xylitol is a sugar alcohol, tastes almost exactly like sugar, barely affects blood glucose, and is made from birch or corn.
+Xylitol is a normal byproduct of glucose metabolism, so the body already makes it.
+
+=== THE LABELLING GAP — NIH ===
+Sugar alcohols are not required to be listed individually on Nutrition Facts panels.
+A consumer cannot determine their own exposure.
+
+=== DOGS — FDA / MERCK VETERINARY MANUAL / VCA ===
+Above approximately 0.1 g/kg: hypoglycaemia, onset 10 to 60 minutes. A 10 kg dog is about 1 g, roughly one or two pieces of gum.
+Above approximately 0.5 g/kg: risk of acute liver failure.
+Dogs are the only domestic species affected; cats and ferrets are not at risk of hypoglycaemia.
+Mechanism: rapid absorption and 3 to 7 times normal insulin release.
+The FDA has warned about xylitol and dogs repeatedly.
+
+=== COVERAGE, 26-31 AUG 2026 ===
+Newsweek, US News & World Report, News-Medical.net, StudyFinds, Pharmaceutical Technology, Yahoo News all essentially reproduced the ESC press release.
+Of the coverage found, essentially all carried the 57% figure, and essentially none carried the 13-minute half-life or the authors' note about endogenous production.
