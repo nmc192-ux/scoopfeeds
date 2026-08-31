@@ -22,6 +22,7 @@ const {
   cacheKeyFor, voiceCaption, sweepTtsCache, probeDurationSecs, durationMethod,
   getFFprobePath, isVoiceConfigured, VoiceError, envNumber, voiceGapSecs,
   TTS_CACHE_DIR, TTS_RETENTION_MS, VOICE_ID, MODEL_ID, VOICE_SETTINGS,
+  wordsFromAlignment, wordsPathFor, readWordsSidecar, _internals,
 } = await import("./videoVoice.js");
 
 const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
@@ -90,8 +91,21 @@ test("there is NO silent fallback anywhere in the module", () => {
   // ttsService degrades to Google Translate and finally to silence. A silent
   // slide has no duration, and slide duration IS audio duration — so the whole
   // timing chain would be built on a fabricated number.
-  assert.ok(!/gtranslate|translate\.google|anullsrc|return null/i.test(SRC),
-    "videoVoice must never substitute silence or return null for missing audio");
+  assert.ok(!/gtranslate|translate\.google|anullsrc/i.test(SRC),
+    "videoVoice must never substitute silence for missing audio");
+
+  // `return null` used to be banned across the whole file as a proxy for that.
+  // It stopped being a good proxy when word timings arrived: a clip legitimately
+  // has NO timings (cached before the feature, or a fallback synthesis), and
+  // null is the honest answer for an absent enhancement. So the ban is now
+  // scoped to the path that produces AUDIO, where it always belonged — missing
+  // audio must THROW, and only the timing helpers may answer null.
+  const from = SRC.indexOf("async function elevenLabs");
+  const to = SRC.indexOf("export async function voiceSpec");
+  assert.ok(from > 0 && to > from, "could not locate the audio path — this guard has drifted");
+  const audioPath = SRC.slice(from, to);
+  assert.ok(!/return null/.test(audioPath),
+    "the audio path must throw on failure, never hand back null for a missing clip");
 });
 
 test("ElevenLabs is called unconditionally — no provider chain", () => {
@@ -299,4 +313,90 @@ test("non-mp3 files in the cache are left alone", () => {
   sweepTtsCache();
   assert.ok(existsSync(other), "the sweeper must only claim what it owns");
   rmSync(other, { force: true });
+});
+
+// ─── Word timings (step 1: carried, not yet consumed) ───────────────────────
+//
+// The timestamps were never DISCARDED — they were never requested. The plain
+// endpoint returns raw MP3; `/with-timestamps` returns JSON with a per-character
+// alignment. What these pin is that switching endpoints cannot cost us audio,
+// because every short we publish goes through this function.
+
+test("characters are grouped into words, with the word's own start and end", () => {
+  const words = wordsFromAlignment({
+    characters:                    ["G", "a", "s", " ", "u", "p"],
+    character_start_times_seconds: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5],
+    character_end_times_seconds:   [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+  });
+  assert.deepEqual(words, [
+    { word: "Gas", start: 0.0, end: 0.3 },
+    { word: "up",  start: 0.4, end: 0.6 },
+  ]);
+});
+
+test("a malformed alignment yields null rather than throwing", () => {
+  // Ragged arrays are the shape an API change would arrive in, and this runs on
+  // the publish path for every short.
+  assert.equal(wordsFromAlignment({ characters: ["a"], character_start_times_seconds: [0], character_end_times_seconds: [] }), null);
+  assert.equal(wordsFromAlignment({}), null);
+  assert.equal(wordsFromAlignment(null), null);
+  assert.equal(wordsFromAlignment({ characters: [" "], character_start_times_seconds: [0], character_end_times_seconds: [1] }), null,
+    "whitespace alone is not a word");
+});
+
+test("THE SAFETY CONTRACT: a broken timestamps endpoint costs timings, never audio", async () => {
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, opts) => {
+    calls.push(String(url));
+    if (String(url).includes("/with-timestamps")) return { ok: false, status: 503, text: async () => "down" };
+    return { ok: true, status: 200, arrayBuffer: async () => new Uint8Array(2048).fill(7).buffer };
+  };
+  try {
+    const { buf, words } = await _internals.elevenLabs("a caption");
+    assert.equal(buf.length, 2048, "the audio must still arrive");
+    assert.equal(words, null, "and the clip simply has no timings");
+    assert.ok(calls[0].includes("/with-timestamps"), "timestamps are tried first");
+    assert.ok(!calls[1].includes("/with-timestamps"), "then the plain endpoint");
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test("a timestamps response whose audio will not decode falls back too", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => String(url).includes("/with-timestamps")
+    ? { ok: true, status: 200, json: async () => ({ audio_base64: "", alignment: null }) }
+    : { ok: true, status: 200, arrayBuffer: async () => new Uint8Array(4096).fill(3).buffer };
+  try {
+    const { buf, words } = await _internals.elevenLabs("a caption");
+    assert.equal(buf.length, 4096, "an empty audio_base64 must not become the clip");
+    assert.equal(words, null);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test("a clip cached before timestamps existed reads as words:null, not as an error", () => {
+  // The normal state for a whole retention window after deploy.
+  const key = cacheKeyFor("some caption with no sidecar");
+  assert.equal(readWordsSidecar(wordsPathFor(key)), null);
+});
+
+test("a truncated sidecar degrades to no timings rather than taking the video down", () => {
+  const key = cacheKeyFor("half written sidecar");
+  writeFileSync(wordsPathFor(key), '[{"word":"Ga');
+  assert.equal(readWordsSidecar(wordsPathFor(key)), null);
+});
+
+test("the sweeper takes the sidecar with its clip — no new orphan class", () => {
+  // This function's own header names the ~19GB CARDS_DIR orphan incident. A
+  // sidecar the sweeper does not know about is that bug, newly planted.
+  const key = cacheKeyFor("swept clip with timings");
+  const mp3 = path.join(TTS_CACHE_DIR, `${key}.mp3`);
+  const side = wordsPathFor(key);
+  writeFileSync(mp3, Buffer.alloc(1024));
+  writeFileSync(side, JSON.stringify([{ word: "x", start: 0, end: 1 }]));
+  const old = new Date(Date.now() - 30 * 86400000);
+  utimesSync(mp3, old, old);
+
+  sweepTtsCache({ retentionMs: 7 * 86400000 });
+  assert.equal(existsSync(mp3), false, "the clip is swept");
+  assert.equal(existsSync(side), false, "and so is its sidecar");
 });
