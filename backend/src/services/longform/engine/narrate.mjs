@@ -36,7 +36,17 @@ loadEnv();
 
 const VOICE_ID = process.env.VIDEO_VOICE_ID || process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
 const MODEL_ID = process.env.VIDEO_VOICE_MODEL || "eleven_turbo_v2";
-const VOICE_SETTINGS = { stability: 0.5, similarity_boost: 0.75, speed: 1.0 };
+// OVERRIDABLE, WITH THE SHIPPED VALUES AS DEFAULTS. These were hardcoded, so a
+// brief specifying "stability 0.45" described a setting no film could actually
+// reach — the number was unreachable rather than wrong, which is worse, because
+// it reads as configuration. Defaults are unchanged, so every existing film
+// narrates identically; a project that wants a different voice sets the env.
+const num = (v, dflt) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : dflt);
+const VOICE_SETTINGS = {
+  stability: num(process.env.VIDEO_VOICE_STABILITY, 0.5),
+  similarity_boost: num(process.env.VIDEO_VOICE_SIMILARITY, 0.75),
+  speed: num(process.env.VIDEO_VOICE_SPEED, 1.0),
+};
 
 /**
  * Duration by decoding to null and taking the last reported time.
