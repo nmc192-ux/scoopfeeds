@@ -1,0 +1,577 @@
+[
+  {
+    "id": 1,
+    "chapter": "COLD OPEN",
+    "text": "I'm a public health doctor. For years, I've told people the same thing about sugar-free gum: it's fine."
+  },
+  {
+    "id": 2,
+    "chapter": "COLD OPEN",
+    "text": "Better than the sugar version. Chew it."
+  },
+  {
+    "id": 3,
+    "chapter": "COLD OPEN",
+    "text": "This week I've been reading a study that made me want to check whether I've been giving good advice."
+  },
+  {
+    "id": 4,
+    "chapter": "COLD OPEN",
+    "text": "Seventeen thousand people. Up to thirty years. And a sweetener that's in your gum, your toothpaste, your peanut butter and your \"sugar-free\" everything."
+  },
+  {
+    "id": 5,
+    "chapter": "COLD OPEN",
+    "text": "So I read the actual paper. Not the headline."
+  },
+  {
+    "id": 6,
+    "chapter": "COLD OPEN",
+    "text": "And I want to show you the thing that basically none of the coverage mentioned — because once you see it, you can't unsee it."
+  },
+  {
+    "id": 7,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "Quick note first: this is my professional read of published research. It isn't medical advice for you specifically."
+  },
+  {
+    "id": 8,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "If you've got heart disease, talk to your own doctor. Right — let's go."
+  },
+  {
+    "id": 9,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "Xylitol. It's a sugar alcohol. Tastes almost exactly like sugar, barely touches your blood glucose, made from birch or corn."
+  },
+  {
+    "id": 10,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "It's been in gum and toothpaste for decades and dentists genuinely love it, for good reason."
+  },
+  {
+    "id": 11,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "Here's the part that matters later: your body already makes it. Xylitol is a normal byproduct of glucose metabolism."
+  },
+  {
+    "id": 12,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "You've got some in your blood right now. But the amounts added to food are over a thousand times higher than the amounts you make."
+  },
+  {
+    "id": 13,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "Last Saturday in Munich, at the world's biggest heart conference, a team from the Charité in Berlin presented this."
+  },
+  {
+    "id": 14,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "Seventeen thousand seven hundred and ten people. Two long-running population studies — one Canadian, one British."
+  },
+  {
+    "id": 15,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "Not heart patients. Ordinary people."
+  },
+  {
+    "id": 16,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "They measured xylitol in the blood, sorted everyone into four groups, and waited."
+  },
+  {
+    "id": 17,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "Canadian cohort, six years:"
+  },
+  {
+    "id": 18,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "the top quarter had a fifty-seven per cent higher risk of dying, or having a heart attack, or a stroke, than the bottom quarter."
+  },
+  {
+    "id": 19,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "British cohort, thirty years: eighteen per cent."
+  },
+  {
+    "id": 20,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "And the middle groups sat in between. More in the blood, more events."
+  },
+  {
+    "id": 21,
+    "chapter": "CH 1 — WHAT THEY FOUND",
+    "text": "That's a dose-response — and that's the pattern that makes epidemiologists take something seriously."
+  },
+  {
+    "id": 22,
+    "chapter": "CH 2 — WHY THIS ONE IS HARDER TO DISMISS",
+    "text": "If this feels familiar — it should. Same group published on xylitol in 2024 and it got huge coverage."
+  },
+  {
+    "id": 23,
+    "chapter": "CH 2 — WHY THIS ONE IS HARDER TO DISMISS",
+    "text": "But that one was easy to argue with. About three thousand people, all already in hospital for cardiac testing, followed for three years."
+  },
+  {
+    "id": 24,
+    "chapter": "CH 2 — WHY THIS ONE IS HARDER TO DISMISS",
+    "text": "Sick people, short window."
+  },
+  {
+    "id": 25,
+    "chapter": "CH 2 — WHY THIS ONE IS HARDER TO DISMISS",
+    "text": "This one answers both. Five times the people. General population. Six years in one cohort, thirty in the other."
+  },
+  {
+    "id": 26,
+    "chapter": "CH 2 — WHY THIS ONE IS HARDER TO DISMISS",
+    "text": "And they report the link held after adjusting for body mass index, blood pressure, diabetes and cholesterol."
+  },
+  {
+    "id": 27,
+    "chapter": "CH 2 — WHY THIS ONE IS HARDER TO DISMISS",
+    "text": "That matters, because the obvious objection is that people who buy sugar-free products are already people with a metabolic problem."
+  },
+  {
+    "id": 28,
+    "chapter": "CH 2 — WHY THIS ONE IS HARDER TO DISMISS",
+    "text": "If that were the whole story, those adjustments should have made the signal vanish. They say it didn't."
+  },
+  {
+    "id": 29,
+    "chapter": "CH 3 — THE PATTERN",
+    "text": "Now widen out, because xylitol isn't the first one."
+  },
+  {
+    "id": 30,
+    "chapter": "CH 3 — THE PATTERN",
+    "text": "In 2023, the same lab published this on erythritol — the sweetener in basically every keto product on the shelf."
+  },
+  {
+    "id": 31,
+    "chapter": "CH 3 — THE PATTERN",
+    "text": "Nature Medicine. Cleveland cohort: eighty per cent higher risk. Berlin cohort: a hundred and twenty-one per cent."
+  },
+  {
+    "id": 32,
+    "chapter": "CH 3 — THE PATTERN",
+    "text": "Then xylitol in 2024. Fifty-seven."
+  },
+  {
+    "id": 33,
+    "chapter": "CH 3 — THE PATTERN",
+    "text": "Then Munich, this week. Fifty-seven, and eighteen."
+  },
+  {
+    "id": 34,
+    "chapter": "CH 3 — THE PATTERN",
+    "text": "Five separate cohorts. Two different sugar alcohols. Two continents. Every single one pointing the same way."
+  },
+  {
+    "id": 35,
+    "chapter": "CH 3 — THE PATTERN",
+    "text": "Now — be careful with that chart, including with mine. Those studies don't all use the same comparison groups."
+  },
+  {
+    "id": 36,
+    "chapter": "CH 3 — THE PATTERN",
+    "text": "Some compare quarters, one compares thirds."
+  },
+  {
+    "id": 37,
+    "chapter": "CH 3 — THE PATTERN",
+    "text": "So this is a pattern, not a meta-analysis, and anyone showing it to you as if the bars are interchangeable is overselling it."
+  },
+  {
+    "id": 38,
+    "chapter": "CH 3 — THE PATTERN",
+    "text": "Including me, if I didn't just say that."
+  },
+  {
+    "id": 39,
+    "chapter": "CH 3 — THE PATTERN",
+    "text": "But the direction is the direction."
+  },
+  {
+    "id": 40,
+    "chapter": "CH 3 — THE PATTERN",
+    "text": "And when the same signal turns up in five independent groups of people, that's when you stop calling it a fluke."
+  },
+  {
+    "id": 41,
+    "chapter": "CH 4 — WHY CLOTTING, NOT CHOLESTEROL",
+    "text": "So what's the mechanism? It isn't cholesterol. It's clotting."
+  },
+  {
+    "id": 42,
+    "chapter": "CH 4 — WHY CLOTTING, NOT CHOLESTEROL",
+    "text": "Platelets are the cells that clump to seal a cut. Brilliant when you're bleeding."
+  },
+  {
+    "id": 43,
+    "chapter": "CH 4 — WHY CLOTTING, NOT CHOLESTEROL",
+    "text": "Dangerous when it happens inside an artery that's already narrowed — because that is what a heart attack and most strokes actually are."
+  },
+  {
+    "id": 44,
+    "chapter": "CH 4 — WHY CLOTTING, NOT CHOLESTEROL",
+    "text": "In the 2024 work, they gave ten healthy volunteers a drink with thirty grams of xylitol in it."
+  },
+  {
+    "id": 45,
+    "chapter": "CH 4 — WHY CLOTTING, NOT CHOLESTEROL",
+    "text": "Within thirty minutes, several measures of platelet stickiness had gone up."
+  },
+  {
+    "id": 46,
+    "chapter": "CH 4 — WHY CLOTTING, NOT CHOLESTEROL",
+    "text": "Same thing showed up with erythritol, in twenty volunteers, at a dose you'd get from one sugar-free soda."
+  },
+  {
+    "id": 47,
+    "chapter": "CH 4 — WHY CLOTTING, NOT CHOLESTEROL",
+    "text": "Hold onto that thirty grams. We're coming back to it, and it's the number that decides whether any of this applies to you."
+  },
+  {
+    "id": 48,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "Okay. This is the part I'd want a colleague to tell me, and almost nobody is reporting it."
+  },
+  {
+    "id": 49,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "Xylitol does not hang around. Its half-life in your blood is about thirteen minutes."
+  },
+  {
+    "id": 50,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "After that test drink, levels spiked to as much as a thousand times normal — and were back to baseline within four to six hours."
+  },
+  {
+    "id": 51,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "Thirteen minutes."
+  },
+  {
+    "id": 52,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "Now go back to those cohort studies and ask a boring methods question. When were the blood samples taken?"
+  },
+  {
+    "id": 53,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "After an overnight fast."
+  },
+  {
+    "id": 54,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "So by the time that needle went in, anything anyone ate the day before was long gone."
+  },
+  {
+    "id": 55,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "Which means the xylitol they measured — the thing that predicted heart attacks — was almost entirely xylitol those people's own bodies were making."
+  },
+  {
+    "id": 56,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "And this isn't me being clever. It's what the researchers wrote themselves, in the 2024 paper."
+  },
+  {
+    "id": 57,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "Their words: the plasma levels in their observational cohort represent variations in endogenous production, and not food intake."
+  },
+  {
+    "id": 58,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "That is a very different claim from the one in your feed."
+  },
+  {
+    "id": 59,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "It leaves a real possibility on the table:"
+  },
+  {
+    "id": 60,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "that something is already going wrong in this person's metabolism, and one of the ways it shows up is more xylitol in their blood."
+  },
+  {
+    "id": 61,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "In my field we call that a marker rather than a cause."
+  },
+  {
+    "id": 62,
+    "chapter": "CH 5 — THE THIRTEEN MINUTES",
+    "text": "A smoke alarm is strongly associated with house fires. It is not what burns the house down."
+  },
+  {
+    "id": 63,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "Now, the researchers have an answer to that, and it's a good one — I want to be fair here."
+  },
+  {
+    "id": 64,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "Their argument: yes, the baseline is what your body makes. But what's added to food is over a thousand times higher."
+  },
+  {
+    "id": 65,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "So if a small self-made amount tracks with risk, a big dietary spike might be doing more, not less."
+  },
+  {
+    "id": 66,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "The fasting number might be understating it."
+  },
+  {
+    "id": 67,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "Other cardiologists have pushed back, in the same journal, under their own names."
+  },
+  {
+    "id": 68,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "Their points: xylitol was given intravenously to patients in Germany from the 1970s, at doses way beyond anything you'd eat —"
+  },
+  {
+    "id": 69,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "and the harm in that record is a rare kidney complication at extreme doses, not heart attacks."
+  },
+  {
+    "id": 70,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "The animal work needed xylitol injected, because mice barely absorb it by mouth."
+  },
+  {
+    "id": 71,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "And a separate double-blinded study found seven grams of dietary xylitol produced no detectable rise in blood levels at all."
+  },
+  {
+    "id": 72,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "And then the argument I find most interesting, as a public health person. Tooth decay and gum disease are themselves associated with stroke and death."
+  },
+  {
+    "id": 73,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "Xylitol reduces both. So at the doses dentists actually recommend, the net effect on your heart might run the other way."
+  },
+  {
+    "id": 74,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "Nobody here is a crank. They're all publishing in the same journal with the data on the table."
+  },
+  {
+    "id": 75,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "And one more thing you should know: the senior author on the erythritol work holds patents with his institution on cardiovascular diagnostics."
+  },
+  {
+    "id": 76,
+    "chapter": "CH 6 — THE ARGUMENT BACK",
+    "text": "That doesn't make him wrong. It's just something you're entitled to know, and I'd want you to know if the situation were reversed."
+  },
+  {
+    "id": 77,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "So let's get practical. Thirty grams was the test dose. What's actually in the stuff you buy?"
+  },
+  {
+    "id": 78,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "A piece of xylitol gum: somewhere between a fifth of a gram and one gram."
+  },
+  {
+    "id": 79,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "Dentists suggest five to ten grams a day for the cavity benefit."
+  },
+  {
+    "id": 80,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "Thirty grams — the amount that moved platelets in a lab — is, in the researchers' own comparison, about a pint of xylitol-sweetened ice cream."
+  },
+  {
+    "id": 81,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "So two pieces of gum is not the experiment. Toothpaste isn't either — you spit it out."
+  },
+  {
+    "id": 82,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "Where you can hit thirty grams without noticing is bulk xylitol swapped one-for-one for sugar in home baking, sugar-free sweets eaten by the bag,"
+  },
+  {
+    "id": 83,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "and sugar-free ice cream and drinks by the tub. That's the honest line. It's a kitchen-scale exposure, not a pocket-sized one."
+  },
+  {
+    "id": 84,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "Two more things, and these are the ones I actually care about professionally."
+  },
+  {
+    "id": 85,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "First: fifty-seven per cent is a relative number. Fifty-seven per cent more than what? The presentation didn't publish the underlying event rate."
+  },
+  {
+    "id": 86,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "So nobody — not me, not any channel running this — can currently tell you what it means in people per thousand."
+  },
+  {
+    "id": 87,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "That number matters more than the percentage, and we don't have it."
+  },
+  {
+    "id": 88,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "Second, and this is the one that genuinely bothers me. Look at a label. Sugar alcohols aren't required to be listed individually."
+  },
+  {
+    "id": 89,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "So you can buy a product, read the panel properly, do everything right —"
+  },
+  {
+    "id": 90,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "and still have no way of knowing how much xylitol is in it."
+  },
+  {
+    "id": 91,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "Whatever the cardiology turns out to say, that gap is a problem right now."
+  },
+  {
+    "id": 92,
+    "chapter": "CH 7 — YOUR PACKET, AND THE THING NOBODY CAN CHECK",
+    "text": "You cannot make an informed choice about an exposure you're not permitted to measure."
+  },
+  {
+    "id": 93,
+    "chapter": "CH 8 — THE PART THAT ISN'T DEBATED",
+    "text": "One thing about xylitol nobody argues about. And it's worth thirty seconds, because unlike everything else in this video, this one is settled and it kills."
+  },
+  {
+    "id": 94,
+    "chapter": "CH 8 — THE PART THAT ISN'T DEBATED",
+    "text": "Xylitol is severely toxic to dogs."
+  },
+  {
+    "id": 95,
+    "chapter": "CH 8 — THE PART THAT ISN'T DEBATED",
+    "text": "Dogs absorb it fast and dump three to seven times the normal amount of insulin."
+  },
+  {
+    "id": 96,
+    "chapter": "CH 8 — THE PART THAT ISN'T DEBATED",
+    "text": "Around a tenth of a gram per kilo of body weight can crash a dog's blood sugar within an hour."
+  },
+  {
+    "id": 97,
+    "chapter": "CH 8 — THE PART THAT ISN'T DEBATED",
+    "text": "Half a gram per kilo risks acute liver failure."
+  },
+  {
+    "id": 98,
+    "chapter": "CH 8 — THE PART THAT ISN'T DEBATED",
+    "text": "For a ten-kilo dog, that first threshold is about one gram. One or two pieces of gum."
+  },
+  {
+    "id": 99,
+    "chapter": "CH 8 — THE PART THAT ISN'T DEBATED",
+    "text": "In a handbag, on a chair, at dog height."
+  },
+  {
+    "id": 100,
+    "chapter": "CH 8 — THE PART THAT ISN'T DEBATED",
+    "text": "Cats aren't affected the same way. Dogs are. The FDA has warned about this repeatedly."
+  },
+  {
+    "id": 101,
+    "chapter": "CH 8 — THE PART THAT ISN'T DEBATED",
+    "text": "So while the cardiologists work out the human question, the veterinary one is already answered:"
+  },
+  {
+    "id": 102,
+    "chapter": "CH 8 — THE PART THAT ISN'T DEBATED",
+    "text": "sugar-free gum, sugar-free peanut butter and baking xylitol go in a closed cupboard."
+  },
+  {
+    "id": 103,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "So — has my advice changed?"
+  },
+  {
+    "id": 104,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "A bit. Here's my actual read."
+  },
+  {
+    "id": 105,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "The finding is real. Five cohorts, two continents, one direction, and a mechanism that makes biological sense."
+  },
+  {
+    "id": 106,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "That's not nothing and I'm not going to wave it away."
+  },
+  {
+    "id": 107,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "But what hasn't been shown is that eating xylitol is what put it in those people's blood."
+  },
+  {
+    "id": 108,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "That study hasn't been done. And the design that would settle it is not mysterious — measure what people actually consume alongside what's in their blood."
+  },
+  {
+    "id": 109,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "Or run a trial with hard endpoints instead of platelet readings."
+  },
+  {
+    "id": 110,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "So: gum, mints, toothpaste? I'm not worried, and neither are the dentists, and the dental benefit is real and well documented."
+  },
+  {
+    "id": 111,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "Baking with it by the cupful, or living on sugar-free tubs and bottles?"
+  },
+  {
+    "id": 112,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "That's a different exposure, and I'd want to know more before I did that every day — especially for anyone already at high clotting risk."
+  },
+  {
+    "id": 113,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "And the last thing. \"Sugar free\" was never a health claim. It was a claim about sugar."
+  },
+  {
+    "id": 114,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "Saccharin, aspartame, sucralose, erythritol, now xylitol — every one arrived as the safe answer, and every one is still being studied decades later."
+  },
+  {
+    "id": 115,
+    "chapter": "CH 9 — HOW I READ IT",
+    "text": "The label tells you what isn't in the packet. It was never a promise about what is."
+  }
+]

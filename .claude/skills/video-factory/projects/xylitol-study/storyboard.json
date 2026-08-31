@@ -1,0 +1,1057 @@
+{
+  "beats": {
+    "1": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "2": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "3": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "4": {
+      "card": "stat",
+      "kicker": "THE STUDY",
+      "figure": "17,710",
+      "label": "People, in two population cohorts, followed for up to thirty years.",
+      "src": "ESC CONGRESS 2026",
+      "roll": true
+    },
+    "5": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "6": {
+      "card": "statement",
+      "kicker": "WHAT THE COVERAGE MISSED",
+      "lines": [
+        "ONE DETAIL",
+        "CHANGES",
+        "WHAT IT MEANS"
+      ]
+    },
+    "7": {
+      "card": "statement",
+      "kicker": "BEFORE WE START",
+      "lines": [
+        "NOT MEDICAL ADVICE"
+      ]
+    },
+    "8": {
+      "footage": "F_LAB_TUBES_RACK"
+    },
+    "9": {
+      "footage": "F_LAB_TUBES_RACK"
+    },
+    "10": {
+      "footage": "F_LAB_TUBES_RACK"
+    },
+    "11": {
+      "footage": "F_LAB_TUBES_RACK"
+    },
+    "12": {
+      "card": "stat",
+      "kicker": "DIETARY VS ENDOGENOUS",
+      "figure": "1,000×",
+      "label": "More xylitol is added to food than your body makes.",
+      "src": "EUR HEART J 2024;45:2439–2452",
+      "roll": true
+    },
+    "13": {
+      "card": "title",
+      "kicker": "ESC CONGRESS 2026 · MUNICH",
+      "lines": [
+        "THE XYLITOL",
+        "STUDY"
+      ],
+      "sub": "Presented 29 August 2026 by a team from the Charité, Berlin."
+    },
+    "14": {
+      "footage": "F_LAB_TUBES_RACK"
+    },
+    "15": {
+      "footage": "F_LAB_TUBES_RACK"
+    },
+    "16": {
+      "footage": "F_LAB_TUBES_RACK"
+    },
+    "17": {
+      "footage": "F_LAB_TUBES_RACK"
+    },
+    "18": {
+      "card": "stat",
+      "kicker": "CLSA · 6-YEAR FOLLOW-UP",
+      "figure": "+57%",
+      "label": "Higher risk of death, heart attack or stroke — top versus bottom quartile.",
+      "src": "ESC CONGRESS 2026"
+    },
+    "19": {
+      "card": "stat",
+      "kicker": "EPIC-NORFOLK · 30-YEAR FOLLOW-UP",
+      "figure": "+18%",
+      "label": "The same direction, over thirty years.",
+      "src": "ESC CONGRESS 2026"
+    },
+    "20": {
+      "footage": "F_LAB_TUBES_RACK"
+    },
+    "21": {
+      "card": "statement",
+      "kicker": "WHY IT MATTERS",
+      "lines": [
+        "MORE IN THE BLOOD,",
+        "MORE EVENTS.",
+        "THAT IS A DOSE-RESPONSE."
+      ]
+    },
+    "22": {
+      "card": "chapter",
+      "n": "02",
+      "name": "Why this one is harder to dismiss"
+    },
+    "23": {
+      "footage": "F_CROWD_STREET_SLOMO"
+    },
+    "24": {
+      "footage": "F_CROWD_STREET_SLOMO"
+    },
+    "25": {
+      "card": "ledger",
+      "kicker": "WHAT CHANGED",
+      "title": "The 2024 study, and this one.",
+      "rows": [
+        {
+          "who": "2024",
+          "what": "≈3,300 cardiac patients · 3 years"
+        },
+        {
+          "who": "2026",
+          "what": "17,710 general population · up to 30 years",
+          "hot": true
+        }
+      ],
+      "src": "ESC CONGRESS 2026"
+    },
+    "26": {
+      "footage": "F_CROWD_STREET_SLOMO"
+    },
+    "27": {
+      "footage": "F_CROWD_STREET_SLOMO"
+    },
+    "28": {
+      "footage": "F_CROWD_STREET_SLOMO"
+    },
+    "29": {
+      "card": "chapter",
+      "n": "03",
+      "name": "Five cohorts, two sweeteners, one direction"
+    },
+    "30": {
+      "footage": "F_KETO_SHELF"
+    },
+    "31": {
+      "card": "bars",
+      "kicker": "ERYTHRITOL · NATURE MEDICINE 2023",
+      "title": "Five cohorts. Two sugar alcohols. Same direction.",
+      "items": [
+        {
+          "label": "Erythritol — Cleveland, 3yr",
+          "value": 80,
+          "display": "+80%"
+        },
+        {
+          "label": "Erythritol — Berlin, 3yr",
+          "value": 121,
+          "display": "+121%",
+          "hot": true
+        },
+        {
+          "label": "Xylitol — validation, 3yr",
+          "value": 57,
+          "display": "+57%"
+        },
+        {
+          "label": "Xylitol — CLSA, 6yr",
+          "value": 57,
+          "display": "+57%"
+        },
+        {
+          "label": "Xylitol — EPIC-Norfolk, 30yr",
+          "value": 18,
+          "display": "+18%"
+        }
+      ],
+      "src": "COMPARISON GROUPS DIFFER — TERTILES AND QUARTILES. ILLUSTRATIVE, NOT A META-ANALYSIS."
+    },
+    "32": {
+      "card": "bars",
+      "kicker": "XYLITOL · EUROPEAN HEART JOURNAL 2024",
+      "title": "Five cohorts. Two sugar alcohols. Same direction.",
+      "items": [
+        {
+          "label": "Erythritol — Cleveland, 3yr",
+          "value": 80,
+          "display": "+80%"
+        },
+        {
+          "label": "Erythritol — Berlin, 3yr",
+          "value": 121,
+          "display": "+121%"
+        },
+        {
+          "label": "Xylitol — validation, 3yr",
+          "value": 57,
+          "display": "+57%",
+          "hot": true
+        },
+        {
+          "label": "Xylitol — CLSA, 6yr",
+          "value": 57,
+          "display": "+57%"
+        },
+        {
+          "label": "Xylitol — EPIC-Norfolk, 30yr",
+          "value": 18,
+          "display": "+18%"
+        }
+      ],
+      "src": "COMPARISON GROUPS DIFFER — TERTILES AND QUARTILES. ILLUSTRATIVE, NOT A META-ANALYSIS."
+    },
+    "33": {
+      "card": "bars",
+      "kicker": "XYLITOL · ESC CONGRESS 2026",
+      "title": "Five cohorts. Two sugar alcohols. Same direction.",
+      "items": [
+        {
+          "label": "Erythritol — Cleveland, 3yr",
+          "value": 80,
+          "display": "+80%"
+        },
+        {
+          "label": "Erythritol — Berlin, 3yr",
+          "value": 121,
+          "display": "+121%"
+        },
+        {
+          "label": "Xylitol — validation, 3yr",
+          "value": 57,
+          "display": "+57%"
+        },
+        {
+          "label": "Xylitol — CLSA, 6yr",
+          "value": 57,
+          "display": "+57%",
+          "hot": true
+        },
+        {
+          "label": "Xylitol — EPIC-Norfolk, 30yr",
+          "value": 18,
+          "display": "+18%"
+        }
+      ],
+      "src": "COMPARISON GROUPS DIFFER — TERTILES AND QUARTILES. ILLUSTRATIVE, NOT A META-ANALYSIS."
+    },
+    "34": {
+      "card": "bars",
+      "kicker": "FIVE COHORTS",
+      "title": "Five cohorts. Two sugar alcohols. Same direction.",
+      "items": [
+        {
+          "label": "Erythritol — Cleveland, 3yr",
+          "value": 80,
+          "display": "+80%"
+        },
+        {
+          "label": "Erythritol — Berlin, 3yr",
+          "value": 121,
+          "display": "+121%"
+        },
+        {
+          "label": "Xylitol — validation, 3yr",
+          "value": 57,
+          "display": "+57%"
+        },
+        {
+          "label": "Xylitol — CLSA, 6yr",
+          "value": 57,
+          "display": "+57%"
+        },
+        {
+          "label": "Xylitol — EPIC-Norfolk, 30yr",
+          "value": 18,
+          "display": "+18%"
+        }
+      ],
+      "src": "COMPARISON GROUPS DIFFER — TERTILES AND QUARTILES. ILLUSTRATIVE, NOT A META-ANALYSIS."
+    },
+    "35": {
+      "footage": "F_KETO_SHELF"
+    },
+    "36": {
+      "footage": "F_KETO_SHELF"
+    },
+    "37": {
+      "card": "statement",
+      "kicker": "READ THE CHART CAREFULLY",
+      "lines": [
+        "TERTILES",
+        "≠",
+        "QUARTILES"
+      ],
+      "src": "COMPARISON GROUPS DIFFER — TERTILES AND QUARTILES. ILLUSTRATIVE, NOT A META-ANALYSIS."
+    },
+    "38": {
+      "footage": "F_KETO_SHELF"
+    },
+    "39": {
+      "footage": "F_KETO_SHELF"
+    },
+    "40": {
+      "footage": "F_KETO_SHELF"
+    },
+    "41": {
+      "card": "chapter",
+      "n": "04",
+      "name": "Clotting, not cholesterol"
+    },
+    "42": {
+      "footage": "F_DROPLET_COLLISION_MACRO"
+    },
+    "43": {
+      "footage": "F_DROPLET_COLLISION_MACRO"
+    },
+    "44": {
+      "card": "stat",
+      "kicker": "THE INTERVENTIONAL ARM",
+      "figure": "30 g",
+      "label": "Xylitol in a drink, given to ten healthy volunteers.",
+      "src": "EUR HEART J 2024;45:2439–2452"
+    },
+    "45": {
+      "card": "stat",
+      "kicker": "TIME TO EFFECT",
+      "figure": "30",
+      "unit": "MIN",
+      "label": "Several measures of platelet stickiness had risen.",
+      "src": "EUR HEART J 2024;45:2439–2452"
+    },
+    "46": {
+      "card": "stat",
+      "kicker": "ERYTHRITOL · 20 VOLUNTEERS",
+      "figure": "1,000×",
+      "label": "Levels rose over a thousandfold, from one sugar-free soda.",
+      "src": "NATURE MEDICINE 2023;29:710–718"
+    },
+    "47": {
+      "footage": "F_DROPLET_COLLISION_MACRO"
+    },
+    "48": {
+      "card": "chapter",
+      "n": "05",
+      "name": "The thirteen minutes nobody reported"
+    },
+    "49": {
+      "footage": "F_STOPWATCH_MACRO"
+    },
+    "50": {
+      "card": "decay",
+      "kicker": "PLASMA XYLITOL AFTER A 30 g DRINK",
+      "title": "Thirteen minutes.",
+      "peak": 1000,
+      "baseline": 1,
+      "halfLife": 13,
+      "xMax": 360,
+      "yAxis": [
+        {
+          "at": 1000,
+          "label": "1,000×"
+        },
+        {
+          "at": 500,
+          "label": "500×"
+        },
+        {
+          "at": 1,
+          "label": "BASELINE"
+        }
+      ],
+      "xAxis": [
+        {
+          "at": 0,
+          "label": "DRINK"
+        },
+        {
+          "at": 120,
+          "label": "2 HRS"
+        },
+        {
+          "at": 240,
+          "label": "4 HRS"
+        },
+        {
+          "at": 360,
+          "label": "6 HRS"
+        }
+      ],
+      "marks": [
+        {
+          "at": 13,
+          "label": "Half-life ≈ 13 min"
+        }
+      ],
+      "src": "EUR HEART J 2024;45:2439–2452"
+    },
+    "51": {
+      "card": "stat",
+      "kicker": "HALF-LIFE IN BLOOD",
+      "figure": "13",
+      "unit": "MIN",
+      "label": "Back to baseline within four to six hours.",
+      "src": "EUR HEART J 2024;45:2439–2452"
+    },
+    "52": {
+      "footage": "F_STOPWATCH_MACRO"
+    },
+    "53": {
+      "card": "statement",
+      "kicker": "WHEN THE BLOOD WAS TAKEN",
+      "lines": [
+        "AFTER AN",
+        "OVERNIGHT FAST"
+      ]
+    },
+    "54": {
+      "card": "decay",
+      "kicker": "PLASMA XYLITOL AFTER A 30 g DRINK",
+      "title": "It is gone long before the blood is drawn.",
+      "peak": 1000,
+      "baseline": 1,
+      "halfLife": 13,
+      "xMax": 360,
+      "yAxis": [
+        {
+          "at": 1000,
+          "label": "1,000×"
+        },
+        {
+          "at": 500,
+          "label": "500×"
+        },
+        {
+          "at": 1,
+          "label": "BASELINE"
+        }
+      ],
+      "xAxis": [
+        {
+          "at": 0,
+          "label": "DRINK"
+        },
+        {
+          "at": 120,
+          "label": "2 HRS"
+        },
+        {
+          "at": 240,
+          "label": "4 HRS"
+        },
+        {
+          "at": 360,
+          "label": "6 HRS"
+        }
+      ],
+      "marks": [
+        {
+          "at": 13,
+          "label": "Half-life ≈ 13 min"
+        }
+      ],
+      "beyond": {
+        "label": "BLOOD SAMPLE TAKEN — 12 HRS"
+      },
+      "note": "The cohorts sampled after an overnight fast.",
+      "src": "EUR HEART J 2024;45:2439–2452"
+    },
+    "55": {
+      "footage": "F_STOPWATCH_MACRO"
+    },
+    "56": {
+      "footage": "F_STOPWATCH_MACRO"
+    },
+    "57": {
+      "card": "quote",
+      "text": "The plasma levels in their observational cohort represent variations in endogenous production, and not food intake.",
+      "who": "Witkowski et al.",
+      "role": "European Heart Journal, 2024 — the authors' own words"
+    },
+    "58": {
+      "footage": "F_STOPWATCH_MACRO"
+    },
+    "59": {
+      "footage": "F_STOPWATCH_MACRO"
+    },
+    "60": {
+      "footage": "F_STOPWATCH_MACRO"
+    },
+    "61": {
+      "card": "statement",
+      "kicker": "THE OPEN QUESTION",
+      "lines": [
+        "MARKER,",
+        "OR CAUSE?"
+      ]
+    },
+    "62": {
+      "footage": "F_STOPWATCH_MACRO"
+    },
+    "63": {
+      "card": "chapter",
+      "n": "06",
+      "name": "The argument back — and a disclosure"
+    },
+    "64": {
+      "footage": "F_IV_DRIP_BAG"
+    },
+    "65": {
+      "footage": "F_IV_DRIP_BAG"
+    },
+    "66": {
+      "footage": "F_IV_DRIP_BAG"
+    },
+    "67": {
+      "footage": "F_IV_DRIP_BAG"
+    },
+    "68": {
+      "footage": "F_IV_DRIP_BAG"
+    },
+    "69": {
+      "footage": "F_IV_DRIP_BAG"
+    },
+    "70": {
+      "footage": "F_IV_DRIP_BAG"
+    },
+    "71": {
+      "card": "stat",
+      "kicker": "A SEPARATE DOUBLE-BLINDED STUDY",
+      "figure": "7 g",
+      "label": "Dietary xylitol produced no detectable rise in blood levels.",
+      "src": "EUR HEART J COMMENTARY, 2024"
+    },
+    "72": {
+      "footage": "F_IV_DRIP_BAG"
+    },
+    "73": {
+      "footage": "F_IV_DRIP_BAG"
+    },
+    "74": {
+      "footage": "F_IV_DRIP_BAG"
+    },
+    "75": {
+      "card": "statement",
+      "kicker": "DISCLOSURE",
+      "lines": [
+        "THE SENIOR AUTHOR HOLDS",
+        "PATENTS WITH HIS INSTITUTION",
+        "ON CARDIOVASCULAR DIAGNOSTICS"
+      ],
+      "src": "NATURE MEDICINE 2023;29:710–718"
+    },
+    "76": {
+      "footage": "F_IV_DRIP_BAG"
+    },
+    "77": {
+      "card": "chapter",
+      "n": "07",
+      "name": "Your packet, and the gap on the label"
+    },
+    "78": {
+      "card": "bars",
+      "kicker": "THE DOSE LADDER",
+      "title": "What is actually in the things you buy.",
+      "items": [
+        {
+          "label": "One piece of gum",
+          "value": 1,
+          "display": "0.2–1 g"
+        }
+      ],
+      "src": "FDA · MERCK VETERINARY MANUAL · ESC"
+    },
+    "79": {
+      "card": "bars",
+      "kicker": "THE DOSE LADDER",
+      "title": "What is actually in the things you buy.",
+      "items": [
+        {
+          "label": "One piece of gum",
+          "value": 1,
+          "display": "0.2–1 g"
+        },
+        {
+          "label": "Dental dose, per day",
+          "value": 10,
+          "display": "5–10 g"
+        }
+      ],
+      "src": "DENTAL CONSENSUS"
+    },
+    "80": {
+      "card": "bars",
+      "kicker": "THE DOSE LADDER",
+      "title": "What is actually in the things you buy.",
+      "items": [
+        {
+          "label": "One piece of gum",
+          "value": 1,
+          "display": "0.2–1 g"
+        },
+        {
+          "label": "Dental dose, per day",
+          "value": 10,
+          "display": "5–10 g"
+        },
+        {
+          "label": "The study's test dose",
+          "value": 30,
+          "display": "30 g",
+          "hot": true
+        }
+      ],
+      "src": "≈ A PINT OF XYLITOL-SWEETENED ICE CREAM — THE RESEARCHERS' OWN COMPARISON"
+    },
+    "81": {
+      "footage": "F_KITCHEN_SCALE_POWDER"
+    },
+    "82": {
+      "footage": "F_KITCHEN_SCALE_POWDER"
+    },
+    "83": {
+      "footage": "F_KITCHEN_SCALE_POWDER"
+    },
+    "84": {
+      "footage": "F_KITCHEN_SCALE_POWDER"
+    },
+    "85": {
+      "footage": "F_KITCHEN_SCALE_POWDER"
+    },
+    "86": {
+      "card": "split",
+      "kicker": "THE NUMBER THAT ISN'T THERE",
+      "title": "Fifty-seven per cent more than what?",
+      "left": {
+        "label": "Relative risk increase — top vs bottom quartile",
+        "figure": "+57%"
+      },
+      "right": {
+        "label": "Events per 1,000 people",
+        "stamp": "NOT PUBLISHED"
+      },
+      "note": "Without the underlying event rate, nobody can convert this into your risk.",
+      "src": "ESC CONGRESS 2026"
+    },
+    "87": {
+      "footage": "F_KITCHEN_SCALE_POWDER"
+    },
+    "88": {
+      "card": "doc",
+      "docKey": "DOC_NUTRITION_PANEL",
+      "eyebrow": "SUGAR ALCOHOLS",
+      "src": "NIH"
+    },
+    "89": {
+      "footage": "F_KITCHEN_SCALE_POWDER"
+    },
+    "90": {
+      "footage": "F_KITCHEN_SCALE_POWDER"
+    },
+    "91": {
+      "footage": "F_KITCHEN_SCALE_POWDER"
+    },
+    "92": {
+      "card": "statement",
+      "kicker": "THE PUBLIC HEALTH PROBLEM",
+      "lines": [
+        "YOU CANNOT MEASURE",
+        "AN EXPOSURE YOU ARE",
+        "NOT PERMITTED TO SEE"
+      ]
+    },
+    "93": {
+      "card": "chapter",
+      "n": "08",
+      "name": "The part that isn't debated"
+    },
+    "94": {
+      "card": "statement",
+      "kicker": "NOT DEBATED",
+      "lines": [
+        "XYLITOL IS",
+        "SEVERELY TOXIC",
+        "TO DOGS"
+      ]
+    },
+    "95": {
+      "footage": "F_DOG_KITCHEN_COUNTER"
+    },
+    "96": {
+      "card": "stat",
+      "kicker": "HYPOGLYCAEMIA THRESHOLD",
+      "figure": "0.1",
+      "unit": "g/kg",
+      "label": "Onset within ten to sixty minutes.",
+      "src": "FDA · MERCK VETERINARY MANUAL"
+    },
+    "97": {
+      "footage": "F_DOG_KITCHEN_COUNTER"
+    },
+    "98": {
+      "card": "stat",
+      "kicker": "A 10 kg DOG",
+      "figure": "≈1 g",
+      "label": "One or two pieces of gum.",
+      "src": "FDA · MERCK VETERINARY MANUAL"
+    },
+    "99": {
+      "footage": "F_DOG_KITCHEN_COUNTER"
+    },
+    "100": {
+      "footage": "F_DOG_KITCHEN_COUNTER"
+    },
+    "101": {
+      "footage": "F_DOG_KITCHEN_COUNTER"
+    },
+    "102": {
+      "footage": "F_DOG_KITCHEN_COUNTER"
+    },
+    "103": {
+      "card": "chapter",
+      "n": "09",
+      "name": "How I actually read it"
+    },
+    "104": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "105": {
+      "card": "statement",
+      "kicker": "WHAT IS ESTABLISHED",
+      "lines": [
+        "ASSOCIATION —",
+        "NOT YET CAUSATION"
+      ]
+    },
+    "106": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "107": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "108": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "109": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "110": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "111": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "112": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "113": {
+      "footage": "F_GUM_PACKET_HAND"
+    },
+    "114": {
+      "card": "ledger",
+      "kicker": "EVERY ONE ARRIVED AS THE SAFE ANSWER",
+      "title": "Still being studied, decades later.",
+      "rows": [
+        {
+          "who": "Saccharin",
+          "what": ""
+        },
+        {
+          "who": "Aspartame",
+          "what": ""
+        },
+        {
+          "who": "Sucralose",
+          "what": ""
+        },
+        {
+          "who": "Erythritol",
+          "what": ""
+        },
+        {
+          "who": "Xylitol",
+          "what": "",
+          "hot": true
+        }
+      ]
+    },
+    "115": {
+      "card": "statement",
+      "lines": [
+        "\"SUGAR FREE\" TELLS YOU",
+        "WHAT ISN'T IN IT."
+      ]
+    }
+  },
+  "footage": {
+    "1": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    },
+    "2": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    },
+    "3": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    },
+    "5": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    },
+    "8": {
+      "file": "footage/F_LAB_TUBES_RACK.mp4"
+    },
+    "9": {
+      "file": "footage/F_LAB_TUBES_RACK.mp4"
+    },
+    "10": {
+      "file": "footage/F_LAB_TUBES_RACK.mp4"
+    },
+    "11": {
+      "file": "footage/F_LAB_TUBES_RACK.mp4"
+    },
+    "14": {
+      "file": "footage/F_LAB_TUBES_RACK.mp4"
+    },
+    "15": {
+      "file": "footage/F_LAB_TUBES_RACK.mp4"
+    },
+    "16": {
+      "file": "footage/F_LAB_TUBES_RACK.mp4"
+    },
+    "17": {
+      "file": "footage/F_LAB_TUBES_RACK.mp4"
+    },
+    "20": {
+      "file": "footage/F_LAB_TUBES_RACK.mp4"
+    },
+    "23": {
+      "file": "footage/F_CROWD_STREET_SLOMO.mp4"
+    },
+    "24": {
+      "file": "footage/F_CROWD_STREET_SLOMO.mp4"
+    },
+    "26": {
+      "file": "footage/F_CROWD_STREET_SLOMO.mp4"
+    },
+    "27": {
+      "file": "footage/F_CROWD_STREET_SLOMO.mp4"
+    },
+    "28": {
+      "file": "footage/F_CROWD_STREET_SLOMO.mp4"
+    },
+    "30": {
+      "file": "footage/F_KETO_SHELF.mp4"
+    },
+    "35": {
+      "file": "footage/F_KETO_SHELF.mp4"
+    },
+    "36": {
+      "file": "footage/F_KETO_SHELF.mp4"
+    },
+    "38": {
+      "file": "footage/F_KETO_SHELF.mp4"
+    },
+    "39": {
+      "file": "footage/F_KETO_SHELF.mp4"
+    },
+    "40": {
+      "file": "footage/F_KETO_SHELF.mp4"
+    },
+    "42": {
+      "file": "footage/F_DROPLET_COLLISION_MACRO.mp4"
+    },
+    "43": {
+      "file": "footage/F_DROPLET_COLLISION_MACRO.mp4"
+    },
+    "47": {
+      "file": "footage/F_DROPLET_COLLISION_MACRO.mp4"
+    },
+    "49": {
+      "file": "footage/F_STOPWATCH_MACRO.mp4"
+    },
+    "52": {
+      "file": "footage/F_STOPWATCH_MACRO.mp4"
+    },
+    "55": {
+      "file": "footage/F_STOPWATCH_MACRO.mp4"
+    },
+    "56": {
+      "file": "footage/F_STOPWATCH_MACRO.mp4"
+    },
+    "58": {
+      "file": "footage/F_STOPWATCH_MACRO.mp4"
+    },
+    "59": {
+      "file": "footage/F_STOPWATCH_MACRO.mp4"
+    },
+    "60": {
+      "file": "footage/F_STOPWATCH_MACRO.mp4"
+    },
+    "62": {
+      "file": "footage/F_STOPWATCH_MACRO.mp4"
+    },
+    "64": {
+      "file": "footage/F_IV_DRIP_BAG.mp4"
+    },
+    "65": {
+      "file": "footage/F_IV_DRIP_BAG.mp4"
+    },
+    "66": {
+      "file": "footage/F_IV_DRIP_BAG.mp4"
+    },
+    "67": {
+      "file": "footage/F_IV_DRIP_BAG.mp4"
+    },
+    "68": {
+      "file": "footage/F_IV_DRIP_BAG.mp4"
+    },
+    "69": {
+      "file": "footage/F_IV_DRIP_BAG.mp4"
+    },
+    "70": {
+      "file": "footage/F_IV_DRIP_BAG.mp4"
+    },
+    "72": {
+      "file": "footage/F_IV_DRIP_BAG.mp4"
+    },
+    "73": {
+      "file": "footage/F_IV_DRIP_BAG.mp4"
+    },
+    "74": {
+      "file": "footage/F_IV_DRIP_BAG.mp4"
+    },
+    "76": {
+      "file": "footage/F_IV_DRIP_BAG.mp4"
+    },
+    "81": {
+      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+    },
+    "82": {
+      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+    },
+    "83": {
+      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+    },
+    "84": {
+      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+    },
+    "85": {
+      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+    },
+    "87": {
+      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+    },
+    "89": {
+      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+    },
+    "90": {
+      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+    },
+    "91": {
+      "file": "footage/F_KITCHEN_SCALE_POWDER.mp4"
+    },
+    "95": {
+      "file": "footage/F_DOG_KITCHEN_COUNTER.mp4"
+    },
+    "97": {
+      "file": "footage/F_DOG_KITCHEN_COUNTER.mp4"
+    },
+    "99": {
+      "file": "footage/F_DOG_KITCHEN_COUNTER.mp4"
+    },
+    "100": {
+      "file": "footage/F_DOG_KITCHEN_COUNTER.mp4"
+    },
+    "101": {
+      "file": "footage/F_DOG_KITCHEN_COUNTER.mp4"
+    },
+    "102": {
+      "file": "footage/F_DOG_KITCHEN_COUNTER.mp4"
+    },
+    "104": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    },
+    "106": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    },
+    "107": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    },
+    "108": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    },
+    "109": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    },
+    "110": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    },
+    "111": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    },
+    "112": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    },
+    "113": {
+      "file": "footage/F_GUM_PACKET_HAND.mp4"
+    }
+  },
+  "docs": {
+    "DOC_NUTRITION_PANEL": {
+      "title": "Nutrition Facts — sugar alcohols",
+      "note": "NEEDS CAPTURE: real panel, macro, zoomed to the Sugar Alcohols line."
+    }
+  },
+  "shorts": [
+    {
+      "name": "13-minutes",
+      "from": 49,
+      "to": 55,
+      "title": "The 13 Minutes Nobody Reported",
+      "hook": "The study measured xylitol after an overnight fast. Its half-life is thirteen minutes."
+    },
+    {
+      "name": "dogs",
+      "from": 94,
+      "to": 100,
+      "title": "Xylitol and Dogs: The Part Nobody Argues About",
+      "hook": "One or two pieces of sugar-free gum can crash a ten-kilo dog's blood sugar."
+    },
+    {
+      "name": "label-gap",
+      "from": 88,
+      "to": 92,
+      "title": "You Are Not Allowed To Know How Much",
+      "hook": "Sugar alcohols are not required to be listed individually on the label."
+    },
+    {
+      "name": "five-cohorts",
+      "from": 30,
+      "to": 34,
+      "title": "Five Cohorts. Two Sweeteners. One Direction.",
+      "hook": "Two sugar alcohols, two continents, five cohorts — all pointing the same way."
+    },
+    {
+      "name": "dose",
+      "from": 78,
+      "to": 81,
+      "title": "One Gram Or Thirty?",
+      "hook": "The dose that moved platelets in a lab is not the dose in your pocket."
+    }
+  ],
+  "reveal": 54
+}
