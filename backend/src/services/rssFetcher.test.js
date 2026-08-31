@@ -79,7 +79,7 @@ test("media:thumbnail inside the group is the fallback within it", () => {
   assert.equal(extractImageUrl(item), "thumb.jpg");
 });
 
-test("a single object, not an array, is handled — keepArray is false", () => {
+test("a single object, not an array, is still handled", () => {
   assert.equal(extractImageUrl({ mediaGroup: { "media:content": { $: { url: "one.jpg", medium: "image" } } } }), "one.jpg");
 });
 
@@ -118,4 +118,61 @@ test("a malformed group does not throw — ingestion must not die on one bad ite
   for (const g of [null, undefined, "string", 42, { "media:content": [null, undefined] }, { "media:content": [{}] }]) {
     assert.doesNotThrow(() => extractImageUrl({ mediaGroup: g }));
   }
+});
+
+// ─── The Guardian's three renditions (2026-08-31) ────────────────────────────
+//
+// EARNED, and expensive: 526 of the 529 Guardian articles fetched in a week
+// carried an image_url declaring a width under 400px, and they are 97% of every
+// undersized image we hold. The 700px rendition was in the same <item> the
+// whole time — the parser was collapsing the siblings to the first, and the
+// flat branch of extractImageUrl took it without looking at the rest.
+//
+// Downstream this is not a small picture, it is NO picture: buildFullBleed
+// rejects the 140px file ("photo is 3648B — too small"), so no Guardian story
+// could carry a photograph in a Short. The fixture below is the real parsed
+// shape from theguardian.com/us-news/rss.
+
+const GUARDIAN_RENDITIONS = [
+  { $: { width: "140", url: "https://i.guim.co.uk/img/media/bfb0/master/3600.jpg?width=140&s=50165b5a" } },
+  { $: { width: "460", url: "https://i.guim.co.uk/img/media/bfb0/master/3600.jpg?width=460&s=e5c90729" } },
+  { $: { width: "700", url: "https://i.guim.co.uk/img/media/bfb0/master/3600.jpg?width=700&s=ad2ee188" } },
+];
+
+test("THE BUG: a Guardian item yields its widest rendition, not the 140px thumbnail", () => {
+  const url = extractImageUrl({ mediaContent: GUARDIAN_RENDITIONS });
+  assert.equal(url, GUARDIAN_RENDITIONS[2].$.url);
+});
+
+test("the chosen Guardian rendition clears the size floor that rejected the old one", () => {
+  // Pinned as a NUMBER rather than as a URL string: the point of this fix is the
+  // dimension, and a future change that still returns "a Guardian URL" while
+  // dropping back to 140px would pass a URL-equality test.
+  const url = extractImageUrl({ mediaContent: GUARDIAN_RENDITIONS });
+  const declared = Number(new URL(url).searchParams.get("width"));
+  assert.ok(declared >= 400, `expected a usable width, got ${declared}px`);
+});
+
+test("the widest rendition wins even when the smallest arrives first", () => {
+  // Order is the whole bug. Reversed, the answer must not change.
+  const reversed = [...GUARDIAN_RENDITIONS].reverse();
+  assert.equal(extractImageUrl({ mediaContent: reversed }), GUARDIAN_RENDITIONS[2].$.url);
+});
+
+test("a flat media:thumbnail list is picked from too, not taken first", () => {
+  const item = { mediaThumbnail: [
+    { $: { width: "100", url: "small.jpg" } },
+    { $: { width: "900", url: "large.jpg" } },
+  ] };
+  assert.equal(extractImageUrl(item), "large.jpg");
+});
+
+test("a video rendition among flat siblings is never chosen", () => {
+  // isImageEntry already enforced this for the group branch; the flat branch
+  // reached it for the first time with this change, so it is pinned here too.
+  const item = { mediaContent: [
+    { $: { url: "clip.mp4", medium: "video", width: "1920" } },
+    { $: { url: "still.jpg", medium: "image", width: "600" } },
+  ] };
+  assert.equal(extractImageUrl(item), "still.jpg");
 });

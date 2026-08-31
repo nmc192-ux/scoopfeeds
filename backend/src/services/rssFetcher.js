@@ -26,8 +26,14 @@ const parser = new Parser({
   },
   customFields: {
     item: [
-      ["media:content", "mediaContent", { keepArray: false }],
-      ["media:thumbnail", "mediaThumbnail", { keepArray: false }],
+      // keepArray: TRUE on both, changed 2026-08-31. With it false the parser
+      // collapses an item's sibling <media:content> elements to the first one,
+      // which is how every Guardian article stored a 140px thumbnail while the
+      // 700px rendition sat in the same item, invisible. extractImageUrl now
+      // picks from the whole list; pickFromMediaList accepts a bare object too,
+      // so single-rendition feeds are unaffected.
+      ["media:content", "mediaContent", { keepArray: true }],
+      ["media:thumbnail", "mediaThumbnail", { keepArray: true }],
       // MEDIA RSS ALLOWS media:content TO BE WRAPPED IN media:group, and
       // rss-parser's item-level customFields only match DIRECT children of
       // <item>. ABC Australia ships an image on 25/25 items and we recorded
@@ -81,9 +87,29 @@ function pickFromMediaList(list) {
 }
 
 export function extractImageUrl(item) {
-  // Try various image fields
-  if (item.mediaContent?.["$"]?.url) return item.mediaContent["$"].url;
-  if (item.mediaThumbnail?.["$"]?.url) return item.mediaThumbnail["$"].url;
+  // EVERY RENDITION, THEN PICK — not the first one the parser happened to keep.
+  //
+  // These two lines used to read `item.mediaContent["$"].url`, which takes
+  // whichever sibling arrived first. The Guardian ships three renditions of the
+  // same photograph per item — 140px, 460px and 700px — so every Guardian
+  // article in this database stored the 140px one. Measured 2026-08-31: 526 of
+  // the 529 Guardian articles fetched in a week declared a width under 400px,
+  // and they are 97% of every undersized image_url we hold.
+  //
+  // Downstream that is not "a small picture", it is NO picture: buildFullBleed
+  // rejects it outright ("photo is 3648B — too small"), so a Guardian story
+  // could never carry a photograph in a Short. The URL cannot be widened either
+  // — i.guim.co.uk signs it with `s=`, and changing `width` returns 401
+  // (verified against the live CDN), which is why this is fixed at the choice
+  // rather than by rewriting.
+  //
+  // pickFromMediaList already encoded the right rule — publisher's isDefault
+  // first, widest as the tiebreak — but only the nested media:group branch
+  // below ever reached it. Both forms now go through the same judgment.
+  const flatContent = pickFromMediaList(item.mediaContent);
+  if (flatContent) return flatContent;
+  const flatThumb = pickFromMediaList(item.mediaThumbnail);
+  if (flatThumb) return flatThumb;
   if (item.enclosure?.url && item.enclosure.type?.startsWith("image/")) return item.enclosure.url;
 
   // THEN the nested form, deliberately AFTER the three above so that every feed
