@@ -1,1 +1,74 @@
-{}
+{
+  "_publishAt_is_null_on_purpose": [
+    "publish-all.mjs REFUSES to run while youtube.publishAt or facebook.publishAt is",
+    "null, and that is the safety property wanted here: the packaging is authored and",
+    "reviewable, but nothing can be scheduled until a human sets the dates. A plausible",
+    "placeholder date would pass validation and schedule the wrong slot, and a published",
+    "film cannot be quietly corrected — the subscriber notification has already gone out.",
+    "DrJ sets these. Nothing about this file constitutes approval to publish."
+  ],
+  "_syntheticContent": [
+    "TRUE, and it must stay true. Six Higgsfield-generated stills are used as the",
+    "backplates behind the data frames (grounds.json). They are abstract and textless,",
+    "but they are generated imagery, so the YouTube 'Altered content' disclosure applies",
+    "and the description says so in words. publish-all.mjs cross-checks this against the",
+    "AI-generated stamp in out/footage/LICENSES.md in both directions and refuses on a",
+    "mismatch. If the grounds are ever dropped in favour of flat near-black, this flag",
+    "and the description line come out together."
+  ],
+
+  "film": "out/xylitol-study-scored.mp4",
+  "thumb": "out/thumb.png",
+  "syntheticContent": true,
+
+  "youtube": {
+    "title": "I'm a Doctor. Here's What That Xylitol Study Actually Says.",
+    "publishAt": null,
+    "tags": [
+      "xylitol", "erythritol", "sugar free", "artificial sweeteners",
+      "ESC Congress 2026", "heart health", "cardiovascular risk", "sugar alcohols",
+      "doctor explains", "nutrition science", "epidemiology", "public health",
+      "health news"
+    ],
+    "description": "A study presented at ESC Congress 2026 in Munich followed 17,710 people and\nfound higher blood levels of xylitol tracked with more heart attacks, strokes\nand deaths. That part is real, and it fits a pattern going back to erythritol\nin 2023.\n\nBut there's a detail in the study design that almost none of the coverage\nmentioned, and it changes what the finding means. I go through the numbers,\nthe mechanism, the published counter-arguments from other cardiologists, the\ndose in an actual packet of gum — and the labelling gap that means you can't\nmeasure your own exposure even if you want to.\n\nThis is my professional read of published research. It is not medical advice\nfor any individual. Observational studies show association, not causation.\nTalk to your own doctor about your own situation.\n\nSome abstract background textures in this video were generated with AI. Every\nfigure, chart and number on screen is rendered from the sourced data below.\n\nCHAPTERS\n00:00  I've been giving this advice for years\n00:38  What they found in Munich\n02:05  Why this study is harder to dismiss\n03:05  Five cohorts, two sweeteners, one direction\n04:20  Clotting, not cholesterol\n05:20  The 13 minutes nobody reported\n06:55  The argument back — and a disclosure\n08:10  Your packet, and the gap on the label\n09:35  The part that isn't debated\n10:10  How I actually read it\n\nSOURCES\nESC press release, 26 Aug 2026: https://www.escardio.org/news/press/press-releases/xylitol-may-increase-the-risk-of-cardiovascular-events/\nWitkowski et al., Eur Heart J 2024;45:2439-2452: https://doi.org/10.1093/eurheartj/ehae244\nWitkowski/Hazen et al., Nature Medicine 2023;29:710-718: https://www.nature.com/articles/s41591-023-02223-9\nWölnerhanssen et al., EHJ commentary: https://doi.org/10.1093/eurheartj/ehae730\nBonomini et al., EHJ commentary: https://doi.org/10.1093/eurheartj/ehae731\nNIH Research Matters, erythritol: https://www.nih.gov/news-events/nih-research-matters/erythritol-cardiovascular-events\nMerck Veterinary Manual, xylitol toxicosis in dogs: https://www.merckvetmanual.com/toxicology/food-hazards/xylitol-toxicosis-in-dogs\n\nScoopFeeds — the story behind the headline."
+  },
+
+  "shorts": [
+    {
+      "file": "out/shorts/13-minutes.mp4",
+      "title": "The 13 Minutes Nobody Reported",
+      "desc": "The study measured xylitol after an overnight fast. Its half-life is thirteen minutes. #xylitol #hearthealth #publichealth",
+      "publishAt": null
+    },
+    {
+      "file": "out/shorts/dogs.mp4",
+      "title": "Xylitol and Dogs: The Part Nobody Argues About",
+      "desc": "One or two pieces of sugar-free gum can crash a ten-kilo dog's blood sugar. #dogs #xylitol #petsafety",
+      "publishAt": null
+    },
+    {
+      "file": "out/shorts/label-gap.mp4",
+      "title": "You Are Not Allowed To Know How Much",
+      "desc": "Sugar alcohols are not required to be listed individually on the label. #nutrition #publichealth #sugarfree",
+      "publishAt": null
+    },
+    {
+      "file": "out/shorts/five-cohorts.mp4",
+      "title": "Five Cohorts. Two Sweeteners. One Direction.",
+      "desc": "Two sugar alcohols, two continents, five cohorts — all pointing the same way. #xylitol #erythritol #hearthealth",
+      "publishAt": null
+    },
+    {
+      "file": "out/shorts/dose.mp4",
+      "title": "One Gram Or Thirty?",
+      "desc": "The dose that moved platelets in a lab is not the dose in your pocket. #xylitol #nutritionscience #sugarfree",
+      "publishAt": null
+    }
+  ],
+
+  "facebook": {
+    "caption": "A study presented at ESC Congress 2026 followed 17,710 people and found higher blood xylitol tracked with more heart attacks, strokes and deaths. There is a detail in how the blood was sampled that almost none of the coverage mentioned — and it changes what the finding means. My read, with the numbers and the counter-arguments.",
+    "publishAt": null,
+    "reel": "out/shorts/13-minutes.mp4"
+  }
+}
