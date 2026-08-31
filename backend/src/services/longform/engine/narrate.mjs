@@ -7,7 +7,7 @@
 // Durations are measured by decoding with the bundled ffmpeg (no ffprobe in
 // this tree) and parsing the final reported time.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "fs";
 import { createHash } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -15,6 +15,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import { ffmpegPath, P, ENV_FILES } from "./_deps.mjs";
+import { wordsFromAlignment } from "./wordTimings.mjs";
 
 const FFMPEG = ffmpegPath;
 const execFileP = promisify(execFile);
@@ -51,22 +52,59 @@ export async function measureDuration(file) {
   return (+t[1]) * 3600 + (+t[2]) * 60 + (+t[3]);
 }
 
+/**
+ * Synthesise one take, asking for the character alignment alongside the audio.
+ *
+ * `/with-timestamps` returns JSON — base64 audio plus three parallel character
+ * arrays — instead of an audio stream. wordTimings.mjs turns those into words,
+ * which is what lets a card element land on a WORD rather than at a fixed
+ * fraction of the line (see build.mjs's revealAt).
+ *
+ * IT DEGRADES, IT DOES NOT FAIL. The alignment is an enhancement: a model or
+ * account without the endpoint still has to produce a film. On any failure of
+ * the timestamps call we fall back to the plain endpoint and return no words,
+ * and the caller then keeps the proportional timing this engine has always
+ * used. The one thing we never do is invent timings — no words file is a
+ * truthful "unmeasured", and a fabricated one is not.
+ *
+ * @returns {{buf: Buffer, words: {word,start,end}[]|null}}
+ */
 async function synth(text) {
+  const body = JSON.stringify({ text, model_id: MODEL_ID, voice_settings: VOICE_SETTINGS });
+  const headers = {
+    "xi-api-key": process.env.ELEVENLABS_API_KEY,
+    "Content-Type": "application/json",
+  };
+
+  try {
+    const res = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/with-timestamps`,
+      { method: "POST", headers: { ...headers, Accept: "application/json" }, body });
+    if (res.ok) {
+      const json = await res.json();
+      const buf = Buffer.from(String(json.audio_base64 || ""), "base64");
+      if (buf.length >= 256) {
+        // normalized_alignment matches the text as SPOKEN (numbers expanded);
+        // alignment matches the text as WRITTEN, which is what an author's
+        // anchor phrase is copied from. Prefer the written one.
+        const words = wordsFromAlignment(json.alignment || json.normalized_alignment);
+        return { buf, words: words.length ? words : null };
+      }
+    }
+    process.stdout.write("t");   // timestamps unavailable — see the legend
+  } catch { process.stdout.write("t"); }
+
   const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
     method: "POST",
-    headers: {
-      "xi-api-key": process.env.ELEVENLABS_API_KEY,
-      "Content-Type": "application/json",
-      Accept: "audio/mpeg",
-    },
-    body: JSON.stringify({ text, model_id: MODEL_ID, voice_settings: VOICE_SETTINGS }),
+    headers: { ...headers, Accept: "audio/mpeg" },
+    body,
   });
   if (!res.ok) {
     throw new Error(`ElevenLabs ${res.status}: ${(await res.text().catch(() => "")).slice(0, 300)}`);
   }
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.length < 256) throw new Error(`returned ${buf.length} bytes — not audio`);
-  return buf;
+  return { buf, words: null };
 }
 
 // build.mjs's fixed "outro" card is BRAND COPY, not project text — render.mjs
@@ -85,7 +123,7 @@ async function main() {
   const beats = JSON.parse(readFileSync(P("beats.json"), "utf8"));
 
   const out = [];
-  let synthed = 0, cached = 0;
+  let synthed = 0, cached = 0, timed = 0;
   for (const b of [...beats, { id: "outro", text: OUTRO_LINE }]) {
     const file = path.join(AUDIO_DIR, typeof b.id === "number"
       ? `b${String(b.id).padStart(2, "0")}.mp3` : `${b.id}.mp3`);
@@ -100,9 +138,18 @@ async function main() {
     const sidecar = file.replace(/\.mp3$/, ".txt");
     const stale = existsSync(file) && (!existsSync(sidecar)
       || readFileSync(sidecar, "utf8") !== b.text);
+    // The words file rides with the take: written when the take is, removed
+    // when the take is re-synthesised without an alignment. It can therefore
+    // never describe a DIFFERENT take than the mp3 beside it, which is the
+    // same trap the .txt sidecar above exists to close.
+    const wordsFile = file.replace(/\.mp3$/, ".words.json");
     if (!existsSync(file) || stale) {
-      writeFileSync(file, await synth(b.text));
+      const { buf, words } = await synth(b.text);
+      writeFileSync(file, buf);
       writeFileSync(sidecar, b.text);
+      if (words) writeFileSync(wordsFile, JSON.stringify(words));
+      else if (existsSync(wordsFile)) rmSync(wordsFile);
+      if (words) timed++;
       synthed++;
       process.stdout.write(stale ? "!" : ".");
     } else {
@@ -117,7 +164,8 @@ async function main() {
   writeFileSync(P("takes.json"), JSON.stringify(out, null, 2));
 
   const mins = Math.floor(total / 60);
-  console.log(`synthesised ${synthed}, cached ${cached}   (. new  ! text changed  · reused)`);
+  console.log(`synthesised ${synthed}, cached ${cached}   (. new  ! text changed  · reused  t no timestamps)`);
+  console.log(`word timings: ${timed}/${synthed} new take(s) carry an alignment` + (timed < synthed ? " — the rest fall back to proportional reveal timing" : ""));
   console.log(`narration total: ${mins}m${(total % 60).toFixed(1)}s across ${out.length} takes`);
   const longest = [...out].sort((a, b) => b.dur - a.dur).slice(0, 3);
   console.log("longest takes:", longest.map((x) => `b${x.id}=${x.dur.toFixed(1)}s`).join(" "));

@@ -23,8 +23,16 @@
  *
  *  D3  beats 78-80, `bars`, climbing with the kitchen scale.
  *  D4  beat 86, `split` — the NOT PUBLISHED panel.
- *  D5  beat 88, `doc` — NEEDS A CAPTURE. See the note on DOCS below.
+ *  D5  beat 88, `ledger` with `muted` — the greyed ghost rows. NOT a `doc`
+ *      card; see the note at that beat.
  *  D6  beat 98, `stat`.
+ *
+ * WORD ANCHORS. Five cards carry `revealOn`, so their payoff lands on a word
+ * instead of at ~30% of the line: the sample arrow on "that needle went in",
+ * the CLSA bar on "Fifty-seven", the 30 g bar on "about a pint", the NOT
+ * PUBLISHED stamp on "tell you what it means", and the sweetener ledger on
+ * "now xylitol". Each degrades to the old proportional timing if the take
+ * carries no alignment — see engine/wordTimings.mjs.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -50,8 +58,8 @@ const COHORTS = [
   { key: "xylClsa", label: "Xylitol — CLSA, 6yr", value: 57, display: "+57%" },
   { key: "xylEpic", label: "Xylitol — EPIC-Norfolk, 30yr", value: 18, display: "+18%" },
 ];
-const d1 = (hotKey, kicker) => ({
-  card: "bars", kicker, title: "Five cohorts. Two sugar alcohols. Same direction.",
+const d1 = (hotKey, kicker, revealOn) => ({
+  card: "bars", kicker, ...(revealOn ? { revealOn } : {}), title: "Five cohorts. Two sugar alcohols. Same direction.",
   items: COHORTS.map((c) => ({ ...c, key: undefined, ...(c.key === hotKey ? { hot: true } : {}) }))
     .map(({ label, value, display, hot }) => (hot ? { label, value, display, hot } : { label, value, display })),
   src: D1_FOOTNOTE,
@@ -68,6 +76,8 @@ const d2 = (withBeyond) => ({
   marks: [{ at: 13, label: "Half-life ≈ 13 min" }],
   ...(withBeyond ? { beyond: { label: "BLOOD SAMPLE TAKEN — 12 HRS" } } : {}),
   ...(withBeyond ? { note: "The cohorts sampled after an overnight fast." } : {}),
+  // The arrow lands ON the words about the needle, not at 30% of the line.
+  ...(withBeyond ? { revealOn: "that needle went in" } : {}),
   src: SRC_EHJ,
 });
 
@@ -96,7 +106,7 @@ const CARDS = {
   29: { card: "chapter", n: "03", name: "Five cohorts, two sweeteners, one direction" },
   31: d1("eryBerl", "ERYTHRITOL · NATURE MEDICINE 2023"),
   32: d1("xylVal", "XYLITOL · EUROPEAN HEART JOURNAL 2024"),
-  33: d1("xylClsa", "XYLITOL · ESC CONGRESS 2026"),
+  33: d1("xylClsa", "XYLITOL · ESC CONGRESS 2026", "Fifty-seven"),
   34: d1(null, "FIVE COHORTS"),
   37: { card: "statement", kicker: "READ THE CHART CAREFULLY", lines: ["TERTILES", "≠", "QUARTILES"], src: D1_FOOTNOTE },
 
@@ -135,11 +145,13 @@ const CARDS = {
         items: [{ label: "One piece of gum", value: 1, display: "0.2–1 g" },
                 { label: "Dental dose, per day", value: 10, display: "5–10 g" },
                 { label: "The study's test dose", value: 30, display: "30 g", hot: true }],
-        src: "≈ A PINT OF XYLITOL-SWEETENED ICE CREAM — THE RESEARCHERS' OWN COMPARISON" },
+        src: "≈ A PINT OF XYLITOL-SWEETENED ICE CREAM — THE RESEARCHERS' OWN COMPARISON",
+        revealOn: "about a pint" },
   86: { card: "split", kicker: "THE NUMBER THAT ISN'T THERE", title: "Fifty-seven per cent more than what?",
         left: { label: "Relative risk increase — top vs bottom quartile", figure: "+57%" },
         right: { label: "Events per 1,000 people", stamp: "NOT PUBLISHED" },
-        note: "Without the underlying event rate, nobody can convert this into your risk.", src: SRC_ESC },
+        note: "Without the underlying event rate, nobody can convert this into your risk.",
+        revealOn: "tell you what it means", src: SRC_ESC },
   // D5. NOT a `doc` card. `doc` captures a WEB DOCUMENT with phrase highlights
   // (capture-measured.mjs, Chromium, local-only) — but the brief's D5 has
   // "Ground: none (real label footage)", i.e. the graphic sits OVER footage of
@@ -166,7 +178,8 @@ const CARDS = {
   105: { card: "statement", kicker: "WHAT IS ESTABLISHED", lines: ["ASSOCIATION —", "NOT YET CAUSATION"] },
   114: { card: "ledger", kicker: "EVERY ONE ARRIVED AS THE SAFE ANSWER", title: "Still being studied, decades later.",
          rows: [{ who: "Saccharin", what: "" }, { who: "Aspartame", what: "" }, { who: "Sucralose", what: "" },
-                { who: "Erythritol", what: "" }, { who: "Xylitol", what: "", hot: true }] },
+                { who: "Erythritol", what: "" }, { who: "Xylitol", what: "", hot: true }],
+         revealOn: "now xylitol" },
   115: { card: "statement", kicker: "", lines: ['"SUGAR FREE" TELLS YOU', "WHAT ISN'T IN IT."] },
 };
 

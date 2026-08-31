@@ -338,3 +338,22 @@ test("ledger: `muted` and a `hot` row contradict each other", () => {
     beats: { 1: { card: "ledger", muted: true, rows: [{ who: "Xylitol", what: "" }] } },
   })), []);
 });
+
+test("revealOn is accepted on payoff cards and refused on cards with no payoff", () => {
+  // A `chapter` divider animates straight through; anchoring a payoff it does
+  // not have would be an instruction nothing could honour.
+  assert.deepEqual(validateStoryboard(ok({
+    beats: { 1: { card: "stat", figure: "13", label: "x", revealOn: "thirteen minutes" } },
+  })), []);
+  assert.match(validateStoryboard(ok({
+    beats: { 1: { card: "chapter", n: "01", name: "x", revealOn: "anything" } },
+  })).join("\n"), /unknown field "revealOn"/);
+});
+
+test("revealOn must be a non-empty phrase", () => {
+  for (const bad of ["", "   ", 42]) {
+    assert.match(validateStoryboard(ok({
+      beats: { 1: { card: "stat", figure: "1", label: "x", revealOn: bad } },
+    })).join("\n"), /must be a non-empty phrase/, `revealOn: ${JSON.stringify(bad)}`);
+  }
+});

@@ -63,6 +63,20 @@ export const CARD_SPECS = Object.freeze({
   split:     { req: ["left", "right"],                          opt: ["kicker", "title", "note", "src"] },
 });
 
+/**
+ * Cards that hold something back for the payoff phase, and may therefore anchor
+ * that payoff to a WORD with `revealOn: "<phrase>"` (see engine/wordTimings.mjs).
+ *
+ * DUPLICATES render.mjs's HAS_PAYOFF on purpose: importing render.mjs here would
+ * pull satori and resvg into every consumer of this schema, including the
+ * storyboard writer. decaySplit.test.mjs asserts the two lists agree, so the
+ * duplication cannot drift.
+ */
+export const PAYOFF_CARDS = Object.freeze([
+  "stat", "statement", "equation", "bars", "ledger", "doc", "dotgrid",
+  "pipeline", "map", "linechart", "multiline", "decay", "split",
+]);
+
 /** The widest beat range a short may cut. See the shorts check below. */
 export const MAX_SHORT_BEATS = 10;
 /**
@@ -96,6 +110,9 @@ const FIELD_SHAPE = {
   n:      (v) => isStr(v) || isNum(v) || "must be a string or number",
   total:  (v) => isNum(v) || "must be a number",
   out:    (v) => isNum(v) || "must be a number",
+  // The phrase itself is only checkable against the beat's narration, which
+  // this validator does not have; build.mjs throws if it does not occur.
+  revealOn: (v) => isStr(v) || "must be a non-empty phrase from that beat's narration",
   // decay. `xMax` is shared with multiline, where it is also a number.
   peak:     (v) => isNum(v) || "must be a number",
   baseline: (v) => isNum(v) || "must be a number",
@@ -243,7 +260,8 @@ export function validateStoryboard(doc, { statementIds = [], docKeys: capturedDo
     if (b.card === "ledger" && b.muted && Array.isArray(b.rows) && b.rows.some((r) => r?.hot)) {
       errs.push(`${at} (ledger): "muted" recedes every row, so a "hot" row contradicts it — pick one`);
     }
-    const allowed = new Set(["card", ...spec.req, ...spec.opt]);
+    const allowed = new Set(["card", ...spec.req, ...spec.opt,
+      ...(PAYOFF_CARDS.includes(b.card) ? ["revealOn"] : [])]);
     for (const f of Object.keys(b)) {
       if (!allowed.has(f)) {
         errs.push(`${at} (${b.card}): unknown field "${f}" — a typo'd field would otherwise pass as ignorable`);

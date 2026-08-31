@@ -143,3 +143,15 @@ test("ledger: `muted` recedes rows that a hot row would otherwise light", async 
   assert.notEqual(muted, await render(hot, "ledger-hot", 1.0),
     "muted and hot are different pictures");
 });
+
+// ── revealOn (word-anchored payoffs) ────────────────────────────────────────
+
+test("PAYOFF_CARDS mirrors HAS_PAYOFF exactly", async () => {
+  // The schema cannot import render.mjs without pulling satori into every
+  // consumer, so the list is duplicated there. This is the thing that stops the
+  // copy drifting: a card added to one and not the other would either reject a
+  // legal revealOn or accept one the renderer never plays.
+  const { PAYOFF_CARDS } = await import("../longformStoryboardSchema.js");
+  assert.deepEqual([...PAYOFF_CARDS].sort(), [...HAS_PAYOFF].sort(),
+    "PAYOFF_CARDS (schema) and HAS_PAYOFF (renderer) have diverged");
+});

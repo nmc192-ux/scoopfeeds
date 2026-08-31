@@ -219,6 +219,7 @@
     "33": {
       "card": "bars",
       "kicker": "XYLITOL · ESC CONGRESS 2026",
+      "revealOn": "Fifty-seven",
       "title": "Five cohorts. Two sugar alcohols. Same direction.",
       "items": [
         {
@@ -469,6 +470,7 @@
         "label": "BLOOD SAMPLE TAKEN — 12 HRS"
       },
       "note": "The cohorts sampled after an overnight fast.",
+      "revealOn": "that needle went in",
       "src": "EUR HEART J 2024;45:2439–2452"
     },
     "55": {
@@ -616,7 +618,8 @@
           "hot": true
         }
       ],
-      "src": "≈ A PINT OF XYLITOL-SWEETENED ICE CREAM — THE RESEARCHERS' OWN COMPARISON"
+      "src": "≈ A PINT OF XYLITOL-SWEETENED ICE CREAM — THE RESEARCHERS' OWN COMPARISON",
+      "revealOn": "about a pint"
     },
     "81": {
       "footage": "F_BAKING_MIXING_BOWL"
@@ -646,6 +649,7 @@
         "stamp": "NOT PUBLISHED"
       },
       "note": "Without the underlying event rate, nobody can convert this into your risk.",
+      "revealOn": "tell you what it means",
       "src": "ESC CONGRESS 2026"
     },
     "87": {
@@ -807,7 +811,8 @@
           "what": "",
           "hot": true
         }
-      ]
+      ],
+      "revealOn": "now xylitol"
     },
     "115": {
       "card": "statement",

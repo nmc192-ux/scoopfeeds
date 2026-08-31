@@ -36,6 +36,7 @@ import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import { renderCard, HAS_PAYOFF, PAYOFF_P } from "./render.mjs";
 import { ffmpegPath, P, loadStoryboard, projectSlug } from "./_deps.mjs";
+import { findAnchor, clampReveal } from "./wordTimings.mjs";
 import { parallaxFilter, validateParallax, FG_HEIGHT_FRAC } from "./parallax.mjs";
 import { srtTime } from "./srtTime.mjs";
 import { loadStatement } from "./statement.mjs";
@@ -48,6 +49,10 @@ const FFMPEG = ffmpegPath;
 const execFileP = promisify(execFile);
 
 
+
+// Reported once per build, not once per beat: on a film whose takes predate
+// word timings every anchored card would otherwise print the same line.
+let warnedNoWordTimings = false;
 
 const FPS = 30;
 const TAIL = 0.38;
@@ -418,9 +423,40 @@ async function main() {
     };
 
     // Where the card's animation finishes; an insert must come after it.
-    const revealAt = payoff
+    //
+    // A card may declare `revealOn: "<phrase>"` to land its payoff on a WORD
+    // rather than at a fixed ~30% of the line. That needs an alignment from
+    // narrate.mjs, and there are three cases, kept distinct on purpose:
+    //
+    //   · anchor resolves          → use it, clamped to the same legal window
+    //   · no words file            → proportional, and SAY SO once. The take
+    //                                predates the feature or the account has no
+    //                                timestamps endpoint; not an author error.
+    //   · words file, no match     → THROW. The author wrote a phrase that is
+    //                                not in the line they attached it to, and
+    //                                falling back would silently ignore an
+    //                                instruction that was given explicitly.
+    let revealAt = payoff
       ? Math.min(Math.max(take.dur * 0.30, ENTER_SECS + 0.30), Math.max(ENTER_SECS + 0.30, take.dur - PAYOFF_SECS - 0.9))
       : ENTER_SECS;
+    if (payoff && isCard && v.revealOn) {
+      const wordsFile = String(take.file).replace(/\.mp3$/, ".words.json");
+      if (!existsSync(wordsFile)) {
+        if (!warnedNoWordTimings) {
+          console.log("  word timings unavailable — revealOn anchors fall back to proportional timing");
+          warnedNoWordTimings = true;
+        }
+      } else {
+        const at = findAnchor(JSON.parse(readFileSync(wordsFile, "utf8")), v.revealOn);
+        if (at == null) {
+          throw new Error(
+            `beat ${id}: revealOn ${JSON.stringify(v.revealOn)} does not occur in that beat's narration:\n` +
+            `  "${take.text}"\n` +
+            `An anchor names words the beat actually says. Fix the phrase or drop revealOn.`);
+        }
+        revealAt = clampReveal(at, take.dur, ENTER_SECS, PAYOFF_SECS);
+      }
+    }
     const animEnd = revealAt + (payoff ? PAYOFF_SECS : 0) + 0.35;
 
     // Extend the shot if the card cannot be read in the time it is fully formed.
