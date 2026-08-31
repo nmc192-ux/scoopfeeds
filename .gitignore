@@ -75,3 +75,9 @@ J-LOOP-INBOX.md
 # video-factory: working dirs symlink node_modules to backend's, and a stray
 # link once got staged. The engine resolves deps via _deps.mjs, not from here.
 .claude/skills/video-factory/engine/node_modules
+
+# Longform project working dirs: the toolchain symlinks and render output are
+# per-machine, never committed. Authored files (beats, storyboard, sources) are
+# added explicitly.
+.claude/skills/video-factory/projects/*/fonts
+.claude/skills/video-factory/projects/*/out/
