@@ -808,6 +808,45 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
         } catch (err) {
           logger.warn(`🖼 slide ${i}: could not stage the picture — ${String(err.message).slice(0, 90)}`);
         }
+
+        // THE PICTURE GOES BACK IF IT DID NOT MAKE IT TO SCREEN.
+        //
+        // The resolver claims up front, for every beat, before this loop runs.
+        // A claim is a promise to show the photograph, and a staging failure
+        // breaks it — which used to cost the video TWICE: the beat showed
+        // nothing, and the claim went on refusing that same photograph to
+        // choosePhotoUnderlay, whose buildFullBleed returns null on a refusal.
+        // Confirmed at unit level: a beat takes the article's own photograph and
+        // the underlay is then denied the identical bytes. When the staging
+        // failed as well, the slide carried no picture at all and the ledger
+        // still reported one placed.
+        //
+        // Releasing here also lets the underlay have its turn on THIS slide —
+        // it ran earlier in the loop and was refused, so without the retry
+        // below the release would only help later slides.
+        if (!beatStill && beat.imageUrl && imageLedger) {
+          if (imageLedger.release(beat.imageUrl) && wants === "photo" && !underlayPath) {
+            try {
+              const retry = await choosePhotoUnderlay({
+                card, article, attribution, ordinal: photosUsed - 1,
+                work: path.join(work, `sv${String(i).padStart(2, "0")}r`),
+                slideIndex: i, ledger: imageLedger,
+              });
+              if (retry.underlayPath) {
+                underlayPath = retry.underlayPath;
+                imageCredit = retry.imageCredit;
+                imageDate = retry.imageDate;
+                if (retry.footage) footageUsed.push(retry.footage);
+                logger.info(
+                  `🎬 slide ${i} photo [${retry.pickedBy}, after the beat picture failed to stage]: ` +
+                  `${retry.imageCredit || "uncredited"} · ${String(retry.imageUrl || "").slice(0, 90)}`
+                );
+              }
+            } catch (err) {
+              logger.warn(`🎬 slide ${i}: underlay retry failed — ${String(err.message).slice(0, 80)}`);
+            }
+          }
+        }
       }
 
       await assembleSlide({

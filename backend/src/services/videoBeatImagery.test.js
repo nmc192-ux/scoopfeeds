@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { getFFmpegPath } from "./videoGenerator.js";
 import {
   intentForBeat, buildBodyPool, resolveBeat, resolveSpecImagery,
-  noAdjacentRepeat, coverageOf, TIERS,
+  noAdjacentRepeat, coverageOf, TIERS, createImageLedger,
 } from "./videoBeatImagery.js";
 
 // FIXTURES USE TYPE CARDS, not photo cards: a photo card gets its picture
@@ -626,4 +626,100 @@ test("the ledger refuses a CROP RENDITION by URL identity — across any two tie
   assert.equal(l.claim(jpeg("color=c=navy:s=1200x800"), {
     label: "https://image.cnbcfm.com/api/v1/image/999999-y.jpg" }), true,
     "a genuinely different image still claims");
+});
+
+// ─── A claim is a promise to show the picture (2026-08-31) ───────────────────
+//
+// Confirmed at unit level after four live shorts, one of which carried zero
+// photographs: the resolver claims up front, rendering happens later and can
+// fail, and until release() existed the claim outlived the pick. The video lost
+// a picture it had, and entries() — the count this project rules on — reported
+// a photograph that never reached the screen.
+
+const stockBuf = (n) => Buffer.from(`stock-photo-${n}`.repeat(64));
+
+function countingLedger() {
+  const seen = new Map();
+  let n = 0;
+  return createImageLedger({
+    _hash: (b) => {
+      const k = b.toString("latin1").slice(0, 40);
+      if (!seen.has(k)) seen.set(k, BigInt(++n) << 8n);
+      return seen.get(k);
+    },
+    _log: { info() {}, warn() {} },
+  });
+}
+
+test("the stock tier claims, so the ledger stops undercounting", async () => {
+  const ledger = countingLedger();
+  const { picks } = await resolveSpecImagery({
+    slides: [{ t: "turn", visual: "an abstract idea about money" }],
+    article: { title: "Why rates move slowly", source_name: "Reuters" },
+    ledger,
+    deps: {
+      _pool: [],
+      _stockImage: async () => ({ buf: stockBuf(1), url: "https://images.pexels.com/photos/1.jpg", credit: "A Person" }),
+      _entityImage: async () => null, _webSearch: async () => [], _fetchImage: async () => null,
+      _log: { info() {}, warn() {} },
+    },
+  });
+  assert.equal(picks[0].tier, TIERS.STOCK);
+  assert.equal(ledger.entries().length, 1, "a stock photograph on screen must be one entry in the ledger");
+});
+
+test("a stock pick demoted by the contributor cap gives its photograph back", async () => {
+  const ledger = countingLedger();
+  let call = 0;
+  const { picks } = await resolveSpecImagery({
+    slides: [
+      { t: "turn", visual: "an abstract idea about money" },
+      { t: "turn", visual: "another abstract notion of currency" },
+    ],
+    article: { title: "Why rates move slowly", source_name: "Reuters" },
+    ledger,
+    deps: {
+      _pool: [],
+      _stockImage: async () => {
+        call += 1;
+        return { buf: stockBuf(call), url: `https://images.pexels.com/photos/${call}.jpg`, credit: "Same Person" };
+      },
+      _entityImage: async () => null, _webSearch: async () => [], _fetchImage: async () => null,
+      _log: { info() {}, warn() {} },
+    },
+  });
+  const renderable = picks.filter((p) => p.buffer).length;
+  assert.equal(renderable, 1, "the contributor cap demoted the second pick");
+  assert.equal(ledger.entries().length, renderable,
+    "the ledger must report exactly what can render — no claim outliving its pick");
+});
+
+test("release() hands a photograph back, and a later consumer can then have it", () => {
+  const ledger = countingLedger();
+  const buf = stockBuf("shared");
+  const url = "https://cdn.example.com/lead.jpg";
+  assert.equal(ledger.claim(buf, { label: url }), true);
+  assert.equal(ledger.claim(buf, { label: url }), false, "second asker is refused while the claim stands");
+  assert.equal(ledger.release(url), true);
+  assert.equal(ledger.entries().length, 0);
+  assert.equal(ledger.claim(buf, { label: url }), true, "after release the photograph is available again");
+});
+
+test("release() matches on image identity, not on the exact URL string", () => {
+  // Crops defeat the byte hash and claim() already resolves them by identity;
+  // release must use the same rule or a claim made under one rendition could
+  // never be given back under another.
+  const ledger = countingLedger();
+  const a = "https://i.guim.co.uk/img/media/abc/59_0_2500_2000/master/2500.jpg?width=700&s=x";
+  const b = "https://i.guim.co.uk/img/media/abc/12_0_2500_2000/master/2500.jpg?width=460&s=y";
+  assert.equal(ledger.claim(stockBuf("g"), { label: a }), true);
+  assert.equal(ledger.release(b), true, "the same photograph under another rendition is the same entry");
+  assert.equal(ledger.entries().length, 0);
+});
+
+test("releasing something never claimed is a no-op, not a corruption", () => {
+  const ledger = countingLedger();
+  ledger.claim(stockBuf("keep"), { label: "https://example.com/keep.jpg" });
+  assert.equal(ledger.release("https://example.com/never-claimed.jpg"), false);
+  assert.equal(ledger.entries().length, 1, "the unrelated claim must survive");
 });

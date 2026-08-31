@@ -184,6 +184,35 @@ export function createImageLedger({ _hash = averageHash, _log = logger } = {}) {
     },
     /** Claim without a caller — used to hold the article photo for its card. */
     reserve(buf, label = "reserved") { return this.claim(buf, { label }); },
+
+    /**
+     * Give a photograph back, because the caller could not render it.
+     *
+     * A CLAIM IS A PROMISE TO SHOW THE PICTURE, and until this existed there was
+     * no way to break that promise honestly. Selection happens up front, in
+     * resolveSpecImagery, while rendering happens later and can fail — a
+     * treatment that produces nothing, or a pick the contributor cap demotes
+     * after the fact. The claim outlived the pick, so the photograph was spent
+     * on a beat that showed nothing AND refused to the next path that asked for
+     * it. Both halves are wrong: the video loses a picture it had, and
+     * `entries()` — the count this project treats as the trustworthy one —
+     * reports a photograph that never reached the screen.
+     *
+     * Matched on the LABEL, not the bytes, and for the same reason claim()
+     * checks identity first: the caller knows which URL it was handed, and two
+     * renditions of one photograph must resolve to one entry either way.
+     *
+     * @returns {boolean} true if something was actually given back
+     */
+    release(label) {
+      const id = imageIdentity(label);
+      const i = labels.findIndex((prev) => (id ? imageIdentity(prev) === id : prev === String(label)));
+      if (i === -1) return false;
+      labels.splice(i, 1);
+      spent.splice(i, 1);
+      _log.info(`🖼 ledger: released — ${String(label).slice(0, 70)}`);
+      return true;
+    },
     get size() { return spent.length; },
     /**
      * Every distinct photograph this video actually placed, by SOURCE bytes.
@@ -565,7 +594,13 @@ export async function resolveBeat({
   if (thirdPartyAllowed && _stockImage && isAbstractQuery(intent)) {
     try {
       const got = await _stockImage(intent);
-      if (got) {
+      // STOCK CLAIMS LIKE EVERY OTHER TIER (2026-08-31). It was the one tier
+      // that returned a buffer without claiming, which made the ledger blind to
+      // it: `entries()` UNDERCOUNTED every video carrying stock, and the count
+      // is the thing this project rules on. It also meant nothing stopped the
+      // same stock photograph appearing twice by two routes — the contributor
+      // cap catches a repeated CREDIT, which is not the same guarantee.
+      if (got && (!ledger || ledger.claim(got.buf, { label: got.url }))) {
         return { ...base, tier: TIERS.STOCK, confidence: CONFIDENCE.stock,
                  imageUrl: got.url, buffer: got.buf, credit: got.credit, stockTitle: got.title };
       }
@@ -638,6 +673,11 @@ export async function resolveSpecImagery({
     if (pick.tier === TIERS.STOCK && pick.credit) {
       const who = norm(pick.credit);
       if (stockCreators.has(who)) {
+        // GIVE THE PICTURE BACK. Now that stock claims (above), demoting a pick
+        // without releasing it would spend a photograph on a beat that shows
+        // nothing — the exact leak this pass exists to close, newly reachable
+        // because the claim is new.
+        if (ledger && pick.imageUrl) ledger.release(pick.imageUrl);
         pick = { ...pick, tier: TIERS.CARD, confidence: null, buffer: undefined,
                  reason: `contributor "${pick.credit}" already used in this video` };
       } else { stockCreators.add(who); }
