@@ -260,9 +260,24 @@ test("every queue the worker consumes has an explicit lock duration", async () =
   const { queueLockDuration, QUEUE_NAMES } = await import("../jobs/jobOptions.js");
   const { readFileSync } = await import("node:fs");
   const worker = readFileSync(new URL("../jobs/workerProcess.js", import.meta.url), "utf8");
-  // The queues registerWorker is actually called for.
-  const consumed = [...worker.matchAll(/registerWorker\(\s*QUEUE_NAMES\.(\w+)/g)].map(m => m[1]);
+  // The queues a registration is actually written for. The call is
+  // `registerIfMine` since the worker split (#139) — it filters by
+  // WORKER_QUEUES and then delegates to registerWorker — so both spellings are
+  // accepted rather than pinning this test to one refactor.
+  const consumed = [...worker.matchAll(/register(?:Worker|IfMine)\(\s*QUEUE_NAMES\.(\w+)/g)].map(m => m[1]);
   assert.ok(consumed.length >= 5, `expected several registered queues, found ${consumed.length}`);
+
+  // AND THE DECLARED SET MUST MATCH THE REGISTERED ONE. ALL_WORKER_QUEUES is
+  // what the compose partition is checked against, so if it drifts from the
+  // registrations a queue can be "covered" by the partition and consumed by
+  // nobody. The old "ready" log literal had already drifted this way — it
+  // omitted longform, which has been registered for weeks.
+  const { ALL_WORKER_QUEUES } = await import("../jobs/workerQueues.js");
+  const registered = new Set(consumed.map((k) => QUEUE_NAMES[k]));
+  assert.deepEqual(
+    [...registered].sort(), [...ALL_WORKER_QUEUES].sort(),
+    "ALL_WORKER_QUEUES and the actual registerIfMine calls have drifted apart"
+  );
   for (const key of consumed) {
     const name = QUEUE_NAMES[key];
     assert.ok(
