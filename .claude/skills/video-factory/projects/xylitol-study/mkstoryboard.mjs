@@ -65,7 +65,7 @@ const COHORTS = [
   { key: "xylEpic", label: "Xylitol — EPIC-Norfolk, 30yr", value: 18, display: "+18%" },
 ];
 const d1 = (hotKey, kicker, revealOn) => ({
-  card: "bars", kicker, ...(revealOn ? { revealOn } : {}), title: "Five cohorts. Two sugar alcohols. Same direction.",
+  card: "bars", kicker, ground: "HG-01", ...(revealOn ? { revealOn } : {}), title: "Five cohorts. Two sugar alcohols. Same direction.",
   items: COHORTS.map((c) => ({ ...c, key: undefined, ...(c.key === hotKey ? { hot: true } : {}) }))
     .map(({ label, value, display, hot }) => (hot ? { label, value, display, hot } : { label, value, display })),
   src: D1_FOOTNOTE,
@@ -73,7 +73,7 @@ const d1 = (hotKey, kicker, revealOn) => ({
 
 /** D2. `withBeyond` withholds the sample marker until the line about it. */
 const d2 = (withBeyond) => ({
-  card: "decay",
+  card: "decay", ground: "HG-02",
   kicker: "PLASMA XYLITOL AFTER A 30 g DRINK",
   title: withBeyond ? "It is gone long before the blood is drawn." : "Thirteen minutes.",
   peak: 1000, baseline: 1, halfLife: 13, xMax: 360,
@@ -141,7 +141,7 @@ const CARDS = {
   // ── ch 6 ──
   63: { card: "chapter", n: "06", name: "The argument back — and a disclosure" },
   71: { card: "stat", kicker: "A SEPARATE DOUBLE-BLINDED STUDY", figure: "7 g", label: "Dietary xylitol produced no detectable rise in blood levels.", src: "EUR HEART J COMMENTARY, 2024" },
-  75: { card: "statement", kicker: "DISCLOSURE", lines: ["THE SENIOR AUTHOR HOLDS", "PATENTS WITH HIS INSTITUTION", "ON CARDIOVASCULAR DIAGNOSTICS"], src: SRC_NM },
+  75: { card: "statement", ground: "HG-05", kicker: "DISCLOSURE", lines: ["THE SENIOR AUTHOR HOLDS", "PATENTS WITH HIS INSTITUTION", "ON CARDIOVASCULAR DIAGNOSTICS"], src: SRC_NM },
 
   // ── ch 7 — D3, D4, D5 ──
   77: { card: "chapter", n: "07", name: "Your packet, and the gap on the label" },
@@ -156,7 +156,7 @@ const CARDS = {
                 { label: "The study's test dose", value: 30, display: "30 g", hot: true }],
         src: "≈ A PINT OF XYLITOL-SWEETENED ICE CREAM — THE RESEARCHERS' OWN COMPARISON",
         revealOn: "about a pint" },
-  86: { card: "split", kicker: "THE NUMBER THAT ISN'T THERE", title: "Fifty-seven per cent more than what?",
+  86: { card: "split", ground: "HG-03", kicker: "THE NUMBER THAT ISN'T THERE", title: "Fifty-seven per cent more than what?",
         left: { label: "Relative risk increase — top vs bottom quartile", figure: "+57%" },
         right: { label: "Events per 1,000 people", stamp: "NOT PUBLISHED" },
         note: "Without the underlying event rate, nobody can convert this into your risk.",
@@ -185,11 +185,11 @@ const CARDS = {
   // ── ch 9 ──
   103: { card: "chapter", n: "09", name: "How I actually read it" },
   105: { card: "statement", kicker: "WHAT IS ESTABLISHED", lines: ["ASSOCIATION —", "NOT YET CAUSATION"] },
-  114: { card: "ledger", kicker: "EVERY ONE ARRIVED AS THE SAFE ANSWER", title: "Still being studied, decades later.",
+  114: { card: "ledger", ground: "HG-06", kicker: "EVERY ONE ARRIVED AS THE SAFE ANSWER", title: "Still being studied, decades later.",
          rows: [{ who: "Saccharin", what: "" }, { who: "Aspartame", what: "" }, { who: "Sucralose", what: "" },
                 { who: "Erythritol", what: "" }, { who: "Xylitol", what: "", hot: true }],
          revealOn: "now xylitol" },
-  115: { card: "statement", kicker: "", lines: ['"SUGAR FREE" TELLS YOU', "WHAT ISN'T IN IT."] },
+  115: { card: "statement", ground: "HG-06", kicker: "", lines: ['"SUGAR FREE" TELLS YOU', "WHAT ISN'T IN IT."] },
 };
 
 /** Footage default per chapter — acquisition resolves these to files. */
@@ -235,7 +235,7 @@ const titleSegment = {
   after: 6,
   seconds: 3.2,
   spec: {
-    card: "title",
+    card: "title", ground: "HG-04",
     kicker: "ScoopFeeds · Long-form",
     lines: ["I'M A DOCTOR.", "HERE'S WHAT THAT", "XYLITOL STUDY SAYS."],
     sub: "17,710 people, up to thirty years — and one detail in the study design that almost none of the coverage mentioned.",

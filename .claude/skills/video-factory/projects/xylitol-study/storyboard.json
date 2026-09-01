@@ -145,6 +145,7 @@
     "31": {
       "card": "bars",
       "kicker": "ERYTHRITOL · NATURE MEDICINE 2023",
+      "ground": "HG-01",
       "title": "Five cohorts. Two sugar alcohols. Same direction.",
       "items": [
         {
@@ -179,6 +180,7 @@
     "32": {
       "card": "bars",
       "kicker": "XYLITOL · EUROPEAN HEART JOURNAL 2024",
+      "ground": "HG-01",
       "title": "Five cohorts. Two sugar alcohols. Same direction.",
       "items": [
         {
@@ -213,6 +215,7 @@
     "33": {
       "card": "bars",
       "kicker": "XYLITOL · ESC CONGRESS 2026",
+      "ground": "HG-01",
       "revealOn": "Fifty-seven",
       "title": "Five cohorts. Two sugar alcohols. Same direction.",
       "items": [
@@ -248,6 +251,7 @@
     "34": {
       "card": "bars",
       "kicker": "FIVE COHORTS",
+      "ground": "HG-01",
       "title": "Five cohorts. Two sugar alcohols. Same direction.",
       "items": [
         {
@@ -349,6 +353,7 @@
     },
     "50": {
       "card": "decay",
+      "ground": "HG-02",
       "kicker": "PLASMA XYLITOL AFTER A 30 g DRINK",
       "title": "Thirteen minutes.",
       "peak": 1000,
@@ -416,6 +421,7 @@
     },
     "54": {
       "card": "decay",
+      "ground": "HG-02",
       "kicker": "PLASMA XYLITOL AFTER A 30 g DRINK",
       "title": "It is gone long before the blood is drawn.",
       "peak": 1000,
@@ -543,6 +549,7 @@
     },
     "75": {
       "card": "statement",
+      "ground": "HG-05",
       "kicker": "DISCLOSURE",
       "lines": [
         "THE SENIOR AUTHOR HOLDS",
@@ -632,6 +639,7 @@
     },
     "86": {
       "card": "split",
+      "ground": "HG-03",
       "kicker": "THE NUMBER THAT ISN'T THERE",
       "title": "Fifty-seven per cent more than what?",
       "left": {
@@ -781,6 +789,7 @@
     },
     "114": {
       "card": "ledger",
+      "ground": "HG-06",
       "kicker": "EVERY ONE ARRIVED AS THE SAFE ANSWER",
       "title": "Still being studied, decades later.",
       "rows": [
@@ -810,6 +819,7 @@
     },
     "115": {
       "card": "statement",
+      "ground": "HG-06",
       "lines": [
         "\"SUGAR FREE\" TELLS YOU",
         "WHAT ISN'T IN IT."
@@ -859,6 +869,7 @@
     "seconds": 3.2,
     "spec": {
       "card": "title",
+      "ground": "HG-04",
       "kicker": "ScoopFeeds · Long-form",
       "lines": [
         "I'M A DOCTOR.",

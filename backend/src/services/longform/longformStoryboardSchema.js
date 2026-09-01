@@ -115,6 +115,7 @@ const FIELD_SHAPE = {
   // The phrase itself is only checkable against the beat's narration, which
   // this validator does not have; build.mjs throws if it does not occur.
   revealOn: (v) => isStr(v) || "must be a non-empty phrase from that beat's narration",
+  ground:   (v) => isStr(v) || "must be a ground key resolving to out/grounds/<key>.png",
   // decay. `xMax` is shared with multiline, where it is also a number.
   peak:     (v) => isNum(v) || "must be a number",
   baseline: (v) => isNum(v) || "must be a number",
@@ -270,7 +271,11 @@ export function validateStoryboard(doc, { statementIds = [], docKeys: capturedDo
     if (b.card === "ledger" && b.muted && Array.isArray(b.rows) && b.rows.some((r) => r?.hot)) {
       errs.push(`${at} (ledger): "muted" recedes every row, so a "hot" row contradicts it — pick one`);
     }
-    const allowed = new Set(["card", ...spec.req, ...spec.opt,
+    // `ground` is legal on ANY card — it is chrome, not content: render.mjs
+    // composites the named backplate behind the frame and darkens it under a
+    // scrim. A ground that is not on disk falls back to flat near-black and
+    // says so, so a missing file cannot fail a build.
+    const allowed = new Set(["card", "ground", ...spec.req, ...spec.opt,
       ...(PAYOFF_CARDS.includes(b.card) ? ["revealOn"] : [])]);
     for (const f of Object.keys(b)) {
       if (!allowed.has(f)) {
@@ -352,7 +357,7 @@ export function validateStoryboard(doc, { statementIds = [], docKeys: capturedDo
       for (const f of CARD_SPECS.title.req) {
         if (t.spec[f] === undefined) errs.push(`storyboard.titleSegment.spec: missing required field "${f}"`);
       }
-      const allowedT = new Set(["card", ...CARD_SPECS.title.req, ...CARD_SPECS.title.opt]);
+      const allowedT = new Set(["card", "ground", ...CARD_SPECS.title.req, ...CARD_SPECS.title.opt]);
       for (const f of Object.keys(t.spec)) {
         if (!allowedT.has(f)) errs.push(`storyboard.titleSegment.spec: unknown field "${f}"`);
       }

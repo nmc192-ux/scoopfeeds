@@ -33,14 +33,14 @@ import { dep } from "./_deps.mjs";
 const _satori = dep("satori");
 const satori = _satori.default ?? _satori;
 const { Resvg } = dep("@resvg/resvg-js");
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { clamp01, at, enter } from "./anim.mjs";
 import { GEO, geoSvg } from "./mapGeo.mjs";
 import { assertVerbatim } from "./statement.mjs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { ASSETS } from "./_deps.mjs";
+import { ASSETS, P } from "./_deps.mjs";
 export const W = 1920;
 export const H = 1080;
 
@@ -111,8 +111,41 @@ const row = (style, children) => h("div", { display: "flex", flexDirection: "row
 
 // ─── Chrome ─────────────────────────────────────────────────────────────────
 
+/**
+ * THE GENERATED GROUND, if this card has one.
+ *
+ * Set by renderCard immediately before it calls the card builder, and cleared
+ * immediately after. That is safe because a builder is SYNCHRONOUS — it returns
+ * an element tree and the await (satori) happens afterwards — so nothing can
+ * interleave between the set and the clear. Passing it through instead would
+ * mean touching all eighteen frame() call sites to thread a value that only the
+ * chrome uses.
+ */
+let _ground = null;
+const _warnedGrounds = new Set();
+
+/**
+ * Resolve a ground KEY to a file, or null.
+ *
+ * A missing ground falls back to flat near-black rather than failing the build:
+ * §7.4 rule 5 says a ground that cannot be produced falls back to flat, and a
+ * film should not stop rendering because a decorative backplate is absent. It
+ * says so once per key — silence here would look like the ground was applied.
+ */
+function groundFile(key) {
+  if (!key) return null;
+  const f = P(`out/grounds/${key}.png`);
+  if (existsSync(f)) return f;
+  if (!_warnedGrounds.has(key)) {
+    console.log(`  ground "${key}" not found at ${f} — card renders on flat near-black`);
+    _warnedGrounds.add(key);
+  }
+  return null;
+}
+
 /** The ground every card sits on, plus the standing chrome. */
 function frame(children, p = 1, { accentRule = true } = {}) {
+  const groundSrc = groundFile(_ground);
   // The accent rule wipes down as the card arrives — the first motion on screen.
   const k = at(p, 0, 0.22);
   return h(
@@ -123,6 +156,29 @@ function frame(children, p = 1, { accentRule = true } = {}) {
       padding: "96px 120px", fontFamily: "Inter",
     },
     [
+      // GROUND, THEN SCRIM, THEN EVERYTHING ELSE. The scrim is what makes a
+      // 480p backplate the right call (§7.2): the image is darkened to near the
+      // base colour and never competes with the type sitting on it. It is also
+      // why the ground may be STATIC and still not look flat — §7.4 rule 3
+      // forbids drift, so the life comes from texture, not movement.
+      ...(groundSrc
+        ? [
+            himg(groundSrc, {
+              position: "absolute", left: 0, top: 0, width: W, height: H,
+              objectFit: "cover",
+            }),
+            h("div", {
+              position: "absolute", left: 0, top: 0, width: W, height: H,
+              // 0.86, NOT 0.78. Tested against a deliberately over-bright
+              // ground: at 0.78 a light backplate tinted the whole frame and
+              // competed with the lime accent, which breaks the one rule the
+              // look rests on ("one lime accent per frame"). The scrim has to
+              // hold for a ground that is WRONG, not only for the near-black
+              // ones that were ordered — a generated asset is not a promise.
+              backgroundColor: "rgba(9,7,6,0.86)",
+            }),
+          ]
+        : []),
       ...(accentRule
         ? [h("div", {
             position: "absolute", left: 0, top: 0, width: 14,
@@ -1164,7 +1220,11 @@ ${beyond ? `<line x1="${(W - PAD_R).toFixed(1)}" y1="${baseY.toFixed(1)}" x2="${
 export async function renderCard(spec, outPath, p = 1) {
   const build = CARDS[spec.card];
   if (!build) throw new Error(`unknown card type: ${spec.card}`);
-  const svg = await satori(build(spec, p), { width: W, height: H, fonts: FONTS });
+  // See _ground: set, build synchronously, clear. No await in between.
+  _ground = spec.ground || null;
+  let tree;
+  try { tree = build(spec, p); } finally { _ground = null; }
+  const svg = await satori(tree, { width: W, height: H, fonts: FONTS });
   const png = new Resvg(svg, { fitTo: { mode: "width", value: W } }).render().asPng();
   writeFileSync(outPath, png);
   return outPath;
