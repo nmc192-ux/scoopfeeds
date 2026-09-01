@@ -37,6 +37,22 @@ test("the gate is ON unless explicitly switched off", () => {
   assert.equal(withEnv("OFF", licenceGateEnabled), false, "case must not decide a rights question");
 });
 
+// THE HAZARD THIS DESIGN EXISTS TO AVOID. The autopost loop publishes a film
+// with no human ack, and it shares a machine (and an environment) with
+// hand-authored research builds. If screenCandidate defaulted to reading the
+// env var, exporting LONGFORM_LICENCE_GATE=off for one research cut would
+// silently disarm the rights gate on everything the autopost loop fetched from
+// then on. So the default is STRICT and the env var only has effect where a
+// script deliberately consults licenceGateEnabled() and passes the answer in.
+test("an ambient env var cannot weaken a library call", () => {
+  withEnv("off", () => {
+    const errs = screenCandidate({ ...OK, licence: "rights-managed" });
+    assert.ok(errs.some((e) => /is not usable/.test(e)),
+      "screenCandidate with no explicit option must stay strict even with the env var set — "
+      + `otherwise the unattended publishing path is disarmed by another run's setting. Got: ${JSON.stringify(errs)}`);
+  });
+});
+
 test("with the gate on, an unknown licence is refused", () => {
   const errs = screenCandidate({ ...OK, licence: "some-rights-reserved" }, { licenceGate: true });
   assert.ok(errs.some((e) => /is not usable/.test(e)), errs.join("; "));

@@ -67,6 +67,14 @@ const PEXELS_REAL = /videos\.pexels\.com\/video-files\/|images\.pexels\.com\/pho
  * — an upscale is a quality fact, not a rights one.
  *
  * Read at CALL time, not at import, so a run can flip it per invocation.
+ *
+ * NOTHING IN THIS MODULE CALLS THIS FUNCTION. That is deliberate and it is the
+ * safety property: no library function here weakens because of an ambient
+ * environment variable. `screenCandidate` defaults to STRICT, and a caller that
+ * wants the relaxed behaviour has to consult this and pass the result. So the
+ * hand-authored project script opts in explicitly, and the autopost loop — which
+ * publishes with no human ack — keeps the full gate no matter what is set in the
+ * environment it happens to share with a research build on the same box.
  */
 export function licenceGateEnabled() {
   return String(process.env.LONGFORM_LICENCE_GATE || "").toLowerCase() !== "off";
@@ -89,7 +97,7 @@ const LICENCE_RULE = /^(licence |no licence)/;
  * disclosure that says there is none. The licence switch above is the single
  * exception, it is explicit, and what it suppresses is recorded on the asset.
  */
-export function screenCandidate(c = {}, { licenceGate = licenceGateEnabled() } = {}) {
+export function screenCandidate(c = {}, { licenceGate = true } = {}) {
   const errs = [];
   const url = String(c.url || "");
 
