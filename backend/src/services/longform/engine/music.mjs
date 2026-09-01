@@ -28,6 +28,8 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { readFileSync } from "fs";
+import { DUCK } from "./ducking.mjs";
+export { DUCK };
 import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
@@ -223,12 +225,14 @@ export async function buildBed(seconds, out, { arc = null, chapters = null } = {
  * Gentle ratio (2.5): this bed is meant to be heard. It steps back under
  * speech, it does not disappear.
  */
-export async function scoreFilm(filmIn, bed, filmOut) {
+export async function scoreFilm(filmIn, bed, filmOut, { duck = DUCK.bed } = {}) {
+  const d = typeof duck === "string" ? (DUCK[duck] || DUCK.bed) : duck;
   await ff([
     "-i", filmIn, "-i", bed,
     "-filter_complex",
       `[0:a]asplit=2[voice][key];` +
-      `[1:a][key]sidechaincompress=threshold=0.12:ratio=2.5:attack=20:release=380:makeup=1[ducked];` +
+      `[1:a][key]sidechaincompress=threshold=${d.threshold}:ratio=${d.ratio}`
+        + `:attack=${d.attack}:release=${d.release}:makeup=${d.makeup}[ducked];` +
       // Limiter LAST. With it before loudnorm, loudnorm's make-up gain pushed
       // the wider v3 bed to +0.25 dBFS — single-pass loudnorm only approximates
       // its TP ceiling, so it cannot be the final stage.
