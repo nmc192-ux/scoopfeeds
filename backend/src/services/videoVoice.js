@@ -217,6 +217,24 @@ export function durationMethod() {
  * `ffmpeg -i` stderr — ffmpeg prints "Duration: 00:00:04.18" and exits
  * non-zero because no output was requested, which is expected, not an error.
  */
+/** The word-timing sidecar for a cache key. One file per clip, beside the mp3. */
+export function wordsPathFor(key) {
+  return path.join(TTS_CACHE_DIR, `${key}.words.json`);
+}
+
+/** Read a sidecar, tolerating every way it can be absent or corrupt. */
+export function readWordsSidecar(file) {
+  try {
+    if (!existsSync(file)) return null;
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    return Array.isArray(parsed) && parsed.length ? parsed : null;
+  } catch {
+    // A truncated sidecar (killed mid-write) must degrade to "no timings", not
+    // take the video down for a file that is pure enhancement.
+    return null;
+  }
+}
+
 export function probeDurationSecs(filePath) {
   if (!existsSync(filePath)) throw new VoiceError(`audio file missing: ${filePath}`);
 
@@ -248,28 +266,96 @@ export function probeDurationSecs(filePath) {
 
 // ─── Synthesis ──────────────────────────────────────────────────────────────
 
+/**
+ * Group ElevenLabs' PER-CHARACTER alignment into words.
+ *
+ * The API returns one start/end per character, which is the wrong grain for
+ * anything on screen: a phrase changes on a WORD. Grouping here, once, at write
+ * time means every consumer reads the same derivation rather than each inventing
+ * its own — and it keeps the sidecar small, which matters at 12 videos a day.
+ *
+ * A word's start is its first character's start and its end is its last
+ * character's end. Whitespace delimits and belongs to no word.
+ */
+export function wordsFromAlignment(alignment) {
+  const chars = alignment?.characters;
+  const starts = alignment?.character_start_times_seconds;
+  const ends = alignment?.character_end_times_seconds;
+  if (!Array.isArray(chars) || !Array.isArray(starts) || !Array.isArray(ends)) return null;
+  if (chars.length !== starts.length || chars.length !== ends.length) return null;
+
+  const words = [];
+  let cur = null;
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    if (/\s/.test(ch)) { if (cur) { words.push(cur); cur = null; } continue; }
+    if (!cur) cur = { word: "", start: starts[i], end: ends[i] };
+    cur.word += ch;
+    cur.end = ends[i];
+  }
+  if (cur) words.push(cur);
+  return words.length ? words : null;
+}
+
+/**
+ * Synthesise one caption, WITH per-word timings when the API will give them.
+ *
+ * `/with-timestamps` returns JSON — base64 audio plus a per-character alignment
+ * — where the plain endpoint returns raw MP3 bytes. The decoded audio is the
+ * same audio, so nothing downstream changes: probeDurationSecs still reads the
+ * file, and the cache still holds an .mp3 at the same path.
+ *
+ * IT FALLS BACK TO THE PLAIN ENDPOINT ON ANY FAILURE, and that is the whole
+ * safety argument for shipping this. Every short we publish goes through this
+ * function; a timestamps endpoint that 404s, rate-limits, or changes its
+ * response shape must cost us word timings, never the video. Losing the audio
+ * to gain a text-timing feature would be a bad trade at any success rate.
+ *
+ * @returns {Promise<{buf: Buffer, words: Array|null}>}
+ */
 async function elevenLabs(caption) {
+  const text = String(caption).slice(0, 5000);
+  const body = JSON.stringify({ text, model_id: MODEL_ID, voice_settings: { ...VOICE_SETTINGS } });
+  const headers = {
+    "xi-api-key": process.env.ELEVENLABS_API_KEY,
+    "Content-Type": "application/json",
+  };
+
+  try {
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/with-timestamps`, {
+      method: "POST",
+      headers: { ...headers, Accept: "application/json" },
+      body,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const buf = Buffer.from(String(json?.audio_base64 || ""), "base64");
+    if (buf.length < 256) throw new Error(`decoded ${buf.length} bytes — not audio`);
+    // normalized_alignment is aligned to the SPOKEN normalisation ("$5" spoken
+    // as "five dollars"), so its characters do not correspond to the text we
+    // hold. `alignment` is the one that indexes the caption we sent.
+    return { buf, words: wordsFromAlignment(json?.alignment) };
+  } catch (err) {
+    logger.warn(
+      `🔊 with-timestamps unavailable (${String(err.message).slice(0, 80)}) — falling back to plain audio. ` +
+      `The video is unaffected; this clip simply has no word timings.`
+    );
+  }
+
   const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
     method: "POST",
-    headers: {
-      "xi-api-key": process.env.ELEVENLABS_API_KEY,
-      "Content-Type": "application/json",
-      "Accept": "audio/mpeg",
-    },
-    body: JSON.stringify({
-      text: String(caption).slice(0, 5000),
-      model_id: MODEL_ID,
-      voice_settings: { ...VOICE_SETTINGS },
-    }),
+    headers: { ...headers, Accept: "audio/mpeg" },
+    body,
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new VoiceError(`ElevenLabs ${res.status}: ${body.slice(0, 300)}`, { caption, status: res.status });
+    const b = await res.text().catch(() => "");
+    throw new VoiceError(`ElevenLabs ${res.status}: ${b.slice(0, 300)}`, { caption, status: res.status });
   }
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.length < 256) throw new VoiceError(`ElevenLabs returned ${buf.length} bytes — not audio`, { caption });
-  return buf;
+  return { buf, words: null };
 }
 
 /**
@@ -284,22 +370,40 @@ export async function voiceCaption(caption, { slideIndex = -1 } = {}) {
   if (!existsSync(TTS_CACHE_DIR)) mkdirSync(TTS_CACHE_DIR, { recursive: true });
   const key = cacheKeyFor(text);
   const file = path.join(TTS_CACHE_DIR, `${key}.mp3`);
+  const wordsFile = wordsPathFor(key);
 
   if (existsSync(file) && statSync(file).size > 256) {
     const durationSecs = probeDurationSecs(file);
-    logger.info(`🔊 voice slide ${slideIndex}: CACHE HIT ${key} (${durationSecs.toFixed(2)}s) "${text.slice(0, 48)}"`);
-    return { path: file, durationSecs, cached: true, key };
+    // A CLIP CACHED BEFORE THIS EXISTED HAS NO SIDECAR, and that is a normal
+    // state for the whole retention window after deploy — not a fault. It is
+    // reported rather than silent, because "the feature does nothing" and "every
+    // clip was a pre-timestamp cache hit" look identical from the outside and
+    // the second one resolves itself in seven days.
+    const words = readWordsSidecar(wordsFile);
+    logger.info(
+      `🔊 voice slide ${slideIndex}: CACHE HIT ${key} (${durationSecs.toFixed(2)}s) ` +
+      `${words ? `${words.length} word timings` : "NO word timings — cached before timestamps"} ` +
+      `"${text.slice(0, 48)}"`
+    );
+    return { path: file, durationSecs, cached: true, key, words };
   }
 
   const t0 = Date.now();
-  const buf = await elevenLabs(text);
+  const { buf, words } = await elevenLabs(text);
   writeFileSync(file, buf);
+  // Written AFTER the audio, and never allowed to fail the clip: the sidecar is
+  // an enhancement, the mp3 is the product.
+  if (words) {
+    try { writeFileSync(wordsFile, JSON.stringify(words)); }
+    catch (err) { logger.warn(`🔊 could not write word timings for ${key}: ${err.message}`); }
+  }
   const durationSecs = probeDurationSecs(file);
   logger.info(
     `🔊 voice slide ${slideIndex}: CACHE MISS ${key} — synthesised ${(buf.length / 1024).toFixed(0)}KB / ` +
-    `${durationSecs.toFixed(2)}s in ${Date.now() - t0}ms "${text.slice(0, 48)}"`
+    `${durationSecs.toFixed(2)}s in ${Date.now() - t0}ms ` +
+    `${words ? `+ ${words.length} word timings` : "(no word timings)"} "${text.slice(0, 48)}"`
   );
-  return { path: file, durationSecs, cached: false, key };
+  return { path: file, durationSecs, cached: false, key, words };
 }
 
 /**
@@ -341,7 +445,15 @@ export function sweepTtsCache({ retentionMs = TTS_RETENTION_MS, now = Date.now()
     const p = path.join(TTS_CACHE_DIR, entry);
     try {
       const st = statSync(p);
-      if (now - st.mtimeMs > retentionMs) { bytes += st.size; unlinkSync(p); removed++; }
+      if (now - st.mtimeMs > retentionMs) {
+        bytes += st.size; unlinkSync(p); removed++;
+        // THE SIDECAR GOES WITH ITS CLIP. This function's own header explains
+        // why content-hashed files with no owning row are the orphan class that
+        // grew CARDS_DIR to ~19GB; a sidecar the sweeper does not know about is
+        // that same bug, newly planted.
+        const w = wordsPathFor(entry.replace(/\.mp3$/, ""));
+        try { if (existsSync(w)) { bytes += statSync(w).size; unlinkSync(w); } } catch { /* best effort */ }
+      }
       else kept++;
     } catch (err) {
       logger.warn(`🔊 sweepTtsCache: could not sweep ${p}: ${err.message}`);
