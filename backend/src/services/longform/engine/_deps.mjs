@@ -48,7 +48,34 @@ function resolverFor(name) {
   );
 }
 
-export const ffmpegPath = resolverFor("@ffmpeg-installer/ffmpeg").path;
+/**
+ * ffmpeg: THE SYSTEM ONE FIRST, the bundled one as a fallback.
+ *
+ * @ffmpeg-installer/ffmpeg's linux-x64 build is a 2018 static binary
+ * ("N-47683 ... gcc 6.3.0"), and resolving it unconditionally meant the engine
+ * ran on a seven-year-old ffmpeg even where a current one was installed —
+ * including in production, whose Dockerfile explicitly `apt-get install`s
+ * ffmpeg into the runtime stage for exactly this purpose.
+ *
+ * It is not a theoretical age problem. The final mux uses
+ * `amix=...:normalize=0`, and `normalize` arrived in FFmpeg 4.4 (2021). On the
+ * bundled binary the whole film failed at the last step with "Option
+ * 'normalize' not found", after the entire render had been paid for. Worse
+ * would have been the version where it silently averaged 116 inputs instead of
+ * summing them, and the film came out near-silent.
+ *
+ * FFMPEG_PATH overrides both, for a box that keeps a build somewhere else.
+ */
+function resolveFfmpeg() {
+  if (process.env.FFMPEG_PATH && existsSync(process.env.FFMPEG_PATH)) return process.env.FFMPEG_PATH;
+  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
+    if (!dir) continue;
+    const cand = path.join(dir, "ffmpeg");
+    if (existsSync(cand)) return cand;
+  }
+  return resolverFor("@ffmpeg-installer/ffmpeg").path;
+}
+export const ffmpegPath = resolveFfmpeg();
 export const dep = resolverFor;
 
 // ── project vs engine ────────────────────────────────────────────────────

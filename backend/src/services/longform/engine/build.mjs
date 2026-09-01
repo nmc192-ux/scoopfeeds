@@ -275,7 +275,34 @@ async function renderCardFrames(spec, dir, payoff) {
   return n;
 }
 
+/**
+ * FAIL IN THE FIRST SECOND, NOT THE LAST.
+ *
+ * The final mux needs `amix=...:normalize=0`, added in FFmpeg 4.4 (2021).
+ * @ffmpeg-installer's linux-x64 build is from 2018 and does not have it, so a
+ * complete film — 116 narration takes, 450 card frames, 144 encoded shots,
+ * about ten minutes of work — died on the very last command with "Option
+ * 'normalize' not found". Every second of that was spent before anything could
+ * have known it would not finish.
+ *
+ * Checking a filter's options costs one process spawn.
+ */
+function assertFfmpegCapable() {
+  const r = spawnSync(FFMPEG, ["-hide_banner", "-h", "filter=amix"], { encoding: "utf8" });
+  const help = (r.stdout || "") + (r.stderr || "");
+  if (help.includes("normalize")) return;
+  const ver = String(spawnSync(FFMPEG, ["-version"], { encoding: "utf8" }).stdout || "").split("\n")[0];
+  throw new Error(
+    `ffmpeg is too old: its amix filter has no "normalize" option (added in FFmpeg 4.4, 2021).\n`
+    + `  using: ${FFMPEG}\n`
+    + `  ${ver}\n`
+    + `Without it amix AVERAGES its inputs instead of summing them, so the film's\n`
+    + `narration would come out near-silent across 116 takes. Install a current\n`
+    + `ffmpeg (the production image apt-installs one) or set FFMPEG_PATH to it.`);
+}
+
 async function main() {
+  assertFfmpegCapable();
   mkdirSync(P("out/cards"), { recursive: true });
   mkdirSync(P("out/segments"), { recursive: true });
   rmSync(P("out/anim"), { recursive: true, force: true });
