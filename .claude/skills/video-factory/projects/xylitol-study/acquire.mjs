@@ -54,7 +54,8 @@ const BACKEND = path.resolve(HERE, "../../../../../backend");
 const ENGINE = path.join(BACKEND, "src/services/longform/engine");
 
 const { searchFootage, resolveDownloadFor } = await import(`${ENGINE}/footage-search.mjs`);
-const { unattendedRefusal, MAX_CLIP_BYTES, keyFor } = await import(`${BACKEND}/src/services/longform/longformAcquire.js`);
+const { unattendedRefusal, MAX_CLIP_BYTES, keyFor, gateLicenceFor } =
+  await import(`${BACKEND}/src/services/longform/longformAcquire.js`);
 const { screenCandidate } = await import(`${BACKEND}/src/services/longform/longformMediaGate.js`);
 
 const REFETCH = process.argv.includes("--refetch");
@@ -146,7 +147,24 @@ for (const key of keys) {
     // the media gate silently disabled here, which is how AI-generated Pexels
     // stock, sub-1080p upscales and unlicensed clips would all have walked
     // straight through an unattended download.
-    const cand = { ...c, key: c.key || keyFor(c, i) };
+    // NORMALISE BEFORE SCREENING. footage-search records a human-readable
+    // licence; the gate matches machine tokens. Screening the raw candidate
+    // refused every source for the wrong reason and made a whole provenance
+    // tier look broken — the engine was normalising all along, at the point it
+    // builds the acquired record. gateLicenceFor is that same rule.
+    // Same two normalisations acquireFootage does when it builds an acquired
+    // record: the gate's licence TOKEN, and — for platform stock — the DOWNLOAD
+    // url, because the gate checks the media host (videos.pexels.com/
+    // video-files) and a Pexels PAGE url would read as unclear provenance.
+    // DVIDS and NASA carry no dimensions in a search result and are therefore
+    // refused here as "unmeasured", which is the gate working: the engine only
+    // clears them after probing a downloaded file.
+    const cand = {
+      ...c,
+      key: c.key || keyFor(c, i),
+      licence: gateLicenceFor(c),
+      url: c.provenance === "platform" ? (c.download || c.url) : (c.url || c.download),
+    };
     const problems = screenCandidate(cand);
     if (problems.length) { refused.push(`${c.source}: ${problems[0]}`); continue; }
     eligible.push(cand);

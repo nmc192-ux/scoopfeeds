@@ -66,6 +66,26 @@ export const MAX_CLIP_BYTES = () =>
 const PLATFORM_SOURCES = new Set(["Pexels"]);
 
 /**
+ * The licence TOKEN longformMediaGate screens on, for a search candidate.
+ *
+ * footage-search records a human-readable licence ("Pexels License — free to
+ * use, modification allowed, no attribution required"); the gate's
+ * ALLOWED_LICENCES is a list of machine tokens ("pexels", "public-domain").
+ * The two are different by design — one is provenance a person can read, the
+ * other is a key a screen can match — and this is the single place that maps
+ * between them.
+ *
+ * EXPORTED BECAUSE THE MAPPING WAS INLINE. A caller that screened raw search
+ * results instead of acquired ones refused every candidate from every source,
+ * for the wrong reason, and read it as an engine bug — a whole tier looked
+ * dead when it was simply being asked the wrong question. One exported rule is
+ * cheaper than that diagnosis happening twice.
+ */
+export function gateLicenceFor(candidate = {}) {
+  return candidate.provenance === PLATFORM ? "pexels" : "public-domain";
+}
+
+/**
  * May this candidate be fetched with nobody watching?
  * @returns {null|string} null to proceed, or the reason to refuse
  */
@@ -250,7 +270,7 @@ export async function acquireFootage({
       // and refuses the AIGC bundle host outright — which is also DrJ's
       // no-generated-imagery rule enforced in code), "public-domain" for the
       // federal sources.
-      licence: c.provenance === PLATFORM ? "pexels" : "public-domain",
+      licence: gateLicenceFor(c),
       // For platform stock the DOWNLOAD url is the provenance answer (the
       // page url does not name the file the gate screens).
       url: c.provenance === PLATFORM ? url : (c.url || url),
