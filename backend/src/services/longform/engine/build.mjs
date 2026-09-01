@@ -256,22 +256,23 @@ async function pool(items, n, fn) {
 // srtTime lives in srtTime.mjs — build.mjs runs a film build on import, so
 // nothing defined inside it is reachable from a test.
 
-/** Render the frame sequence for one card into `dir`. */
+/**
+ * Render one card's frames — IN A CHILD PROCESS. See renderFrames.mjs for the
+ * measured resvg leak that makes this necessary; in-process, a 46-card film
+ * needs ~21 GB and is OOM-killed around card 17.
+ */
+const FRAME_WORKER = fileURLToPath(new URL("./renderFrames.mjs", import.meta.url));
 async function renderCardFrames(spec, dir, payoff) {
   mkdirSync(dir, { recursive: true });
   const enterN = Math.max(2, Math.round(ENTER_SECS * FPS));
-  for (let i = 0; i < enterN; i++) {
-    const t = i / (enterN - 1);
-    const p = payoff ? t * PAYOFF_P : t;
-    await renderCard(spec, path.join(dir, `e${String(i).padStart(3, "0")}.png`), p);
-  }
-  if (!payoff) return enterN;
   const payN = Math.max(2, Math.round(PAYOFF_SECS * FPS));
-  for (let i = 0; i < payN; i++) {
-    const t = i / (payN - 1);
-    await renderCard(spec, path.join(dir, `p${String(i).padStart(3, "0")}.png`), PAYOFF_P + t * (1 - PAYOFF_P));
-  }
-  return enterN + payN;
+  const jobFile = path.join(dir, "_job.json");
+  writeFileSync(jobFile, JSON.stringify({ spec, dir, payoff, enterN, payN }));
+  const { stdout } = await execFileP(process.execPath, [FRAME_WORKER, jobFile], { maxBuffer: 1 << 20 });
+  rmSync(jobFile, { force: true });
+  const n = parseInt(String(stdout).trim(), 10);
+  if (!Number.isFinite(n)) throw new Error(`frame worker for ${dir} returned ${JSON.stringify(stdout)}`);
+  return n;
 }
 
 async function main() {
