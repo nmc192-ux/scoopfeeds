@@ -156,11 +156,13 @@ function frame(children, p = 1, { accentRule = true } = {}) {
       padding: "96px 120px", fontFamily: "Inter",
     },
     [
-      // GROUND, THEN SCRIM, THEN EVERYTHING ELSE. The scrim is what makes a
-      // 480p backplate the right call (§7.2): the image is darkened to near the
-      // base colour and never competes with the type sitting on it. It is also
-      // why the ground may be STATIC and still not look flat — §7.4 rule 3
-      // forbids drift, so the life comes from texture, not movement.
+      // GROUND, THEN SCRIM, THEN EVERYTHING ELSE. The scrim darkens the image
+      // to near the base colour so it never competes with the type sitting on
+      // it. It is also why the ground may be STATIC and still not look flat —
+      // §7.4 rule 3 forbids drift, so the life comes from texture, not motion.
+      // Resolution is not a concern in either direction: the stills come back
+      // at 2752x1536 and are downscaled to fit, and a ground much smaller than
+      // the frame would still be acceptable under a scrim this heavy.
       ...(groundSrc
         ? [
             himg(groundSrc, {
