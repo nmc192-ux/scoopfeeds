@@ -19,15 +19,19 @@ cd "$HERE"
 FROM="${2:-narrate}"
 [ "${1:-}" = "--from" ] || FROM="narrate"
 
+# Stages in order. `after` answers "has FROM reached this stage yet?" by
+# comparing positions in this list, which is why adding a stage here is the only
+# edit needed — the previous hand-written case arms had to be kept consistent
+# with each other by eye, and a new stage in the middle meant touching all of
+# them.
+STAGES="narrate acquire build music shorts qc"
 step() { echo; echo "── $1 ─────────────────────────────────────────"; }
-after() { case "$FROM" in
-  narrate) return 0 ;;
-  build)   [ "$1" != "narrate" ] ;;
-  music)   [ "$1" != "narrate" ] && [ "$1" != "build" ] ;;
-  shorts)  [ "$1" = "shorts" ] || [ "$1" = "qc" ] ;;
-  qc)      [ "$1" = "qc" ] ;;
-  *) return 0 ;;
-esac; }
+pos() { local i=0 s; for s in $STAGES; do [ "$s" = "$1" ] && { echo $i; return; }; i=$((i+1)); done; echo -1; }
+after() {
+  local want; want=$(pos "$FROM")
+  [ "$want" -ge 0 ] || { echo "unknown --from stage: $FROM (want one of: $STAGES)" >&2; exit 1; }
+  [ "$(pos "$1")" -ge "$want" ]
+}
 
 # PREFLIGHT. Fail here, naming what is missing, rather than 40 takes into a
 # narration run or at the first ffmpeg call.
@@ -80,11 +84,28 @@ if after narrate; then
   node "$ENGINE/narrate.mjs"
 fi
 
+if after acquire; then
+  step "acquire — footage, unattended"
+  # Runs the engine's OWN screens verbatim: unattendedRefusal (provenance),
+  # screenCandidate (rights and resolution), makeRelevanceScreen. Nothing here
+  # decides what is publishable — it only wires those rules to this film's named
+  # keys. A key that finds nothing stays unfilled and is reported.
+  node acquire.mjs
+
+  step "grounds — generated backplates"
+  # Fetches the six Higgsfield stills. A ground that does not arrive is not a
+  # build failure: the card renders on flat near-black and logs which key.
+  node fetchgrounds.mjs
+
+  step "slates — placeholders for whatever acquisition could not fill"
+  # AFTER acquire, deliberately. Slates never overwrite an existing file, so
+  # this order fills every key it can with real footage and leaves labelled
+  # magenta NOT-FOR-PUBLICATION placeholders only where acquisition failed.
+  node slates.mjs
+fi
+
 if after build; then
   step "build — assemble"
-  # Needs out/footage/*.mp4 for the 70 footage beats. Acquisition is a curated
-  # step, not one command: footage-search.mjs ranks candidates by provenance and
-  # a human picks. See Section 4 of the brief for the 27 keys and their sources.
   node "$ENGINE/build.mjs"
 fi
 
