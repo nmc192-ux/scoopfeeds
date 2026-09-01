@@ -22,7 +22,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, mkdtempSync } from "node:fs";
+import { existsSync, readFileSync, mkdtempSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -123,6 +123,33 @@ test("new-project.sh scaffolds a working project from the engine's new home", ()
     assert.ok(readFileSync(path.join(proj, f), "utf8").length > 500,
       `${f} was not copied from the skill's template — SKILL is pointing at the wrong directory`);
   }
+});
+
+test("no project script bakes in an absolute home path", async () => {
+  // The SAME regression this file already guards for _deps.mjs, reproduced one
+  // layer out where no test was looking: the xylitol project's scripts each
+  // carried an absolute /home/<user>/scoopfeeds path from the machine they were
+  // written on, so they ran on exactly that machine. It surfaced when the film
+  // was first checked out on the VPS, where the repo is /app.
+  //
+  // Project scripts sit five levels under the repo root and must derive from
+  // their own location, the same rule the engine follows.
+  const { REPO_ROOT } = await import(`${ENGINE}/_deps.mjs`);
+  const root = path.join(REPO_ROOT, ".claude/skills/video-factory/projects");
+  if (!existsSync(root)) return;                       // no projects checked in
+  const offenders = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const f = path.join(dir, e.name);
+      if (e.isDirectory()) { if (e.name !== "out" && e.name !== "node_modules") walk(f); continue; }
+      if (!/\.(mjs|js|sh)$/.test(e.name)) continue;
+      const hits = readFileSync(f, "utf8").match(/["'`]\/(?:Users|home)\/[^"'`\n]+/g);
+      if (hits) offenders.push(`${path.relative(REPO_ROOT, f)}: ${hits.join(", ")}`);
+    }
+  };
+  walk(root);
+  assert.deepEqual(offenders, [],
+    `absolute home path(s) baked into project scripts — derive from the file's own location:\n  ${offenders.join("\n  ")}`);
 });
 
 test("source screenshots fail loudly when Chromium is absent, never silently", async () => {

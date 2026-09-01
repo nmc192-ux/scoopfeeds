@@ -39,8 +39,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// PATHS ARE DERIVED, NEVER BAKED. A project directory sits five levels under
+// the repo root, so the backend is derived from this file's own location. These
+// scripts had an absolute /home/... path from the machine they were written on
+// and worked on exactly that machine — the regression deployment.test.js exists
+// to catch, reproduced in the project layer where no test was looking.
+const BACKEND = path.resolve(HERE, "../../../../../backend");
 const { validateStoryboard } = await import(
-  "/home/user/scoopfeeds/backend/src/services/longform/longformStoryboardSchema.js");
+  path.join(BACKEND, "src/services/longform/longformStoryboardSchema.js"));
 
 const beats = JSON.parse(readFileSync(path.join(HERE, "beats.json"), "utf8"));
 

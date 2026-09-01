@@ -17,10 +17,21 @@
 import { readFileSync, writeFileSync } from "fs";
 import { execFileSync } from "child_process";
 import path from "path";
+import { fileURLToPath } from "url";
 import { createRequire } from "module";
-import { ffmpegPath, P, ASSETS } from "/Users/jahanzebhussain/Downloads/scoop-news/.claude/skills/video-factory/engine/_deps.mjs";
 
-const require = createRequire("/Users/jahanzebhussain/Downloads/scoop-news/backend/package.json");
+// DERIVED FROM THIS FILE, NEVER BAKED. Both imports below were absolute paths
+// into one developer's Downloads folder, under the repo's OLD name — and one of
+// them pointed at .claude/skills/video-factory/engine, where the engine has not
+// lived since it moved into the backend. This script therefore could not run on
+// any machine, including the one it was written on. Project scripts sit five
+// levels under the repo root; the backend is derived from that.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const BACKEND = path.resolve(HERE, "../../../../../backend");
+const { ffmpegPath, P, ASSETS } = await import(
+  path.join(BACKEND, "src/services/longform/engine/_deps.mjs"));
+
+const require = createRequire(path.join(BACKEND, "package.json"));
 const _satori = require("satori"); const satori = _satori.default ?? _satori;
 const { Resvg } = require("@resvg/resvg-js");
 
