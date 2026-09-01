@@ -104,13 +104,47 @@ const QUERIES = {
   F_ESC_CONGRESS_FLOOR:     "conference hall audience presentation",
 };
 
+/**
+ * Keys that must NOT be filled from stock, and why.
+ *
+ * "An honest gap is better than a wrong clip." Each of these beats names
+ * something specific, real and checkable, and a stock clip in its place does
+ * not merely under-deliver — it implies the viewer is looking at the actual
+ * thing when they are not. In a film whose argument is "I read the actual
+ * paper, not the headline", that is a credibility problem rather than an
+ * aesthetic one.
+ *
+ * These are listed rather than deleted from QUERIES because a key with no entry
+ * at all trips the missing-query check below and looks like an oversight. A
+ * deliberate refusal should be legible as one, and should survive someone
+ * later "fixing" it by adding a search term.
+ */
+const NO_STOCK = {
+  F_ESC_CONGRESS_FLOOR:
+    "beat 13 names ESC Congress in Munich and a Charité team. A generic "
+    + "auditorium would stand in for a named, dated event at a named institution. "
+    + "Needs the real congress, the abstract's title block, or a typographic beat.",
+  F_HEADLINES_SCROLL:
+    "beat 5 is 'I read the actual paper. Not the headline.' A generic news "
+    + "screen erases the exact contrast the line exists to draw. Needs the real "
+    + "headlines as themselves, then the paper's first page.",
+};
+
 const sb = JSON.parse(readFileSync(path.join(HERE, "storyboard.json"), "utf8"));
-const keys = [...new Set(Object.values(sb.beats).filter((b) => b.footage).map((b) => b.footage))].sort();
+const allKeys = [...new Set(Object.values(sb.beats).filter((b) => b.footage).map((b) => b.footage))].sort();
+const keys = allKeys.filter((k) => !NO_STOCK[k]);
 
 const missingQuery = keys.filter((k) => !QUERIES[k]);
 if (missingQuery.length) {
   console.error(`no search term for: ${missingQuery.join(", ")}\nAdd one to QUERIES — a key with no query would silently stay a placeholder.`);
   process.exit(1);
+}
+
+const refusedByPolicy = allKeys.filter((k) => NO_STOCK[k]);
+if (refusedByPolicy.length) {
+  console.log(`\n${refusedByPolicy.length} key(s) deliberately NOT filled from stock:`);
+  for (const k of refusedByPolicy) console.log(`  · ${k}\n      ${NO_STOCK[k]}`);
+  console.log("");
 }
 
 const ledger = existsSync(LEDGER) ? JSON.parse(readFileSync(LEDGER, "utf8")) : {};
