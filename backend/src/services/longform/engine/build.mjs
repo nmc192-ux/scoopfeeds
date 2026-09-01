@@ -34,6 +34,7 @@ import { promisify } from "util";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
+import os from "os";
 import { renderCard, HAS_PAYOFF, PAYOFF_P } from "./render.mjs";
 import { ffmpegPath, P, loadStoryboard, projectSlug } from "./_deps.mjs";
 import { findAnchor, clampReveal } from "./wordTimings.mjs";
@@ -299,11 +300,36 @@ async function main() {
   cardJobs.push({ id: "title", spec: TITLE_SEGMENT.spec });
   cardJobs.push({ id: "outro", spec: { card: "outro" } });
 
+  // CARD RENDER CONCURRENCY IS MEMORY-BOUND, NOT CPU-BOUND. This was a
+  // hardcoded 6: six satori+resvg pipelines each rasterising 1920x1080 at once.
+  // That is fine on a workstation and is an OOM kill on a small VPS — the first
+  // real build of this film died as a bare "Killed", which names nothing and
+  // reads like a crash rather than a resource limit.
+  //
+  // So it scales with the memory actually available, one worker per ~1.5 GB,
+  // still capped at 6 and never below 1. LONGFORM_RENDER_CONCURRENCY overrides
+  // it for a box whose real limit differs from what os.totalmem() reports —
+  // notably a container with --memory set, which Node does not see.
+  const CONCURRENCY = (() => {
+    const env = parseInt(process.env.LONGFORM_RENDER_CONCURRENCY || "", 10);
+    if (Number.isFinite(env) && env > 0) return env;
+    return Math.max(1, Math.min(6, Math.floor(os.totalmem() / (1.5 * 1024 ** 3))));
+  })();
+
   const t0 = Date.now();
   let renders = 0;
-  await pool(cardJobs, 6, async ({ id, spec }) => {
+  let doneCards = 0;
+  console.log(`  rendering card frames — ${cardJobs.length} cards, concurrency ${CONCURRENCY}`
+    + ` (${(os.totalmem() / 1024 ** 3).toFixed(1)} GB visible)`);
+  await pool(cardJobs, CONCURRENCY, async ({ id, spec }) => {
     const payoff = HAS_PAYOFF.has(spec.card);
     renders += await renderCardFrames(spec, P(`out/anim/${id}`), payoff);
+    // ~2,400 frames take tens of minutes and this loop used to print NOTHING
+    // until all of them were done, so a slow build was indistinguishable from a
+    // hung one. Asked as "its still lingering here?" during the first real run.
+    if (++doneCards % 5 === 0 || doneCards === cardJobs.length) {
+      process.stdout.write(`  ${doneCards}/${cardJobs.length} cards\n`);
+    }
   });
   console.log(`rendered ${renders} card frames across ${cardJobs.length} cards `
     + `in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
