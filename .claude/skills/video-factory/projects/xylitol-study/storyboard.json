@@ -57,13 +57,7 @@
       "roll": true
     },
     "13": {
-      "card": "title",
-      "kicker": "ESC CONGRESS 2026 · MUNICH",
-      "lines": [
-        "THE XYLITOL",
-        "STUDY"
-      ],
-      "sub": "Presented 29 August 2026 by a team from the Charité, Berlin."
+      "footage": "F_ESC_CONGRESS_FLOOR"
     },
     "14": {
       "footage": "F_LAB_TUBES_RACK"
@@ -847,6 +841,9 @@
     "11": {
       "file": "footage/F_LAB_TUBES_RACK.mp4"
     },
+    "13": {
+      "file": "footage/F_ESC_CONGRESS_FLOOR.mp4"
+    },
     "14": {
       "file": "footage/F_LAB_TUBES_RACK.mp4"
     },
@@ -1071,5 +1068,19 @@
       "hook": "The dose that moved platelets in a lab is not the dose in your pocket."
     }
   ],
-  "reveal": 54
+  "reveal": 54,
+  "titleSegment": {
+    "after": 6,
+    "seconds": 3.2,
+    "spec": {
+      "card": "title",
+      "kicker": "ScoopFeeds · Long-form",
+      "lines": [
+        "I'M A DOCTOR.",
+        "HERE'S WHAT THAT",
+        "XYLITOL STUDY SAYS."
+      ],
+      "sub": "17,710 people, up to thirty years — and one detail in the study design that almost none of the coverage mentioned."
+    }
+  }
 }

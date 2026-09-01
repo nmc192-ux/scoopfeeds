@@ -324,6 +324,44 @@ export function validateStoryboard(doc, { statementIds = [], docKeys: capturedDo
     }
   }
 
+  // EVERY FILM NEEDS A TITLE SEGMENT, and build.mjs hard-fails without one —
+  // 300 lines in, after narration has already been paid for. Nothing here
+  // looked at it, so a storyboard could validate clean and then die at
+  // assembly; that is exactly what happened to the xylitol film on its first
+  // real build, having just synthesised 116 takes.
+  //
+  // It is NOT a beat: build.mjs inserts it silently after `after` and holds it
+  // for `seconds`, carrying no narration of its own.
+  if (!doc.titleSegment || typeof doc.titleSegment !== "object") {
+    errs.push('storyboard.titleSegment: missing — every film needs a title card. '
+      + '{ after: <beat>, seconds: <n>, spec: { card: "title", lines: [...] } }');
+  } else {
+    const t = doc.titleSegment;
+    if (!isNum(t.after) || !ids.includes(t.after)) {
+      errs.push(`storyboard.titleSegment.after: ${JSON.stringify(t.after)} is not one of the film's beats`);
+    }
+    if (!isNum(t.seconds) || t.seconds <= 0) {
+      errs.push(`storyboard.titleSegment.seconds: must be a positive number (got ${JSON.stringify(t.seconds)})`);
+    }
+    if (!t.spec || typeof t.spec !== "object") {
+      errs.push("storyboard.titleSegment.spec: missing — this is the card build.mjs renders");
+    } else if (t.spec.card !== "title") {
+      errs.push(`storyboard.titleSegment.spec.card: must be "title" (got ${JSON.stringify(t.spec.card)})`);
+    } else {
+      // The spec is a real card and is held to the same contract as any other.
+      for (const f of CARD_SPECS.title.req) {
+        if (t.spec[f] === undefined) errs.push(`storyboard.titleSegment.spec: missing required field "${f}"`);
+      }
+      const allowedT = new Set(["card", ...CARD_SPECS.title.req, ...CARD_SPECS.title.opt]);
+      for (const f of Object.keys(t.spec)) {
+        if (!allowedT.has(f)) errs.push(`storyboard.titleSegment.spec: unknown field "${f}"`);
+      }
+      for (const c of confusablesIn(cardStrings(t.spec))) {
+        errs.push(`storyboard.titleSegment.spec: ${JSON.stringify(c.char)} renders as ${JSON.stringify(c.renders)} — ${c.why}`);
+      }
+    }
+  }
+
   // The reveal names a real beat, so music.mjs cannot resolve it to undefined.
   if (doc.reveal !== undefined) {
     if (!isNum(doc.reveal) || !ids.includes(doc.reveal)) {

@@ -34,6 +34,9 @@ const ok = (over = {}) => ({
     4: { card: "ledger", rows: [{ who: "IMO", what: "Declared it closed." }] },
     5: { card: "statement", lines: ["THE ANSWER"] },
   },
+  // Every film needs one — build.mjs hard-fails without it, so a fixture
+  // without one would not describe a film that can actually be assembled.
+  titleSegment: { after: 1, seconds: 3.2, spec: { card: "title", lines: ["A FILM"] } },
   ...over,
 });
 
@@ -356,4 +359,29 @@ test("revealOn must be a non-empty phrase", () => {
       beats: { 1: { card: "stat", figure: "1", label: "x", revealOn: bad } },
     })).join("\n"), /must be a non-empty phrase/, `revealOn: ${JSON.stringify(bad)}`);
   }
+});
+
+test("a storyboard with no titleSegment is refused, not left to die at assembly", () => {
+  // build.mjs throws for want of a TITLE_SEGMENT ~300 lines into a build. On the
+  // xylitol film that happened AFTER 116 narration takes had been synthesised
+  // and paid for, on a storyboard this validator had passed as clean.
+  const { titleSegment, ...noTitle } = ok();
+  assert.match(validateStoryboard(noTitle).join("\n"), /titleSegment: missing/);
+});
+
+test("titleSegment is held to the same contract as any other card", () => {
+  const bad = (t) => validateStoryboard(ok({ titleSegment: t })).join("\n");
+  // `after` must be a real beat — build.mjs inserts the segment after it.
+  assert.match(bad({ after: 99, seconds: 3, spec: { card: "title", lines: ["X"] } }),
+    /titleSegment\.after: 99 is not one of the film's beats/);
+  assert.match(bad({ after: 1, seconds: 0, spec: { card: "title", lines: ["X"] } }),
+    /titleSegment\.seconds: must be a positive number/);
+  assert.match(bad({ after: 1, seconds: 3 }), /titleSegment\.spec: missing/);
+  assert.match(bad({ after: 1, seconds: 3, spec: { card: "stat", figure: "1", label: "x" } }),
+    /titleSegment\.spec\.card: must be "title"/);
+  // A title card still needs its required field, and still may not lie.
+  assert.match(bad({ after: 1, seconds: 3, spec: { card: "title" } }),
+    /titleSegment\.spec: missing required field "lines"/);
+  assert.match(bad({ after: 1, seconds: 3, spec: { card: "title", lines: ["A ≠ B"] } }),
+    /renders as "="/);
 });

@@ -95,7 +95,7 @@ const CARDS = {
   // ── ch 1 ──
   7: { card: "statement", kicker: "BEFORE WE START", lines: ["NOT MEDICAL ADVICE"] },
   12: { card: "stat", kicker: "DIETARY VS ENDOGENOUS", figure: "1,000×", label: "More xylitol is added to food than your body makes.", src: SRC_EHJ, roll: true },
-  13: { card: "title", kicker: "ESC CONGRESS 2026 · MUNICH", lines: ["THE XYLITOL", "STUDY"], sub: "Presented 29 August 2026 by a team from the Charité, Berlin." },
+
   18: { card: "stat", kicker: "CLSA · 6-YEAR FOLLOW-UP", figure: "+57%", label: "Higher risk of death, heart attack or stroke — top versus bottom quartile.", src: SRC_ESC },
   19: { card: "stat", kicker: "EPIC-NORFOLK · 30-YEAR FOLLOW-UP", figure: "+18%", label: "The same direction, over thirty years.", src: SRC_ESC },
   21: { card: "statement", kicker: "WHY IT MATTERS", lines: ["MORE IN THE BLOOD,", "MORE EVENTS.", "THAT IS A DOSE-RESPONSE."] },
@@ -214,7 +214,7 @@ const CHAPTER_FOOTAGE = {
  */
 const FOOTAGE_AT = {
   2: "F_SUPERMARKET_AISLE", 5: "F_HEADLINES_SCROLL", 9: "F_BIRCH_FOREST",
-  16: "F_CENTRIFUGE_SPINNING", 17: "F_SCIENTIST_PIPETTE",
+  13: "F_ESC_CONGRESS_FLOOR", 16: "F_CENTRIFUGE_SPINNING", 17: "F_SCIENTIST_PIPETTE",
   23: "F_HOSPITAL_CORRIDOR", 27: "F_CROWD_STREET_SLOMO",
   30: "F_POURING_SWEETENER", 43: "F_NARROW_PIPE_INTERIOR", 44: "F_STIRRING_GLASS",
   52: "F_EMPTY_BREAKFAST_TABLE", 55: "F_BLOOD_DRAW_VIAL", 62: "F_SMOKE_ALARM_CEILING",
@@ -225,7 +225,24 @@ const FOOTAGE_AT = {
   110: "F_TOOTHBRUSH_MACRO", 113: "F_SUPERMARKET_AISLE",
 };
 
-const doc = { beats: {}, footage: {}, shorts: [], reveal: 54 };
+// THE TITLE IS A SEGMENT, NOT A BEAT. build.mjs inserts it silently after a
+// beat and holds it for `seconds` — it carries no narration. Authored as a
+// `title` CARD on beat 13 it consumed a narration line, and build.mjs then
+// hard-failed for want of a TITLE_SEGMENT. It lands after the cold open (beat
+// 6), where the brief's structure puts it: object and problem first, context at
+// 0:35, never at 0:00.
+const titleSegment = {
+  after: 6,
+  seconds: 3.2,
+  spec: {
+    card: "title",
+    kicker: "ScoopFeeds · Long-form",
+    lines: ["I'M A DOCTOR.", "HERE'S WHAT THAT", "XYLITOL STUDY SAYS."],
+    sub: "17,710 people, up to thirty years — and one detail in the study design that almost none of the coverage mentioned.",
+  },
+};
+
+const doc = { beats: {}, footage: {}, shorts: [], reveal: 54, titleSegment };
 for (const b of beats) {
   doc.beats[String(b.id)] = CARDS[b.id]
     ? { ...CARDS[b.id] }
