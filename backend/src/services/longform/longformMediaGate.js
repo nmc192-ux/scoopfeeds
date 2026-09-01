@@ -48,13 +48,48 @@ const AIGC_HOST = /content\.pexels\.com\/aigc-bundle\//i;
 const PEXELS_REAL = /videos\.pexels\.com\/video-files\/|images\.pexels\.com\/photos\//i;
 
 /**
+ * Is the LICENCE half of the gate on? `LONGFORM_LICENCE_GATE=off` turns it off.
+ *
+ * WHY A SWITCH AND NOT A DELETION. Without one, "don't worry about licensing
+ * for now" has no expression in the pipeline: the gate refuses every candidate
+ * whose licence is not a known token, and footage silently never lands. A
+ * research cut that cannot show real material is not a research cut. So the
+ * refusal becomes a recorded note instead of a rejection — and it is one env
+ * var to put back, rather than a diff to reconstruct.
+ *
+ * WHAT IT DOES NOT TOUCH, EVER. Only the licence-token rules relax. The
+ * AI-stock host check and the synthetic-humans check are NOT part of this and
+ * cannot be turned off by any flag, because they are not about rights: they are
+ * what keeps the film's own AI-provenance disclosure true. A bypass that let an
+ * `aigc-bundle` clip through would make the published statement "no
+ * AI-generated imagery" false, which is the one class of error this pipeline
+ * refuses to paper over. Resolution stays on for the same reason it always was
+ * — an upscale is a quality fact, not a rights one.
+ *
+ * Read at CALL time, not at import, so a run can flip it per invocation.
+ */
+export function licenceGateEnabled() {
+  return String(process.env.LONGFORM_LICENCE_GATE || "").toLowerCase() !== "off";
+}
+
+/** The licence problems that a disabled gate downgrades to notes. */
+export function licenceNotes(c = {}) {
+  return screenCandidate(c, { licenceGate: true })
+    .filter((e) => LICENCE_RULE.test(e));
+}
+
+/** Marks the errors `licenceGateEnabled() === false` is allowed to suppress. */
+const LICENCE_RULE = /^(licence |no licence)/;
+
+/**
  * Screen one candidate. Returns [] when usable, or the reasons it is not.
  *
  * REJECT, DON'T DOWNGRADE. There is deliberately no "accept with a warning"
  * path: a warning in a log nobody reads is how an AI clip ends up under a
- * disclosure that says there is none.
+ * disclosure that says there is none. The licence switch above is the single
+ * exception, it is explicit, and what it suppresses is recorded on the asset.
  */
-export function screenCandidate(c = {}) {
+export function screenCandidate(c = {}, { licenceGate = licenceGateEnabled() } = {}) {
   const errs = [];
   const url = String(c.url || "");
 
@@ -89,7 +124,10 @@ export function screenCandidate(c = {}) {
   if (c.synthetic && c.containsPeople) {
     errs.push("synthetic imagery containing people — generated environments are permitted, synthetic humans are not");
   }
-  return errs;
+  // The filter is applied LAST, over the complete set, so that adding a rule
+  // above cannot accidentally fall inside the bypass: a new error only becomes
+  // suppressible if its text matches LICENCE_RULE, which is a deliberate act.
+  return licenceGate ? errs : errs.filter((e) => !LICENCE_RULE.test(e));
 }
 
 /**
@@ -146,6 +184,24 @@ export function renderLicenses({ title, assets = [], acquiredOn = null } = {}) {
     lines.push("_None._");
   }
   lines.push("");
+
+  // A BYPASSED LICENCE IS STATED, NOT OMITTED. If the gate was off when these
+  // were acquired, the provenance record is the one place that fact survives to
+  // whoever reads it later — the env var is long gone by then. Listing them
+  // here is also what makes the bypass reversible in practice: this is the
+  // worklist of what to re-clear before the film goes anywhere public.
+  const unverified = assets.filter((a) => a.licenceUnverified);
+  if (unverified.length) {
+    lines.push("## Licence NOT verified", "");
+    lines.push(`**${unverified.length} asset(s) entered with \`LONGFORM_LICENCE_GATE=off\`.** `
+      + "Their licences were not checked against the allowed set. This film is not "
+      + "cleared for publication until each row below is resolved or replaced.", "");
+    lines.push("| Key | Claimed licence | Source | Why it would have been refused |", "|---|---|---|---|");
+    for (const a of unverified) {
+      lines.push(`| \`${a.key}\` | ${a.licence || "—"} | ${a.url} | ${(a.licenceNotes || []).join("; ") || "—"} |`);
+    }
+    lines.push("");
+  }
 
   lines.push("## AI-generated imagery", "");
   if (synthetic.length) {
