@@ -64,6 +64,8 @@ export async function renderFrames({ spec, dir, payoff, enterN, payN }) {
 // enough spec would hit the argv length limit — a failure that would look like
 // a spawn bug rather than a size one.
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const job = JSON.parse(readFileSync(process.argv[2], "utf8"));
-  process.stdout.write(String(await renderFrames(job)));
+  // NO COUNT ON STDOUT. The parent counts the PNGs it can see instead: node's
+  // stdout to a pipe is async, so a number written just before exit can be
+  // truncated, and the parent was reading "5" where the child meant "57".
+  await renderFrames(JSON.parse(readFileSync(process.argv[2], "utf8")));
 }

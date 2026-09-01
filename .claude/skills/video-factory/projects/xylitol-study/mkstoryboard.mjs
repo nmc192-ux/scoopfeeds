@@ -276,6 +276,13 @@ if (errs.length) {
   process.exit(1);
 }
 writeFileSync(path.join(HERE, "storyboard.json"), JSON.stringify(doc, null, 2) + "\n");
+// shorts.mjs reads shorts.json, NOT the storyboard — the cuts live in the
+// storyboard here because that is where the beat numbers are validated (a
+// short may not open on a chapter divider, may not span more than
+// MAX_SHORT_BEATS). Writing both from one source keeps them from drifting;
+// the scaffold's empty shorts.json meant the shorts step found nothing to cut
+// after a full film had already been built and scored.
+writeFileSync(path.join(HERE, "shorts.json"), JSON.stringify(doc.shorts, null, 2) + "\n");
 const cards = Object.values(doc.beats).filter((b) => b.card);
 const byType = {};
 for (const c of cards) byType[c.card] = (byType[c.card] || 0) + 1;

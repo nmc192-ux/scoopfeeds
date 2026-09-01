@@ -28,7 +28,7 @@
 // Every segment is encoded with identical codecs/rate so the concat demuxer can
 // join them without re-encoding the whole film.
 
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from "fs";
 import { execFile, spawnSync } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -268,10 +268,18 @@ async function renderCardFrames(spec, dir, payoff) {
   const payN = Math.max(2, Math.round(PAYOFF_SECS * FPS));
   const jobFile = path.join(dir, "_job.json");
   writeFileSync(jobFile, JSON.stringify({ spec, dir, payoff, enterN, payN }));
-  const { stdout } = await execFileP(process.execPath, [FRAME_WORKER, jobFile], { maxBuffer: 1 << 20 });
+  await execFileP(process.execPath, [FRAME_WORKER, jobFile], { maxBuffer: 1 << 20 });
   rmSync(jobFile, { force: true });
-  const n = parseInt(String(stdout).trim(), 10);
-  if (!Number.isFinite(n)) throw new Error(`frame worker for ${dir} returned ${JSON.stringify(stdout)}`);
+  // COUNT THE FILES, DO NOT TRUST THE CHILD'S STDOUT. This parsed a number the
+  // worker printed, and node's stdout to a pipe is ASYNC: a child that exits
+  // immediately after writing can have its last write truncated, so parseInt
+  // read PREFIXES — "5" out of "57". The same 46 cards reported 450 frames on
+  // one run and 492 on the next while writing identical output. The frames were
+  // always right; only the number was wrong, which is the kind of bug that
+  // quietly discredits every figure printed near it.
+  const n = readdirSync(dir).filter((f) => f.endsWith(".png")).length;
+  const want = payoff ? enterN + payN : enterN;
+  if (n !== want) throw new Error(`frame worker wrote ${n} frames to ${dir}, expected ${want}`);
   return n;
 }
 

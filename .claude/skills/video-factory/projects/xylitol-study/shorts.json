@@ -1,1 +1,37 @@
-[]
+[
+  {
+    "name": "13-minutes",
+    "from": 49,
+    "to": 55,
+    "title": "The 13 Minutes Nobody Reported",
+    "hook": "The study measured xylitol after an overnight fast. Its half-life is thirteen minutes."
+  },
+  {
+    "name": "dogs",
+    "from": 94,
+    "to": 100,
+    "title": "Xylitol and Dogs: The Part Nobody Argues About",
+    "hook": "One or two pieces of sugar-free gum can crash a ten-kilo dog's blood sugar."
+  },
+  {
+    "name": "label-gap",
+    "from": 88,
+    "to": 92,
+    "title": "You Are Not Allowed To Know How Much",
+    "hook": "Sugar alcohols are not required to be listed individually on the label."
+  },
+  {
+    "name": "five-cohorts",
+    "from": 30,
+    "to": 34,
+    "title": "Five Cohorts. Two Sweeteners. One Direction.",
+    "hook": "Two sugar alcohols, two continents, five cohorts — all pointing the same way."
+  },
+  {
+    "name": "dose",
+    "from": 78,
+    "to": 81,
+    "title": "One Gram Or Thirty?",
+    "hook": "The dose that moved platelets in a lab is not the dose in your pocket."
+  }
+]
