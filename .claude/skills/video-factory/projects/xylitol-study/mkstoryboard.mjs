@@ -242,7 +242,7 @@ const titleSegment = {
   },
 };
 
-const doc = { beats: {}, footage: {}, shorts: [], reveal: 54, titleSegment };
+const doc = { beats: {}, shorts: [], reveal: 54, titleSegment };
 for (const b of beats) {
   doc.beats[String(b.id)] = CARDS[b.id]
     ? { ...CARDS[b.id] }
@@ -252,9 +252,12 @@ for (const b of beats) {
 for (const b of Object.values(doc.beats)) {
   if (b.kicker === "") delete b.kicker;
 }
-for (const [id, b] of Object.entries(doc.beats)) {
-  if (b.footage) doc.footage[id] = { file: `footage/${b.footage}.mp4` };
-}
+// NO FOOTAGE TABLE. build.mjs resolves a clip as `out/footage/${file}.mp4`, so
+// a table entry of "footage/KEY.mp4" resolves to out/footage/footage/KEY.mp4.mp4
+// — every shot an empty input, every beat black. The interpreter already derives
+// the mechanical default ({ file: KEY, in: 1 }) from each beat's own `footage`
+// key, which is exactly right; the table only exists to add refinements (an
+// in-point, a grade, a crop) and this film needs none yet.
 // The film uses no `doc` cards — see the D5 note above. Nothing to capture, so
 // nothing here is waiting on Chromium.
 
