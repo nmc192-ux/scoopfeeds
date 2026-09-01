@@ -32,10 +32,31 @@ esac; }
 # PREFLIGHT. Fail here, naming what is missing, rather than 40 takes into a
 # narration run or at the first ffmpeg call.
 step "preflight"
+# CHECK WHAT THE ENGINE CHECKS, NOT JUST THE SHELL. narrate.mjs has its own
+# loadEnv that reads backend/.env then ~/.scoopfeeds.env, so a key living in the
+# .env file is perfectly usable even though it is absent from the environment.
+# The first version of this preflight tested $ELEVENLABS_API_KEY alone and
+# refused to start a run that would have worked — and a false blocker is just as
+# expensive as a missing one when the machine that can do the work is not the
+# machine you are sitting at.
+REPO="$(cd "$HERE/../../../../.." && pwd)"
 missing=0
-for k in ELEVENLABS_API_KEY; do
-  [ -n "${!k:-}" ] || { echo "  ✗ $k not set (check backend/.env or ~/.scoopfeeds.env)"; missing=1; }
-done
+have_key() {
+  [ -n "${ELEVENLABS_API_KEY:-}" ] && { echo "  key: environment"; return 0; }
+  for f in "$REPO/backend/.env" "$HOME/.scoopfeeds.env"; do
+    if [ -f "$f" ] && grep -qE '^[[:space:]]*ELEVENLABS_API_KEY[[:space:]]*=[[:space:]]*[^[:space:]]' "$f"; then
+      echo "  key: $f"; return 0
+    fi
+  done
+  return 1
+}
+if ! have_key; then
+  echo "  X ELEVENLABS_API_KEY found in none of:"
+  echo "      the environment"
+  echo "      $REPO/backend/.env"
+  echo "      $HOME/.scoopfeeds.env"
+  missing=1
+fi
 [ -f "$HERE/storyboard.json" ] || { echo "  ✗ storyboard.json missing"; missing=1; }
 [ -f "$HERE/beats.json" ] || { echo "  ✗ beats.json missing"; missing=1; }
 # The scaffold's TEMPLATE storyboard is a loaded gun: storyboard.json wins while
