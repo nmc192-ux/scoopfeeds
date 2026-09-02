@@ -210,10 +210,28 @@ for (const key of keys) {
     continue;
   }
 
-  const pick = eligible[0];
+  // VIDEO FIRST, STILLS ONLY IF THERE IS NO CLIP.
+  //
+  // searchFootage ranks by PROVENANCE alone, and Pexels video and Pexels photos
+  // are both `platform` — so the tie broke on date and a still frequently won a
+  // slot a clip was available for. That is how a footage-led cut ends up full of
+  // held photographs. Only photos carry mediaKind, so anything without it came
+  // from a video search.
+  //
+  // This is the source ladder from the brief, and the rung is recorded per key
+  // rather than inferred later: rung 3 is stock video, rung 4 stock stills.
+  // Rungs 1-2 — the actual thing — are not reachable from these sources at all,
+  // which is itself the finding.
+  const isPhoto = (c) => c.mediaKind === "photo";
+  const clips = eligible.filter((c) => !isPhoto(c));
+  const stills = eligible.filter(isPhoto);
+  const pick = clips[0] || stills[0];
+  const rung = isPhoto(pick) ? 4 : 3;
+
   if (DRY) {
-    results.push({ key, status: "dry", q, source: pick.source, title: pick.title });
-    process.stdout.write("?");
+    results.push({ key, status: "dry", q, source: pick.source, title: pick.title,
+                   rung, clips: clips.length, stills: stills.length });
+    process.stdout.write(clips.length ? "?" : "s");
     continue;
   }
 
@@ -221,9 +239,12 @@ for (const key of keys) {
     const url = (await resolveDownloadFor(pick)) || pick.download || pick.url;
     const bytes = await download(url, dest);
     ledger[key] = { ok: true, source: pick.source, provenance: pick.provenance,
-                    licence: pick.licence, title: pick.title, url: pick.url, bytes, query: q };
-    results.push({ key, status: "got", source: pick.source, mb: (bytes / 1024 ** 2).toFixed(1) });
-    process.stdout.write(".");
+                    licence: pick.licence, title: pick.title, url: pick.url, bytes, query: q,
+                    rung, mediaKind: isPhoto(pick) ? "photo" : "video",
+                    alternatives: { clips: clips.length, stills: stills.length } };
+    results.push({ key, status: "got", source: pick.source, rung,
+                   mb: (bytes / 1024 ** 2).toFixed(1) });
+    process.stdout.write(rung === 3 ? "." : "s");
   } catch (e) {
     results.push({ key, status: "failed", q, why: e.message });
     process.stdout.write("!");
@@ -241,5 +262,30 @@ console.log(`  ${by("got").length} downloaded, ${by("cached").length} already ha
 for (const r of results.filter((x) => x.status === "none" || x.status === "failed")) {
   console.log(`  x ${r.key}  "${r.q}"  ${r.why || (r.refused || []).join(" | ") || "no eligible candidate"}`);
 }
+
+// THE LADDER, PER KEY. The brief asks which rung each beat landed on, and a run
+// that quietly settles for stills everywhere should be legible as exactly that
+// from the output rather than from watching the film.
+const rungOf = (k) => ledger[k]?.rung ?? (NO_STOCK[k] ? "—" : "?");
+const RUNG_NAME = { 3: "stock video", 4: "stock still" };
+console.log(`\nSOURCE LADDER — rung per key`);
+console.log(`  (1 real video of the actual thing · 2 real photos of it · 3 stock video · 4 stock stills · 5 nothing)\n`);
+console.log(`  RUNG  KEY                          QUERY`);
+for (const k of allKeys) {
+  const r = rungOf(k);
+  const q = NO_STOCK[k] ? "— fenced: needs real material —" : (QUERIES[k] || "(no query)");
+  const alt = ledger[k]?.alternatives;
+  const note = alt && r === 4 && alt.clips === 0 ? "  [no clip existed]" : "";
+  console.log(`   ${String(r).padStart(2)}   ${k.padEnd(28)} ${q}${note}`);
+}
+const byRung = (n) => allKeys.filter((k) => ledger[k]?.rung === n).length;
+console.log(`\n  rung 3 (video): ${byRung(3)}   rung 4 (stills): ${byRung(4)}   `
+  + `fenced: ${refusedByPolicy.length}   unfilled: ${allKeys.filter((k) => !ledger[k]?.ok && !NO_STOCK[k]).length}`);
+if (byRung(4)) {
+  console.log(`  Stills get a slow push at build time — nothing sits still — but a rung-4`);
+  console.log(`  key is a beat where no clip existed, not a preference.`);
+}
+console.log(`\n  Nothing landed on rungs 1-2: no source wired here serves "the actual thing"`);
+console.log(`  (the congress, the paper, the correspondence). Those are built, not found.`);
 console.log(`\n  Provenance is recorded per clip in out/footage/_acquired.json.`);
 console.log(`  Run slates.mjs next — it fills only the keys still without a clip.\n`);

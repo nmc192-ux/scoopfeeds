@@ -41,6 +41,7 @@ import { findAnchor, clampReveal } from "./wordTimings.mjs";
 import { cardWords } from "./cardWords.mjs";
 import { parallaxFilter, validateParallax, FG_HEIGHT_FRAC } from "./parallax.mjs";
 import { srtTime } from "./srtTime.mjs";
+import { captionLayer } from "./captionBurn.mjs";
 import { loadStatement } from "./statement.mjs";
 import { useAsset, licenseLines } from "./assetRegistry.mjs";
 import { ASSETS } from "./_deps.mjs";
@@ -128,6 +129,25 @@ async function headerDur(file) {
 // for a second that does not exist; `-ss` past the end yields an empty input and
 // the shot renders black. `-stream_loop -1` already loops the source, so wrapping
 // the offset is the behaviour the flags were chosen for.
+/**
+ * Caption bookkeeping.
+ *
+ * A caption that silently does not appear is the failure this records. The
+ * build reports, at the end, how many beats got word-synced captions and how
+ * many did not and why — because "the film has no captions" and "the film has
+ * captions on 3 of 115 beats" look identical while it renders.
+ */
+const capStats = { beats: new Set(), words: 0, skipped: new Map() };
+function noteCaption(p, cap) {
+  if (cap.skipped) {
+    if (!capStats.skipped.has(cap.skipped)) capStats.skipped.set(cap.skipped, new Set());
+    capStats.skipped.get(cap.skipped).add(p.beat);
+  } else if (cap.words) {
+    capStats.beats.add(p.beat);
+    capStats.words += cap.words;
+  }
+}
+
 const _durCache = new Map();
 function clipDuration(file) {
   if (_durCache.has(file)) return _durCache.get(file);
@@ -138,9 +158,44 @@ function clipDuration(file) {
   return d;
 }
 
+/**
+ * NOTHING STATIC. Every still gets a slow push.
+ *
+ * Two ways a frame used to sit dead still, and both looked like the same bug:
+ *
+ *   · a photo beat whose storyboard entry authored no `ken` fell through to a
+ *     plain `scale=1920:1080` — the default was "no motion", so a still was
+ *     static unless someone remembered to say otherwise;
+ *   · a Pexels PHOTO downloaded to `<key>.mp4` takes the clip branch, which has
+ *     no motion path at all. `-stream_loop -1` on a single frame is a held
+ *     frame for the whole shot.
+ *
+ * Alternating in/out rather than always pushing in matters when a key recurs:
+ * this film reuses some keys nine times, and nine identical pushes on the same
+ * image read as one shot repeated. This is a PUSH, never a pan — the frame
+ * doesn't pan (video-pipeline.md §2), the content moves within it.
+ */
+const KEN_CYCLE = ["in", "out"];
+function autoKen(p) {
+  const seed = (Number(p.beat) || 0) + Math.round((p.audioStart || 0) * 10);
+  return KEN_CYCLE[Math.abs(seed) % KEN_CYCLE.length];
+}
+
 /** A still or footage shot. */
 async function shotStill(p) {
-  const { image, clip, grade, crop, ken, zoom0, punch, pan, seconds, out } = p;
+  const { image, grade, crop, zoom0, punch, pan, seconds, out } = p;
+  let { clip, ken } = p;
+  // A "clip" with no duration is a still that was saved with a video extension
+  // — which is exactly what acquisition produces when a search returns a photo.
+  // Route it to the image branch so it gets a push instead of being frozen.
+  let stillFromClip = null;
+  if (clip && clipDuration(clip) === 0) { stillFromClip = clip; clip = null; }
+  const src = image || stillFromClip;
+  // `p.static` is the ONE way to ask for a genuinely motionless frame, and only
+  // a resumed card frame does: it is a held CARD, and cards do not pan. Without
+  // this distinction, "unspecified motion" and "deliberately none" are both a
+  // falsy `ken`, and giving every still a push would start animating card holds.
+  if (src && !p.static && !ken) ken = autoKen(p);
   let clipIn = p.clipIn || 0;
   if (clip) {
     const d = clipDuration(clip);
@@ -185,12 +240,21 @@ async function shotStill(p) {
       phaseTotal: ph ? Math.max(2, Math.round(ph.total * FPS)) : null,
     });
   } else {
-    args.push("-loop", "1", "-framerate", String(FPS), "-i", image);
-    const vf = ken ? kenFilter(ken, frames, zoom0 || 1.0) : `scale=1920:1080,format=yuv420p`;
+    args.push("-loop", "1", "-framerate", String(FPS), "-i", src);
+    // ken is guaranteed above — the `: scale` fallback that made a still static
+    // is gone deliberately, so a missing ken can no longer mean "no motion".
+    const vf = p.static ? `scale=1920:1080,format=yuv420p`
+      : kenFilter(ken || "in", frames, zoom0 || 1.0);
     v = `[0:v]${vf},trim=duration=${seconds},setpts=PTS-STARTPTS[v]`;
   }
-  args.push("-filter_complex", v,
-    "-map", "[v]", "-an", "-t", String(seconds),
+  const cap = await captionLayer({
+    shot: p, nextInput: args.filter((a) => a === "-i").length,
+    inLabel: "v", wordsDir: P("out/capwords"),
+  });
+  noteCaption(p, cap);
+  args.push(...cap.args);
+  args.push("-filter_complex", v + (cap.filter ? `;${cap.filter}` : ``),
+    "-map", `[${cap.label}]`, "-an", "-t", String(seconds),
     ...VENC, "-movflags", "+faststart", out);
   await ff(args);
   return out;
@@ -213,7 +277,9 @@ async function shotCard(p) {
     const last = hadPayoff
       ? path.join(dir, `p${String(payN - 1).padStart(3, "0")}.png`)
       : path.join(dir, `e${String(enterN - 1).padStart(3, "0")}.png`);
-    return shotStill({ ...p, image: last, ken: null, clip: null, fg: null, parallax: null });
+    // `static: true` — a resumed card is already finished animating, and a card
+    // frame must not drift. See the p.static note in shotStill.
+    return shotStill({ ...p, image: last, ken: null, static: true, clip: null, fg: null, parallax: null });
   }
 
   const hold1 = Math.max(0.04, revealAt - ENTER_SECS);
@@ -238,7 +304,13 @@ async function shotCard(p) {
   const filter = `${chains.join(";")};${labels}concat=n=${parts}:v=1:a=0,`
     + `trim=duration=${seconds.toFixed(3)},setpts=PTS-STARTPTS[v]`;
 
-  args.push("-filter_complex", filter, "-map", "[v]", "-an",
+  const cap = await captionLayer({
+    shot: p, nextInput: parts, inLabel: "v", wordsDir: P("out/capwords"),
+  });
+  noteCaption(p, cap);
+  args.push(...cap.args);
+  args.push("-filter_complex", filter + (cap.filter ? `;${cap.filter}` : ``),
+    "-map", `[${cap.label}]`, "-an",
     "-t", String(seconds), ...VENC, "-movflags", "+faststart", out);
   await ff(args);
   return out;
@@ -633,6 +705,25 @@ async function main() {
   });
   if (held.length) console.log(`readability holds added to ${held.length} cards (+${held.reduce((a,h)=>a+h.add,0).toFixed(1)}s total)`);
   console.log(`built ${plan.length} shots in ${((Date.now() - t1) / 1000).toFixed(0)}s`);
+
+  // CAPTIONS, STATED. A film with captions on three beats and a film with none
+  // look identical from a progress counter, and both look like success.
+  const capTotal = new Set(plan.filter((x) => x.text && x.audio).map((x) => x.beat)).size;
+  if (capStats.beats.size) {
+    console.log(`captions   : ${capStats.beats.size}/${capTotal} narrated beats, ${capStats.words} word overlays`);
+  }
+  if (capStats.skipped.size) {
+    for (const [why, beats] of capStats.skipped) {
+      const ids = [...beats].sort((x, y) => x - y);
+      console.log(`captions   : ${ids.length} beat(s) WITHOUT captions — ${why}`);
+      console.log(`             beats ${ids.slice(0, 20).join(", ")}${ids.length > 20 ? ` …+${ids.length - 20}` : ""}`);
+    }
+    console.log(`             No timings were invented for these. Re-run narrate.mjs to`);
+    console.log(`             produce .words.json sidecars, then rebuild.`);
+  }
+  if (!capStats.beats.size && capTotal) {
+    console.log(`captions   : NONE BURNED. The film has no on-screen text.`);
+  }
 
   // ── 4. concat ───────────────────────────────────────────────────────────
   const listFile = P("out/concat.txt");

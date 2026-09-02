@@ -475,6 +475,46 @@ app.use("/", tiktokCallbackRouter);
 //     because the HTML referencing newly-deployed asset hashes never updates.
 //     The /assets/ predicate is the safety boundary; Vite never puts
 //     non-hashed files there.
+// ── Screening room ────────────────────────────────────────────────────────
+//
+// Unlisted review copies of films, reachable on this domain so a cut can be
+// watched without moving a 40 MB file by hand.
+//
+// SERVED FROM THE PERSISTENT DIR, NOT FROM dist/. The obvious home is
+// frontend/dist, which is already served at the site root — but `vite build`
+// empties that directory, so a film placed there is destroyed by the next
+// deploy. SCOOP_PERSISTENT_DATA_DIR is outside the deploy directory for exactly
+// this reason (see the DB-location note in CLAUDE.md).
+//
+// UNLISTED, NOT SECURE. Access control is the unguessable directory name and
+// nothing else, so anyone holding the link can watch. That is the right trade
+// for a review link and the wrong one for anything that must not leak: no
+// listing is served, so a URL cannot be discovered by browsing, but a leaked
+// URL is a leaked film. Unpublished cuts should be removed once reviewed.
+const screeningDir = path.join(
+  process.env.SCOOP_PERSISTENT_DATA_DIR || "/var/lib/scoop", "screening");
+if (existsSync(screeningDir)) {
+  app.use("/screening", express.static(screeningDir, {
+    // `index.html` is the little player page publish-screening.mjs writes beside
+    // the file, so /screening/<token>/ opens a video rather than downloading it.
+    // This is NOT what would enable a directory listing — express.static never
+    // lists directories at all (that is serve-index, which is not mounted).
+    // Setting it to false only breaks the player page, which is how the first
+    // version of this mount 404'd the exact URL it told people to open.
+    index: ["index.html"],
+    dotfiles: "deny",
+    fallthrough: false,  // a miss is a 404 here, never the SPA's index.html
+    maxAge: 0,
+    setHeaders(res) {
+      // Authoritative for crawlers that never read robots.txt, and it covers
+      // the file itself rather than a page linking to it.
+      res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive, noimageindex");
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("Referrer-Policy", "no-referrer");
+    },
+  }));
+}
+
 const distDir = path.join(__dirname, "../frontend/dist");
 if (existsSync(distDir)) {
   app.use(express.static(distDir, {

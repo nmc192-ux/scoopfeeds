@@ -48,28 +48,63 @@ const keys = [...new Set(Object.values(FOOTAGE).map((f) => f.file))].sort();
 const SECONDS = 20;
 const esc = (t) => String(t).replace(/[\\':]/g, (c) => `\\${c}`);
 
-let made = 0, kept = 0;
+/**
+ * Keys awaiting real material, which must NOT announce themselves on screen.
+ *
+ * A magenta card reading PLACEHOLDER — NOT FOR PUBLICATION is the right thing
+ * for a key nobody has sourced yet: it is loud, it is unmistakable in a review
+ * cut, and it cannot be mistaken for a finished shot.
+ *
+ * It is the WRONG thing for a beat that is deliberately fenced off. Those beats
+ * are waiting on the actual congress, the actual paper, the actual headlines —
+ * a decision, not an oversight — and the film is watchable while they wait. A
+ * caption still runs over them and the narration still carries the line, so a
+ * plain dark frame reads as an intentional cut to black. A magenta card
+ * shouting its own filename reads as a broken render, and makes the whole cut
+ * unwatchable for the sake of two beats.
+ *
+ * Kept in step with acquire.mjs's NO_STOCK by name. Duplicated deliberately:
+ * these two scripts run independently, and importing one into the other to
+ * share two strings would couple a placeholder generator to a downloader.
+ */
+const FENCED = new Set(["F_ESC_CONGRESS_FLOOR", "F_HEADLINES_SCROLL"]);
+
+let made = 0, kept = 0, dark = 0;
 for (const key of keys) {
   const file = path.join(OUT, `${key}.mp4`);
   if (existsSync(file) && !FORCE) { kept++; process.stdout.write("·"); continue; }
-  const vf = [
-    `drawtext=fontfile=${FONT}:text='${esc(key)}':fontcolor=white:fontsize=58`
-      + `:x=(w-text_w)/2:y=(h-text_h)/2-60`,
-    `drawtext=fontfile=${FONT}:text='${esc("PLACEHOLDER - NOT FOR PUBLICATION")}':fontcolor=white`
-      + `:fontsize=34:x=(w-text_w)/2:y=(h-text_h)/2+40`,
-  ].join(",");
+  const fenced = FENCED.has(key);
+  // Near-black, not pure black: it matches the film's own base colour, so the
+  // cut reads as the frame the caption sits on rather than as dropped signal.
+  const bg = fenced ? "0x090706" : "0x8B1A5A";
+  const vf = fenced
+    ? null
+    : [
+        `drawtext=fontfile=${FONT}:text='${esc(key)}':fontcolor=white:fontsize=58`
+          + `:x=(w-text_w)/2:y=(h-text_h)/2-60`,
+        `drawtext=fontfile=${FONT}:text='${esc("PLACEHOLDER - NOT FOR PUBLICATION")}':fontcolor=white`
+          + `:fontsize=34:x=(w-text_w)/2:y=(h-text_h)/2+40`,
+      ].join(",");
   execFileSync(ffmpegPath, [
     "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
-    "-f", "lavfi", "-i", `color=c=0x8B1A5A:s=1920x1080:d=${SECONDS}:r=30`,
-    "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
+    "-f", "lavfi", "-i", `color=c=${bg}:s=1920x1080:d=${SECONDS}:r=30`,
+    ...(vf ? ["-vf", vf] : []),
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
     "-pix_fmt", "yuv420p", file,
   ]);
-  made++; process.stdout.write(".");
+  made++; if (fenced) dark++;
+  process.stdout.write(fenced ? "▪" : ".");
 }
 process.stdout.write("\n");
 
 console.log(`\n${keys.length} distinct footage keys`);
 console.log(`  ${made} slate(s) written, ${kept} existing file(s) left alone${FORCE ? " (--force overwrote)" : ""}`);
+if (dark) {
+  console.log(`  ${dark} fenced key(s) written as PLAIN DARK frames, not labelled placeholders:`);
+  for (const k of keys.filter((k) => FENCED.has(k))) console.log(`      ${k}`);
+  console.log(`  Those beats keep their narration and captions and cut to black until they`);
+  console.log(`  have real material. They never announce themselves on screen.`);
+}
 if (kept && !FORCE) console.log(`  '·' is a file that already existed — real footage is never clobbered.`);
 console.log(`\n  These are PLACEHOLDERS. A build over them proves the assembly, the SRT and`);
 console.log(`  the real runtime — it is not a cut of the film, and must not be published.\n`);
