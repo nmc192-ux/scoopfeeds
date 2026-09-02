@@ -57,6 +57,7 @@ export const CAPTION_DEFAULTS = {
   gapBreak: 0.45,   // a pause this long is a natural caption boundary
   holdAfter: 0.28,  // how long the finished chunk stays up after its last word
   minChunk: 0.55,   // a chunk shorter than this is a flash; merge it forward
+  minGap: 0.10,     // clear screen time between one caption leaving and the next
 };
 
 /**
@@ -113,6 +114,29 @@ export function planCaptions(words, opt = {}) {
       last.words = last.words.concat(c.words);
       last.end = c.end;
     } else out.push(c);
+  }
+
+  // ONE CAPTION ON SCREEN AT A TIME.
+  //
+  // `holdAfter` extends a chunk past its last spoken word so the caption does
+  // not vanish the instant the word ends. Nothing was stopping that extension
+  // from running past the START of the next chunk — and ordinary speech has
+  // word gaps well under 0.28s, so it did, constantly. Both groups were then
+  // enabled at once and the film showed a line still sitting there while its
+  // replacement drew over it.
+  //
+  // Clamping here rather than at render time keeps the guarantee in the planner
+  // where it can be tested: after this loop, chunk[i].end < chunk[i+1].start for
+  // every i, with a visible gap between them.
+  for (let i = 0; i < out.length - 1; i++) {
+    const limit = out[i + 1].start - o.minGap;
+    if (out[i].end > limit) out[i].end = limit;
+    // A chunk whose last word runs into the next chunk's start cannot be given
+    // the gap without hiding the word while it is still being spoken. Keep the
+    // word visible and let the gap be whatever is left; this is rare and the
+    // alternative is a caption that disappears mid-utterance.
+    const lastWordEnd = out[i].words[out[i].words.length - 1].end;
+    if (out[i].end < lastWordEnd) out[i].end = Math.min(lastWordEnd, out[i + 1].start);
   }
   return out;
 }

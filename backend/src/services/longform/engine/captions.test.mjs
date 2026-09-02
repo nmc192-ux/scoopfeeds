@@ -38,9 +38,14 @@ test("every caption time is traceable to a word time, never to a duration", () =
   for (const c of chunks) {
     assert.ok(starts.has(c.start), `chunk start ${c.start} is not any word's start`);
     const last = c.words[c.words.length - 1];
-    assert.equal(+(c.end - CAPTION_DEFAULTS.holdAfter).toFixed(3), last.end,
-      "chunk end must be its last word's end plus the hold, not a share of the beat");
     assert.ok(ends.has(last.end));
+    // The end is the last word's end plus the hold, EXCEPT where the clamp that
+    // keeps captions from overlapping pulled it in. Either way it is derived
+    // from word times — never from a share of the beat's duration.
+    assert.ok(c.end >= last.end - 1e-6,
+      `chunk ends at ${c.end} before its last word finishes at ${last.end}`);
+    assert.ok(c.end <= last.end + CAPTION_DEFAULTS.holdAfter + 1e-6,
+      `chunk holds until ${c.end}, longer than its last word's end plus holdAfter`);
   }
 });
 
@@ -66,6 +71,63 @@ test("a sentence end closes the caption even mid-size", () => {
   const chunks = planCaptions(say("it stops. now this continues onward"));
   assert.equal(chunks[0].words[chunks[0].words.length - 1].word, "stops.",
     "a full stop must end the caption rather than running into the next sentence");
+});
+
+// THIS TEST USED TO COMPARE THE WRONG QUANTITY and that is why the film shipped
+// with two captions on screen at once. It checked the next chunk's start against
+// the previous chunk's LAST WORD END — but a chunk is displayed until
+// `chunk.end`, which is the last word end PLUS holdAfter. The gap it verified
+// was not the gap the renderer uses.
+test("a caption is gone before the next one appears", () => {
+  for (const text of [
+    "a b c d e f g h i j k l",
+    "so here is the actual finding and here is what it means",
+    "one. two. three. four.",
+  ]) {
+    const chunks = planCaptions(say(text));
+    for (let i = 1; i < chunks.length; i++) {
+      assert.ok(chunks[i - 1].end <= chunks[i].start,
+        `caption ${i - 1} is still on screen at ${chunks[i - 1].end} when caption ${i} `
+        + `appears at ${chunks[i].start} — they overlap on screen`);
+    }
+  }
+});
+
+test("there is clear time between captions wherever the speech allows it", () => {
+  const chunks = planCaptions(say("so here is the actual finding and what it means"));
+  assert.ok(chunks.length > 1, "need at least two chunks to test the gap");
+  for (let i = 1; i < chunks.length; i++) {
+    const prev = chunks[i - 1];
+    const gap = chunks[i].start - prev.end;
+    const lastWordEnd = prev.words[prev.words.length - 1].end;
+    // The full gap is only available when the previous caption's last word has
+    // finished early enough to give it. Where the speech runs right up to the
+    // next caption, keeping the word visible wins and the gap shrinks — but it
+    // must never go negative, which is the overlap defect.
+    const affordable = chunks[i].start - CAPTION_DEFAULTS.minGap >= lastWordEnd;
+    if (affordable) {
+      assert.ok(gap >= CAPTION_DEFAULTS.minGap - 1e-6,
+        `only ${gap.toFixed(3)}s between captions ${i - 1} and ${i} where a full gap was possible`);
+    } else {
+      assert.ok(gap >= -1e-6, `captions ${i - 1} and ${i} overlap by ${(-gap).toFixed(3)}s`);
+    }
+  }
+});
+
+test("clamping never hides a word while it is still being spoken", () => {
+  // The gap must not be bought by cutting a caption before its last word ends.
+  for (const text of ["a b c d e f g h", "one two three four five six seven"]) {
+    for (const step of [0.12, 0.2, 0.35]) {
+      const chunks = planCaptions(say(text, {}).map((w, i) => ({
+        ...w, start: +(i * step).toFixed(3), end: +(i * step + step * 0.8).toFixed(3),
+      })));
+      for (const c of chunks) {
+        const last = c.words[c.words.length - 1];
+        assert.ok(c.end >= last.end - 1e-6,
+          `caption ends at ${c.end} but its last word is still being said until ${last.end}`);
+      }
+    }
+  }
 });
 
 test("chunks are ordered and never overlap in their word spans", () => {

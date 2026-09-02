@@ -40,6 +40,7 @@ import { ffmpegPath, P, loadStoryboard, projectSlug } from "./_deps.mjs";
 import { findAnchor, clampReveal } from "./wordTimings.mjs";
 import { cardWords } from "./cardWords.mjs";
 import { parallaxFilter, validateParallax, FG_HEIGHT_FRAC } from "./parallax.mjs";
+import { kenFilter } from "./ken.mjs";
 import { srtTime } from "./srtTime.mjs";
 import { captionLayer } from "./captionBurn.mjs";
 import { loadStatement } from "./statement.mjs";
@@ -80,23 +81,6 @@ const MAX_HOLD = 1.8;       // most we will extend a shot to make it readable
 
 const ff = (args) => execFileP(FFMPEG, ["-y", "-nostdin", "-hide_banner", "-loglevel", "error", ...args],
   { maxBuffer: 1 << 26 });
-
-/** Ken Burns. `z0` lets a punch-in start already tight, so it reads as a new shot. */
-function kenFilter(mode, frames, z0 = 1.0) {
-  const Z = z0 + 0.16;
-  const zin = `min(${z0}+(${(Z - z0).toFixed(4)}/${frames})*on,${Z})`;
-  const zout = `max(${Z}-(${(Z - z0).toFixed(4)}/${frames})*on,${z0})`;
-  const cx = `iw/2-(iw/zoom/2)`, cy = `ih/2-(ih/zoom/2)`;
-  const map = {
-    in: { z: zin, x: cx, y: cy },
-    out: { z: zout, x: cx, y: cy },
-    left: { z: `${Z}`, x: `(iw-iw/zoom)*(1-on/${frames})`, y: cy },
-    right: { z: `${Z}`, x: `(iw-iw/zoom)*(on/${frames})`, y: cy },
-  };
-  const m = map[mode] || map.in;
-  return `scale=2560:1440:force_original_aspect_ratio=increase,crop=2560:1440,`
-    + `zoompan=z='${m.z}':x='${m.x}':y='${m.y}':d=${frames}:s=1920x1080:fps=${FPS},format=yuv420p`;
-}
 
 const AENC = ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"];
 const VENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18",

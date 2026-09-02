@@ -98,13 +98,25 @@ export async function captionLayer({ shot, nextInput, inLabel = "v", wordsDir, s
     // the same distance from the frame edge as a one-line caption's. Growing
     // downward would push longer captions toward (and off) the bottom.
     const yTop = 1080 - CAPTION_BOX.bottomPad - L.lines * CAPTION_BOX.lineH;
-    // The PNG is uncropped, so shift by the ink offset to place the GLYPH where
-    // the layout put it rather than the render box's corner.
+
+    // INK BOUNDS ARE HORIZONTAL-ONLY. Subtracting `inkTop` here is what made
+    // words on one line sit at different heights: ink is measured per word, so
+    // "gum" (descender) and "cost" (none) have different top edges, and
+    // aligning their INK tops shoves one up relative to the other. Every word
+    // ends up hung from its own tallest pixel instead of from a shared baseline.
+    //
+    // The render canvas is the shared baseline. Every word is drawn into a box
+    // of the same height with `alignItems: center`, so identical font metrics
+    // put every glyph on the same baseline within its own PNG. Placing by the
+    // CANVAS therefore aligns them by construction, and no metrics need to be
+    // read back out of the font. Horizontal placement still uses inkLeft, where
+    // per-word measurement is exactly what is wanted.
+    const yCanvas = yTop + box.y - Math.round((r.canvasH - CAPTION_BOX.lineH) / 2);
     args.push("-i", r.file);
     placements.push({
       start: pl.start, chunkEnd: pl.chunkEnd,
       x: x0 + box.x - r.inkLeft,
-      y: yTop + box.y - r.inkTop,
+      y: yCanvas,
     });
   });
 

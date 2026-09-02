@@ -109,3 +109,58 @@ test("wordsFileFor answers about the file that actually exists", () => {
   assert.equal(wordsFileFor(path.join(TMP, "ghost.mp3")), null);
   assert.equal(wordsFileFor(null), null);
 });
+
+// ── Defect 2: words on a line must share a baseline ─────────────────────────
+//
+// The first version positioned each word by subtracting its own `inkTop`. Ink is
+// measured per word, so a word with a descender has a different top edge from
+// one without, and aligning ink tops hangs every word from its own tallest
+// pixel. On screen: words in the same line sitting at different heights.
+
+test("every word on a line lands at the same y", async () => {
+  // "gum" has a descender, "cost" has none, "Xylitol" has an ascender and a
+  // dot — exactly the mix that exposed the bug.
+  const r = await captionLayer({
+    shot: shotOf(take("baseline", say("Xylitol gum cost"))), nextInput: 1, wordsDir: WORDS,
+  });
+  const ys = [...r.filter.matchAll(/overlay=x=-?\d+:y=(-?\d+)/g)].map((m) => +m[1]);
+  assert.equal(ys.length, 3, "expected three placed words");
+  assert.equal(new Set(ys).size, 1,
+    `words on one line sit at ${ys.join(", ")} — they must share a baseline. `
+    + "Vertical position comes from the render canvas, never from per-word ink.");
+});
+
+test("a second line sits exactly one line-height below the first", async () => {
+  const long = "cardiovascular epidemiology demonstrates considerable heterogeneity";
+  const r = await captionLayer({
+    shot: shotOf(take("twoline", say(long))), nextInput: 1, wordsDir: WORDS,
+  });
+  const ys = [...new Set([...r.filter.matchAll(/overlay=x=-?\d+:y=(-?\d+)/g)].map((m) => +m[1]))]
+    .sort((a, b) => a - b);
+  assert.ok(ys.length <= 2, `expected at most two lines, got ys ${ys.join(", ")}`);
+  if (ys.length === 2) {
+    assert.equal(ys[1] - ys[0], CAPTION_BOX.lineH,
+      "line spacing must be exactly lineH — anything else means ink is leaking into y");
+  }
+});
+
+// ── Defect 3, at the layer that actually renders it ─────────────────────────
+
+test("no two caption groups are enabled at the same instant", async () => {
+  const r = await captionLayer({
+    shot: shotOf(take("nooverlap", say("so here is the actual finding and what it means")), { seconds: 12 }),
+    nextInput: 1, wordsDir: WORDS,
+  });
+  const wins = [...r.filter.matchAll(/enable='between\(t,([\d.]+),([\d.]+)\)'/g)]
+    .map((m) => ({ s: +m[1], e: +m[2] }));
+  assert.ok(wins.length > 1, "need several words to test");
+  // Group by end time: every word in a group leaves together, so a distinct end
+  // is a distinct group.
+  const groups = [...new Set(wins.map((w) => w.e))].sort((a, b) => a - b)
+    .map((e) => ({ e, s: Math.min(...wins.filter((w) => w.e === e).map((w) => w.s)) }));
+  for (let i = 1; i < groups.length; i++) {
+    assert.ok(groups[i - 1].e <= groups[i].s,
+      `group ending ${groups[i - 1].e} is still drawn when the group starting `
+      + `${groups[i].s} appears — this is the on-screen overlap`);
+  }
+});
