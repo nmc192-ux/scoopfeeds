@@ -79,26 +79,26 @@ test("cooling a chain touches nothing but the two blue coefficients", () => {
   assert.match(after, /eq=saturation=0\.5/);
 });
 
-// ─── Grain (Q1: off by default) ─────────────────────────────────────────────
+// ─── Grain (removed everywhere, 2026-09-03) ─────────────────────────────────
 
-test("grain is absent unless asked for", () => {
+test("grain is absent, and there is no option that puts it back", () => {
+  assert.deepEqual(Object.keys(GRAIN_CHAINS), ["none"], "static14 was deleted, not defaulted away");
   assert.equal(GRAIN_CHAINS.none, "");
-  assert.ok(!buildFilterChain().includes("noise="), "the default library master is grade-only");
+  assert.ok(!buildFilterChain().includes("noise="), "the library master is grade-only");
   assert.ok(!buildFilterChain("none").includes("noise="));
 });
 
-test("static-14 grain is the measured treatment, and stays static", () => {
-  const chain = buildFilterChain("static14");
-  assert.match(chain, /noise=alls=14:allf=u:all_seed=20260814/);
-  assert.ok(!chain.includes("allf=t"), "temporal grain cost 4x the encode time — never substitute it");
-});
-
-test("an unknown grain option is refused rather than silently dropped", () => {
+test("the retired grain option is refused by name, not silently dropped", () => {
+  // Named explicitly: someone reading the old brief or an old shell history
+  // will type this, and a loud refusal is how they learn it was decided against
+  // rather than mislaid.
+  assert.throws(() => buildFilterChain("static14"), /unknown grain option/);
   assert.throws(() => buildFilterChain("heavy"), /unknown grain option/);
 });
 
 test("the chain ends in a pixel format ffmpeg and every player agree on", () => {
-  assert.ok(buildFilterChain("static14").endsWith("format=yuv420p"));
+  assert.ok(buildFilterChain().endsWith("format=yuv420p"));
+  assert.ok(buildFilterChain("none").endsWith("format=yuv420p"));
 });
 
 // ─── Delivery resolution and the encode ─────────────────────────────────────
@@ -240,15 +240,17 @@ test("treatment is repeatable — running it twice lands in the same place", asy
   assert.ok(existsSync(src), "and the source is still there");
 });
 
-test("a grain run produces a different master from a grade-only run", async () => {
+test("a treated master carries no grain, whatever it was asked for", async () => {
   const dir = tmpDir();
   const src = makeClip(dir);
   const plain = path.join(dir, "plain.mp4");
-  const grainy = path.join(dir, "grainy.mp4");
   await treatFile({ sourcePath: src, outputPath: plain, grain: "none", ffmpegPath: FFMPEG });
-  const g = await treatFile({ sourcePath: src, outputPath: grainy, grain: "static14", ffmpegPath: FFMPEG });
-  assert.ok(g.bytes > statSync(plain).size,
-    "grain is detail: it costs bytes, which is the Q1 argument for leaving it to render time");
+  assert.ok(statSync(plain).size > 0);
+  await assert.rejects(
+    treatFile({ sourcePath: src, outputPath: path.join(dir, "grainy.mp4"), grain: "static14", ffmpegPath: FFMPEG }),
+    /unknown grain option/,
+    "the retired option must fail before ffmpeg runs, not produce a grained master"
+  );
 });
 
 // ─── ffmpeg resolution ──────────────────────────────────────────────────────

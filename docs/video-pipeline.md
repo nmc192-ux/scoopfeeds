@@ -74,6 +74,51 @@ accent per frame, code-rendered rather than filmed. Six card types:
 There is **no attribution card** — it was removed because a credit slide at
 position 2 is a dead beat where retention is decided.
 
+### The ground is FLAT, and the type has FLOORS (2026-09-03)
+
+Two rules that apply to **every format this repo renders** — the automated
+shorts in both orientations, and the long-form films. They are not shorts
+rules that long-form happens to share; they are house rules with one
+implementation and one test.
+
+**No grain, no texture, anywhere.** A static `noise=alls=14` field used to ride
+every slide. It is gone, `VIDEO_GRAIN_STRENGTH` is deleted rather than
+defaulted to `0`, and `--grain static14` is deleted from the stock treatment
+script. It read as the paper texture that had already been ruled out, and it
+cost 34–43x the output bytes and a third of the encode wall time. See
+`docs/phases/video_premium_track_2026-08.md` §3.1 for the measurement that
+originally shipped it and the one that removed it.
+
+**Contrast floors, computed rather than eyeballed:**
+
+| tier | floor | tokens |
+|---|---|---|
+| dimmed / inactive text | **3.0:1** | `recededText`, `recededFigure` |
+| active / highlighted text | **4.5:1** | `white`, `lime`, `sub`, `alert` |
+| eyebrows, masthead, credits | **3.0:1** | `dim`, `faint`, `counter` |
+
+"Dim the past, highlight the present" is kept — it is the right idea and one of
+the cheapest strong moves in the visual set. What went wrong is that nothing
+ever *measured* how dim "dimmed" had become: the receded state had settled at
+2.17:1 and the slide counter at 1.71:1. The whole range moved up; the hierarchy
+did not flatten (an active row is still four times the contrast of a receded
+one).
+
+`backend/src/services/videoContrast.js` owns the floors and the WCAG
+arithmetic. `videoContrast.test.js` walks **every card type in both aspect
+ratios across both systems**, composites each text token down to the background
+it is actually painted on — evaluating scrim gradients at the text's own y —
+and fails below the floor. It also fails on any text colour that is not a named
+palette token, because an inline hex is a hex nothing measures.
+
+**A warning about how NOT to measure this.** Averaging a text bounding box
+mixes the type with the ground behind it. On this palette a 40px stroke covers
+a few percent of its box, so the mean lands within a hair of the ground and
+every element — lime and near-black alike — reports ~1.1:1. That is a
+measurement of stroke coverage, not of contrast, and it is what produced the
+1.13 / 1.14 / 1.15 readings that prompted this work. Measure the glyph core,
+or walk the tree.
+
 **Motion is keyframes, not frames.** Each card renders 4 *states* — 5 for
 `stat` — (empty → line 1 → line 2 → complete); ffmpeg crossfades between them.
 It used to also pan the whole slide; that is off — see below.

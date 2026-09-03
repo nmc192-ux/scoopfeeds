@@ -48,18 +48,21 @@ import { COOL_BLUE_SHADOWS, COOL_BLUE_MIDS, coolGrade, LIBRARY_GRADE } from "../
 export { COOL_BLUE_SHADOWS, COOL_BLUE_MIDS, coolGrade, LIBRARY_GRADE };
 
 /**
- * Static grain, strength 14 — the treatment measured in the prototype and used by
- * src/services/videoAssembler.js (`noise=alls=14:allf=u:all_seed=20260814`; the
- * seed is the Aug 14 date). `allf=u` is uniform/static: temporal grain cost 4× the
- * encode time in that measurement and must not be substituted.
+ * GRAIN IS GONE — from the library and from the render, in every format.
  *
- * Default is OFF (brief Q1): grain applied here is re-encoded again at assembly,
- * so the library stores grade-only masters and grain stays a render decision.
+ * This used to offer `static14` (`noise=alls=14:allf=u:all_seed=20260814`),
+ * matching a filter the assembler applied to every slide. Both were removed on
+ * 2026-09-03 (DrJ): the texture read as the paper grain that had already been
+ * ruled out, and the measured cost was 34–43x the output bytes and ~1.5x the
+ * encode wall time. See the note above `GROUND_HEX` in
+ * `src/services/videoAssembler.js` for the before/after table.
+ *
+ * The option is DELETED rather than defaulted to "none". Brief Q1 asked whether
+ * grain belonged in the library or at render time; the answer turned out to be
+ * neither, and a dormant `--grain static14` flag is a way back to a look that
+ * was decided against.
  */
-export const GRAIN_CHAINS = Object.freeze({
-  none: "",
-  static14: "noise=alls=14:allf=u:all_seed=20260814",
-});
+export const GRAIN_CHAINS = Object.freeze({ none: "" });
 
 /**
  * Treated assets are written at DELIVERY resolution, not at the master's.

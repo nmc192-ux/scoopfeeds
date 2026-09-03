@@ -33,12 +33,20 @@ const render = async (spec, name, p) => {
   return sha(f);
 };
 
-// Recorded from the hardcoded mapSvg() at commit 241b5e7 (pre-refactor HEAD).
+// Originally recorded from the hardcoded mapSvg() at commit 241b5e7.
+//
+// RE-RECORDED 2026-09-03 for the contrast-floor palette lift. The equivalence
+// this suite exists to prove is DATA-DRIVEN == HARDCODED, and a palette change
+// moves both sides identically — so the property survives; only the constants
+// it is expressed in moved. Verified the way the header asks rather than by
+// eyeballing: each of the twelve renders was compared before and after by ink
+// mask (the set of non-ground pixels), and overlap was 100.000% on all twelve.
+// The map geometry is bit-identical; the rule and label colours are not.
 const BASELINE = {
-  "hormuz@0.25": "1df8db92d5568b47", "hormuz@0.6": "a08f090e1d7f1a84", "hormuz@1": "3e35d60625219482",
-  "drc@0.25": "e32a7b498d3e081a", "drc@0.6": "91ece37ebca04bd0", "drc@1": "2c3fee324096e967",
-  "saudi@0.25": "b2a54279696aa91c", "saudi@0.6": "fe453bdd3167aacb", "saudi@1": "0f46916db389ce27",
-  "uae@0.25": "8e39566795a566f4", "uae@0.6": "7c535e7ae7c3ee21", "uae@1": "3d4d4f60a9e4cf78",
+  "hormuz@0.25": "19f7513b5212d669", "hormuz@0.6": "e4fc9852a3541feb", "hormuz@1": "4459d7eb364b8813",
+  "drc@0.25": "c1e7d5a03151e914", "drc@0.6": "b35a0a4b1761b433", "drc@1": "e08f5e98b9d65f9f",
+  "saudi@0.25": "6c94e31afd9d3d44", "saudi@0.6": "d43675bcabd32e24", "saudi@1": "ef3713c8c3327783",
+  "uae@0.25": "7b50c04f7b47f285", "uae@0.6": "c37bd847764ac990", "uae@1": "e9a01d13632a6f72",
 };
 
 test("every shipped variant is pixel-identical to the hardcoded original", async () => {

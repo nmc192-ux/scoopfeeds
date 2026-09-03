@@ -18,15 +18,49 @@
  * It is in the list. Keep it there.
  */
 
+/**
+ * THE PALETTE — one definition, both video systems.
+ *
+ * The automated-shorts renderers and the long-form engine each used to carry
+ * their own copy of this object, which is the drift this repo has already paid
+ * for twice. `longform/engine/render.mjs` now imports from here and adds only
+ * the tokens that are genuinely its own (alert, the map greys).
+ *
+ * ⚠️ EVERY TEXT TOKEN HERE IS UNDER A MEASURED CONTRAST FLOOR.
+ * `videoContrast.test.js` computes the real WCAG ratio of each one against the
+ * background it is actually painted on, for every card type in both aspect
+ * ratios, and fails below the floor. Darkening any of these without moving the
+ * floor will fail that suite — which is the point. See `videoContrast.js` for
+ * the floors and why they exist.
+ *
+ * The ladder, measured against `base`:
+ *
+ *   white          17.97:1   display type
+ *   lime           14.85:1   the accent
+ *   sub            12.29:1   body / secondary
+ *   dim             6.52:1   eyebrows, labels, source credits
+ *   faint           4.61:1   masthead, the long-form source line
+ *   recededText     3.61:1   a label that is not being discussed
+ *   recededFigure   3.20:1   its number
+ *   counter         3.05:1   the slide counter, the quietest text in the frame
+ */
 export const COLORS = Object.freeze({
   base:        "#090706",
   lime:        "#dde706",
   white:       "#f5f2ea",
   sub:         "#cfcabd",
-  dim:         "#8a8578",
-  faint:       "#6b675e",
+  dim:         "#969386",
+  faint:       "#7c796e",
   rule:        "#2a2721",
   track:       "#4a473f",
+
+  /**
+   * The slide counter. Was an inline "#3a3830" in `chrome()` — 1.71:1, the
+   * worst ratio in the frame and invisible on a phone outdoors. A named token
+   * because the test enumerates COLORS: a hex written inline is a hex nothing
+   * measures.
+   */
+  counter:     "#605d55",
 
   // ─── CONTEXT RECESSION ────────────────────────────────────────────────────
   //
@@ -41,9 +75,14 @@ export const COLORS = Object.freeze({
   // warm-neutral axis instead: present, legible, obviously not the subject.
   // videoSlideRenderer.test.js asserts they stay near-neutral, so nobody can
   // quietly replace them with an alpha of the accent later.
-  recededText:   "#4a473f",   // a label that is not being discussed
-  recededFigure: "#3f3c35",   // its number
-  recededFill:   "#26241f",   // its bar, or its rail dot
+  //
+  // LIFTED 2026-09-03 from 2.17:1 / 1.83:1 / 1.30:1. Recession is a RELATIVE
+  // statement — the active row is 12–15:1, so a receded row at 3.2–3.6:1 is
+  // still four times quieter and reads exactly as intended. It was never the
+  // gap that made these unreadable; it was the absolute floor.
+  recededText:   "#6b685f",   // a label that is not being discussed
+  recededFigure: "#636057",   // its number
+  recededFill:   "#48453d",   // its bar, or its rail dot — NON-TEXT, weaker floor
 });
 
 export const FONTS = { inter: "Inter", anton: "Anton" };
@@ -240,7 +279,7 @@ export function makePrimitives(G) {
       }),
       text(`${slideIndex + 1} / ${slideCount}`, {
         position: "absolute", right: G.marginX, top: G.counterTop,
-        fontSize: 22, fontWeight: 600, letterSpacing: 2, color: "#3a3830",
+        fontSize: 22, fontWeight: 600, letterSpacing: 2, color: C.counter,
       }),
     ];
   };

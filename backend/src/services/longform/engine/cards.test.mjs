@@ -33,10 +33,17 @@ const STAT = { card: "stat", kicker: "THE NUMBER", figure: "$1,240", unit: "BN",
 const EQ = { card: "equation", kicker: "THE MECHANISM", numerator: "20M BARRELS A DAY",
   denominator: "ONE 26KM GAP", result: "NO SLACK", note: "Fixture note." };
 
-// Recorded against 241b5e7-identical output (see header).
+// Re-recorded 2026-09-03 for the contrast-floor palette lift (dim, faint and
+// the receded tokens all moved; see videoContrast.js). Re-recording a pixel
+// baseline is how a layout regression gets blessed, so it was not done on the
+// strength of "the colours changed": every fixture here was rendered before and
+// after and compared by INK MASK — the set of pixels that are not the ground.
+// Overlap was 100.000% on all six, i.e. glyph coverage is identical and only
+// values moved. The invariant these tests actually protect (at p=1 an opt-in
+// changes nothing) is untouched by a palette change and still holds below.
 const PLAIN = {
-  "stat@0.18": "4f6d60790f40906a", "stat@0.6": "605e354573a56ea2", "stat@1": "68a1debc5131977e",
-  "equation@0.18": "0b17ca15fe386301", "equation@0.6": "ccf7b99ab5d7b6dd", "equation@1": "93c8dbdb45d39826",
+  "stat@0.18": "cc74dc4734d449a5", "stat@0.6": "fff5eb04eda39452", "stat@1": "8547fee5070e8826",
+  "equation@0.18": "b33f910304556df3", "equation@0.6": "065ae0f75efa25d8", "equation@1": "4b1ffc5d8414fcca",
 };
 
 test("without opt-ins, stat and equation render exactly as before the change", async () => {

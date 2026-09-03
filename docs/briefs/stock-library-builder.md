@@ -127,7 +127,7 @@ node backend/scripts/stock-acquire.mjs --classes ports,ships --per-class 12 [--p
 ### 3b. `stock-treat`
 
 ```
-node backend/scripts/stock-treat.mjs [--only <assetId>] [--grain static14|none]
+node backend/scripts/stock-treat.mjs [--only <assetId>] [--grain none]
 ```
 
 - Runs over manifest entries with `status: "kept"` (set by DrJ during curation, §8) and
@@ -359,7 +359,13 @@ DrJ's call per clip, made once, recorded in the manifest.
 
 ## 11. Open questions (answer before or during build)
 
-- **Q1 — grain in the library or at final render?** The prototype measured grain's encode cost
+- **Q1 — grain in the library or at final render? ANSWERED 2026-09-03: NEITHER.** The
+  question assumed grain belonged somewhere. It does not — it was removed from every render
+  path on DrJ's ruling (it read as the paper texture already ruled out) and, measured on the
+  shipped format, cost 34-43x the output bytes. `--grain static14` is deleted rather than
+  defaulted off, so the flag refuses the name loudly instead of leaving a way back. The
+  original reasoning, kept because it was correct as far as it went: the prototype measured
+  grain's encode cost
   on the *final* video; pre-graining library clips means the grain is re-encoded again at
   assembly. Default is grade-only in the library, grain decided at render. CC may measure if
   cheap; otherwise leave the flag off.

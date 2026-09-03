@@ -86,15 +86,18 @@ test("the credit rides INSIDE the cutaway stream, so it cannot outlive the foota
   assert.ok(!overlayStage.includes("drawtext=CREDIT"), "never on the main stream");
 });
 
-test("the caption and the grain still cover the whole slide", () => {
-  // Narration continues over a cutaway, so the burned caption must too; and one
-  // grain field must cover the slide or the texture jumps at the cut.
+test("the caption still covers the whole slide, and no grain does", () => {
+  // Narration continues over a cutaway, so the burned caption must too.
   const { filter } = buildSlideFilter({
     stateCount: 3, hold: 3, caption: "drawtext=CAPTION", cutaway: { inputIndex: 3, seconds: 2, credit: null },
   });
   const outStage = filter.split(";").map((s) => s.trim()).find((s) => s.endsWith("[out]"));
   assert.ok(outStage.includes("drawtext=CAPTION"), "the caption is applied after the composite");
-  assert.ok(outStage.includes("noise=alls="), "and so is the grain");
+  // This asserted a grain field until 2026-09-03. Grain is gone from every
+  // render path; the assertion is inverted rather than deleted so the cutaway
+  // composite — the last place a texture node was added "just for the seam" —
+  // stays covered.
+  assert.ok(!filter.includes("noise="), "and no grain rides the cutaway composite");
 });
 
 test("the arithmetic length is identical with a cutaway and without", () => {

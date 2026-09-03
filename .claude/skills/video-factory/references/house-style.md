@@ -2,24 +2,43 @@
 
 ## Palette
 
-From `backend/src/services/videoSlideChrome.js` — keep them in sync.
+`backend/src/services/videoSlideChrome.js` **owns** these — `render.mjs` imports
+`COLORS` from it and adds only the film's own tokens. There is nothing to keep in
+sync any more; that duplication is what let `recededText` go missing here and
+render `undefined`.
 
-| Token | Hex | Use |
-|---|---|---|
-| base | `#090706` | ground |
-| lime | `#dde706` | the one accent; emphasis, rules, figures |
-| white | `#f5f2ea` | primary type |
-| sub | `#cfcabd` | secondary type |
-| dim | `#8a8578` | labels, eyebrows |
-| faint | `#6b675e` | source credits |
-| track | `#4a473f` | bar tracks |
-| recededText | `#4a473f` | ledger rows not yet revealed |
-| recededFigure | `#3f3c35` | figures not yet revealed |
-| recededFill | `#26241f` | fills not yet revealed |
-| alert | `#e0452b` | loss, removal, a blocked route |
-| water / land | `#0e1a22` / `#191510` | map ground |
+Every TEXT token below carries a measured WCAG floor (see `backend/src/services/
+videoContrast.js`). `videoContrast.test.js` computes each one against the
+background it is actually painted on, for every card type in both aspect ratios,
+and fails below the floor. **Do not darken a text token** — the suite will stop
+you, and it is meant to.
+
+| Token | Hex | vs base | Use |
+|---|---|---|---|
+| base | `#090706` | — | ground |
+| lime | `#dde706` | 14.84:1 | the one accent; emphasis, rules, figures |
+| white | `#f5f2ea` | 17.97:1 | primary type |
+| sub | `#cfcabd` | 12.29:1 | secondary type |
+| dim | `#969386` | 6.52:1 | labels, eyebrows |
+| faint | `#7c796e` | 4.61:1 | source credits, masthead |
+| counter | `#605d55` | 3.06:1 | the slide counter (shorts only) |
+| recededText | `#6b685f` | 3.61:1 | a row that is on screen but not the subject |
+| recededFigure | `#636057` | 3.20:1 | its figure |
+| alert | `#e0452b` | 4.84:1 | loss, removal, a blocked route |
+| track | `#4a473f` | *non-text* | bar tracks, chevrons, the ledger rule |
+| recededFill | `#48453d` | *non-text* | a receded bar or rail dot |
+| water / land | `#0e1a22` / `#191510` | *non-text* | map ground |
 
 Lime is an accent, not a colour scheme. One idea per card carries it.
+
+**On recession.** "Dim the past, highlight the present" is the house move and it
+stays. The dimmed tier is a *relative* statement — an active row is 12–15:1 and a
+receded one 3.2–3.6:1, still four times quieter. Before 2026-09-03 the receded
+tier sat at 2.17:1 and 1.83:1, which is not recession, it is illegibility. The
+whole range moved up together; the hierarchy did not flatten.
+
+**There is no grain, in any format.** Flat ground, no noise, no texture. See
+`docs/video-pipeline.md` §2 and `docs/phases/video_premium_track_2026-08.md` §3.1.
 
 Fonts: **Anton** for display, **Inter Bold/SemiBold** for everything else.
 Both are in `assets/fonts/`.

@@ -246,11 +246,11 @@ test("a single-state slide still gets drift and a valid graph", () => {
   const { filter, totalDuration } = buildSlideFilter({ stateCount: 1, hold: 2 });
   assert.ok(!filter.includes("xfade="));
   assert.match(filter, /crop=\d+:\d+:x=/, "the drift crop must still be present with one state");
-  // Anchored on setsar rather than on the end of the chain: the film grain node
-  // now rides after it (B4). What matters is that the LAST scale returns to
-  // output size and SAR is reset there — not that nothing follows.
-  assert.match(filter, /scale=1920:1080:flags=lanczos,setsar=1(,noise=[^[]*)?\[out\]$/,
-    "and must still land back at output size");
+  // The film grain node used to ride after setsar, so this allowed a tail.
+  // Grain is gone (2026-09-03) and the chain ends at setsar again — asserted
+  // exactly, because "something may follow" is how a texture node got in.
+  assert.match(filter, /scale=1920:1080:flags=lanczos,setsar=1\[out\]$/,
+    "and must still land back at output size, with nothing after it");
   assert.equal(totalDuration, 2);
 });
 });
@@ -268,7 +268,7 @@ test("xfade offsets accumulate on the combined timeline", () => {
 
 test("the output is square-pixel — setsar after the crop", () => {
   const { filter } = buildSlideFilter({ stateCount: 2, hold: 1 });
-  assert.match(filter, /crop=[^[]*setsar=1(,noise=[^[]*)?\[out\]/,
+  assert.match(filter, /crop=[^[]*setsar=1\[out\]/,
     "cropping an overscanned frame perturbs SAR unless it is reset");
 });
 
