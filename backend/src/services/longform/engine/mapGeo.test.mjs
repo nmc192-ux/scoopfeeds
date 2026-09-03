@@ -35,7 +35,13 @@ const render = async (spec, name, p) => {
 
 // Originally recorded from the hardcoded mapSvg() at commit 241b5e7.
 //
-// RE-RECORDED 2026-09-03 for the contrast-floor palette lift. The equivalence
+// RE-RECORDED once on 2026-09-03, for the contrast-floor palette lift. NOT
+// re-recorded by the second lift later that day (the receded tokens moved
+// again): the maps use `rule`, `dim`, `white` and `lime`, none of which changed
+// in that pass, and all twelve hashes verified unchanged. A fixture that does
+// not move when it should not is the same evidence as one that does.
+//
+// The equivalence
 // this suite exists to prove is DATA-DRIVEN == HARDCODED, and a palette change
 // moves both sides identically — so the property survives; only the constants
 // it is expressed in moved. Verified the way the header asks rather than by

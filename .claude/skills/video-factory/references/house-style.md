@@ -22,20 +22,27 @@ you, and it is meant to.
 | dim | `#969386` | 6.52:1 | labels, eyebrows |
 | faint | `#7c796e` | 4.61:1 | source credits, masthead |
 | counter | `#605d55` | 3.06:1 | the slide counter (shorts only) |
-| recededText | `#6b685f` | 3.61:1 | a row that is on screen but not the subject |
-| recededFigure | `#636057` | 3.20:1 | its figure |
+| recededText | `#79766b` | 4.42:1 | a row that is on screen but not the subject |
+| recededFigure | `#706d63` | 3.88:1 | its figure |
 | alert | `#e0452b` | 4.84:1 | loss, removal, a blocked route |
 | track | `#4a473f` | *non-text* | bar tracks, chevrons, the ledger rule |
-| recededFill | `#48453d` | *non-text* | a receded bar or rail dot |
+| recededFill | `#56534a` | *non-text* | a receded bar or rail dot |
 | water / land | `#0e1a22` / `#191510` | *non-text* | map ground |
 
 Lime is an accent, not a colour scheme. One idea per card carries it.
 
 **On recession.** "Dim the past, highlight the present" is the house move and it
 stays. The dimmed tier is a *relative* statement — an active row is 12–15:1 and a
-receded one 3.2–3.6:1, still four times quieter. Before 2026-09-03 the receded
-tier sat at 2.17:1 and 1.83:1, which is not recession, it is illegibility. The
-whole range moved up together; the hierarchy did not flatten.
+receded one 3.9–4.4:1, around three times quieter, and a clear step under the
+6.5:1 live-label tier. Before 2026-09-03 the receded tier sat at 2.17:1 and
+1.83:1, which is not recession, it is illegibility.
+
+**Content and chrome are SEPARATE LADDERS.** Order a content token against other
+content: a receded label's ceiling is `dim`, the live-label tier it must not
+out-shout. Do NOT order it against `faint` or `counter`. The first fix did, and
+that ranked a row the viewer may be reading below the masthead — furniture. It
+held the receded tier artificially low; removing the false ceiling is what let it
+reach 4.42:1 and actually read.
 
 **There is no grain, in any format.** Flat ground, no noise, no texture. See
 `docs/video-pipeline.md` §2 and `docs/phases/video_premium_track_2026-08.md` §3.1.

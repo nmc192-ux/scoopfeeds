@@ -91,11 +91,21 @@ originally shipped it and the one that removed it.
 
 **Contrast floors, computed rather than eyeballed:**
 
-| tier | floor | tokens |
-|---|---|---|
-| dimmed / inactive text | **3.0:1** | `recededText`, `recededFigure` |
-| active / highlighted text | **4.5:1** | `white`, `lime`, `sub`, `alert` |
-| eyebrows, masthead, credits | **3.0:1** | `dim`, `faint`, `counter` |
+| tier | floor | tokens | measured |
+|---|---|---|---|
+| dimmed / inactive text | **3.0:1** | `recededText`, `recededFigure` | 4.42 / 3.88 |
+| active / highlighted text | **4.5:1** | `white`, `lime`, `sub`, `alert` | 17.97 / 14.85 / 12.29 / 4.84 |
+| eyebrows and labels | **3.0:1** | `dim` | 6.52 |
+| masthead, counter, credits | **3.0:1** | `faint`, `counter` | 4.61 / 3.06 |
+
+**Two axes, not one.** The first pass ranked receded content *below* the
+masthead, which acted as a false ceiling: a row the viewer may well be reading
+has no business being quieter than standing furniture. Content is ordered
+against content (a receded label's ceiling is `dim`, the live-label tier it
+must not out-shout); chrome is a separate axis and only has to be internally
+ordered. That correction is what let the receded tokens take a real step up
+(3.61 → 4.42, 3.20 → 3.88) on the second pass, after the frames were looked at
+rather than only the numbers.
 
 "Dim the past, highlight the present" is kept — it is the right idea and one of
 the cheapest strong moves in the visual set. What went wrong is that nothing

@@ -33,16 +33,21 @@
  * floor will fail that suite — which is the point. See `videoContrast.js` for
  * the floors and why they exist.
  *
- * The ladder, measured against `base`:
+ * The ladder, measured against `base`. TWO AXES, not one — that distinction is
+ * what the second pass got right:
  *
- *   white          17.97:1   display type
- *   lime           14.85:1   the accent
- *   sub            12.29:1   body / secondary
- *   dim             6.52:1   eyebrows, labels, source credits
- *   faint           4.61:1   masthead, the long-form source line
- *   recededText     3.61:1   a label that is not being discussed
- *   recededFigure   3.20:1   its number
- *   counter         3.05:1   the slide counter, the quietest text in the frame
+ *   CONTENT — words the story is made of, ordered by how live they are:
+ *     white          17.97:1   display type
+ *     lime           14.85:1   the accent
+ *     sub            12.29:1   body / secondary
+ *     dim             6.52:1   eyebrows and labels — the live label tier
+ *     recededText     4.42:1   a label that is not being discussed
+ *     recededFigure   3.88:1   its number
+ *
+ *   CHROME — standing furniture, which is quiet by design and is NOT a ceiling
+ *   for content:
+ *     faint           4.61:1   masthead, the long-form source line
+ *     counter         3.06:1   the slide counter, the quietest text in a frame
  */
 export const COLORS = Object.freeze({
   base:        "#090706",
@@ -76,13 +81,29 @@ export const COLORS = Object.freeze({
   // videoSlideRenderer.test.js asserts they stay near-neutral, so nobody can
   // quietly replace them with an alpha of the accent later.
   //
-  // LIFTED 2026-09-03 from 2.17:1 / 1.83:1 / 1.30:1. Recession is a RELATIVE
-  // statement — the active row is 12–15:1, so a receded row at 3.2–3.6:1 is
-  // still four times quieter and reads exactly as intended. It was never the
-  // gap that made these unreadable; it was the absolute floor.
-  recededText:   "#6b685f",   // a label that is not being discussed
-  recededFigure: "#636057",   // its number
-  recededFill:   "#48453d",   // its bar, or its rail dot — NON-TEXT, weaker floor
+  // LIFTED TWICE on 2026-09-03. First from 2.17:1 / 1.83:1 / 1.30:1 to clear
+  // the 3:1 floor; then again, on looking at the rendered frames, because
+  // clearing a floor is not the same as reading well — DrJ: "we can make the
+  // dull font a bit more prominent."
+  //
+  // The second pass corrected a wrong assumption in the first, not just a
+  // number. The original ladder ranked these BELOW `faint` (the masthead), on
+  // the reasoning that receded content should be quieter than everything above
+  // it. But the masthead is FURNITURE and a receded row is INFORMATION — a row
+  // the viewer may well be reading, just not the one being talked about. The
+  // ceiling for a receded label is `dim`, the live label tier it must not
+  // out-shout; chrome is a separate axis and does not order against content at
+  // all. Freed from that false ceiling these could take a real step up.
+  //
+  // Recession is a RELATIVE statement and it survives: the active row is
+  // 12–15:1, so a receded row at 3.9–4.4:1 is still around three times
+  // quieter, and it now sits a clear step under the 6.5:1 live-label tier.
+  recededText:   "#79766b",   // a label that is not being discussed  4.42:1
+  recededFigure: "#706d63",   // its number                          3.88:1
+  // Lifted with them: a bar whose label reads at 4.4:1 above a fill at 2.1:1
+  // looks like the fill failed to render. NON-TEXT, so a weaker floor — but it
+  // tracks its label rather than sitting at a fixed value.
+  recededFill:   "#56534a",   // its bar, or its rail dot             2.62:1
 });
 
 export const FONTS = { inter: "Inter", anton: "Anton" };

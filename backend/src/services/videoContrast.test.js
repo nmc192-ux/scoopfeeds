@@ -239,16 +239,29 @@ test("every text token clears its floor against the ink ground", () => {
   assert.equal(TIER.size, 9, "the tier table changed size — was that a decision?");
 });
 
-test("the hierarchy is preserved — dimmed sits below chrome sits below active", () => {
+test("the content ladder is ordered, and recession survives the lift", () => {
   const r = (k) => ratio(COLORS[k], INK);
-  // The whole range moved up; it must not have flattened on the way.
+  // ONE LADDER PER AXIS. This originally asserted `recededText < faint`, which
+  // ranked receded CONTENT below the MASTHEAD. That was wrong, and it acted as
+  // a false ceiling holding the receded tokens down: a row the viewer may be
+  // reading has no business being quieter than standing furniture. The ceiling
+  // for a receded label is the live-label tier it must not out-shout.
   assert.ok(r("recededFigure") < r("recededText"), "a receded figure is quieter than its label");
-  assert.ok(r("recededText") < r("faint"), "receded content is quieter than the masthead");
-  assert.ok(r("faint") < r("dim"), "the masthead is quieter than an eyebrow");
-  assert.ok(r("dim") < r("sub"), "an eyebrow is quieter than body text");
+  assert.ok(r("recededText") < r("dim"), "a receded label must not out-shout a live one");
+  assert.ok(r("dim") < r("sub"), "a label is quieter than body text");
   assert.ok(r("sub") < r("white"), "body text is quieter than display type");
-  // The point of recession: active is several times the contrast of receded.
-  assert.ok(r("lime") / r("recededText") > 3, "an active row must still dominate a receded one");
+  // Chrome is its own axis and only has to be internally ordered.
+  assert.ok(r("counter") < r("faint"), "the counter is the quietest thing in the frame");
+  // THE POINT OF RECESSION, and the thing a lift could quietly destroy: the
+  // live row must still dominate. Kept as a ratio-of-ratios rather than an
+  // absolute, so it holds whatever the range is next moved to.
+  const dominance = r("lime") / r("recededText");
+  assert.ok(dominance > 2.5,
+    `an active row is only ${dominance.toFixed(1)}x a receded one — the recession has flattened`);
+  // And a real gap under the live-label tier, so "receded" is still a state
+  // rather than a slightly different grey.
+  assert.ok(r("dim") / r("recededText") > 1.3,
+    `receded sits only ${(r("dim") / r("recededText")).toFixed(2)}x under a live label`);
 });
 
 test("structural marks are lifted too, at their own weaker floor", () => {
