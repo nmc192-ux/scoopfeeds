@@ -33,10 +33,25 @@ const STAT = { card: "stat", kicker: "THE NUMBER", figure: "$1,240", unit: "BN",
 const EQ = { card: "equation", kicker: "THE MECHANISM", numerator: "20M BARRELS A DAY",
   denominator: "ONE 26KM GAP", result: "NO SLACK", note: "Fixture note." };
 
-// Recorded against 241b5e7-identical output (see header).
+// Re-recorded 2026-09-03 for the contrast-floor palette lift, in two passes
+// (the floors first, then a further lift of the receded tokens once the frames
+// were looked at). Re-recording a pixel baseline is how a layout regression
+// gets blessed, so neither pass was done on the strength of "the colours
+// changed": every fixture was rendered before and after and compared by INK
+// MASK — the set of pixels that are not the ground. Overlap was 100.000% on all
+// six, both times, i.e. glyph coverage is identical and only values moved.
+//
+// The second pass moved only the two equation hashes at p >= 0.6, which is
+// itself a check worth reading: the card's 90px "=" is the one glyph here in a
+// receded colour, and its opacity ramp `at(p, 0.24, 0.34)` is still zero at
+// p=0.18 — so equation@0.18 SHOULD be untouched, and is. `stat` carries no
+// receded token and did not move either.
+//
+// The invariant these tests actually protect (at p=1 an opt-in changes nothing)
+// is untouched by a palette change and still holds below.
 const PLAIN = {
-  "stat@0.18": "4f6d60790f40906a", "stat@0.6": "605e354573a56ea2", "stat@1": "68a1debc5131977e",
-  "equation@0.18": "0b17ca15fe386301", "equation@0.6": "ccf7b99ab5d7b6dd", "equation@1": "93c8dbdb45d39826",
+  "stat@0.18": "cc74dc4734d449a5", "stat@0.6": "fff5eb04eda39452", "stat@1": "8547fee5070e8826",
+  "equation@0.18": "b33f910304556df3", "equation@0.6": "bd1d4aafab43e386", "equation@1": "b4f09975f3b38b7f",
 };
 
 test("without opt-ins, stat and equation render exactly as before the change", async () => {

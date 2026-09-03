@@ -495,46 +495,35 @@ export function buildCutawayCreditFilter({ text, workDir, slideIndex, fontFile, 
 }
 
 /**
- * FILM GRAIN — static, not temporal, and that choice is the whole cost story.
+ * THERE IS NO FILM GRAIN, IN ANY FORMAT. Do not add one back.
  *
- * Measured 2026-08-14 on a 43s vertical render, final encode from clean masters:
+ * A static `noise=alls=14:allf=u` field was applied here to every slide of every
+ * automated short, both orientations. It was removed on 2026-09-03 (DrJ): "it
+ * reads exactly as the paper texture I told you to delete. Flat background, no
+ * noise, no texture, in any format."
  *
- *   clean         2.0s    1.7MB
- *   static 9      7.0s    7.7MB
- *   static 14     7.6s    8.9MB      <- shipped
- *   temporal 5   15.0s    9.0MB
- *   temporal 9   33.4s   31.6MB
+ * The cost was measured before and after on this repo's own 6-slide fixture,
+ * same ffmpeg binary, same source PNGs:
  *
- * Static at 14 costs about the same as temporal at 5 and looks considerably
- * stronger; temporal at a comparable strength is roughly 4x the bytes and 4x the
- * encode. Grain is unique per pixel per frame, so temporal grain defeats
- * inter-frame compression completely — that is the 31.6MB.
+ *                     encode      bytes       background stdev
+ *   9:16  grain 14     26.4s     15.9 MB      6.49 / 5.08 / 6.40
+ *   9:16  none         17.4s      0.47 MB     0 / 0 / 0
+ *   16:9  grain 14     30.6s     20.1 MB      6.48 / 5.06 / 6.35
+ *   16:9  none         20.4s      0.47 MB     0 / 0 / 0
  *
- * THE SEED IS FIXED ON PURPOSE. Slides are encoded separately and concatenated,
- * and an unseeded `noise` would generate a different still pattern per slide —
- * the texture would visibly jump at every cut, which is worse than no texture.
- * One seed means one grain field across the whole video.
+ * 34x and 43x the bytes, and a third of the encode wall time, for a texture
+ * nobody wanted. The August note that shipped it estimated "up to 5x"; it
+ * measured a clip with footage in it, where inter-frame compression had other
+ * things to fail at. On the format as it actually ships — static type on a flat
+ * ground — grain is the ONLY thing standing between the encoder and a nearly
+ * free file, so it costs far more than that estimate suggested.
  *
- * VIDEO_GRAIN_STRENGTH=0 removes the filter node entirely rather than adding a
- * zero-strength one: zero means zero, and it also means no encode cost at all.
+ * The zero stdev is the test. `videoContrast.test.js` asserts the rendered
+ * background is exactly flat, so a grain node reintroduced anywhere in this
+ * graph fails a suite rather than shipping.
  */
 // The one ground, as ffmpeg spells it. Kept beside the filter that pads onto it.
 const GROUND_HEX = "0x090706";
-const GRAIN_SEED = 20260814;
-export const grainStrength = () => {
-  const raw = process.env.VIDEO_GRAIN_STRENGTH;
-  if (raw === undefined || raw === "") return 14;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 0 || n > 100) {
-    logger.warn(`🎬 VIDEO_GRAIN_STRENGTH="${raw}" is not an integer 0-100 — using 14`);
-    return 14;
-  }
-  return n;
-};
-export const grainChain = () => {
-  const n = grainStrength();
-  return n > 0 ? `,noise=alls=${n}:allf=u:all_seed=${GRAIN_SEED}` : "";
-};
 
 /**
  * A cutaway is a stream that ENDS, not a time-gated overlay.
@@ -665,7 +654,7 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
         `crop=${f.w}:${f.h},setsar=1,fps=${FPS},` +
         `trim=duration=${cutaway.seconds.toFixed(3)},setpts=PTS-STARTPTS${credit}[cut]`
       );
-      parts.push(`[base][cut]overlay=${f.x}:${f.y}:eof_action=pass,setsar=1${captionChain}${grainChain()}[out]`);
+      parts.push(`[base][cut]overlay=${f.x}:${f.y}:eof_action=pass,setsar=1${captionChain}[out]`);
       return;
     }
 
@@ -674,11 +663,11 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
       `crop=${CV.w}:${CV.h},setsar=1,fps=${FPS},` +
       `trim=duration=${cutaway.seconds.toFixed(3)},setpts=PTS-STARTPTS${credit}[cut]`
     );
-    parts.push(`[base][cut]overlay=0:0:eof_action=pass,setsar=1${captionChain}${grainChain()}[out]`);
+    parts.push(`[base][cut]overlay=0:0:eof_action=pass,setsar=1${captionChain}[out]`);
   };
   // With no cutaway the graph is byte-for-byte what it was: one node, ending in
   // [out]. The split into [base] happens only when there is something to composite.
-  const sink = cutaway ? `setsar=1[base]` : `setsar=1${captionChain}${grainChain()}[out]`;
+  const sink = cutaway ? `setsar=1[base]` : `setsar=1${captionChain}[out]`;
 
   // ── STATIC (the default): the same 2% overscan, cropped dead centre ──
   //

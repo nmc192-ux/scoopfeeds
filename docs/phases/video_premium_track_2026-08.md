@@ -88,7 +88,33 @@ record reversed once measured.
 
 ## 3. Decisions that could have gone the other way
 
-### 3.1 Static grain beat temporal grain
+### 3.1 Static grain beat temporal grain — and then grain lost altogether
+
+> **REVERSED 2026-09-03 (DrJ).** There is no film grain in any format any more. The
+> comparison below is preserved because it is a correct measurement, and because the
+> *reasoning* about temporal vs static compression still holds for anything that ever
+> reaches for `noise` again — but the shipped answer is now **clean**. Two things the
+> table below could not show:
+>
+> - **It reads as the paper texture that had already been ruled out.** That is the
+>   whole reason it went; the cost was a bonus, not the argument.
+> - **The cost was understated.** These numbers were taken on a clip with footage in
+>   it, where inter-frame compression had other things to fail at. On the format as it
+>   actually ships — static type on a flat ground — grain is the *only* thing standing
+>   between the encoder and a nearly free file. Re-measured 2026-09-03 on a 6-slide
+>   fixture, same binary, both orientations:
+>
+>   | | encode | size | background stdev |
+>   |---|---|---|---|
+>   | 9:16 static 14 | 26.4s | 15.9 MB | 6.49 / 5.08 / 6.40 |
+>   | 9:16 none | **17.4s** | **0.47 MB** | **0 / 0 / 0** |
+>   | 16:9 static 14 | 30.6s | 20.1 MB | 6.48 / 5.06 / 6.35 |
+>   | 16:9 none | **20.4s** | **0.47 MB** | **0 / 0 / 0** |
+>
+>   34x and 43x the bytes, and a third of the encode wall time, on a 2-core box.
+>
+> `VIDEO_GRAIN_STRENGTH` is deleted, not defaulted to 0, and `videoContrast.test.js`
+> fails if a `noise=` node returns to any render graph.
 
 **Decision:** film grain is applied static (`allf=u`) at strength 14 with a fixed seed, not
 temporal.

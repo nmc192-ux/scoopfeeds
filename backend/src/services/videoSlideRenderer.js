@@ -216,7 +216,11 @@ function barsStates(card, ctx) {
     return [
       text(b[0], { position: "absolute", left: MARGIN_X, top: top + 4, fontSize: 36, fontWeight: 600, color: C.sub }),
       abs({ left: MARGIN_X, top: top + 44, width: trackW, height: H - 44, background: "#151310" }),
-      abs({ left: MARGIN_X, top: top + 44, width: w, height: H - 44, background: i === leadIdx ? C.lime : C.track }),
+      // recededFill, not track. This is the FILLED portion of a bar that is not
+      // the lead — semantically the same "on screen, not the subject" state 9:16
+      // already names, and `track` is the empty rail behind it. Two names for one
+      // thing is how the two orientations drifted to different greys.
+      abs({ left: MARGIN_X, top: top + 44, width: w, height: H - 44, background: i === leadIdx ? C.lime : C.recededFill }),
       text(b[1], { position: "absolute", left: MARGIN_X + trackW + 32, top: top + 30, fontFamily: F.anton, fontSize: 58, color: C.white }),
     ];
   };

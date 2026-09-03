@@ -24,9 +24,10 @@
  *
  * WHY A FLAT MID-GREY CUTAWAY SOURCE. The detector counts near-white pixels in
  * the credit band. Against flat grey, the chip's text is the only bright thing
- * that can be there, and the default film grain (±14 around the grey) comes
- * nowhere near the threshold — so the measurement survives the treatment the
- * real pipeline applies rather than needing it switched off.
+ * that can be there. This used to note that the default film grain (±14 around
+ * the grey) came nowhere near the threshold; grain was removed from every
+ * render path on 2026-09-03, so the grey is now exactly flat and the margin is
+ * only wider.
  *
  * BOTH LANES, EVERY PROPERTY (DrJ, Gate D). This file originally ran full-bleed
  * only, which is precisely where the framed-lane chip bug lived — the chip

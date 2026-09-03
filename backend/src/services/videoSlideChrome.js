@@ -18,15 +18,54 @@
  * It is in the list. Keep it there.
  */
 
+/**
+ * THE PALETTE — one definition, both video systems.
+ *
+ * The automated-shorts renderers and the long-form engine each used to carry
+ * their own copy of this object, which is the drift this repo has already paid
+ * for twice. `longform/engine/render.mjs` now imports from here and adds only
+ * the tokens that are genuinely its own (alert, the map greys).
+ *
+ * ⚠️ EVERY TEXT TOKEN HERE IS UNDER A MEASURED CONTRAST FLOOR.
+ * `videoContrast.test.js` computes the real WCAG ratio of each one against the
+ * background it is actually painted on, for every card type in both aspect
+ * ratios, and fails below the floor. Darkening any of these without moving the
+ * floor will fail that suite — which is the point. See `videoContrast.js` for
+ * the floors and why they exist.
+ *
+ * The ladder, measured against `base`. TWO AXES, not one — that distinction is
+ * what the second pass got right:
+ *
+ *   CONTENT — words the story is made of, ordered by how live they are:
+ *     white          17.97:1   display type
+ *     lime           14.85:1   the accent
+ *     sub            12.29:1   body / secondary
+ *     dim             6.52:1   eyebrows and labels — the live label tier
+ *     recededText     4.42:1   a label that is not being discussed
+ *     recededFigure   3.88:1   its number
+ *
+ *   CHROME — standing furniture, which is quiet by design and is NOT a ceiling
+ *   for content:
+ *     faint           4.61:1   masthead, the long-form source line
+ *     counter         3.06:1   the slide counter, the quietest text in a frame
+ */
 export const COLORS = Object.freeze({
   base:        "#090706",
   lime:        "#dde706",
   white:       "#f5f2ea",
   sub:         "#cfcabd",
-  dim:         "#8a8578",
-  faint:       "#6b675e",
+  dim:         "#969386",
+  faint:       "#7c796e",
   rule:        "#2a2721",
   track:       "#4a473f",
+
+  /**
+   * The slide counter. Was an inline "#3a3830" in `chrome()` — 1.71:1, the
+   * worst ratio in the frame and invisible on a phone outdoors. A named token
+   * because the test enumerates COLORS: a hex written inline is a hex nothing
+   * measures.
+   */
+  counter:     "#605d55",
 
   // ─── CONTEXT RECESSION ────────────────────────────────────────────────────
   //
@@ -41,9 +80,30 @@ export const COLORS = Object.freeze({
   // warm-neutral axis instead: present, legible, obviously not the subject.
   // videoSlideRenderer.test.js asserts they stay near-neutral, so nobody can
   // quietly replace them with an alpha of the accent later.
-  recededText:   "#4a473f",   // a label that is not being discussed
-  recededFigure: "#3f3c35",   // its number
-  recededFill:   "#26241f",   // its bar, or its rail dot
+  //
+  // LIFTED TWICE on 2026-09-03. First from 2.17:1 / 1.83:1 / 1.30:1 to clear
+  // the 3:1 floor; then again, on looking at the rendered frames, because
+  // clearing a floor is not the same as reading well — DrJ: "we can make the
+  // dull font a bit more prominent."
+  //
+  // The second pass corrected a wrong assumption in the first, not just a
+  // number. The original ladder ranked these BELOW `faint` (the masthead), on
+  // the reasoning that receded content should be quieter than everything above
+  // it. But the masthead is FURNITURE and a receded row is INFORMATION — a row
+  // the viewer may well be reading, just not the one being talked about. The
+  // ceiling for a receded label is `dim`, the live label tier it must not
+  // out-shout; chrome is a separate axis and does not order against content at
+  // all. Freed from that false ceiling these could take a real step up.
+  //
+  // Recession is a RELATIVE statement and it survives: the active row is
+  // 12–15:1, so a receded row at 3.9–4.4:1 is still around three times
+  // quieter, and it now sits a clear step under the 6.5:1 live-label tier.
+  recededText:   "#79766b",   // a label that is not being discussed  4.42:1
+  recededFigure: "#706d63",   // its number                          3.88:1
+  // Lifted with them: a bar whose label reads at 4.4:1 above a fill at 2.1:1
+  // looks like the fill failed to render. NON-TEXT, so a weaker floor — but it
+  // tracks its label rather than sitting at a fixed value.
+  recededFill:   "#56534a",   // its bar, or its rail dot             2.62:1
 });
 
 export const FONTS = { inter: "Inter", anton: "Anton" };
@@ -240,7 +300,7 @@ export function makePrimitives(G) {
       }),
       text(`${slideIndex + 1} / ${slideCount}`, {
         position: "absolute", right: G.marginX, top: G.counterTop,
-        fontSize: 22, fontWeight: 600, letterSpacing: 2, color: "#3a3830",
+        fontSize: 22, fontWeight: 600, letterSpacing: 2, color: C.counter,
       }),
     ];
   };

@@ -422,11 +422,21 @@ const overScrim = (top = 1360) => abs({
  * the first place. A second line grows downward into empty frame instead of
  * sideways into the masthead.
  */
+/**
+ * The backing every chip that sits on a photograph shares.
+ *
+ * ONE constant, because the credit and the date line are the same object at two
+ * sizes and drifted to different alphas once already. The value is the weakest
+ * the contrast floors permit against a white plate — see the note on
+ * imageCredit below.
+ */
+const CHIP_GROUND = "rgba(9,7,6,0.88)";
+
 const imageDateLine = (label) => label
   ? text(String(label).toUpperCase(), {
       position: "absolute", right: G.safeRight + G.marginX, top: G.safeTop + 52,
       fontSize: 20, fontWeight: 600, letterSpacing: 3, color: C.dim,
-      backgroundColor: "rgba(9,7,6,0.62)", padding: "5px 11px", borderRadius: 5,
+      backgroundColor: CHIP_GROUND, padding: "5px 11px", borderRadius: 5,
     })
   : null;
 
@@ -441,7 +451,13 @@ const imageCredit = (label) => label
       // The bottom display type solves the same problem with overScrim; a chip
       // is the small-element form of it, and it keeps the ground contract (an
       // object ON the ground) rather than tinting the picture.
-      backgroundColor: "rgba(9,7,6,0.62)", padding: "7px 13px", borderRadius: 5,
+      //
+      // 0.62 -> 0.88 (2026-09-03). MEASURED, not adjusted by eye: against the
+      // worst-case plate — a white one — 0.62 left this at 3.55:1 and the date
+      // line below at 1.82:1, both under floor. At 0.88 they are 9.35:1 and
+      // 4.96:1. videoContrast.test.js composites this chip over both a white
+      // and a black plate, so the number cannot drift back down unnoticed.
+      backgroundColor: CHIP_GROUND, padding: "7px 13px", borderRadius: 5,
     })
   : null;
 

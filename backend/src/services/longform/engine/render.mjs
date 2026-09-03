@@ -41,6 +41,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { ASSETS } from "./_deps.mjs";
+import { COLORS } from "../../videoSlideChrome.js";
 export const W = 1920;
 export const H = 1080;
 
@@ -49,21 +50,22 @@ export const PAYOFF_P = 0.35;
 /** Card types that hold something back for the payoff phase. */
 export const HAS_PAYOFF = new Set(["stat", "statement", "equation", "bars", "ledger", "doc", "dotgrid", "pipeline", "map", "linechart", "multiline"]);
 
+/**
+ * The house palette, IMPORTED rather than restated.
+ *
+ * This object used to be a second copy of `videoSlideChrome.js`'s COLORS, and
+ * it had already drifted: `recededText` was missing here entirely until ledger
+ * rows started rendering `undefined`. Two copies of one number set is the
+ * failure this repo has had with the tragedy keywords and with
+ * GEMINI_GENERATION_MODEL's two defaults — and it is what let the shorts and
+ * the films need two separate contrast fixes.
+ *
+ * `videoSlideChrome.js` imports nothing, so this costs the engine no
+ * dependency and no boundary. What stays local is only what is genuinely the
+ * film's own: the loss colours and the map greys, which no card renderer has.
+ */
 export const C = {
-  base: "#090706",
-  lime: "#dde706",
-  white: "#f5f2ea",
-  sub: "#cfcabd",
-  dim: "#8a8578",
-  faint: "#6b675e",
-  rule: "#2a2721",
-  track: "#4a473f",
-  // Context recession. These are CHOSEN near-neutrals, not a dimmed accent:
-  // lime at 25% over the ground composites to #3e3f06, which keeps lime's hue
-  // and reads as a BROKEN accent rather than a receded one.
-  recededText: "#4a473f",     // was missing — ledger rows referenced it and got `undefined`
-  recededFigure: "#3f3c35",
-  recededFill: "#26241f",
+  ...COLORS,
   // Loss/removal. Dots used to be DELETED to show a shortfall, which reads as
   // "these were never here"; recolouring says "these are gone", which is the
   // actual claim. Warm enough to separate from lime at a glance.
@@ -279,7 +281,10 @@ const CARDS = {
             row({ alignItems: "baseline", marginBottom: 14 }, [
               h("div", {
                 fontFamily: "Inter", fontWeight: 700, fontSize: 30, letterSpacing: 2,
-                textTransform: "uppercase", color: hot ? C.white : C.track,
+                // recededText, not track. A cold bar's LABEL is text in the
+                // receded state; `track` is a rail colour and reading it as
+                // text put this at 2.17:1. Same mix-up the 16:9 bars card had.
+                textTransform: "uppercase", color: hot ? C.white : C.recededText,
                 opacity: at(p, a - 0.08, a + 0.10),
               }, it.label),
               h("div", { flexGrow: 1 }),
@@ -697,7 +702,9 @@ ${paths.filter((q) => q.s.hot).map((q) => `<path d="${q.d}" fill="none" stroke="
           term(denominator, 0.16, 0.30),
         ]),
         h("div", {
-          fontFamily: "Anton", fontSize: 90, color: C.track, margin: "0 56px",
+          // recededText, not track. A 90px "=" is TYPE — it carries the card's
+          // whole grammar — and `track` is a rail colour that put it at 2.17:1.
+          fontFamily: "Anton", fontSize: 90, color: C.recededText, margin: "0 56px",
           opacity: at(p, 0.24, 0.34),
         }, "="),
         // PAYOFF — starts cleanly AFTER the entrance span ends.
@@ -973,3 +980,18 @@ export async function renderCard(spec, outPath, p = 1) {
 }
 
 export const CARD_TYPES = Object.keys(CARDS);
+
+/**
+ * The satori tree for one card, without rasterising it.
+ *
+ * `videoContrast.test.js` measures contrast by walking the tree the rasteriser
+ * is handed, which is the only way to know what background a glyph is actually
+ * painted on. Rendering to PNG and sampling a text bounding box averages the
+ * type together with the ground behind it and reports ~1.1:1 for anything
+ * light on this palette — a measurement of stroke coverage, not of contrast.
+ */
+export const _cardTree = (spec, p = 1) => {
+  const build = CARDS[spec.card];
+  if (!build) throw new Error(`unknown card type: ${spec.card}`);
+  return build(spec, p);
+};
