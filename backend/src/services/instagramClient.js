@@ -151,22 +151,33 @@ async function _waitForFinished(creationId, { maxAttempts = 10, gapMs = 1500 } =
 //
 // Required env (same as image posts):
 //   INSTAGRAM_USER_ID + FACEBOOK_PAGE_TOKEN (or INSTAGRAM_ACCESS_TOKEN)
-export async function postReelToInstagram({ videoUrl, caption = "" }) {
+export async function postReelToInstagram({ videoUrl, caption = "", coverUrl = null }) {
   const t = _loadToken();
   if (!t) throw new Error("instagram not configured");
   if (!videoUrl) throw new Error("postReelToInstagram requires a videoUrl");
 
+  // `cover_url` REPLACES `thumb_offset`, it does not complement it. Meta takes
+  // the cover when one is supplied and the offset otherwise, so sending both
+  // just leaves a dead parameter on the call.
+  //
+  // THE COVER IS CENTRE-CROPPED TO A SQUARE ON THE PROFILE GRID. A 1080x1920
+  // cover survives as its middle 1080x1080, which is why videoThumbnail.js
+  // constrains the hook to the centre square — a bottom-anchored hook is one
+  // nobody browsing the grid ever reads.
+  //
+  // A URL-FETCH PARAMETER, like video_url: Meta downloads it server-side, so it
+  // has to be publicly reachable for as long as the container takes to process.
+  const media = {
+    media_type:    "REELS",
+    video_url:     videoUrl,
+    caption,
+    share_to_feed: "true",   // also show in main IG feed
+  };
+  if (coverUrl) media.cover_url = coverUrl;
+  else media.thumb_offset = "1000";   // ms offset for auto-generated thumbnail
+
   // Step 1: create the media container for the Reel.
-  const create = await _call(`/${t.userId}/media`, {
-    method: "POST",
-    params: {
-      media_type:    "REELS",
-      video_url:     videoUrl,
-      caption,
-      share_to_feed: "true",   // also show in main IG feed
-      thumb_offset:  "1000",   // ms offset for auto-generated thumbnail
-    },
-  });
+  const create = await _call(`/${t.userId}/media`, { method: "POST", params: media });
   if (!create?.id) {
     throw new Error(`instagram reel container creation returned no id: ${JSON.stringify(create).slice(0, 200)}`);
   }

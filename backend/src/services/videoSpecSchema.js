@@ -57,7 +57,7 @@ import { resolveAttribution } from "./videoAttribution.js";
 import { restatesAny } from "./textSimilarity.js";
 // Country codes are validated against the shipped atlas, not a pattern — see the
 // map case below for why a plausible-but-absent code is the dangerous one.
-import { knownCountry } from "./videoSubjectVisual.js";
+import { knownCountry, knownCity } from "./videoSubjectVisual.js";
 
 // ─── The closed set ─────────────────────────────────────────────────────────
 
@@ -671,7 +671,7 @@ const CARD_FIELDS = {
   // `codes` are ISO 3166-1 alpha-3. `exception` is the ONE member of the set
   // the story excludes — the "all but one" case, which is unreadable without a
   // callout because the excepted country is often a couple of pixels wide.
-  map:     { required: ["codes", "caption"],                 optional: ["eyebrow", "exception", "lines", "visual"] },
+  map:     { required: ["codes", "caption"],                 optional: ["eyebrow", "exception", "city", "lines", "visual"] },
 };
 
 // Card types the MODEL is allowed to emit. The `attribution` card is GONE —
@@ -919,6 +919,20 @@ function validateCardShape(card, idx) {
           if (bad.length) {
             e.push(`${at} (map): unknown country code(s) ${bad.map(b => JSON.stringify(b)).join(", ")}`);
           }
+        }
+      }
+      // A CITY IS NOT ITS COUNTRY, and the map enforces that by NOT filling the
+      // country when one is named — see videoSubjectVisual's "must not assert
+      // more than the caption" note. Validated against the shipped populated-
+      // places atlas for the same reason `codes` is validated against the
+      // country geometry: a plausible-looking name the atlas cannot place would
+      // render a map that quietly says less than the card claims.
+      if (card.city !== undefined && card.city !== null) {
+        if (!isStr(card.city)) {
+          e.push(`${at} (map): "city" must be a non-empty string`);
+        } else if (!knownCity(card.city, isArr(card.codes) ? card.codes : null)) {
+          e.push(`${at} (map): "city" ${JSON.stringify(card.city)} is not a place the atlas can locate ` +
+                 `inside ${JSON.stringify(card.codes ?? [])}`);
         }
       }
       if (card.exception !== undefined && card.exception !== null) {

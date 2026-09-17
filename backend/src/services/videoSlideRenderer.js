@@ -65,6 +65,12 @@ export const VIDEO_BUILDER_FINGERPRINT = sourceFingerprint([
   new URL("./videoSlideRendererVertical.js", import.meta.url).href,
   new URL("./videoAssembler.js", import.meta.url).href,
   new URL("./videoHouseGrade.js", import.meta.url).href,
+  // videoSubjectVisual.js joins for the same reason as the rest of this list,
+  // and it was MISSING: it draws the locator map and treats every photograph,
+  // so it decides pixels as directly as any layout module. The cartographic
+  // map (#2026-09-17) would otherwise have shipped with an unchanged key and
+  // prod would have kept serving the flat lime blob it had already cached.
+  new URL("./videoSubjectVisual.js", import.meta.url).href,
   new URL("./incident/incidentFiles.js", import.meta.url).href,
 ]);
 export const videoDesignKey = () => `${VIDEO_DESIGN_VER}-${VIDEO_BUILDER_FINGERPRINT}`;

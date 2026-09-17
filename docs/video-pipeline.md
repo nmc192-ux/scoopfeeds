@@ -74,6 +74,46 @@ accent per frame, code-rendered rather than filmed. Six card types:
 There is **no attribution card** — it was removed because a credit slide at
 position 2 is a dead beat where retention is decided.
 
+### A locator map is a MAP, not a coloured shape (2026-09-17)
+
+"A flat coloured shape with no names is not a map." The previous locator drew
+only the highlighted countries, as one lime blob on black — no land, no water,
+no borders between neighbours, and no names except the exception callout.
+
+The measured cause of it rendering as a *speck* was separate and worse: **the
+extent used every ring of every country**, so France's overseas départements
+(Guadeloupe at −61.8° lon, Réunion at +55.8°) and the Caribbean Netherlands
+(−68.4°) stretched a European frame to **124° of longitude to show a story
+spanning 16°** — a 7.75x over-scale. `centroidOf` had always known to take a
+country's largest ring; the bounding box did not. Outlying territories are
+still drawn, they just no longer aim the camera.
+
+What a map needs to be one, all of it from the atlas already shipped plus a
+committed 84 KB Natural Earth populated-places extract (no runtime fetch):
+
+- **Land vs water.** Water is the house ground, unchanged. Land is every
+  country in view in a low on-palette tone, borders hairlined in the ground
+  colour, so a coastline exists at all.
+- **Names.** Subjects in white; the neighbours a viewer orients by in the
+  `recededText` token — the palette's existing word for "present, legible,
+  obviously not the subject".
+- **Cities**, when the spec names one: marker plus label.
+- **Labels** stay inside `marginX` and the vertical safe margins, and a label
+  that would collide with one already placed is **dropped, not stacked**.
+  Subjects are placed first, so they are never the ones lost.
+
+**The map may not assert more than the caption.** Sub-national geography falls
+back rather than lighting a whole country, and that rule now has teeth in a
+second place: naming a `city` marks the city and leaves its country **unfilled**.
+Filling France because something happened in Marseille is the map claiming a
+national story nobody wrote — the same class of error as the tariffs
+photograph.
+
+`videoSubjectVisual.js` was **missing from `VIDEO_BUILDER_FINGERPRINT`** and now
+joins it. It draws the map and treats every photograph, so it decides pixels as
+directly as any layout module; without it this change would have shipped with an
+unchanged cache key and prod would have kept serving the blob it already had.
+
 ### The ground is FLAT, and the type has FLOORS (2026-09-03)
 
 Two rules that apply to **every format this repo renders** — the automated
@@ -335,6 +375,16 @@ simply have been almost nothing to extract from.
 - `403 quotaExceeded` ends the cycle rather than burning a spec+render+TTS per
   remaining candidate. Uploads cost 1,600 units of 10,000/day, **shared with
   YouTube ingestion**.
+- **Thumbnails** (`VIDEO_THUMBNAIL_ENABLED=1`, dark). One 1080x1920 poster
+  frame per short, rendered through the slides' own satori+resvg path, from
+  **the subject visual the video already resolved** — it never picks a picture
+  of its own. `thumbnails.set` on YouTube (~50 units, same budget as the
+  1,600-unit upload); `cover_url` on the Instagram Reels container; `cover_url`
+  attempted at Facebook's `/video_reels` finish phase, **unconfirmed** and
+  retried without it on rejection, so the first published Reel settles whether
+  that surface supports one. The hook lives in the centre 1080x1080 square,
+  because Instagram centre-crops a cover for the profile grid. Rule 0 gates it
+  exactly as it gates the upload; a failure costs the thumbnail, never a video.
 
 ### The fan-out, as of 2026-08-24
 
