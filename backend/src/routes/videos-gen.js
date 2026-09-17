@@ -894,4 +894,39 @@ router.get("/file/:articleId", (req, res) => {
   res.sendFile(filePath);
 });
 
+// ─── Serve the rendered thumbnail ───────────────────────────────────────────
+//
+// PUBLIC FOR THE SAME REASON THE MP4 IS. Instagram's `cover_url` (and Facebook's
+// `cover_url`, if /video_reels turns out to accept it) are URL-FETCH
+// parameters: Meta downloads the image server-side while the container
+// processes, so a thumbnail that only exists on our disk is a thumbnail Meta
+// never sees. YouTube is unaffected — that one takes raw bytes.
+//
+// Same sanitisation as the MP4 route above, and for the same reason: this sits
+// under adminAuth's one allowlisted prefix, so `articleId` is attacker-
+// controlled and the sanitised value is the only thing that reaches the
+// filesystem.
+router.get("/thumb/:articleId", (req, res) => {
+  const articleId = String(req.params.articleId).replace(/[^a-z0-9_-]/gi, "_");
+  if (!existsSync(VIDEOS_DIR)) return res.status(404).json({ ok: false, error: "not rendered yet" });
+
+  // Newest match wins, exactly as for the MP4: the design key is a content
+  // fingerprint that cannot be reconstructed from the id, and serving a stale
+  // thumbnail would put the previous story's hook on this story's Reel.
+  const prefix = `${articleId}-`;
+  let newest = null;
+  for (const entry of readdirSync(VIDEOS_DIR)) {
+    if (!entry.startsWith(prefix) || !entry.endsWith("-thumb.jpg")) continue;
+    const full = path.join(VIDEOS_DIR, entry);
+    try {
+      const mtime = statSync(full).mtimeMs;
+      if (!newest || mtime > newest.mtime) newest = { full, mtime };
+    } catch { /* raced with the sweep; skip it */ }
+  }
+  if (!newest) return res.status(404).json({ ok: false, error: "no thumbnail" });
+  res.type("image/jpeg");
+  res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+  res.sendFile(newest.full);
+});
+
 export default router;

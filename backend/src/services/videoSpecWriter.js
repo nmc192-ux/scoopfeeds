@@ -428,7 +428,7 @@ const cardGrammarBase = ({ visualsOn = false, hasPhoto = false } = {}) => `
                what makes the point anyway.
 "turn"    — the pivot beat, where the obvious reading gives way to the real one.
             { "t":"turn", "eyebrow":"...", "lines":[["TEXT","white"],["TEXT","lime"]], "sub":"one line", "caption":"..." }
-${visualsOn ? `"map"     — a GEOGRAPHIC subject, drawn from a country list. { "t":"map", "eyebrow":"...", "codes":["DZA","EGY"], "exception":"SWZ", "lines":[["TEXT","white"],["TEXT","lime"]], "caption":"..." }
+${visualsOn ? `"map"     — a GEOGRAPHIC subject, drawn from a country list. { "t":"map", "eyebrow":"...", "codes":["DZA","EGY"], "exception":"SWZ", "city":"Marseille", "lines":[["TEXT","white"],["TEXT","lime"]], "caption":"..." }
             "codes" are ISO 3166-1 alpha-3, one per country the story covers. They are checked
             against a real atlas: a code that does not exist invalidates the card, so emit codes
             you are sure of and omit ones you are not. Do not invent codes to pad a set.
@@ -436,6 +436,11 @@ ${visualsOn ? `"map"     — a GEOGRAPHIC subject, drawn from a country list. { 
             case. It must also appear in "codes". It is drawn dark and CALLED OUT with a label,
             because the excepted country is often a couple of pixels wide and it is usually the
             entire point of the story. Omit "exception" when there is no exception.
+            "city" is OPTIONAL and it NARROWS the claim: name a settlement inside "codes" and the
+            map marks that city and LEAVES THE COUNTRY UNFILLED, because a city is not its country.
+            Use it whenever the event happened in one place rather than to a nation. It is checked
+            against a real gazetteer, so spell it plainly and omit it if unsure. A region, province
+            or state is not a city and has no field — such a story takes "codes" alone.
             You do not supply a projection, a colour or a position. The map is drawn by code.
 ${hasPhoto ? `"photo"   — a NAMED PERSON or a specific place: the article's own photograph. { "t":"photo", "eyebrow":"...", "subject":"...", "lines":[["TEXT","white"],["TEXT","lime"]], "caption":"..." }
             "subject" is REQUIRED and it is what makes this card checkable: a short noun phrase
@@ -565,6 +570,10 @@ This is a rule about the SUBJECT, not about the beat. Choose from the subject, i
 WHY THIS RULE EXISTS, stated plainly so you can apply it rather than pattern-match it: a story about a TARIFF SYSTEM once ran with a publisher photograph of two people, because the article happened to carry one. The subject was a system covering a continent; the picture showed neither. A map would have shown the subject exactly. Ask what the story is ABOUT, then pick — never pick a card because an image happens to exist.
 
 AT MOST ONE subject-visual card per video. It is the establishing shot, and it belongs early — normally the second or third card. Two of them is a slideshow.
+
+THE MAP MAY NOT CLAIM MORE THAN YOUR CAPTION DOES. "codes" LIGHTS UP WHOLE COUNTRIES, so it is only correct when the story is about those countries as countries — a treaty they signed, a bloc they belong to, a border between them. When what happened happened in ONE PLACE inside a country, name that place in "city" instead: the map marks the city and deliberately leaves the country UNFILLED, because filling France for something that happened in Marseille tells the viewer a national story you did not write. Still list the country in "codes" — that is what tells the map where to point — and add "city" beside it.
+
+  "city" must be a real settlement the atlas can place, spelled plainly ("Marseille", "Rafah", "Kharkiv"). A region, province, state or county is NOT a city and there is no field for one: a story about a sub-national REGION takes the country in "codes" with no "city", and the caption carries the precision the map cannot.
 ${hasPhoto ? "" : "This article has NO photograph, so \"photo\" is not on your list of card types. Do not ask for one."}
 ` : ""}${imageryOn ? `
 "visual" — on every card: a CONCRETE PHOTOGRAPHABLE NOUN PHRASE, two to six words, naming the one

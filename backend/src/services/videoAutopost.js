@@ -68,13 +68,14 @@ import { assembleSlide, concatSlides, holdForAudio, slideTotalSecs, captionForCa
 import { deriveShortArc, buildBed, scoreShort } from "./videoMusicBed.js";
 import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.js";
 import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
-import { uploadToYouTube, isYouTubeConfigured } from "./youtubeClient.js";
+import { uploadToYouTube, isYouTubeConfigured, setYouTubeThumbnail } from "./youtubeClient.js";
 import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from "./facebookClient.js";
 import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js";
 import { postVideoToThreads, isThreadsConfigured } from "./threadsClient.js";
 import { postVideoToBluesky, isBlueskyConfigured } from "./blueskyClient.js";
 import { upscaleKnownThumbnailUrl } from "./cardRenderer.js";
 import { buildFullBleed, buildMapPng, buildStillSequence, buildTightCrop } from "./videoSubjectVisual.js";
+import { renderThumbnail, thumbnailEnabled } from "./videoThumbnail.js";
 import { findFootageStill, footageEnabled, footageCreditLines, footageDateLabel } from "./videoFootage.js";
 import { withDeadline } from "./httpRetry.js";
 import { isTikTokConfigured, uploadToTikTok, tiktokPrivacyLevel } from "./tiktokClient.js";
@@ -247,6 +248,15 @@ export const VIDEO_THREADS_MAX_PER_DAY = () => {
 
 export const publicVideoUrl = (articleId) =>
   `${SITE_ORIGIN}/scoop-ops/videos-gen/file/${encodeURIComponent(articleId)}`;
+
+/**
+ * The thumbnail's public URL. Meta's `cover_url` is a URL-FETCH parameter on
+ * both Reels surfaces — Meta downloads it server-side while the container
+ * processes — so a thumbnail that exists only on our disk is one Meta never
+ * sees. YouTube does not use this: that surface takes raw bytes.
+ */
+export const publicThumbnailUrl = (articleId) =>
+  `${SITE_ORIGIN}/scoop-ops/videos-gen/thumb/${encodeURIComponent(articleId)}`;
 
 /**
  * Facebook's own rolling-24h cap. Unset it and Facebook tracks YouTube, so
@@ -564,6 +574,16 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
     // Public domain is not the same as unattributed, and DVIDS attaches an
     // actual condition — see footageCreditLines.
     const footageUsed = [];
+    // THE ESTABLISHING SHOT, REMEMBERED FOR THE THUMBNAIL.
+    //
+    // Whatever the resolver picked for the video's subject-visual card — the
+    // photograph, the locator map, the flag — is what the thumbnail uses. This
+    // is a RECORD of that decision, not a second one: the thumbnail never gets
+    // to go looking for a picture of its own, because a second selection path
+    // is a second thing that can disagree with the spec's declared subject.
+    // The spec allows at most one subject-visual card, so the first resolved
+    // underlay is the establishing shot by construction.
+    let thumbSubjectVisual = null;
     // ── Stock cutaways (dark: VIDEO_STOCK_CUTAWAYS_ENABLED=1) ───────────────
     //
     // A lookup against the curated library, never a search. The picks are made
@@ -709,14 +729,18 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
           } else if (wants === "map") {
             underlayPath = buildMapPng({
               codes: card.codes, exception: card.exception ?? null,
+              city: card.city ?? null,
               out: path.join(svWork, "map.png"), work: svWork,
             });
             if (underlayPath) imageCredit = "NATURAL EARTH";
             logger.info(
               `🎬 slide ${i} map: codes ${JSON.stringify(card.codes ?? [])}` +
-              `${card.exception ? ` except ${card.exception}` : ""} → ${underlayPath ? "drawn" : "NOT DRAWN"}`
+              `${card.exception ? ` except ${card.exception}` : ""}` +
+              `${card.city ? ` city ${card.city} (country NOT filled)` : ""} → ${underlayPath ? "drawn" : "NOT DRAWN"}`
             );
           }
+          // Record the first one that actually resolved — see thumbSubjectVisual.
+          if (underlayPath && !thumbSubjectVisual) thumbSubjectVisual = underlayPath;
           if (!underlayPath) {
             logger.warn(`🎬 slide ${i} (${card.t}): no ${wants} could be built — rendering the type alone`);
           } else if (wants === "photo") {
@@ -936,6 +960,34 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
       throw new Error(`assembled video is missing or implausibly small: ${out}`);
     }
 
+    // ── Thumbnail (dark: VIDEO_THUMBNAIL_ENABLED=1) ─────────────────────────
+    //
+    // Rendered HERE, inside produceVideo, because this is the only scope that
+    // holds the subject visual the resolver chose — `work` is released in the
+    // finally below, taking the resolved photo/map with it. Named off the same
+    // videoDesignKey() as the MP4 so a layout change produces a new thumbnail
+    // instead of leaving the previous one beside the new video.
+    //
+    // A thumbnail is worth having and is not worth a video: renderThumbnail
+    // never throws, and a null here simply means the platforms keep their own
+    // auto-generated frames, which is what they did before this existed.
+    let thumbPath = null;
+    if (thumbnailEnabled()) {
+      const thumbOut = path.join(VIDEOS_DIR, `${article.id}-${videoDesignKey()}-thumb.jpg`);
+      const made = await renderThumbnail({
+        // The hook, in the spec's own words. The title card's caption IS the
+        // cold open (spec rule 11) — the one line written to make someone stop
+        // — so it is the right text for a thumbnail and the headline is not.
+        hook: spec?.cards?.[0]?.caption || article.title,
+        outlet: attribution.publisher,
+        subjectVisualPath: thumbSubjectVisual,
+        out: thumbOut,
+        work: path.join(work, "thumb"),
+        ffmpegPath: getFFmpegPath(),
+      });
+      thumbPath = made?.path ?? null;
+    }
+
     // ── Score bed (dark: VIDEO_MUSIC_BED_ENABLED=1) ─────────────────────────
     // Slide starts are DERIVED from the same audio durations the assembler
     // used — slideTotalSecs per slide, accumulated. Nothing here re-models the
@@ -953,14 +1005,14 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
         await scoreShort(out, bed, scored, { ffmpegPath: ff });
         if (existsSync(scored) && statSync(scored).size > 10_000) {
           logger.info(`🎬 music bed: scored ${t.toFixed(1)}s, turn=${phases.turn?.toFixed(1) ?? "none"}, sections=${sections.length}`);
-          return { path: scored, slides, footage: footageUsed };
+          return { path: scored, slides, footage: footageUsed, thumbPath };
         }
         logger.warn("🎬 music bed: scored file missing/small — shipping unscored");
       } catch (err) {
         logger.warn(`🎬 music bed failed (shipping unscored): ${err.message.slice(0, 160)}`);
       }
     }
-    return { path: out, slides, footage: footageUsed };
+    return { path: out, slides, footage: footageUsed, thumbPath };
   } finally {
     releaseFrameDir(work);
   }
@@ -1343,6 +1395,7 @@ export async function crossPostToFacebook(article, {
  */
 export async function reelToFacebook(article, {
   filePath, title, attribution, spec = null, slides = null, now = Date.now(), footage = [],
+  thumbPath = null,
 } = {}) {
   if (!facebookReelsEnabled()) return { status: "off" };
 
@@ -1389,7 +1442,13 @@ export async function reelToFacebook(article, {
         `?utm_source=social_facebook_reel&utm_medium=social&utm_campaign=scoop_video`,
     ].filter(Boolean).join("\n\n").slice(0, 2200);
 
-    const fb = await postReelToFacebook({ filePath, caption });
+    // See postReelToFacebook's COVER_REJECTED note: whether /video_reels
+    // accepts a cover at all is UNCONFIRMED, so it is attempted and the call
+    // retries without it rather than risking the Reel.
+    const fb = await postReelToFacebook({
+      filePath, caption,
+      coverUrl: thumbPath ? publicThumbnailUrl(article.id) : null,
+    });
     logger.info(`🎞️ FACEBOOK REEL PUBLISHED ${fb.id} — ${fb.url}`);
     return { status: "posted", id: fb.id, url: fb.url };
 
@@ -1431,6 +1490,7 @@ export async function reelToFacebook(article, {
  */
 export async function reelToInstagram(article, {
   filePath, title, attribution, spec = null, slides = null, now = Date.now(), footage = [],
+  thumbPath = null,
 } = {}) {
   if (!instagramReelsEnabled()) return { status: "off" };
 
@@ -1497,7 +1557,12 @@ export async function reelToInstagram(article, {
     // moment Meta is told about the URL, so the marker must precede the call.
     markVideoInstagram(article.id, { status: "pending" });
 
-    const ig = await postReelToInstagram({ videoUrl: publicVideoUrl(article.id), caption });
+    const ig = await postReelToInstagram({
+      videoUrl: publicVideoUrl(article.id), caption,
+      // Centre-cropped to a square on the profile grid — videoThumbnail.js
+      // keeps the hook inside that crop.
+      coverUrl: thumbPath ? publicThumbnailUrl(article.id) : null,
+    });
     markVideoInstagram(article.id, { status: "posted", postId: ig.id });
     logger.info(`📸 INSTAGRAM REEL PUBLISHED ${ig.id} (${posted24h + 1}/${max} today) — ${ig.url}`);
     return { status: "posted", id: ig.id, url: ig.url, seconds: secs };
@@ -1750,6 +1815,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     writePackaging: _writePackaging = writePackaging,
     produceVideo: _produceVideo = produceVideo,
     uploadToYouTube: _uploadToYouTube = uploadToYouTube,
+    setYouTubeThumbnail: _setYouTubeThumbnail = setYouTubeThumbnail,
     isVoiceConfigured: _isVoiceConfigured = isVoiceConfigured,
     isYouTubeConfigured: _isYouTubeConfigured = isYouTubeConfigured,
     isVideoSpecEnabled: _isVideoSpecEnabled = isVideoSpecEnabled,
@@ -2027,6 +2093,30 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
         rec.stage = "ok";
         logger.info(`🎬 PUBLISHED ${produced.youtubeId} — "${title}"`);
 
+        // ─── Custom thumbnail ──────────────────────────────────────────────
+        //
+        // AFTER the upload and AFTER markVideoPublished, deliberately. The
+        // video is already live and already recorded by this point, so a
+        // thumbnail failure has nothing left to corrupt — which is exactly why
+        // it belongs here rather than folded into the upload call. It costs
+        // ~50 quota units against the same 10,000/day budget the 1,600-unit
+        // upload draws on; see setYouTubeThumbnail's quota note.
+        //
+        // RULE 0 STILL GATES THIS. The thumbnail is drawn from the same spec
+        // and the same subject visual the video was gated on at the pre-upload
+        // assertPublishAllowed, so it carries no claim the video does not. It
+        // is published only because that gate already passed — a refusal
+        // returns long before this line.
+        //
+        // setYouTubeThumbnail never throws, so this needs no guard of its own;
+        // it is inside the load-bearing try anyway.
+        if (video.thumbPath) {
+          const okThumb = await _setYouTubeThumbnail({
+            videoId: produced.youtubeId, filePath: video.thumbPath,
+          });
+          produced.thumbnail = okThumb ? "set" : "failed";
+        }
+
         // ─── Facebook cross-post ───────────────────────────────────────────
         //
         // NESTED INSIDE THE UPLOAD TRY, which is unavoidable here: the YouTube
@@ -2064,6 +2154,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             () => _reelToFacebook(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
+            thumbPath: video.thumbPath,
           }));
           if (reel && reel.status !== "off") produced.facebookReel = reel;
 
@@ -2075,6 +2166,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
             () => _reelToInstagram(article, {
             filePath: video.path, title, attribution,
             spec: r.spec, slides: video.slides, now, footage: video.footage,
+            thumbPath: video.thumbPath,
           }));
           if (igReel && igReel.status !== "off") produced.instagramReel = igReel;
 

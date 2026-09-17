@@ -220,12 +220,152 @@ export async function buildBed(seconds, out, { arc = null, sections = [], phases
  */
 export const LOUDNESS_TARGET = Object.freeze({ I: -14, TP: -2.0, LRA: 11 });
 
-export async function measureLoudness(file, { ffmpegPath }) {
+/**
+ * ─── BED GAIN STAGING (2026-09-16) ──────────────────────────────────────────
+ *
+ * MEASURED DEFECT, on a render built by these same functions: the bed sat
+ * **13.5 dB ABOVE the voice** during speech, and the sidechain contributed a
+ * median of **0.00 dB** of gain reduction across 164 speech windows. Two
+ * independent faults, and lowering a gain would have fixed only one of them.
+ *
+ *   1. NOTHING GAIN-STAGED THE TWO STEMS. buildBed ends with
+ *      `alimiter=limit=0.95`, and alimiter AUTO-LEVELS by default — it
+ *      normalizes its output UP toward the ceiling. So the bed arrived at
+ *      +0.03 dBTP / −16.8 LUFS no matter what, while the narration arrived at
+ *      whatever level the TTS happened to produce (−27.5 LUFS / −6.1 dBTP on
+ *      the measured render). The bed was simply louder, and no stage between
+ *      them ever compared the two.
+ *
+ *   2. THE SIDECHAIN THRESHOLD WAS IN THE WRONG PLACE ENTIRELY. ffmpeg's
+ *      `threshold` is LINEAR AMPLITUDE, so 0.12 is −18.4 dBFS. The key — the
+ *      narration — sits near −30 dBFS RMS under speech, i.e. **11.9 dB below
+ *      the threshold**. The compressor never opened. It was not a gentle duck;
+ *      it was no duck.
+ *
+ * THE FIX IS RELATIVE, NOT A NEW CONSTANT. A fixed bed gain would have been
+ * the same bug with a nicer number: it would hold for one TTS voice and drift
+ * the moment VIDEO_VOICE_ID changes, which is a knob this repo expects to be
+ * turned. So both the bed gain and the sidechain key are derived from the
+ * narration's OWN measured loudness:
+ *
+ *   • the bed is gained so it sits BED_UNDER_DB below the measured voice —
+ *     this is the level you hear IN THE GAPS, and it is what keeps the bed
+ *     present rather than absent;
+ *   • the KEY is normalized to a fixed reference (KEY_REF_LUFS) before it hits
+ *     the sidechain, so one threshold is correct for every voice. The key is a
+ *     CONTROL SIGNAL ONLY — normalizing it changes no audio that anybody hears.
+ *
+ * With the key at a known level the threshold finally means something: speech
+ * lands ~12 dB above it, and the ratio (2.5, unchanged — "the bed is meant to
+ * be heard") turns that into ~7 dB of reduction while the voice is speaking.
+ * Net: the bed sits ~BED_UNDER_DB under the voice in the gaps and ~17 dB under
+ * it during speech, and the difference between those two is audible breathing
+ * rather than a number in a config file.
+ *
+ * ALL THREE ARE ENV-TUNABLE because the house convention is that a level
+ * judgement gets eyeballed and adjusted without a deploy — but the DEFAULTS
+ * are the fix. Prod needs no env line to get the corrected mix.
+ */
+function envDb(name, fallback, { min, max }) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number.parseFloat(raw);
+  // A typo must not silently re-tune the mix — fall back loudly instead.
+  if (!Number.isFinite(n) || n < min || n > max) return fallback;
+  return n;
+}
+
+/**
+ * How far BELOW the delivery true-peak target the mix is encoded, to leave the
+ * AAC encoder room for inter-sample overshoot. 3.0 dB covers the 2.66 dB
+ * measured on a speech-dominated short; the verify-and-retry in scoreShort is
+ * what covers content that overshoots harder.
+ */
+export function encodeHeadroomDb() {
+  return envDb("VIDEO_MUSIC_BED_ENCODE_HEADROOM_DB", 1.5, { min: 0, max: 12 });
+}
+
+/**
+ * ─── VOICE CONDITIONING, AND WHY THE BED FIX FORCED IT ──────────────────────
+ *
+ * MEASURED: with the bed staged down to where it belongs, the mix arrives at
+ * loudnorm at −27.55 LUFS with a −6.10 dBTP peak — a 21.5 dB crest factor.
+ * Reaching −14 LUFS needs +13.55 dB, which would put true peak at +7.45 dBTP.
+ * loudnorm CANNOT do that linearly, so it SILENTLY FALLS BACK TO DYNAMIC MODE:
+ * the per-window gain ride that the 2026-08-30 fix exists to eliminate. The
+ * output measured −15.4 LUFS with LRA 0.7, where a genuinely TP-constrained
+ * linear gain would have produced −26.45 LUFS. That gap is the fallback.
+ *
+ * THE OLD, TOO-LOUD BED HAD BEEN HIDING THIS. A dense music bed runs
+ * continuously and lifts the programme's integrated level toward its peaks, so
+ * only ~3 dB of make-up was ever needed and linear mode always succeeded.
+ * Quieting the bed removes that prop and exposes the narration as it actually
+ * is: far too peaky to normalise linearly on its own.
+ *
+ * `linear=true` IN THE FILTER STRING IS NOT A GUARANTEE — it is a request, and
+ * videoMusicBed.test.js can only assert the string. The only way to keep the
+ * guarantee is to hand loudnorm a mix it CAN normalise linearly, which means
+ * the narration has to arrive with a sane crest factor.
+ *
+ * So the voice is levelled before the mix: gained to a target, compressed to
+ * bring the crest in, and held under a peak ceiling. This IS an editorial
+ * change — the narration is more even than it was — but the alternative is not
+ * "uncompressed narration", it is dynamic-mode loudnorm riding the gain across
+ * the whole short, which is compression too, applied blindly and to everything
+ * including the bed.
+ *
+ * VIDEO_MUSIC_BED_VOICE_LEVEL=0 turns it off; the mix then reverts to the
+ * dynamic-mode behaviour described above, which is why it is not the default.
+ */
+export function voiceLeveling(voiceI, {
+  enabled = process.env.VIDEO_MUSIC_BED_VOICE_LEVEL !== "0",
+  targetLufs = envDb("VIDEO_MUSIC_BED_VOICE_TARGET_LUFS", -18, { min: -30, max: -6 }),
+  ceilingDb = envDb("VIDEO_MUSIC_BED_VOICE_CEILING_DB", -6, { min: -20, max: -1 }),
+  ratio = envDb("VIDEO_MUSIC_BED_VOICE_RATIO", 6, { min: 1, max: 20 }),
+} = {}) {
+  if (!enabled || !Number.isFinite(voiceI)) return { filter: null, targetLufs: voiceI };
+  const gainDb = targetLufs - voiceI;
+  // acompressor's threshold is LINEAR AMPLITUDE — the same trap that made the
+  // old sidechain a no-op. Sit it below the ceiling so the compressor does the
+  // smooth work and the limiter only catches what is left.
+  const knee = 10 ** ((ceilingDb - 8) / 20);
+  const ceil = 10 ** (ceilingDb / 20);
+  return {
+    targetLufs,
+    filter:
+      `volume=${gainDb.toFixed(2)}dB,` +
+      `acompressor=threshold=${knee.toFixed(6)}:ratio=${ratio}:attack=5:release=120` +
+        `:makeup=1:detection=rms,` +
+      // level=false, for the same reason it is false on the final stage.
+      `alimiter=limit=${ceil.toFixed(4)}:level=false`,
+  };
+}
+
+export function bedMix() {
+  return {
+    // How far under the voice the bed sits when nobody is speaking.
+    underDb: envDb("VIDEO_MUSIC_BED_UNDER_DB", -12, { min: -40, max: 0 }),
+    // The level the sidechain key is normalized to. Not an audio level —
+    // it exists so DUCK_THRESHOLD is voice-independent.
+    keyRefLufs: envDb("VIDEO_MUSIC_BED_KEY_REF_LUFS", -20, { min: -40, max: -6 }),
+    // Linear amplitude, against a key at keyRefLufs. 0.02 = −34 dBFS.
+    duckThreshold: envDb("VIDEO_MUSIC_BED_DUCK_THRESHOLD", 0.02, { min: 0.001, max: 0.5 }),
+    duckRatio: envDb("VIDEO_MUSIC_BED_DUCK_RATIO", 2.5, { min: 1, max: 20 }),
+  };
+}
+
+export async function measureLoudness(file, { ffmpegPath, preFilter = null }) {
+  // `preFilter` measures what a stem will be AFTER a stage, without writing an
+  // intermediate: the voice conditioner changes the voice's loudness, and the
+  // bed is staged against the CONDITIONED voice, so the number that matters is
+  // the post-conditioning one.
+  const chain = [preFilter,
+    `loudnorm=I=${LOUDNESS_TARGET.I}:TP=${LOUDNESS_TARGET.TP}:LRA=${LOUDNESS_TARGET.LRA}:print_format=json`,
+  ].filter(Boolean).join(",");
   // stderr, not stdout: loudnorm prints its JSON to the log stream.
   const { stderr } = await execFileP(ffmpegPath,
-    ["-nostdin", "-hide_banner", "-i", file,
-     "-af", `loudnorm=I=${LOUDNESS_TARGET.I}:TP=${LOUDNESS_TARGET.TP}:LRA=${LOUDNESS_TARGET.LRA}:print_format=json`,
-     "-f", "null", "-"], { maxBuffer: 1 << 26 });
+    ["-nostdin", "-hide_banner", "-i", file, "-af", chain, "-f", "null", "-"],
+    { maxBuffer: 1 << 26 });
   const m = stderr.match(/\{[\s\S]*?"input_i"[\s\S]*?\}/);
   if (!m) throw new Error("videoMusicBed: loudnorm printed no measurement");
   return JSON.parse(m[0]);
@@ -241,39 +381,137 @@ export function secondPassLoudnorm(measured, t = LOUDNESS_TARGET) {
     `:offset=${measured.target_offset}:linear=true`;
 }
 
+/**
+ * The mix filtergraph, as a pure function of the two measured stem loudnesses.
+ *
+ * SEPARATED FROM scoreShort SO IT CAN BE MEASURED. The defect this replaced was
+ * invisible in code review and obvious in a measurement, so the graph that
+ * actually ships is the graph the ground harness renders — the harness asks for
+ * `[ducked]` instead of `[a]` and gets the bed stem in isolation, with no second
+ * copy of the parameters to drift out of step.
+ *
+ * Input 0 is the narration (the finished, unscored short); input 1 is the bed.
+ * Returns the filter_complex string, the two derived gains, and the labels.
+ */
+export function mixFilterGraph({
+  voiceI, bedI, mix = bedMix(), tapDucked = false, leveling = undefined,
+}) {
+  if (!Number.isFinite(voiceI) || !Number.isFinite(bedI)) {
+    throw new Error(`videoMusicBed: unmeasurable stem (voice=${voiceI}, bed=${bedI})`);
+  }
+  const lvl = leveling === undefined ? voiceLeveling(voiceI) : leveling;
+  // Everything downstream is staged against the LEVELLED voice — the level the
+  // mix actually carries — not against the raw stem.
+  const heardI = lvl.filter ? lvl.targetLufs : voiceI;
+  const bedGainDb = (heardI + mix.underDb) - bedI;
+  // The key is a CONTROL SIGNAL; this gain never reaches the output.
+  const keyGainDb = mix.keyRefLufs - heardI;
+  // `tapDucked` splits the ducked bed back out as a second, unused-by-the-mix
+  // output so the ground harness can measure the bed in isolation. It changes
+  // NOTHING about [a] — asplit is lossless and the mix leg is byte-identical —
+  // which is the point: the thing measured is the thing that ships.
+  const graph =
+    `[0:a]${lvl.filter ? `${lvl.filter},` : ""}asplit=2[voice][keyraw];` +
+    `[keyraw]volume=${keyGainDb.toFixed(2)}dB[key];` +
+    `[1:a]volume=${bedGainDb.toFixed(2)}dB[bedlvl];` +
+    `[bedlvl][key]sidechaincompress=threshold=${mix.duckThreshold}:ratio=${mix.duckRatio}` +
+      `:attack=20:release=380:makeup=1[duckedraw];` +
+    (tapDucked ? `[duckedraw]asplit=2[ducked][duckedtap];` : `[duckedraw]anull[ducked];`) +
+    `[voice][ducked]amix=inputs=2:duration=first:normalize=0[a]`;
+  return { graph, bedGainDb, keyGainDb, mix, leveling: lvl, heardI,
+           out: "[a]", duckedOut: "[duckedtap]" };
+}
+
 export async function scoreShort(fileIn, bed, fileOut, { ffmpegPath }) {
   if (!ffmpegPath) throw new Error("videoMusicBed: ffmpegPath is required");
   const ff = (args) => execFileP(ffmpegPath, ["-y", "-nostdin", "-hide_banner", "-loglevel", "error", ...args],
     { maxBuffer: 1 << 26 });
 
+  // Pass 0: MEASURE BOTH STEMS. Everything below is relative to these two
+  // numbers, which is what makes the mix hold across TTS voices — see the
+  // BED GAIN STAGING note above.
+  const [voiceRaw, bedM] = await Promise.all([
+    measureLoudness(fileIn, { ffmpegPath }),
+    measureLoudness(bed, { ffmpegPath }),
+  ]);
+  // The leveller is derived from the RAW voice, then the voice is RE-MEASURED
+  // THROUGH it. Its compressor and limiter pull the level back down below the
+  // gain that was applied — measured −19.74 LUFS for an −18 target — so staging
+  // the bed against the requested target rather than the achieved one put it
+  // ~1.7 dB out. Assume nothing that can be measured.
+  const leveling = voiceLeveling(Number(voiceRaw.input_i));
+  const voiceM = leveling.filter
+    ? await measureLoudness(fileIn, { ffmpegPath, preFilter: leveling.filter })
+    : voiceRaw;
+  const staged = mixFilterGraph({
+    voiceI: Number(voiceM.input_i), bedI: Number(bedM.input_i),
+    // The filter is already built; pass the ACHIEVED loudness as the reference.
+    leveling: { ...leveling, targetLufs: Number(voiceM.input_i) },
+  });
+
   // Pass 1: the mix itself — voice, sidechain-ducked bed — to float PCM.
   const mixed = `${fileOut}.mix.wav`;
   await ff([
     "-i", fileIn, "-i", bed,
-    "-filter_complex",
-      `[0:a]asplit=2[voice][key];` +
-      `[1:a][key]sidechaincompress=threshold=0.12:ratio=2.5:attack=20:release=380:makeup=1[ducked];` +
-      `[voice][ducked]amix=inputs=2:duration=first:normalize=0[a]`,
-    "-map", "[a]", "-c:a", "pcm_f32le", "-ar", "48000", "-ac", "2", mixed,
+    "-filter_complex", staged.graph,
+    "-map", staged.out, "-c:a", "pcm_f32le", "-ar", "48000", "-ac", "2", mixed,
   ]);
 
   try {
     // Pass 2: measure, then apply linearly against the measured values.
     const measured = await measureLoudness(mixed, { ffmpegPath });
-    await ff([
-      "-i", fileIn, "-i", mixed,
-      // level=false IS THE ACTUAL FIX. alimiter AUTO-LEVELS by default — it
-      // normalizes its output UP toward the ceiling — so the original chain
-      // took loudnorm's on-target mix and boosted it ~+1.4 dB, which is
-      // precisely the +1.5 LU / −0.2 dBTP signature measured on the published
-      // file. The bed's INTERNAL limiter keeps auto-level: it was part of the
-      // sound the bed was tuned to, and its output passes through this
-      // correctly-behaved stage anyway.
-      "-filter_complex", `[1:a]${secondPassLoudnorm(measured)},alimiter=limit=0.85:level=false[a]`,
-      "-map", "0:v", "-map", "[a]",
-      "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
-      "-movflags", "+faststart", fileOut,
-    ]);
+
+    // ── ENCODE HEADROOM, AND THEN VERIFY IT ───────────────────────────────
+    //
+    // MEASURED, once the bed came down: loudnorm and the limiter land the mix
+    // at −14.28 LUFS / −1.99 dBTP — dead on target, with the limiter not
+    // engaging at all — and the AAC ENCODE THEN ADDS 2.66 dB of inter-sample
+    // true peak, delivering +0.67 dBTP against a −2.0 target.
+    //
+    // The overshoot was always there (the file header records a 0.94 ceiling
+    // measuring +0.86 dBFS), but the old, far-too-loud bed masked it: a dense
+    // music bed needed only ~3 dB of make-up gain and its peaks never
+    // approached the ceiling. A speech-dominated mix has sharp transients and
+    // needs ~13 dB, so the encoder's reconstruction overshoots much harder.
+    //
+    // Encoding to a lower internal target is necessary but NOT sufficient,
+    // because the overshoot is content-dependent — which is exactly the kind
+    // of thing this file has been burned by before. So the encoded file is
+    // MEASURED, and if it still exceeds the delivery target the encode is
+    // repeated once from the same WAV with the excess taken out. An unmeasured
+    // ceiling is not a ceiling.
+    const deliveryTp = LOUDNESS_TARGET.TP;
+    let trimDb = encodeHeadroomDb();
+    let lastTp = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await ff([
+        "-i", fileIn, "-i", mixed,
+        // level=false IS THE ACTUAL FIX for the earlier defect. alimiter
+        // AUTO-LEVELS by default — it normalizes its output UP toward the
+        // ceiling — so the original chain took loudnorm's on-target mix and
+        // boosted it ~+1.4 dB, which is precisely the +1.5 LU / −0.2 dBTP
+        // signature measured on the published file. The bed's INTERNAL limiter
+        // keeps auto-level: it was part of the sound the bed was tuned to, and
+        // its output passes through this correctly-behaved stage anyway.
+        "-filter_complex",
+          `[1:a]${secondPassLoudnorm(measured, { ...LOUDNESS_TARGET, TP: deliveryTp - trimDb })},` +
+          `alimiter=limit=0.85:level=false[a]`,
+        "-map", "0:v", "-map", "[a]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+        "-movflags", "+faststart", fileOut,
+      ]);
+      const got = await measureLoudness(fileOut, { ffmpegPath });
+      lastTp = Number(got.input_tp);
+      if (!Number.isFinite(lastTp) || lastTp <= deliveryTp) break;
+      // Take out exactly what it overshot by, plus a small guard, and re-encode.
+      trimDb += (lastTp - deliveryTp) + 0.3;
+    }
+    if (Number.isFinite(lastTp) && lastTp > deliveryTp) {
+      // Honesty rule: say it, do not quietly ship a hot file as if it passed.
+      console.warn(
+        `🎬 music bed: encoded true peak ${lastTp.toFixed(2)} dBTP still exceeds ` +
+        `${deliveryTp} after two encodes (headroom ${trimDb.toFixed(2)} dB) — shipping anyway, but this is over target`);
+    }
   } finally {
     try { unlinkSync(mixed); } catch { /* already gone */ }
   }

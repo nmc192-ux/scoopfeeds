@@ -202,6 +202,55 @@ export async function uploadToYouTube({ filePath, title, description = "", tags 
   return { videoId, videoUrl, title: cleanTitle };
 }
 
+// ─── Custom thumbnail ─────────────────────────────────────────────────────────
+//
+// ⚠️ QUOTA: thumbnails.set COSTS ~50 UNITS PER VIDEO, against the SAME
+// 10,000/day budget that the 1,600-unit upload and the YouTube INGESTION
+// search calls draw on (see the quota note at videoAutopost.js's
+// isQuotaExceeded). 50 is small beside 1,600 — roughly 3% on top of each
+// published short — so at the current one-or-two-a-day cadence this is noise,
+// and it stays noise as long as the cadence does. It is listed here because
+// the budget has already been exhausted once by ingestion, and the next person
+// counting units should not have to rediscover what this call costs.
+//
+// NEVER THROWS. This runs AFTER the video is public: a thumbnail failure must
+// leave the published video alone, not flip a row whose upload succeeded. The
+// caller gets false and a log line.
+export async function setYouTubeThumbnail({ videoId, filePath }) {
+  if (!isYouTubeConfigured()) { logger.warn("📺 thumbnail: YouTube not configured"); return false; }
+  if (!videoId) { logger.warn("📺 thumbnail: no videoId"); return false; }
+  if (!filePath || !existsSync(filePath)) {
+    logger.warn(`📺 thumbnail: file not found at ${filePath}`);
+    return false;
+  }
+  try {
+    const accessToken = await _getAccessToken();
+    const bytes = readFileSync(filePath);
+    const res = await fetch(
+      `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": filePath.endsWith(".png") ? "image/png" : "image/jpeg",
+          "Content-Length": String(bytes.length),
+        },
+        body: bytes,
+      }
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      logger.warn(`📺 thumbnail: set failed ${res.status} — ${body.slice(0, 200)}`);
+      return false;
+    }
+    logger.info(`📺 thumbnail set on ${videoId} (${(bytes.length / 1024).toFixed(0)} KB, ~50 quota units)`);
+    return true;
+  } catch (err) {
+    logger.warn(`📺 thumbnail: set threw — ${String(err.message).slice(0, 160)}`);
+    return false;
+  }
+}
+
 // ─── Video metrics ────────────────────────────────────────────────────────────
 // Fetch view/like/comment counts for one or more video IDs.
 // Called by the scheduler to populate the video_metrics table and feed back

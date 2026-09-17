@@ -382,7 +382,33 @@ export async function postVideoToFacebook({ filePath, title = "", description = 
 //
 // Every path now either publishes a Reel or throws with the reason. No Reel
 // and a loud error beats a link post believed to be a Reel.
-export async function postReelToFacebook({ filePath, caption = "" }) {
+/**
+ * ⚠️ WHETHER /video_reels TAKES A CUSTOM COVER IS NOT CONFIRMED (2026-09-16).
+ *
+ * The Reels Publishing guide and the Page/video_reels reference on
+ * developers.facebook.com are BLOCKED by this network's egress policy, so the
+ * parameter could not be checked against Meta's own documentation. Secondary
+ * sources say the finish phase accepts `cover_url`; Instagram's Reels container
+ * definitely does, and the two APIs share a good deal of shape. That is a
+ * reason to try it, not a reason to claim it works.
+ *
+ * So it is sent OPTIMISTICALLY AND THE CALL IS RETRIED WITHOUT IT if Meta
+ * rejects the parameter. Three things follow, all deliberate:
+ *
+ *   • a cover that Meta does not support can never cost a Reel — the retry
+ *     publishes exactly what the old code published;
+ *   • the answer is DETERMINED IN PRODUCTION rather than guessed here. The log
+ *     line below says which branch ran, so one published Reel settles it;
+ *   • when the answer arrives, delete the retry and this comment — a permanent
+ *     "we are not sure" is a worse state than either yes or no.
+ *
+ * The retry fires only on an error that NAMES the parameter. A generic failure
+ * is a real failure and is allowed to propagate, because swallowing it would
+ * turn "Meta is down" into "we quietly published without a cover".
+ */
+const COVER_REJECTED = /cover_url|unknown parameter|invalid parameter|param cover/i;
+
+export async function postReelToFacebook({ filePath, caption = "", coverUrl = null }) {
   const t = _loadToken();
   if (!t) throw new Error("facebook not configured");
 
@@ -427,16 +453,31 @@ export async function postReelToFacebook({ filePath, caption = "" }) {
         throw new Error(`FB reels upload → ${upRes.status}: ${errTxt.slice(0, 200)}`);
       }
 
-      // Step 3: finalise and publish.
-      const finish = await _call(`/${t.pageId}/video_reels`, {
-        method: "POST",
-        params: {
-          upload_phase:  "finish",
-          video_id:      init.video_id,
-          video_state:   "PUBLISHED",
-          description:   caption,
-        },
-      });
+      // Step 3: finalise and publish. See the COVER_REJECTED note above for why
+      // the cover is attempted rather than assumed, and why the retry is narrow.
+      const finishParams = {
+        upload_phase:  "finish",
+        video_id:      init.video_id,
+        video_state:   "PUBLISHED",
+        description:   caption,
+      };
+      let finish;
+      if (coverUrl) {
+        try {
+          finish = await _call(`/${t.pageId}/video_reels`, {
+            method: "POST", params: { ...finishParams, cover_url: coverUrl },
+          });
+          logger.info("📘 Facebook Reel: cover_url ACCEPTED — /video_reels does take a custom thumbnail");
+        } catch (coverErr) {
+          if (!COVER_REJECTED.test(String(coverErr?.message || ""))) throw coverErr;
+          logger.warn(
+            `📘 Facebook Reel: cover_url REJECTED by Meta (${String(coverErr.message).slice(0, 120)}) — ` +
+            `/video_reels does NOT take a custom thumbnail; publishing without one`);
+          finish = await _call(`/${t.pageId}/video_reels`, { method: "POST", params: finishParams });
+        }
+      } else {
+        finish = await _call(`/${t.pageId}/video_reels`, { method: "POST", params: finishParams });
+      }
 
       // THE FINISH RESPONSE IS CHECKED, not assumed. Meta answers phase 3 with
       // {"success": true}; anything else means the bytes landed but the Reel
