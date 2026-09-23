@@ -678,6 +678,19 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
     for (let i = 0; i < slides.length; i++) {
       const card = slides[i];
       const audioSecs = audio[i].durationSecs;
+      // The cutaway sits INSIDE this slide's segment and is clamped against its
+      // length, so the finished video is exactly as long with cutaways on as
+      // off. Nothing new is concatenated, and the music bed — which derives its
+      // timeline independently from slideTotalSecs — stays in sync by not
+      // having anything to be out of sync with.
+      //
+      // DECLARED AT THE TOP OF THE LOOP, NOT BESIDE assembleSlide. The beat-
+      // imagery branch below reads it (`!cutAsset`, so a picture never
+      // displaces a real stock cutaway). Declared after that read, every slide
+      // with a resolved beat picture threw "Cannot access 'cutAsset' before
+      // initialization", losing the whole video the moment
+      // VIDEO_BEAT_IMAGERY_ENABLED=1. Pinned by videoAutopostTdz.test.js.
+      const cutAsset = cutawayBySlide.get(i) || null;
       // SUBJECT VISUAL, RESOLVED BEFORE ANYTHING IS RENDERED.
       //
       // This used to run AFTER the states were built, which was harmless while
@@ -890,13 +903,6 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
       }
 
       const seg = path.join(work, `slide${String(i).padStart(2, "0")}.mp4`);
-      // The cutaway sits INSIDE this slide's segment and is clamped against its
-      // length, so the finished video is exactly as long with cutaways on as
-      // off. Nothing new is concatenated, and the music bed — which derives its
-      // timeline independently from slideTotalSecs — stays in sync by not
-      // having anything to be out of sync with.
-      const cutAsset = cutawayBySlide.get(i) || null;
-
 
       await assembleSlide({
         statePaths: paths, hold, outputPath: seg, driftDir: i, orientation,
