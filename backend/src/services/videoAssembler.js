@@ -545,7 +545,7 @@ const GROUND_HEX = "0x090706";
  * The credit rides INSIDE the cutaway stream for the same reason: composited
  * before the overlay, it cannot outlive the footage it credits.
  */
-export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0, caption = null, orientation = "horizontal", underlay = false, cutaway = null }) {
+export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS, driftDir = 0, caption = null, orientation = "horizontal", underlay = false, cutaway = null, wordCaption = null }) {
   const CV = geometryFor(orientation).canvas;
   const parts = [];
   // The whole-slide timeline, needed by image motion so each state animates its
@@ -693,7 +693,7 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
       sink
     );
     if (cutaway) appendCutaway();
-    return { filter: parts.join("; "), totalDuration: total };
+    return { filter: withWordCaptions(parts, wordCaption), totalDuration: total };
   }
 
   // ── Drift, applied to the ASSEMBLED stream, in a supersampled domain ──
@@ -734,7 +734,27 @@ export function buildSlideFilter({ stateCount, hold, crossfade = CROSSFADE_SECS,
   );
   if (cutaway) appendCutaway();
 
-  return { filter: parts.join("; "), totalDuration: total };
+  return { filter: withWordCaptions(parts, wordCaption), totalDuration: total };
+}
+
+/**
+ * The word-caption stage, appended AFTER everything else — over the card, the
+ * underlay and any cutaway — because it is the narration and must sit on top of
+ * whatever is on screen. With no word caption the graph is returned unchanged.
+ *
+ * The caption stream (videoWordCaptions) already covers the whole slide, so the
+ * overlay carries no time term; `eof_action=pass` only guards a rounding frame.
+ */
+function withWordCaptions(parts, wordCaption) {
+  const filter = parts.join("; ");
+  if (!wordCaption) return filter;
+  const i = filter.lastIndexOf("[out]");
+  if (i < 0) throw new Error("videoAssembler: slide graph has no [out] to caption");
+  return (
+    filter.slice(0, i) + "[pre]" + filter.slice(i + 5) +
+    `; [${wordCaption.inputIndex}:v]fps=${FPS},format=rgba,setsar=1[wc]` +
+    `; [pre][wc]overlay=0:${wordCaption.y}:eof_action=pass:format=auto,format=yuv420p[out]`
+  );
 }
 
 /**
@@ -786,7 +806,7 @@ export async function assembleSlide({
   audioPath = null, captionText = null, workDir = null, fontFile = null,
   orientation = "horizontal", underlayPath = null, underlayIsVideo = false,
   cutawayPath = null, cutawaySecs = 0, cutawayCredit = null, cutawayFrame = null,
-  cutawayIsStill = false,
+  cutawayIsStill = false, wordCaptionTrack = null,
 }) {
   const ff = ffmpegPath || getFFmpegPath();
   if (!ff) throw new Error("videoAssembler: ffmpeg not available");
@@ -832,6 +852,9 @@ export async function assembleSlide({
   }
   const audioIdx = cutawayIdx + (useCutaway ? 1 : 0);
   if (audioPath) args.push("-i", audioPath);
+  // Word captions go LAST, so every index above stays what it was.
+  const wordIdx = audioIdx + (audioPath ? 1 : 0);
+  if (wordCaptionTrack) args.push("-f", "concat", "-safe", "0", "-i", wordCaptionTrack.listPath);
 
   const caption = (captionText && workDir && fontFile)
     ? await buildCaptionFilter({ text: captionText, workDir, slideIndex: driftDir, fontFile, orientation })
@@ -851,6 +874,7 @@ export async function assembleSlide({
     cutaway: useCutaway && cutSecs > 0
       ? { inputIndex: cutawayIdx, seconds: cutSecs, credit, frame: cutawayFrame }
       : null,
+    wordCaption: wordCaptionTrack ? { inputIndex: wordIdx, y: wordCaptionTrack.y } : null,
   });
 
   args.push("-filter_complex", filter, "-map", "[out]");

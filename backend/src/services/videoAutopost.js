@@ -68,6 +68,7 @@ import { assembleSlide, concatSlides, holdForAudio, slideTotalSecs, captionForCa
 import { deriveShortArc, buildBed, scoreShort } from "./videoMusicBed.js";
 import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.js";
 import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
+import { wordCaptionsEnabled, buildWordCaptionTrack } from "./videoWordCaptions.js";
 import { uploadToYouTube, isYouTubeConfigured, setYouTubeThumbnail } from "./youtubeClient.js";
 import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from "./facebookClient.js";
 import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js";
@@ -903,6 +904,23 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
       }
 
       const seg = path.join(work, `slide${String(i).padStart(2, "0")}.mp4`);
+      // ── Word-by-word captions (dark: VIDEO_WORD_CAPTIONS_ENABLED=1) ─────────
+      // Timed off the word alignment voice already cached. An enhancement: a
+      // failure here costs this slide its captions, never the video.
+      let wordCaptionTrack = null;
+      if (wordCaptionsEnabled()) {
+        if (!audio[i].words) {
+          logger.info(`💬 slide ${i}: no word timings for this clip — no captions on this slide`);
+        } else {
+          try {
+            wordCaptionTrack = await buildWordCaptionTrack({
+              words: audio[i].words, card, slideSecs: slideTotalSecs(audioSecs), workDir: work, slideIndex: i,
+            });
+          } catch (err) {
+            logger.warn(`💬 slide ${i}: word captions failed — ${String(err.message).slice(0, 120)}`);
+          }
+        }
+      }
 
       await assembleSlide({
         statePaths: paths, hold, outputPath: seg, driftDir: i, orientation,
@@ -940,6 +958,7 @@ export async function produceVideo(article, spec, attribution = resolveAttributi
         cutawaySecs: cutAsset ? CUTAWAY_SECS() : 0,
         cutawayCredit: cutAsset ? cutawayCredit(cutAsset) : null,
         cutawayIsStill: false,
+        wordCaptionTrack,
       });
       segments.push(seg);
     }
