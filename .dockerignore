@@ -11,3 +11,5 @@ npm-debug.log*
 backend/npm-debug.log*
 frontend/npm-debug.log*
 .DS_Store
+.env
+backend/.env
