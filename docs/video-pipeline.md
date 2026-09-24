@@ -648,6 +648,12 @@ Rules the resolver enforces, each earned by a real failure or a DrJ ruling:
   very low tense bed and no hits, never a driving bed. Envelope ducking under speech; a soft
   whoosh on each cut and a low hit on punch/turn shots only; two-pass loudnorm to -14 LUFS /
   TP -2, re-measured AFTER AAC with a corrective trim if the true peak lands above -1 dBTP.
+- **Metrics and digest (Phase 6)** — every short records its real-imagery share, real-video
+  share, average shot length, card fallbacks, outlets shown and loudness after AAC, checked
+  against the brief's §0 bars (`shots/shotMetrics.js`), plus a 12-frame contact sheet, under
+  `<data>/shot-metrics/<day>/` (14-day retention, swept at worker startup). A short that
+  misses a bar STILL PUBLISHES; the daily digest (`shots/shotDigest.js`, 07:56 UTC, to
+  `DIGEST_RECIPIENT_EMAIL`) flags it.
 - **Pre-resolve** — resolution is minutes cold (measured 214–367 s a short), so a
   rate-gated render cycle does it ahead of the slot and stores a plan; the slot then
   only fetches and renders.

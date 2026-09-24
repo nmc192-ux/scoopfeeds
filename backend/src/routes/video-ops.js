@@ -131,6 +131,35 @@ router.post("/unlist/:youtubeId", express.json({ limit: "8kb" }), async (req, re
 });
 
 /** GET /scoop-ops/video/status — gates, health, and whether the loop is even armed. */
+// ─── Shot-engine shorts digest (Phase 6) ────────────────────────────────────
+// Preview the digest as it would be emailed (contact sheets served inline as
+// /digest/sheet/<day>/<articleId>.jpg), and send it now. Admin-only by the mount.
+router.get("/digest/preview", async (req, res) => {
+  const { publishedOn } = await import("../services/shots/shotMetrics.js");
+  const { renderShotDigest, yesterdayUtc } = await import("../services/shots/shotDigest.js");
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || "")) ? String(req.query.day) : yesterdayUtc();
+  const records = publishedOn(day);
+  if (!records.length) return res.type("html").send(`<p>No shot-engine short published on ${day}.</p>`);
+  const d = renderShotDigest(records, day);
+  // The email embeds sheets as cid: attachments; the preview points each one at its URL.
+  let html = d.html;
+  for (const r of records) html = html.replace(/cid:sheet-\d+@scoopfeeds/, `${req.baseUrl}/digest/sheet/${day}/${r.articleId}.jpg`);
+  res.type("html").send(html);
+});
+
+router.get("/digest/sheet/:day/:articleId.jpg", async (req, res) => {
+  const { metricsDir } = await import("../services/shots/shotMetrics.js");
+  const { day, articleId } = req.params;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^[a-z0-9-]+$/i.test(articleId)) return res.status(400).end();
+  res.sendFile(`${metricsDir()}/${day}/${articleId}.jpg`, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+});
+
+router.post("/digest/send-now", express.json({ limit: "8kb" }), async (req, res) => {
+  const { sendShotDigest } = await import("../services/shots/shotDigest.js");
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.day || "")) ? String(req.body.day) : undefined;
+  res.json(await sendShotDigest(day ? { day } : {}));
+});
+
 router.get("/status", (_req, res) => {
   const gate = rateGate();
   res.json({

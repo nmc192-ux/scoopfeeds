@@ -36,9 +36,11 @@ export function getTransport() {
   return transport;
 }
 
-export async function sendMail({ to, subject, html, text }) {
+export async function sendMail({ to, subject, html, text, attachments }) {
   const t = getTransport();
   if (!t) return { skipped: true };
   const from = process.env.NEWSLETTER_FROM || "Scoop <no-reply@scoopfeeds.com>";
-  return t.sendMail({ from, to, subject, html, text });
+  // `attachments` is passed through untouched (nodemailer's shape). Inline
+  // images use `cid:` — the video digest embeds each short's contact sheet.
+  return t.sendMail({ from, to, subject, html, text, ...(attachments?.length ? { attachments } : {}) });
 }

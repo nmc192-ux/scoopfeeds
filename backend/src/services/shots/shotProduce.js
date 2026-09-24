@@ -22,6 +22,7 @@ import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "../videoArtifacts.
 import { sourceFingerprint } from "../renderCore.js";
 import { resolveSpecShots, defaultDeps } from "./shotResolver.js";
 import { scoreShotVideo } from "./shotSound.js";
+import { recordShort } from "./shotMetrics.js";
 import {
   buildTimeline, placeShots, subCut, fetchAssets, buildPlan, endCardSources, renderPlan,
   buildNarration, muxNarration, END_CARD_SECS, HOOK_SECS, MAX_SHOT_SECS, ENGINE_DIR,
@@ -151,6 +152,9 @@ export async function produceShotVideo(article, spec, attribution, { plan = null
     logger.info(`🎬 shot engine [${article.id}]: ${metrics.shots} shots · avg ${metrics.avgShotSecs}s · real ${Math.round(metrics.realShare * 100)}% · ` +
       `video ${Math.round(metrics.videoShare * 100)}% · resolve ${metrics.resolveSecs}s${plan ? " (pre-resolved)" : ""} · render ${metrics.renderSecs}s` +
       `${fallbacks.length ? ` · fallbacks: ${fallbacks.join("; ")}` : ""}`);
+    // Phase 6: the record the digest reads — metrics, bars, contact sheet.
+    await recordShort({ article, mp4: finalPath, metrics, sound, durationSecs: total,
+      videoFound: placed.some((p) => p.record?.kind === "clip") });
     const records = placed.map((p) => p.record).filter(Boolean);
     const footage = records.filter((r) => ["clip", "photo"].includes(r.kind))
       .map((r) => ({ credit: r.credit, licence: r.licence, sourceUrl: r.source_url }));

@@ -772,6 +772,19 @@ scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "
       logger.error("❌ X-digest failed", { error: err.message });
     }
   });
+  // Shot-engine shorts digest at 07:56 UTC (shot-engine brief, Phase 6): the
+  // previous UTC day's published shorts — metrics, missed bars, and a 12-frame
+  // contact sheet each — to DIGEST_RECIPIENT_EMAIL. No-op without SMTP, a
+  // recipient, or any shot-engine short published that day (i.e. while
+  // VIDEO_SHOT_ENGINE_ENABLED is off). :56 is a free minute, well clear of :39.
+  scheduleCron("56 7 * * *", async () => {
+    try {
+      const { sendShotDigest } = await import("./shots/shotDigest.js");
+      await sendShotDigest();
+    } catch (err) {
+      logger.error("❌ Shorts digest failed", { error: err.message });
+    }
+  });
   // X-Posting Queue stale sweep at 02:00 UTC (Phase B Sprint 2.x.2b).
   // Marks pending rows older than 24h as 'rejected' so the queue stays
   // bounded and the 09:00 X-digest only sees fresh candidates. Runs BEFORE
