@@ -885,6 +885,14 @@ RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. 
 
 ${shotsOn ? `EVERY card in "slides" — title and kicker included — carries its "shots" array: one to three real picture changes, each with a specific subject, as described above. A card without "shots" makes the spec invalid.
 
+ALSO RETURN A TOP-LEVEL "tone" — one word, the emotional register of the STORY as the source reports it. It chooses the music under the narration; it never changes a beat, a card or a word of any caption.
+  "grief"   — deaths, injuries, disasters, mourning: anyone killed, hurt or lost
+  "tense"   — conflict, crime, crisis, confrontation, threat
+  "hopeful" — discovery, science, recovery, rescue, genuinely good news
+  "neutral" — everything else; the default for news
+When in doubt between two, choose the more sober one. A story with any death or disaster in it is "grief".
+MARKETS, ECONOMY AND BUSINESS NEWS IS "neutral" — rising yields, a rate decision, earnings, a market worry or a policy headache are ordinary news, not tension. Only a crash, a collapse or a panic makes such a story "tense".
+
 ` : ""}Return ONLY a JSON object, no markdown fence, with exactly this shape — "beats" first, then "slides":
 
 {

@@ -59,7 +59,7 @@ import { restatesAny } from "./textSimilarity.js";
 // map case below for why a plausible-but-absent code is the dangerous one.
 import { knownCountry, knownCity } from "./videoSubjectVisual.js";
 // The shot-list checks (shot engine, dark). Pure; imports nothing.
-import { shotListErrors } from "./videoShotList.js";
+import { shotListErrors, TONES } from "./videoShotList.js";
 
 // ─── The closed set ─────────────────────────────────────────────────────────
 
@@ -1380,6 +1380,13 @@ export function validateSpec(spec, {
     const r = shotListErrors(kept, { wpm, outlets: allowedSources });
     errors.push(...r.errors);
     warnings.push(...r.warnings);
+    // TONE picks music, so it is never a reason to lose a story: missing or
+    // unknown is a warning, and the keyword rules decide instead.
+    if (spec.tone === undefined) warnings.push(`no "tone" — the music falls back to the keyword rules`);
+    else if (!TONES.includes(spec.tone)) {
+      warnings.push(`unknown tone ${JSON.stringify(spec.tone)} (one of ${TONES.join(", ")}) — dropped; the keyword rules decide`);
+      delete spec.tone;
+    }
     shotStats = r.stats;
   }
 

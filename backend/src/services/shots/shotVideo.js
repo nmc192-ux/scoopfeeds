@@ -216,7 +216,7 @@ export function buildPlan({ segments, slides, timeline, local, article, attribut
   for (const p of segments) {
     const slide = slides[p.slide];
     const first = p.shot === 0 && p.view === 0;
-    const base = { t0: p.t0, T: p.T, fresh: !p.view, ...chromeFor(p, slide, first) };
+    const base = { t0: p.t0, T: p.T, fresh: !p.view, ...(first && slide.t === "turn" ? { turn: true } : {}), ...chromeFor(p, slide, first) };
     const rec = p.record;
     const named = looksNamed(p.subject);
     const label = named && p.view === 0 ? [{ t: 0.3, text: String(p.subject).toUpperCase().slice(0, 34) }] : [];

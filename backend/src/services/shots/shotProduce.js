@@ -19,9 +19,9 @@ import { getDb } from "../../models/database.js";
 import { voiceSpec } from "../videoVoice.js";
 import { getFFmpegPath } from "../videoGenerator.js";
 import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "../videoArtifacts.js";
-import { deriveShortArc, buildBed, scoreShort } from "../videoMusicBed.js";
 import { sourceFingerprint } from "../renderCore.js";
 import { resolveSpecShots, defaultDeps } from "./shotResolver.js";
+import { scoreShotVideo } from "./shotSound.js";
 import {
   buildTimeline, placeShots, subCut, fetchAssets, buildPlan, endCardSources, renderPlan,
   buildNarration, muxNarration, END_CARD_SECS, HOOK_SECS, MAX_SHOT_SECS, ENGINE_DIR,
@@ -35,6 +35,8 @@ export const SHOT_BUILDER_FINGERPRINT = sourceFingerprint([
   `file://${path.join(ENGINE_DIR, "engine.py")}`,
   `file://${path.join(ENGINE_DIR, "render.py")}`,
   `file://${path.join(ENGINE_DIR, "tiles.py")}`,
+  `file://${path.join(ENGINE_DIR, "mix.py")}`,
+  new URL("./shotSound.js", import.meta.url).href,
 ]);
 export const shotDesignKey = () => `shot-v1-${SHOT_BUILDER_FINGERPRINT}`;
 
@@ -135,21 +137,17 @@ export async function produceShotVideo(article, spec, attribution, { plan = null
 
     const narration = await buildNarration(audio, slides, total, path.join(work, "narration.wav"));
     const out = path.join(VIDEOS_DIR, `${article.id}-${shotDesignKey()}.mp4`);
-    await muxNarration(silent, narration, out);
-    let finalPath = out;
-    if (process.env.VIDEO_MUSIC_BED_ENABLED === "1") {
-      try {
-        const { arc, sections, phases } = deriveShortArc(slides, timeline.starts, total);
-        const bed = path.join(work, "bed.wav");
-        const scored = path.join(VIDEOS_DIR, `${article.id}-${shotDesignKey()}-scored.mp4`);
-        await buildBed(total, bed, { arc, sections, phases, ffmpegPath: getFFmpegPath() });
-        await scoreShort(out, bed, scored, { ffmpegPath: getFFmpegPath() });
-        if (existsSync(scored) && statSync(scored).size > 10_000) finalPath = scored;
-      } catch (err) { logger.warn(`🎬 shot engine: music bed failed (shipping unscored) — ${String(err.message).slice(0, 160)}`); }
-    }
+    // Phase 5 sound: a library bed chosen by the story's tone (synth fallback),
+    // ducked under the voice, subtle SFX on the cuts, -14 LUFS / TP -2, measured
+    // again after AAC. The bed obeys VIDEO_MUSIC_BED_ENABLED like the slide path's.
+    const cuts = shots.map((s) => ({ t: s.t0, kind: s.kind, turn: Boolean(s.turn) }));
+    const { path: finalPath, sound } = await scoreShotVideo({
+      silent, narration, total, cuts, slides, starts: timeline.starts, article, spec, out, work,
+      bedEnabled: process.env.VIDEO_MUSIC_BED_ENABLED === "1",
+    });
 
     const metrics = { ...shotMetrics(shots, placed), resolveSecs: +resolveSecs.toFixed(1), renderSecs: +renderSecs.toFixed(1),
-      preResolved: Boolean(plan), cardFallbacks: fallbacks.length, render: perf };
+      preResolved: Boolean(plan), cardFallbacks: fallbacks.length, render: perf, sound };
     logger.info(`🎬 shot engine [${article.id}]: ${metrics.shots} shots · avg ${metrics.avgShotSecs}s · real ${Math.round(metrics.realShare * 100)}% · ` +
       `video ${Math.round(metrics.videoShare * 100)}% · resolve ${metrics.resolveSecs}s${plan ? " (pre-resolved)" : ""} · render ${metrics.renderSecs}s` +
       `${fallbacks.length ? ` · fallbacks: ${fallbacks.join("; ")}` : ""}`);
