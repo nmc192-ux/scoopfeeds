@@ -55,7 +55,7 @@ export const MIN_CLIP_SECS = 4;
 export const MAX_VIDEO_CANDIDATES = 2;   // per shot: each costs a probe, ~16 seeks and one vision call
 
 // Crime and legal stories — the private-individual rule bites hardest here.
-const CRIME_RE = /\b(arrest(?:ed|s)?|charged|indict(?:ed|ment)|convict(?:ed|ion)|sentenced|fraud|scam(?:med|s)?|murder(?:ed)?|kill(?:ed|ing)|stabb(?:ed|ing)|assault(?:ed)?|robbery|theft|stole|police|suspect(?:s|ed)?|alleged(?:ly)?|court|trial|prosecut(?:or|ors|ion)|lawsuit|sued|jail(?:ed)?|prison)\b/i;
+const CRIME_RE = /\b(arrest(?:ed|s)?|charged|indict(?:ed|ment)|convict(?:ed|ion)|sentenced|fraud|scam(?:med|s)?|murder(?:ed)?|kill(?:ed|ing)|stabb(?:ed|ing)|assault(?:ed)?|robbery|theft|stole|police|suspect(?:s|ed)?|alleged(?:ly)?|court|trial|prosecut(?:or|ors|ion)|lawsuit|sued|jail(?:ed)?|prison|smuggl(?:e|ed|er|ers|ing)|poach(?:er|ers|ing|ed)?|traffick(?:ed|er|ers|ing)|cartel|gang|illegal(?:ly)?)\b/i;
 export const isCrimeStory = (article) => CRIME_RE.test(`${article?.title || ""} ${article?.description || ""}`);
 
 // ─── Country names → ISO3, from the shipped Natural Earth geometry ─────────

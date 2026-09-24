@@ -92,6 +92,7 @@ test("the publisher's own photo is recognised by identity AND by domain", () => 
 
 test("crime stories are recognised from headline and summary", () => {
   assert.equal(isCrimeStory({ title: "Man posing as 49ers player arrested over fraud" }), true);
+  assert.equal(isCrimeStory({ title: "Inside the sea cucumber smuggling boom" }), true);
   assert.equal(isCrimeStory({ title: "Greenland pact signed at UN" }), false);
 });
 
