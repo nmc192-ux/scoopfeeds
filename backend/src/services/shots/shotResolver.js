@@ -434,7 +434,11 @@ async function resolvePlace(name, ctx) {
     if (wd.facts.countryQid) {
       try {
         const cf = await (ctx.deps.wikidataFacts || commons.wikidataFacts)(wd.facts.countryQid);
-        if (cf?.iso3) return { name: v, code: cf.iso3, ...(wd.facts.coords || {}), region: true };
+        // A REGION IS NOT ITS COUNTRY. Tibet resolves to China, but filling China
+        // for a story about Tibet makes the map assert more than the caption (the
+        // 17 Sep rule; seen on the Phase 4 samples). The region is PINNED; the
+        // country is recorded for Rule 0 and orientation, never filled.
+        if (cf?.iso3) return { name: v, code: null, country: cf.iso3, ...(wd.facts.coords || {}), region: true };
       } catch { /* fall through */ }
     }
     if (wd.facts.coords) return { name: v, code: null, ...wd.facts.coords };
@@ -459,7 +463,7 @@ async function rungNaturalEarth(shot, ctx) {
   const coords = places.length
     ? { codes: [...new Set(places.map((p) => p.code).filter(Boolean))], places, how: `${places.length} places` }
     : { lat: whole.lat, lon: whole.lon, codes: whole.codes, zoom: whole.zoom, how: whole.how };
-  if (places.some((p) => rule0Blocks({ code: p.code, name: p.name }) || p.code === "PAK")) return { miss: "Rule 0 — a place in the map is Pakistan" };
+  if (places.some((p) => rule0Blocks({ code: p.code, name: p.name }) || p.code === "PAK" || p.country === "PAK")) return { miss: "Rule 0 — a place in the map is Pakistan" };
   return { record: { subject: shot.subject, kind: "map", rung: "natural-earth", media_url: `ne:${subjectKey(shot.subject)}`,
     licence: "Natural Earth — public domain", credit: "Map: Natural Earth", coords, found_for: ctx.article?.id } };
 }

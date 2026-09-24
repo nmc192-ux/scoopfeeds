@@ -29,6 +29,7 @@ import { tokens } from "../videoShotList.js";
 import { looksNamed } from "../videoImageRelevance.js";
 import { fetchWindow } from "./media.js";
 import { fetchCommonsImage } from "./commons.js";
+import { marinePlace, namedCore } from "./shotResolver.js";
 
 export const MAX_SHOT_SECS = 3.0;
 export const MIN_SUBCUT_SECS = 1.2;
@@ -258,7 +259,11 @@ export function buildPlan({ segments, slides, timeline, local, article, attribut
       // FRAME TO THE FEATURE'S SCALE: a point with no country (a sea) was framed
       // at 18° and showed only water. Oceans need a continent in view; a strait
       // wants its two shores.
-      const marine = /marine (\w+)/.exec(c.how || "")?.[1] || (c.places || []).find((pl) => pl.marine)?.marine;
+      // Looked up from the SUBJECT, not only the stored record: a record kept
+      // from before the marine atlas existed carries no feature type (seen on
+      // the Phase 4 samples: an ocean framed at 6°, all water).
+      const marine = /marine (\w+)/.exec(c.how || "")?.[1] || (c.places || []).find((pl) => pl.marine)?.marine ||
+        marinePlace(p.subject)?.kind || marinePlace(namedCore(p.subject) || "")?.kind;
       const minSpan = { ocean: 70, sea: 24, gulf: 18, bay: 14, strait: 7, channel: 8, canal: 5 }[marine] ?? 6;
       if (v > 0) for (const pin of pins) pin.t = p.t0 - 1;
       shots.push({ ...base, kind: "map", auto: true, codes, hi, pins, texts: [], zoom, min_span: minSpan, ...(focus ? { focus } : {}) });
@@ -279,10 +284,12 @@ export function buildPlan({ segments, slides, timeline, local, article, attribut
       if (n) {
         const decimals = Number.isInteger(n.value) ? 0 : 1;
         shots.push({ ...base, kind: "count", value: n.value, decimals, suffix: n.pct ? "%" : "",
-          label: slide.t === "stat" ? [slide.unit, ...(slide.lines || [])].filter(Boolean).join(" ") : `${n.scaleWord} ${p.subject}`.trim(),
+          // The unit is already on the number when it is a percentage — never "29%" over "% DECLINE".
+          label: (slide.t === "stat" ? [slide.unit, ...(slide.lines || [])].filter(Boolean).join(" ") : `${n.scaleWord} ${p.subject}`.trim())
+            .replace(/^\s*(%|percent)\s*/i, n.pct ? "" : "$1 ").trim(),
           t_start: p.t0 + 0.2, bg: firstPicture || null, settled: Boolean(p.view) });
       } else {
-        shots.push({ ...base, kind: "graphic", title: p.subject }); fallbacks.push(`${p.slide}.${p.shot} count→graphic (no number spoken)`);
+        shots.push({ ...base, kind: "graphic", title: p.subject }); if (!p.view) fallbacks.push(`${p.slide}.${p.shot} count→graphic (no number spoken)`);
       }
     } else if (p.kind === "graphic") {
       if (slide.t === "bars" && Array.isArray(slide.bars)) shots.push({ ...base, kind: "graphic", title: slide.eyebrow || p.subject, bars: slide.bars, hi: (p.view || 0) % slide.bars.length });
@@ -291,7 +298,7 @@ export function buildPlan({ segments, slides, timeline, local, article, attribut
     } else {
       // A picture shot with no picture: say so on screen with the subject, and count it.
       shots.push({ ...base, kind: "graphic", title: p.subject });
-      fallbacks.push(`${p.slide}.${p.shot} ${p.kind}→card (${rec ? "asset fetch failed" : "resolver found nothing"})`);
+      if (!p.view) fallbacks.push(`${p.slide}.${p.shot} ${p.kind}→card (${rec ? "asset fetch failed" : "resolver found nothing"})`);
     }
   }
   return { shots, fallbacks };

@@ -345,7 +345,9 @@ test("multi-place map subjects draw every country; a name containing 'and' stays
   assert.equal(us.rung, "natural-earth", JSON.stringify(us.trail));
   assert.deepEqual(us.record.coords.codes, ["USA", "CHN"]);
   const nt = await resolveShot({ anchor: "The pact", kind: "map", subject: "Nepal and Tibet border region", source_intent: "map" }, CAP, ctx);
-  assert.deepEqual(nt.record.coords.codes, ["NPL", "CHN"], JSON.stringify(nt.trail));
+  // Tibet is PINNED, not filled as China: the map may not claim more than the caption.
+  assert.deepEqual(nt.record.coords.codes, ["NPL"], JSON.stringify(nt.trail));
+  assert.ok(nt.record.coords.places.some((p) => /Tibet/.test(p.name) && p.region && p.country === "CHN" && Number.isFinite(p.lat)));
   const bih = await resolveShot({ anchor: "The pact", kind: "map", subject: "Bosnia and Herzegovina", source_intent: "map" }, CAP, ctx);
   assert.deepEqual(bih.record.coords.codes, ["BIH"]);
   const pk = await resolveShot({ anchor: "The pact", kind: "map", subject: "India and Pakistan", source_intent: "map" }, CAP, ctx);
