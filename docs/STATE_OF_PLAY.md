@@ -147,6 +147,26 @@ dependent. **This blocks I3**: putting the suite in CI before this is fixed make
 red intermittently. Next step is cheap: the native frames beneath `node::Assert` name the
 addon. Full context in `CLAUDE.md` under "Known-flaky".
 
+  **Addon identified (24 Sep 2026, on this MacBook — Node 24.19.0, better-sqlite3 11.10.0).**
+  The frames beneath `node::Assert` are `RemoveEnvironmentCleanupHook` ←
+  `Statement::~Statement()` in `better_sqlite3.node`, running inside a V8 GC weak
+  callback **mid-test**, not at teardown. So it is prepared statements being garbage
+  collected. Measured with forced GC (`--expose-gc`):
+
+  | setup, then one `global.gc()` | survived |
+  |---|---|
+  | `makeTestDb()` alone | **0/4** |
+  | bare `new Database(":memory:")` + 3,000 discarded `prepare()` | 5/5 |
+  | same + `sqlite-vec` loaded | 5/5 |
+  | importing `logger` / `env` / `models/database` / `testing/testDb` without calling it | 4/4 each |
+
+  So the statements that abort are ones `bootstrapSchema()` prepares; why those and not
+  others is not yet known. Next step: bisect `initializeSchema` / `initRealityIndex` /
+  `runMigrations` under the same forced-GC probe, and try better-sqlite3 12.x (not
+  attempted — a dependency change for DrJ). `services/shots/shotResolver.test.js` avoids
+  it by using a bare `shot_assets`-only DB; `shots/shotAssets.js` caches prepared
+  statements per connection.
+
 ## 2026-08-24 — the shorts got pictures, and two more channels
 
 **The finding that reframes the rest of this entry:** `VIDEO_SUBJECT_VISUALS_ENABLED`

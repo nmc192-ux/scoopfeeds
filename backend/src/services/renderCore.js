@@ -25,7 +25,7 @@
 
 import satori from "satori";
 import { Resvg } from "@resvg/resvg-js";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { createHash } from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -65,6 +65,74 @@ export function fontsReady({ requireAnton = false } = {}) {
   return true;
 }
 
+// ─── Fallback fonts for scripts the bundled faces lack ─────────────────────
+//
+// Inter and Anton carry Latin (and Inter Cyrillic/Greek). A Commons credit is
+// whatever its author wrote — "Photo: 李平" rendered as boxes on the Phase 3
+// contact sheet (DrJ, 24 Sep 2026). satori asks for a font per unsupported
+// segment through `loadAdditionalAsset`; this answers with a Noto face SUBSET
+// TO EXACTLY THOSE CHARACTERS from Google Fonts (TrueType, a few KB), cached on
+// disk so a credit costs one fetch ever. Any failure returns nothing and the
+// segment renders as it did before — a font is an enhancement, never a reason
+// to lose a frame.
+const NOTO_FOR = {
+  "zh-CN": "Noto Sans SC", "zh-TW": "Noto Sans TC", "zh-HK": "Noto Sans HK", "ja-JP": "Noto Sans JP",
+  "ko-KR": "Noto Sans KR", "ar-AR": "Noto Sans Arabic", "he-IL": "Noto Sans Hebrew", "th-TH": "Noto Sans Thai",
+  "devanagari": "Noto Sans Devanagari", "bn-IN": "Noto Sans Bengali", "ta-IN": "Noto Sans Tamil", unknown: "Noto Sans",
+};
+let FONT_CACHE_DIR = process.env.SCOOP_PERSISTENT_DATA_DIR
+  ? path.join(process.env.SCOOP_PERSISTENT_DATA_DIR, "font-cache")
+  : path.join(BACKEND_ROOT, "data", "font-cache");
+let _fontFetch = (u, o) => fetch(u, o);
+export function _setFontFetch(fn) { _fontFetch = fn; }
+export function _setFontCacheDir(dir) { FONT_CACHE_DIR = dir; }
+
+/** TrueType (00 01 00 00 / "true") or CFF OpenType ("OTTO"). */
+export function isFontData(buf) {
+  if (!buf || buf.length < 100) return false;
+  const sig = buf.subarray(0, 4);
+  return sig.equals(Buffer.from([0, 1, 0, 0])) || ["OTTO", "true"].includes(sig.toString("latin1"));
+}
+
+export async function loadFallbackFont(code, segment) {
+  if (code === "emoji") return [];
+  // Han characters arrive as ONE combined code, "ja-JP|zh-CN|zh-TW|zh-HK" —
+  // they are shared across the languages. Prefer Simplified Chinese (the
+  // widest Han coverage), then the rest in the order given.
+  const codes = String(code).split("|");
+  const pick = codes.includes("zh-CN") ? "zh-CN" : codes.find((c) => NOTO_FOR[c]);
+  const family = NOTO_FOR[pick] || NOTO_FOR.unknown;
+  const text = [...new Set([...String(segment)])].join("");
+  if (!text.trim()) return [];
+  const key = createHash("sha1").update(`${family}|${text}`).digest("hex").slice(0, 20);
+  const file = path.join(FONT_CACHE_DIR, `${key}.ttf`);
+  try {
+    if (existsSync(file)) {
+      const cached = readFileSync(file);
+      if (isFontData(cached)) return [{ name: family, data: cached, weight: 400, style: "normal" }];
+    }
+    const cssUrl = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}&text=${encodeURIComponent(text)}`;
+    // No browser UA on purpose: without one Google serves TrueType, which is
+    // what satori reads (it cannot read WOFF2).
+    const cssRes = await _fontFetch(cssUrl, { signal: AbortSignal.timeout(8000) });
+    if (!cssRes.ok) return [];
+    const css = await cssRes.text();
+    const m = css.match(/src:\s*url\(([^)]+)\)\s*format\('(?:truetype|opentype)'\)/);
+    if (!m) return [];
+    const fontRes = await _fontFetch(m[1], { signal: AbortSignal.timeout(8000) });
+    if (!fontRes.ok) return [];
+    const data = Buffer.from(await fontRes.arrayBuffer());
+    // VERIFIED BY SIGNATURE. satori throws on anything that is not a font, and
+    // a throw here would lose the frame — an HTML error page must return [].
+    if (!isFontData(data)) return [];
+    try { mkdirSync(FONT_CACHE_DIR, { recursive: true }); writeFileSync(file, data); } catch { /* cache is optional */ }
+    return [{ name: family, data, weight: 400, style: "normal" }];
+  } catch (err) {
+    logger.warn(`renderCore: no fallback font for ${code} "${text.slice(0, 12)}" — ${String(err.message).slice(0, 60)}`);
+    return [];
+  }
+}
+
 /**
  * Tree → PNG. The whole primitive.
  *
@@ -75,7 +143,7 @@ export function fontsReady({ requireAnton = false } = {}) {
  * per video, for motion ffmpeg produces for free.
  */
 export async function renderTreeToPng(tree, { width, height, background, fonts = null }) {
-  const svg = await satori(tree, { width, height, fonts: fonts || satoriFonts() });
+  const svg = await satori(tree, { width, height, fonts: fonts || satoriFonts(), loadAdditionalAsset: loadFallbackFont });
   return new Resvg(svg, { background, fitTo: { mode: "original" } }).render().asPng();
 }
 

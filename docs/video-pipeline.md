@@ -600,3 +600,31 @@ Patterns that repeated often enough to be worth naming:
   true` was logged at boot for weeks while the token was dead.
 - **The dry run earned its keep twice** — it caught a crash on the first thin
   candidate, and a stock tip about to publish under the brand.
+
+---
+
+## 10. The shot engine (dark, Sep 2026)
+
+Being built per `docs/briefs/shot-engine-shorts.md`; everything below is OFF unless
+`VIDEO_SHOT_ENGINE_ENABLED=1`. Word-by-word captions (Phase 1) are separately live
+behind `VIDEO_WORD_CAPTIONS_ENABLED=1`.
+
+- **Shot lists (Phase 2)** — the spec writer adds `shots: [{anchor, kind, subject,
+  source_intent}]` to every card; `videoShotList.js` enforces anchors, kinds and
+  subject specificity. The 3 s pace is report-only at spec time.
+- **Resolver ladder (Phase 3)** — `services/shots/shotResolver.js`. Per shot: reuse →
+  incident → Commons video → open-web news photo → Commons/Wikidata photo → Esri
+  satellite → Natural Earth map → stock (abstract only) → card. Output is a RECORD in
+  `shot_assets` (migration 038), never media.
+
+Rules the resolver enforces, each earned by a real failure or a DrJ ruling:
+
+| rule | where |
+|---|---|
+| Never the publisher's own article photo (identity or domain) | `isPublisherImage`, also re-checked on reuse |
+| No open-web photo of a person in a crime story; vision refuses social screenshots and private individuals | `rungWebPhoto`, `vision.judgePhoto` |
+| No casualties / bodies / violence against people in any selected frame | `vision.pickInPoints` screens the same frames it picks from; explicit-harm headlines get maps, satellite and type only |
+| Commons: transcodes only, one request at a time 1.5–4 s apart, descriptive UA, content-verified downloads, readable licence required | `shots/commons.js`, `shots/media.js` |
+| Burned-in banners cropped per source (White House ymax 0.80) | `shots/bannerCrops.js` |
+| Stock for abstract beats only | `rungStock` |
+| Vision and licence checks fail CLOSED | unverified = refused |
