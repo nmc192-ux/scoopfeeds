@@ -289,3 +289,19 @@ test("past the resolve budget the Commons video rung is skipped, cheaper rungs s
   assert.ok(r.trail.some((t) => t.rung === "commons-video" && /budget spent/.test(t.outcome)));
   assert.equal(r.rung, "esri");
 });
+
+test("the longform evidence-asset registry imports landmarks and counts what it skips", () => {
+  const db = freshDb();
+  const r = importAssetManifest(db, { kind: "landmark", entries: {
+    PITUFFIK: { key: "PITUFFIK", subject: "Pituffik Space Base", file: "landmarks/pituffik.jpg", license: "public-domain",
+      sourceUrl: "https://commons.wikimedia.org/wiki/File:Pituffik.jpg", author: "U.S. Space Force" },
+    NO_URL: { key: "NO_URL", subject: "Somewhere", file: "x.jpg", license: "cc-by" },
+  } });
+  assert.equal(r.imported, 1);
+  assert.equal(r.skipped.length, 1);
+  const rec = findRecords(db, "Pituffik Space Base", "photo")[0];
+  assert.equal(rec.licence, "Public domain");
+  assert.equal(rec.credit, "Photo: U.S. Space Force, Public domain");
+  const cut = importAssetManifest(db, { kind: "cutout", entries: { TRUMP: { key: "TRUMP", subject: "Donald Trump", sourceUrl: "u", license: "public-domain" } } });
+  assert.equal(cut.imported, 0, "cutouts are a treatment the shot engine does not use");
+});

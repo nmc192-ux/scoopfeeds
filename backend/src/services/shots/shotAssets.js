@@ -84,17 +84,40 @@ export function markUsed(db, id, { now = Date.now() } = {}) {
 }
 
 /**
- * Feed a longform film's asset_manifest.json into the table.
+ * Feed the longform engine's evidence-asset registry into the table.
  *
- * ⚠️ SHAPE UNVERIFIED: no manifest exists in this repo to test against, so
- * this accepts either an array or `{ assets: [...] }` and maps the common field
- * names. Entries missing a subject, kind or URL are SKIPPED AND COUNTED, never
- * guessed. Run it on a real manifest and read the counts before trusting it.
+ * THE REAL SHAPE (longform/engine/assetRegistry.mjs): one manifest per kind at
+ * `evidence-assets/<kind>s.json`, `{ kind, entries: { KEY: { key, subject, file,
+ * license, sourceUrl, author, uses } } }`, kinds cutout | landmark | flag, and a
+ * licence allowlist of public-domain | cc-by | cc-by-sa | handout.
+ *
+ * Landmarks become `photo` records keyed on their subject, pointing at their
+ * sourceUrl — the renderer fetches at render time, so the local `file` is not
+ * the record. Cutouts are portraits with the background removed, a treatment
+ * the shot engine does not use, and flags are drawn not photographed; both are
+ * SKIPPED AND COUNTED, as is any entry missing a subject or sourceUrl.
+ * An array (or `{assets: [...]}`) of generic entries is still accepted.
  */
+const LONGFORM_LICENCE = { "public-domain": "Public domain", "cc-by": "CC BY", "cc-by-sa": "CC BY-SA", handout: "Handout" };
+
 export function importAssetManifest(db, manifest, { source = "longform" } = {}) {
-  const list = Array.isArray(manifest) ? manifest : (Array.isArray(manifest?.assets) ? manifest.assets : []);
   let imported = 0;
   const skipped = [];
+  if (manifest && typeof manifest.entries === "object" && !Array.isArray(manifest.entries)) {
+    for (const [key, e] of Object.entries(manifest.entries)) {
+      const kind = manifest.kind || e.kind;
+      if (kind !== "landmark") { skipped.push(`${key} (${kind}: not used by the shot engine)`); continue; }
+      if (!e.subject || !e.sourceUrl) { skipped.push(`${key} (missing subject or sourceUrl)`); continue; }
+      const licence = LONGFORM_LICENCE[e.license] || e.license || null;
+      upsertRecord(db, {
+        subject: e.subject, kind: "photo", rung: source, media_url: e.sourceUrl, source_url: e.sourceUrl,
+        licence, author: e.author || null, credit: `Photo: ${e.author || "public domain"}${licence ? `, ${licence}` : ""}`,
+      });
+      imported++;
+    }
+    return { imported, skipped };
+  }
+  const list = Array.isArray(manifest) ? manifest : (Array.isArray(manifest?.assets) ? manifest.assets : []);
   for (const a of list) {
     const subject = a.subject || a.query || a.title;
     const kind = a.kind || (a.type === "video" ? "clip" : a.type === "image" ? "photo" : a.type);
