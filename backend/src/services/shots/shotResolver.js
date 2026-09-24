@@ -83,6 +83,28 @@ function countryByName(name) {
   return _countries.get(n) || COUNTRY_ALIASES[n] || null;
 }
 
+// ─── Seas, straits and canals ──────────────────────────────────────────────
+// Natural Earth 1:10m marine label points, plus the news-critical passages it
+// does not carry, hand-added and marked `hand` (Hormuz, Kerch, Suez, Panama).
+const MARINE_PATH = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../assets/geo/marine-10m.json");
+let _marine = null;
+export function marinePlace(name) {
+  if (!_marine) {
+    _marine = new Map();
+    try {
+      for (const m of JSON.parse(readFileSync(MARINE_PATH, "utf8")).places || []) {
+        for (const n of [m.n, ...(m.alt || [])]) {
+          const k = String(n).toLowerCase().replace(/^the /, "").trim();
+          if (!_marine.has(k)) _marine.set(k, m);
+        }
+      }
+    } catch { /* no file → no marine match; the map rung says so */ }
+  }
+  const k = String(name || "").toLowerCase().replace(/^the /, "").trim();
+  const m = _marine.get(k);
+  return m ? { name: m.n, lat: m.o[1], lon: m.o[0], kind: m.k, hand: Boolean(m.hand) } : null;
+}
+
 // The names people write that Natural Earth spells differently.
 const COUNTRY_ALIASES = {
   "united states": "USA", "us": "USA", "u.s.": "USA", "usa": "USA", "america": "USA",
@@ -374,6 +396,9 @@ async function placeFor(shot, ctx) {
     if (iso) return { lat: null, lon: null, codes: [iso], zoom: 4, how: "country", name: v };
     const city = findCity(v);
     if (city) return { lat: city.o[1], lon: city.o[0], codes: [city.c], zoom: 11, how: "atlas city", name: v };
+    const sea = marinePlace(v);
+    if (sea) return { lat: sea.lat, lon: sea.lon, codes: [], zoom: sea.kind === "strait" || sea.kind === "canal" ? 8 : 5,
+      how: `marine ${sea.kind}${sea.hand ? " (hand-added)" : ""}`, name: sea.name };
   }
   for (const v of variants(shot.subject)) {
     const wd = await wikidataFor(v, ctx);
@@ -399,6 +424,8 @@ async function resolvePlace(name, ctx) {
     if (iso) return { name: v, code: iso };
     const city = findCity(v);
     if (city) return { name: v, code: city.c, city: v, lat: city.o[1], lon: city.o[0] };
+    const sea = marinePlace(v);
+    if (sea) return { name: sea.name, code: null, lat: sea.lat, lon: sea.lon, marine: sea.kind };
   }
   for (const v of variants(name)) {
     const wd = await wikidataFor(v, ctx);
@@ -407,7 +434,11 @@ async function resolvePlace(name, ctx) {
     if (wd.facts.countryQid) {
       try {
         const cf = await (ctx.deps.wikidataFacts || commons.wikidataFacts)(wd.facts.countryQid);
-        if (cf?.iso3) return { name: v, code: cf.iso3, ...(wd.facts.coords || {}), region: true };
+        // A REGION IS NOT ITS COUNTRY. Tibet resolves to China, but filling China
+        // for a story about Tibet makes the map assert more than the caption (the
+        // 17 Sep rule; seen on the Phase 4 samples). The region is PINNED; the
+        // country is recorded for Rule 0 and orientation, never filled.
+        if (cf?.iso3) return { name: v, code: null, country: cf.iso3, ...(wd.facts.coords || {}), region: true };
       } catch { /* fall through */ }
     }
     if (wd.facts.coords) return { name: v, code: null, ...wd.facts.coords };
@@ -432,7 +463,7 @@ async function rungNaturalEarth(shot, ctx) {
   const coords = places.length
     ? { codes: [...new Set(places.map((p) => p.code).filter(Boolean))], places, how: `${places.length} places` }
     : { lat: whole.lat, lon: whole.lon, codes: whole.codes, zoom: whole.zoom, how: whole.how };
-  if (places.some((p) => rule0Blocks({ code: p.code, name: p.name }) || p.code === "PAK")) return { miss: "Rule 0 — a place in the map is Pakistan" };
+  if (places.some((p) => rule0Blocks({ code: p.code, name: p.name }) || p.code === "PAK" || p.country === "PAK")) return { miss: "Rule 0 — a place in the map is Pakistan" };
   return { record: { subject: shot.subject, kind: "map", rung: "natural-earth", media_url: `ne:${subjectKey(shot.subject)}`,
     licence: "Natural Earth — public domain", credit: "Map: Natural Earth", coords, found_for: ctx.article?.id } };
 }

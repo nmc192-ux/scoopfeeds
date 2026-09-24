@@ -69,6 +69,8 @@ import { deriveShortArc, buildBed, scoreShort } from "./videoMusicBed.js";
 import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.js";
 import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
 import { wordCaptionsEnabled, buildWordCaptionTrack } from "./videoWordCaptions.js";
+import { shotEngineEnabled } from "./videoShotList.js";
+import { produceShotVideo, prepareShotPlan, loadPlan, hasFreshPlan } from "./shots/shotProduce.js";
 import { uploadToYouTube, isYouTubeConfigured, setYouTubeThumbnail } from "./youtubeClient.js";
 import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from "./facebookClient.js";
 import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js";
@@ -542,7 +544,10 @@ export function pingVideoOutcome({ produced = 0, tried = 0, skipped = null,
 // (voice, slides, imagery, assembly, score) WITHOUT the cycle around it — no
 // selection, no upload, no marking. Publishing stays reachable only through
 // runVideoCycle, which is where assertPublishAllowed sits.
-export async function produceVideo(article, spec, attribution = resolveAttribution(article)) {
+export async function produceVideo(article, spec, attribution = resolveAttribution(article), { plan = null } = {}) {
+  // THE SHOT ENGINE (dark: VIDEO_SHOT_ENGINE_ENABLED=1) replaces the slide path
+  // wholesale. Same inputs, same return shape, plus `shots` for the publish gate.
+  if (shotEngineEnabled()) return produceShotVideo(article, spec, attribution, { plan });
   // ORIENTATION. Vertical by default — Shorts and Reels are the only surfaces
   // that push video to people who have not heard of the channel, and a vertical
   // MP4 under the length limit uploaded through the existing YouTube API IS a
@@ -1834,7 +1839,7 @@ export async function videoToBluesky(article, {
  *        not run with. Everything NOT listed here — the gates, the rate limits,
  *        the DB — stays real in tests, so this is a seam, not a mock harness.
  */
-export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), deps = {} } = {}) {
+export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), deps = {}, prepare = false } = {}) {
   const {
     writeVideoSpec: _writeVideoSpec = writeVideoSpec,
     writePackaging: _writePackaging = writePackaging,
@@ -1854,6 +1859,11 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     videoToBluesky: _videoToBluesky = videoToBluesky,
     videoToTikTok: _videoToTikTok = videoToTikTok,
     videoToX: _videoToX = videoToX,
+    // The shot engine's pre-resolve seam — injectable so the cycle's routing
+    // (prepare when gated, take the plan when open) is testable without a render.
+    prepareShotPlan: _prepareShotPlan = prepareShotPlan,
+    loadPlan: _loadPlan = loadPlan,
+    hasFreshPlan: _hasFreshPlan = hasFreshPlan,
   } = deps;
 
   if (!autopostEnabled()) {
@@ -1897,9 +1907,20 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
 
   try {
     const rate = rateGate({ now });
+    // PRE-RESOLVE (shot engine only). A rate-gated cycle — most of them — does
+    // the slow part of the NEXT short now: select, write the spec, resolve every
+    // shot, store the plan. It never renders and never publishes. It runs only
+    // when no fresh plan is waiting, so it costs one spec call per short, not
+    // one per cycle. `prepare` forces it (dry-run harnesses).
+    let prepareOnly = Boolean(prepare) && shotEngineEnabled();
     if (!rate.ok) {
-      logger.info(`🎬 video cycle: ${rate.gate} — ${rate.reason}`);
-      return finish({ skipped: rate.gate, reason: rate.reason });
+      if (shotEngineEnabled() && !dryRun && !_hasFreshPlan({ now })) {
+        prepareOnly = true;
+        logger.info(`🎯 video cycle: ${rate.gate} — pre-resolving the next short while the slot is closed`);
+      } else {
+        logger.info(`🎬 video cycle: ${rate.gate} — ${rate.reason}`);
+        return finish({ skipped: rate.gate, reason: rate.reason });
+      }
     }
     // CONFIG IS CHECKED ONCE, HERE, AND ABORTS LOUDLY.
     //
@@ -2024,16 +2045,26 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       }
 
       rec.stage = "spec";
-      // THE ONLY PLACE THIS IS INCREMENTED. Counted before the await, not after,
-      // so a call that throws or hangs still spends its slot — the budget is
-      // about what was ASKED of the model, and a request that died mid-flight
-      // may well have been billed.
-      specCalls += 1;
-      rec.specCall = specCalls;
-      const r = await _writeVideoSpec(article, {
-        allowedSources: [attribution.publisher].filter(Boolean),
-        attribution,
-      });
+      // A PRE-RESOLVED PLAN carries a spec that already passed writeVideoSpec's
+      // validation, and its resolved shots. Using it costs no spec call.
+      const plan = shotEngineEnabled() && !prepareOnly ? _loadPlan(article.id, { now }) : null;
+      let r;
+      if (plan) {
+        r = { ok: true, spec: plan.spec, costUsd: 0, attempts: 0 };
+        rec.plan = true;
+        logger.info(`🎯 ${n} using the pre-resolved plan for ${article.id} — no spec call, no resolution`);
+      } else {
+        // THE ONLY PLACE THIS IS INCREMENTED. Counted before the await, not after,
+        // so a call that throws or hangs still spends its slot — the budget is
+        // about what was ASKED of the model, and a request that died mid-flight
+        // may well have been billed.
+        specCalls += 1;
+        rec.specCall = specCalls;
+        r = await _writeVideoSpec(article, {
+          allowedSources: [attribution.publisher].filter(Boolean),
+          attribution,
+        });
+      }
       // ASSERT THE SHAPE, DON'T TRUST IT. writeVideoSpec's contract is
       // `{ ok, spec, costUsd, reason, attempts }` on every path, but reading
       // `.costUsd` off a bare null is what took the 2026-08-03 cycle down —
@@ -2061,13 +2092,25 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
         continue;
       }
 
+      if (prepareOnly) {
+        rec.stage = "prepare";
+        try {
+          await _prepareShotPlan(article, r.spec, attribution);
+          rec.stage = "prepared";
+        } catch (err) {
+          rec.reason = err.message;
+          logger.warn(`🎯 ${n} pre-resolve failed: ${String(err.message).slice(0, 160)}`);
+        }
+        break;
+      }
+
       // The job clock. `now` is bound once at cycle entry, which is what the
       // BullMQ lock is measured from — not from when a channel starts.
       const jobStartedAt = now;
       let video;
       rec.stage = "produce";
       try {
-        video = await _produceVideo(article, r.spec, attribution);
+        video = await _produceVideo(article, r.spec, attribution, { plan });
       } catch (err) {
         rec.reason = err.message;
         logger.warn(`🎬 ${n} SKIP produce: ${err.message}`);
@@ -2077,7 +2120,9 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       // Rule 0 LAYER 3 — throws. Re-checked against the article AND everything
       // generated, immediately before upload, assuming layers 1 and 2 did not run.
       rec.stage = "rule0-publish";
-      assertPublishAllowed(article, [r.spec, video.slides]);
+      // The shot engine's records — every picture's title, credit and source —
+      // are artifacts too: Rule 0 sees what will be ON SCREEN, not just the spec.
+      assertPublishAllowed(article, [r.spec, video.slides, video.shots].filter(Boolean));
 
       const packaging = await _writePackaging(r.spec, article);
       const title = packaging?.titles?.[0] || article.title;

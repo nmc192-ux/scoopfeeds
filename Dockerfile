@@ -35,6 +35,20 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
+# THE SHOT ENGINE'S RENDER STEP (docs/briefs/shot-engine-shorts.md, Phase 0
+# decision: a Python render step, the engine that rendered the approved sample).
+# A venv, not the system site-packages: bookworm's pip refuses to install into
+# the system interpreter, and pinning here means the image renders exactly the
+# frames the checkpoint samples were judged on. Headless OpenCV (no GUI libs).
+# Used only when VIDEO_SHOT_ENGINE_ENABLED=1; shotVideo.js reads the path below.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-venv \
+ && python3 -m venv /opt/shotengine \
+ && /opt/shotengine/bin/pip install --no-cache-dir \
+      numpy==2.2.6 pillow==11.3.0 opencv-python-headless==4.12.0.88 \
+ && rm -rf /var/lib/apt/lists/*
+ENV SHOT_ENGINE_PYTHON=/opt/shotengine/bin/python
+
 ENV NODE_ENV=production
 WORKDIR /app/backend
 
