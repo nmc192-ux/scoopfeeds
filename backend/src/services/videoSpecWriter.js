@@ -891,6 +891,7 @@ ALSO RETURN A TOP-LEVEL "tone" — one word, the emotional register of the STORY
   "hopeful" — discovery, science, recovery, rescue, genuinely good news
   "neutral" — everything else; the default for news
 When in doubt between two, choose the more sober one. A story with any death or disaster in it is "grief".
+MARKETS, ECONOMY AND BUSINESS NEWS IS "neutral" — rising yields, a rate decision, earnings, a market worry or a policy headache are ordinary news, not tension. Only a crash, a collapse or a panic makes such a story "tense".
 
 ` : ""}Return ONLY a JSON object, no markdown fence, with exactly this shape — "beats" first, then "slides":
 

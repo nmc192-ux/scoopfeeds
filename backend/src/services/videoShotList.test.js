@@ -216,4 +216,6 @@ test("the tone instruction appears only with the shot engine on", () => {
   assert.match(p, /TOP-LEVEL "tone"/);
   for (const t of ["grief", "tense", "hopeful", "neutral"]) assert.match(p, new RegExp(`"${t}"`));
   assert.match(p, /never changes a beat, a card or a word of any caption/);
+  assert.match(p, /MARKETS, ECONOMY AND BUSINESS NEWS IS "neutral"/);
+  assert.match(p, /Only a crash, a collapse or a panic/);
 });
