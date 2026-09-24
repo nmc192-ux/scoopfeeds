@@ -628,3 +628,16 @@ Rules the resolver enforces, each earned by a real failure or a DrJ ruling:
 | Burned-in banners cropped per source (White House ymax 0.80) | `shots/bannerCrops.js` |
 | Stock for abstract beats only | `rungStock` |
 | Vision and licence checks fail CLOSED | unverified = refused |
+
+- **Shot renderer (Phase 4)** — `services/shots/shotVideo.js` builds one global word
+  timeline from the voice's word timings, places each shot on its anchor word, and
+  **enforces the ≤3 s pace by sub-cutting** real pictures into other in-points or
+  tighter views of the same subject (maps, satellite moves and type cards are held).
+  It fetches only what is shown — each clip's padded window, never a whole file — and
+  hands a JSON plan to `backend/shotengine/render.py` (Python + OpenCV, the approved
+  sample's engine re-set for 9:16, 24 fps). Narration is the existing per-caption voice
+  padded to the slide timeline; the existing bed scores it. Every shown record is an
+  artifact for Rule 0's publish gate.
+- **Pre-resolve** — resolution is minutes cold (measured 214–367 s a short), so a
+  rate-gated render cycle does it ahead of the slot and stores a plan; the slot then
+  only fetches and renders.
