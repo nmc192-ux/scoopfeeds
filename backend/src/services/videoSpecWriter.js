@@ -57,6 +57,7 @@ import {
 } from "./videoSpecSchema.js";
 import { stockCutawaysEnabled } from "./videoStockLibrary.js";
 import { beatImageryEnabled } from "./videoBeatImagery.js";
+import { shotEngineEnabled } from "./videoShotList.js";
 import { resolveAttribution } from "./videoAttribution.js";
 
 // TWO PINS, deliberately different tiers for two different jobs.
@@ -491,6 +492,42 @@ const cardGrammar = ({ visualsOn = false, hasPhoto = false, imageryOn = false } 
  * Do not reintroduce a count here — not "aim for", not "roughly", not a
  * duration the model can divide into slides. That is the whole finding.
  */
+/**
+ * The shot-list rule (shot engine, Phase 2 — dark behind VIDEO_SHOT_ENGINE_ENABLED).
+ *
+ * WRITTEN AS METADATA, LIKE "visual": it is filled in after every other
+ * decision and must not move the beat count or any caption. It carries no
+ * number about the VIDEO — no card count, no duration to divide — because a
+ * leaked length signal has burned this pipeline four times (§5). The only
+ * numbers are per card (one to three shots) and per video for punctuation
+ * cards (at most two), both of which constrain the cut, not the story.
+ */
+const SHOT_LIST_RULE = `
+"shots" — ON EVERY CARD: how that card's narration is cut into pictures. The unit on screen is a SHOT, not a card, and a shot changes on a specific spoken word.
+It is METADATA, filled in after every other decision: it never changes which beats you found, how many cards you emit, or a single word of any caption. You cut the caption you already wrote; you never rewrite a caption to make it cut better.
+
+  "shots": [ { "anchor": "...", "kind": "...", "subject": "...", "source_intent": "..." }, ... ]
+
+  - One to three shots per card. Cut where the picture should change: at a new place, a new person, a new object, a new number. A short caption that is one idea is one shot.
+  - "anchor": the exact words of THIS card's caption the shot starts on — copied verbatim, two to four words. The FIRST shot's anchor is the caption's opening words. Each later anchor comes after the one before it. An anchor that is not word-for-word in the caption makes the spec invalid.
+  - "kind", from this closed set:
+      satellite  satellite imagery zooming to a place
+      map        a map with the places named in the caption marked
+      photo      a real photograph of the subject
+      clip       real video footage of the subject
+      headline   a news headline clipping from a named outlet
+      punch      a deliberate text-only card of two or three words, for emphasis — at most two in the whole video
+      quote      a named speaker's own words, over their own footage or photo
+      count      a single number counting up
+      graphic    a simple data graphic
+  - "subject": the one thing on screen, as a concrete noun phrase — the FULL exact name for named people, places and organisations ("Mette Frederiksen", "Pituffik Space Base"); the plain physical thing for abstract beats ("container ship at port"). Never a sentence, never a hedge between two things.
+  - "source_intent": where a real picture of that subject would come from, most real first:
+      footage (real video of the actual thing) > photo (a real photograph) > satellite / map / data > stock (ABSTRACT beats only, never a named person or place) > card (type only).
+    It must fit the kind: satellite -> satellite; map -> map; photo -> photo or stock; clip -> footage or stock; quote -> footage or photo; count and graphic -> data or card; headline and punch -> card.
+  - Prefer something REAL on screen. A punch card is punctuation, not a fallback for a beat you could have shown.
+  - Never choose a shot whose picture would show casualties, bodies, or violence against people.
+`;
+
 export function buildSpecPrompt({ article, allowedSources = [], bodyText = null }) {
   // bodyText is the resolved source text (full-text fetch when available,
   // stored content otherwise). The slice is a safety ceiling, not the
@@ -531,6 +568,8 @@ export function buildSpecPrompt({ article, allowedSources = [], bodyText = null 
   // it consumes everything the cutaway path consumed and more.
   const imageryOn = beatImageryEnabled();
   const cutawaysOn = stockCutawaysEnabled() && !imageryOn;
+  // SHOT ENGINE (dark). Off, the prompt below is byte-identical to before.
+  const shotsOn = shotEngineEnabled();
   const emittable = MODEL_EMITTABLE.filter(t => {
     if (t === "sources") return false;
     if (!SUBJECT_VISUAL_TYPES.includes(t)) return true;
@@ -604,7 +643,7 @@ a hedge between two things.
      is never a picture of what happened. If what you want to name is the incident itself — a crash,
      a protest, a strike — that is exactly the case where you must omit the field, because any
      footage shown there would be mistaken for the event and it is not.
-` : ""}CARD GRAMMAR — field names and types are exact:
+` : ""}${shotsOn ? SHOT_LIST_RULE : ""}CARD GRAMMAR — field names and types are exact:
 ${cardGrammar({ visualsOn, hasPhoto, imageryOn })}
 
 HARD RULES — violating any of these makes the output unusable:
@@ -1095,6 +1134,8 @@ export async function writeVideoSpec(article, {
       // caption look less like the headline than it is.
       headline: String(article?.title || ""),
       ...(slideCeiling ? { maxSlides: slideCeiling } : {}),
+      // Shot engine (dark): the shot list is checked only when it was asked for.
+      shotList: shotEngineEnabled(), wpm: WPM,
     };
 
     // ONE regeneration retry on a SPEC-LEVEL rejection. A spec costs well under
