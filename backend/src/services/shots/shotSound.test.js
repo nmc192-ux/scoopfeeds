@@ -69,3 +69,29 @@ test("mix.py lands on -14 LUFS with true peak at or under -2 before encode", { s
   assert.ok(Math.abs(m.I + 14) <= 1, `integrated ${m.I} LUFS`);
   assert.ok(m.TP <= -1.9, `true peak ${m.TP} dBTP`);
 });
+
+// ─── The spec writer's tone (DrJ, 25 Sep 2026) ──────────────────────────────
+import { keywordTone } from "./shotSound.js";
+
+test("the spec's tone is primary when the keywords have no grief", () => {
+  const t = toneFor({ title: "Central bank holds rates steady" }, { tone: "tense", slides: [] });
+  assert.deepEqual([t.group, t.level, t.why, t.source], ["tense", "normal", "tense", "spec"]);
+  assert.equal(toneFor({ title: "Troops mass on the border" }, { tone: "neutral", slides: [] }).why, "neutral",
+    "the model may read a keyword-tense story as neutral — its call, and the disagreement is logged");
+});
+
+test("GRIEF FROM THE KEYWORDS ALWAYS WINS — never a driving or hopeful bed on a death story", () => {
+  for (const said of ["hopeful", "neutral", "tense"]) {
+    const t = toneFor({ title: "Rescuers find survivors as quake death toll climbs" }, { tone: said, slides: [] });
+    assert.equal(t.why, "grief", said);
+    assert.equal(t.level, "low");
+    assert.equal(t.source, "keywords (grief override)");
+  }
+  assert.equal(toneFor({ title: "Markets open" }, { tone: "grief", slides: [] }).level, "low", "the spec saying grief is respected too");
+});
+
+test("no or unknown spec tone falls back to the keyword rules", () => {
+  assert.equal(toneFor({ title: "Scientists discover a new antibiotic" }, { slides: [] }).source, "keywords");
+  assert.equal(toneFor({ title: "Scientists discover a new antibiotic" }, { tone: "cheerful", slides: [] }).why, "hopeful");
+  assert.equal(keywordTone({ title: "Dozens killed in flooding" }), "grief");
+});

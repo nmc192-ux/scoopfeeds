@@ -49,6 +49,10 @@ export const KIND_INTENTS = Object.freeze({
   graphic:   ["data", "card"],
 });
 
+// The story's register, chosen by the spec writer (DrJ, 25 Sep 2026); it picks
+// the music bed. The keyword rules in shots/shotSound.js stay as the safety net.
+export const TONES = Object.freeze(["neutral", "tense", "hopeful", "grief"]);
+
 export const MAX_SHOTS_PER_CARD = 3;
 export const MAX_PUNCH_SHOTS = 2;           // brief §1.2: at most two per short
 export const MAX_AVG_SHOT_SECS = 3.0;       // brief §0 — REPORTED at spec time, enforced at render

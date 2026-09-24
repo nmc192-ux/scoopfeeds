@@ -193,3 +193,27 @@ test("flag on: the prompt asks for shots, names every kind and intent, and still
   ];
   for (const re of banned) assert.ok(!re.test(p), `length signal ${re} leaked: ${p.match(re)?.[0]}`);
 });
+
+test("tone: unknown or missing never rejects a spec — it warns, and the keyword rules decide", () => {
+  const s = base();
+  for (const c of s.slides) {
+    const w = c.caption.split(" ");
+    c.shots = [0, 5, 10].filter((i) => i < w.length - 1).map((i) => S(w.slice(i, i + 2).join(" "), "graphic", "cable route", "data"));
+  }
+  const none = validateSpec(s, { allowedSources: ["Reuters"], sourceText: TEXT, shotList: true });
+  assert.equal(none.ok, true, none.errors.join("\n"));
+  assert.ok(none.warnings.some((w) => /no "tone"/.test(w)));
+  const bad = validateSpec({ ...s, tone: "cheerful" }, { allowedSources: ["Reuters"], sourceText: TEXT, shotList: true });
+  assert.equal(bad.ok, true);
+  assert.equal(bad.spec.tone, undefined, "an unknown tone is dropped, not passed to the music");
+  const good = validateSpec({ ...s, tone: "grief" }, { allowedSources: ["Reuters"], sourceText: TEXT, shotList: true });
+  assert.equal(good.spec.tone, "grief");
+});
+
+test("the tone instruction appears only with the shot engine on", () => {
+  assert.ok(!/TOP-LEVEL "tone"/.test(withFlag(undefined, promptFor)));
+  const p = withFlag("1", promptFor);
+  assert.match(p, /TOP-LEVEL "tone"/);
+  for (const t of ["grief", "tense", "hopeful", "neutral"]) assert.match(p, new RegExp(`"${t}"`));
+  assert.match(p, /never changes a beat, a card or a word of any caption/);
+});

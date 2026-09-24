@@ -40,15 +40,40 @@ export const TENSE_WEAK_MIN = 4;
 const HOPEFUL = /\b(breakthrough|discover(?:y|ed|ies)|scientists?|research(?:ers)?|study finds|vaccine|cure[sd]?|treatment|recover(?:y|ed|ing)|rebuil\w*|restor\w*|record high|milestone|launch(?:ed|es)?|renewable|solar|conservation|rescued|reunited|celebrat\w*|award|wins?|won|peace deal|ceasefire holds)\b/i;
 
 /**
- * The story's tone → { group, level }. `level` is "low" for grief — the bed is
- * cut 10 dB further under the voice and the hits are dropped (mix.py).
+ * What the KEYWORD rules say: the safety net under the spec writer's tone.
+ */
+export function keywordTone(article = {}, spec = {}) {
+  const text = [article.title, article.description, ...(spec.slides || []).map((s) => s.caption)].filter(Boolean).join(" \n ");
+  if (isExplicitHarmHeadline(article.title || "") || GRIEF.test(text)) return "grief";
+  if (TENSE_STRONG.test(text) || (text.match(TENSE_WEAK) || []).length >= TENSE_WEAK_MIN) return "tense";
+  if (HOPEFUL.test(text)) return "hopeful";
+  return "neutral";
+}
+
+const TONE_BED = {
+  grief:   { group: "tense", level: "low" },     // very low, no hits — never driving, never hopeful
+  tense:   { group: "tense", level: "normal" },
+  hopeful: { group: "hopeful", level: "normal" },
+  neutral: { group: "neutral", level: "normal" },
+};
+
+/**
+ * The story's tone → { group, level, why, source }.
+ *
+ * PRIMARY: the spec writer's "tone" (DrJ, 25 Sep 2026). SAFETY NET: the keyword
+ * rules — and GRIEF FROM THE KEYWORDS ALWAYS WINS, so a death or disaster story
+ * can never get a driving or hopeful bed whatever the model said. When the two
+ * disagree the log says so, which is how the model's tone gets calibrated.
  */
 export function toneFor(article = {}, spec = {}) {
-  const text = [article.title, article.description, ...(spec.slides || []).map((s) => s.caption)].filter(Boolean).join(" \n ");
-  if (isExplicitHarmHeadline(article.title || "") || GRIEF.test(text)) return { group: "tense", level: "low", why: "grief" };
-  if (TENSE_STRONG.test(text) || (text.match(TENSE_WEAK) || []).length >= TENSE_WEAK_MIN) return { group: "tense", level: "normal", why: "tense" };
-  if (HOPEFUL.test(text)) return { group: "hopeful", level: "normal", why: "hopeful" };
-  return { group: "neutral", level: "normal", why: "neutral" };
+  const kw = keywordTone(article, spec);
+  const model = ["neutral", "tense", "hopeful", "grief"].includes(spec?.tone) ? spec.tone : null;
+  let tone = model || kw, source = model ? "spec" : "keywords";
+  if (kw === "grief" && model !== "grief") { tone = "grief"; source = "keywords (grief override)"; }
+  if (model && model !== kw) {
+    logger.info(`🎵 tone disagreement [${article.id ?? "?"}]: spec says ${model}, keywords say ${kw} → ${tone} (${source})`);
+  }
+  return { ...TONE_BED[tone], why: tone, source, spec: model, keywords: kw };
 }
 
 // ─── The library ─────────────────────────────────────────────────────────────
