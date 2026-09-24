@@ -155,6 +155,8 @@ export async function wikidataFacts(qid, { deps = {} } = {}) {
   const val = (p) => c[p]?.[0]?.mainsnak?.datavalue?.value;
   const coord = val("P625");
   return {
+    iso3: typeof val("P298") === "string" ? val("P298") : null,            // set on country items
+    countryQid: val("P17")?.id || null,                                       // the country a place is in
     image: typeof val("P18") === "string" ? val("P18") : null,
     coords: coord ? { lat: coord.latitude, lon: coord.longitude } : null,
     instanceOf: (c.P31 || []).map((s) => s.mainsnak?.datavalue?.value?.id).filter(Boolean),

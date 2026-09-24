@@ -305,3 +305,84 @@ test("the longform evidence-asset registry imports landmarks and counts what it 
   const cut = importAssetManifest(db, { kind: "cutout", entries: { TRUMP: { key: "TRUMP", subject: "Donald Trump", sourceUrl: "u", license: "public-domain" } } });
   assert.equal(cut.imported, 0, "cutouts are a treatment the shot engine does not use");
 });
+
+// ─── PR #149 fixes (DrJ, 24 Sep) ────────────────────────────────────────────
+import { splitPlaces } from "./shotResolver.js";
+import { splitJpegs, windowFor } from "./media.js";
+import { MIN_MATCH } from "./vision.js";
+import { loadFallbackFont, isFontData, _setFontFetch, _setFontCacheDir } from "../renderCore.js";
+import { mkdtempSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+
+const geminiSays = (obj) => ({ fetchImpl: async () => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] } }], usageMetadata: {} }) }) });
+const withKey = async (fn) => { const s = process.env.GEMINI_API_KEY; process.env.GEMINI_API_KEY = "test"; try { return await fn(); } finally { if (s === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = s; } };
+
+test(`vision refuses weak subject matches (below ${MIN_MATCH}/10) — the Dehradun-for-Himalayas case`, async () => {
+  await withKey(async () => {
+    const frames = [{ t: 0, jpeg: Buffer.alloc(4) }, { t: 5, jpeg: Buffer.alloc(4) }];
+    const weak = await pickInPoints({ frames, subject: "Himalayas", caption: "c", clipTitle: "Chaktonwala Grant, Dehradun",
+      deps: geminiSays({ frames: [{ i: 0, shows_subject: true, match: 4, score: 9, sensitive: false }, { i: 1, shows_subject: true, match: 5, score: 8 }] }) });
+    assert.deepEqual(weak.picks, [], "a town with hills is not the Himalayas");
+    const strong = await pickInPoints({ frames, subject: "Himalayas", caption: "c", clipTitle: "t",
+      deps: geminiSays({ frames: [{ i: 0, shows_subject: true, match: 4, score: 9 }, { i: 1, shows_subject: true, match: 9, score: 6 }] }) });
+    assert.deepEqual(strong.picks.map((p) => p.t), [5]);
+    const photo = await judgePhoto({ jpeg: Buffer.alloc(4), subject: "Joint Base Andrews",
+      deps: geminiSays({ matches: true, match: 5, sensitive: false, screenshot: false, private_person: false }) });
+    assert.equal(photo.usable, false);
+  });
+});
+
+test("multi-place map subjects draw every country; a name containing 'and' stays whole", async () => {
+  assert.deepEqual(splitPlaces("United States and China"), ["United States", "China"]);
+  assert.deepEqual(splitPlaces("Nepal, Tibet & Bhutan"), ["Nepal", "Tibet", "Bhutan"]);
+  const { deps } = fakes({
+    wikidataSearch: async (n) => (/tibet/i.test(n) ? { qid: "Q17252" } : null),
+    wikidataFacts: async (q) => (q === "Q17252" ? { countryQid: "Q148", coords: { lat: 29.6, lon: 91.1 } } : q === "Q148" ? { iso3: "CHN" } : {}),
+  });
+  const ctx = contextFor(ARTICLE, { deps });
+  const us = await resolveShot({ anchor: "The pact", kind: "map", subject: "United States and China", source_intent: "map" }, CAP, ctx);
+  assert.equal(us.rung, "natural-earth", JSON.stringify(us.trail));
+  assert.deepEqual(us.record.coords.codes, ["USA", "CHN"]);
+  const nt = await resolveShot({ anchor: "The pact", kind: "map", subject: "Nepal and Tibet border region", source_intent: "map" }, CAP, ctx);
+  assert.deepEqual(nt.record.coords.codes, ["NPL", "CHN"], JSON.stringify(nt.trail));
+  const bih = await resolveShot({ anchor: "The pact", kind: "map", subject: "Bosnia and Herzegovina", source_intent: "map" }, CAP, ctx);
+  assert.deepEqual(bih.record.coords.codes, ["BIH"]);
+  const pk = await resolveShot({ anchor: "The pact", kind: "map", subject: "India and Pakistan", source_intent: "map" }, CAP, ctx);
+  assert.equal(pk.rung, "card", "Rule 0: no map that includes Pakistan");
+});
+
+test("real imagery counts headline clippings", async () => {
+  const { deps } = fakes();
+  const spec = { slides: [{ t: "title", caption: CAP, shots: [
+    { anchor: "The pact", kind: "headline", subject: "CNBC headline on the Greenland deal", source_intent: "card" },
+    { anchor: "signed at the", kind: "punch", subject: "SIGNED", source_intent: "card" },
+  ] }] };
+  const r = await resolveSpecShots(spec, ARTICLE, { deps });
+  assert.equal(r.stats.realShare, 0.5);
+});
+
+test("frames come from one streamed read, split on JPEG markers; windows pad the in-point", () => {
+  const j = (n) => Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.alloc(n, 1), Buffer.from([0xff, 0xd9])]);
+  assert.equal(splitJpegs(Buffer.concat([j(10), j(20), j(5)])).length, 3);
+  assert.deepEqual(windowFor(30, 120), { start: 28, end: 42 });
+  assert.deepEqual(windowFor(1, 8), { start: 0, end: 8 });
+});
+
+test("fallback fonts: Han picks Noto Sans SC, an HTML error page returns nothing instead of throwing", async () => {
+  const ttf = Buffer.concat([Buffer.from([0, 1, 0, 0]), Buffer.alloc(200)]);
+  assert.equal(isFontData(ttf), true);
+  assert.equal(isFontData(Buffer.from("<html>error</html>".padEnd(200))), false);
+  const asked = [];
+  _setFontCacheDir(mkdtempSync(join(tmpdir(), "fontcache-")));
+  _setFontFetch(async (u) => { asked.push(String(u)); return u.includes("googleapis")
+    ? { ok: true, text: async () => "src: url(https://fonts.gstatic.com/x) format('truetype');" }
+    : { ok: true, arrayBuffer: async () => (asked.length > 2 ? Buffer.from("<html>".padEnd(300)) : ttf) }; });
+  try {
+    const f = await loadFallbackFont("ja-JP|zh-CN|zh-TW|zh-HK", "测试");
+    assert.equal(f[0]?.name, "Noto Sans SC");
+    assert.match(asked[0], /family=Noto%20Sans%20SC/);
+    const bad = await loadFallbackFont("ko-KR", "한국");
+    assert.deepEqual(bad, [], "an error page is not a font");
+  } finally { _setFontFetch((u, o) => fetch(u, o)); }
+});

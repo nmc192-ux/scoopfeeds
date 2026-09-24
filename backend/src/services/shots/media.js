@@ -56,7 +56,7 @@ export function sampleTimes(duration) {
   return { times, spacing, coveredSecs: Math.min(duration, times.length * spacing) };
 }
 
-/** One JPEG frame at `t` seconds, 360 px tall. */
+/** One JPEG frame at `t` seconds, 360 px tall (a single seek). */
 export async function frameAt(url, t, { height = 360, deps = {} } = {}) {
   const ff = deps.ffmpeg || getFFmpegPath();
   const buf = await politely(() => run(ff, ["-v", "error", "-user_agent", UA, "-ss", String(t), "-i", url,
@@ -64,13 +64,55 @@ export async function frameAt(url, t, { height = 360, deps = {} } = {}) {
   return buf?.length > 1000 ? buf : null;
 }
 
-/** Sample a clip into frames for the vision check. */
-export async function sampleFrames(url, duration, { deps = {} } = {}) {
-  const { times, spacing, coveredSecs } = sampleTimes(duration);
-  const frames = [];
-  for (const t of times) {
-    try { const jpeg = await frameAt(url, t, { deps }); if (jpeg) frames.push({ t, jpeg }); }
-    catch { /* a single failed seek costs one frame, not the clip */ }
+/** Split a concatenated MJPEG stream into its JPEGs (SOI FFD8 … EOI FFD9). */
+export function splitJpegs(buf) {
+  const out = [];
+  let start = -1;
+  for (let i = 0; i + 1 < buf.length; i++) {
+    if (buf[i] === 0xff && buf[i + 1] === 0xd8 && start < 0) start = i;
+    else if (buf[i] === 0xff && buf[i + 1] === 0xd9 && start >= 0) { out.push(buf.subarray(start, i + 2)); start = -1; i++; }
   }
+  return out;
+}
+
+/**
+ * Sample a clip into frames for the vision check — ONE streamed read of the
+ * low-res transcode (a single request), not one seek per frame. Measured
+ * 24 Sep: per-frame seeks cost 50–150 s a clip through the polite queue.
+ * Frame k is at k * spacing (ffmpeg's fps filter picks the nearest frame).
+ */
+export async function sampleFrames(url, duration, { deps = {} } = {}) {
+  const ff = deps.ffmpeg || getFFmpegPath();
+  const { times, spacing, coveredSecs } = sampleTimes(duration);
+  let jpegs = [];
+  try {
+    const buf = await politely(() => run(ff, ["-v", "error", "-user_agent", UA, "-t", String(coveredSecs + 0.5), "-i", url,
+      "-vf", `fps=1/${spacing.toFixed(3)},scale=-2:360`, "-frames:v", String(times.length),
+      "-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "-"], { binary: true, timeout: 120000 }));
+    jpegs = splitJpegs(buf || Buffer.alloc(0)).filter((j) => j.length > 1000);
+  } catch { /* fall through to an empty sample; the caller moves on */ }
+  const frames = jpegs.map((jpeg, k) => ({ t: Number((k * spacing).toFixed(2)), jpeg }));
   return { frames, spacing, coveredSecs, duration };
+}
+
+// THE RENDER WINDOW. The renderer never downloads a whole 1080p file: it seeks
+// over HTTP to the chosen in-point and reads only the shot's window, padded.
+export const WINDOW_PAD_S = 2;
+export const WINDOW_SHOT_S = 10;   // generous: a clip shot may be sub-cut into alternate views of the same clip
+
+export function windowFor(t, duration, { shotSecs = WINDOW_SHOT_S, pad = WINDOW_PAD_S } = {}) {
+  const start = Math.max(0, t - pad);
+  const end = Math.min(duration || Infinity, t + shotSecs + pad);
+  return { start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) };
+}
+
+/**
+ * Fetch just a window of a remote clip to a local file (re-encoded, so the cut
+ * is frame-accurate rather than keyframe-aligned). One polite request.
+ */
+export async function fetchWindow(url, { start, end }, out, { height = 1080, deps = {} } = {}) {
+  const ff = deps.ffmpeg || getFFmpegPath();
+  await politely(() => run(ff, ["-v", "error", "-y", "-user_agent", UA, "-ss", String(start), "-t", String(Math.max(0.5, end - start)),
+    "-i", url, "-an", "-vf", `scale=-2:'min(${height},ih)'`, "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", out], { timeout: 180000 }));
+  return out;
 }

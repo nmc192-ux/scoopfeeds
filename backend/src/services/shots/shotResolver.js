@@ -80,7 +80,27 @@ function countryByName(name) {
     } catch { /* no atlas → no country match; the map rung says so */ }
   }
   const n = String(name || "").toLowerCase().replace(/^the /, "").trim();
-  return _countries.get(n) || null;
+  return _countries.get(n) || COUNTRY_ALIASES[n] || null;
+}
+
+// The names people write that Natural Earth spells differently.
+const COUNTRY_ALIASES = {
+  "united states": "USA", "us": "USA", "u.s.": "USA", "usa": "USA", "america": "USA",
+  "uk": "GBR", "u.k.": "GBR", "britain": "GBR", "great britain": "GBR", "england": "GBR",
+  "czech republic": "CZE", "ivory coast": "CIV", "democratic republic of the congo": "COD", "drc": "COD",
+  "republic of the congo": "COG", "bosnia": "BIH", "bosnia and herzegovina": "BIH", "central african republic": "CAF",
+  "south sudan": "SSD", "dominican republic": "DOM", "uae": "ARE", "emirates": "ARE", "macedonia": "MKD",
+  "eswatini": "SWZ", "swaziland": "SWZ", "burma": "MMR", "east timor": "TLS", "vatican": "VAT",
+};
+
+/**
+ * Split a subject naming several places into its parts: "United States and
+ * China", "Nepal, Tibet and Bhutan", "India & Pakistan". A subject that is
+ * one name containing "and" ("Bosnia and Herzegovina", "Trinidad and Tobago")
+ * is tried WHOLE first by the caller, so the split never breaks a real name.
+ */
+export function splitPlaces(subject) {
+  return String(subject || "").split(/\s*,\s*|\s+and\s+|\s*&\s*/i).map((x) => x.trim()).filter(Boolean);
 }
 
 // ─── Context ─────────────────────────────────────────────────────────────────
@@ -263,7 +283,9 @@ async function rungCommonsVideo(shot, caption, ctx) {
     }
     if (!v.picks.length) continue;
     const crop = cropFor({ author: info.author, credit: info.credit, title: info.title }, { bannerSeen: v.picks.some((x) => x.banner) || v.bannerAt !== null });
-    return { record: { ...base, in_points: v.picks, crop, coveredSecs: s.coveredSecs,
+    // Each in-point carries the only part of the 1080p file the renderer will read.
+    const in_points = v.picks.map((x) => ({ ...x, window: media.windowFor(x.t, p.duration) }));
+    return { record: { ...base, in_points, crop, coveredSecs: s.coveredSecs,
       note: s.coveredSecs < p.duration ? `sampled first ${Math.round(s.coveredSecs)}s of ${Math.round(p.duration)}s` : null } };
   }
   return { miss: `${infos.length} Commons video(s): ${refused} refused (${blocked} Rule 0, rest licence/length), ${tried} tried, none fit` };
@@ -361,18 +383,55 @@ async function rungEsri(shot, ctx) {
   if (rule0Blocks({ subject: shot.subject })) return { miss: "Rule 0" };
   const place = await placeFor(shot, ctx);
   if (!place || place.lat === null) return { miss: place ? "a country, not a point — the map rung draws it" : "no coordinates for the subject" };
+  if (place.codes?.includes("PAK")) return { miss: "Rule 0 — the place is in Pakistan" };
   return { record: { subject: shot.subject, kind: "satellite", rung: "esri", media_url: `esri:${place.lat.toFixed(4)},${place.lon.toFixed(4)}`,
     source_url: ESRI_TILE, licence: "Esri World Imagery — attribution required", credit: ESRI_CREDIT,
     coords: { lat: place.lat, lon: place.lon, zoom: place.zoom, how: place.how }, found_for: ctx.article?.id } };
 }
 
+/** One place → {code, city?, lat?, lon?} using the atlas, then Wikidata's country (P17 → P298). */
+async function resolvePlace(name, ctx) {
+  for (const v of variants(name)) {
+    const iso = countryByName(v);
+    if (iso) return { name: v, code: iso };
+    const city = findCity(v);
+    if (city) return { name: v, code: city.c, city: v, lat: city.o[1], lon: city.o[0] };
+  }
+  for (const v of variants(name)) {
+    const wd = await wikidataFor(v, ctx);
+    if (!wd?.facts) continue;
+    if (wd.facts.iso3) return { name: v, code: wd.facts.iso3 };
+    if (wd.facts.countryQid) {
+      try {
+        const cf = await (ctx.deps.wikidataFacts || commons.wikidataFacts)(wd.facts.countryQid);
+        if (cf?.iso3) return { name: v, code: cf.iso3, ...(wd.facts.coords || {}), region: true };
+      } catch { /* fall through */ }
+    }
+    if (wd.facts.coords) return { name: v, code: null, ...wd.facts.coords };
+  }
+  return null;
+}
+
 async function rungNaturalEarth(shot, ctx) {
   if (rule0Blocks({ subject: shot.subject })) return { miss: "Rule 0" };
-  const place = await placeFor(shot, ctx);
-  if (!place) return { miss: "no country, atlas city or coordinates for the subject" };
+  // The whole subject first (a single place, or a name that contains "and"),
+  // then — MULTI-PLACE MAPS — each named part, so "United States and China"
+  // draws both countries rather than falling to a card.
+  const whole = await placeFor(shot, ctx);
+  const parts = splitPlaces(shot.subject);
+  let places = [];
+  if (parts.length > 1) {
+    for (const part of parts) { const p = await resolvePlace(part, ctx); if (p) places.push(p); }
+    if (places.length < 2) places = [];
+  }
+  if (!places.length && !whole) return { miss: "no country, atlas city or coordinates for the subject" };
+  if (!places.length && whole.codes?.includes("PAK")) return { miss: "Rule 0 — the place is in Pakistan" };
+  const coords = places.length
+    ? { codes: [...new Set(places.map((p) => p.code).filter(Boolean))], places, how: `${places.length} places` }
+    : { lat: whole.lat, lon: whole.lon, codes: whole.codes, zoom: whole.zoom, how: whole.how };
+  if (places.some((p) => rule0Blocks({ code: p.code, name: p.name }) || p.code === "PAK")) return { miss: "Rule 0 — a place in the map is Pakistan" };
   return { record: { subject: shot.subject, kind: "map", rung: "natural-earth", media_url: `ne:${subjectKey(shot.subject)}`,
-    licence: "Natural Earth — public domain", credit: "Map: Natural Earth",
-    coords: { lat: place.lat, lon: place.lon, codes: place.codes, zoom: place.zoom, how: place.how }, found_for: ctx.article?.id } };
+    licence: "Natural Earth — public domain", credit: "Map: Natural Earth", coords, found_for: ctx.article?.id } };
 }
 
 async function rungStock(shot, ctx) {
@@ -447,7 +506,9 @@ export async function resolveSpecShots(spec, article, { db = null, deps = {}, we
     }
   }
   const byRung = out.reduce((m, r) => ({ ...m, [r.rung]: (m[r.rung] || 0) + 1 }), {});
-  const real = out.filter((r) => r.record && !["card"].includes(r.rung)).length;
+  // REAL IMAGERY (DrJ, 24 Sep): a found picture, OR a headline clipping — a
+  // real outlet's real headline is real imagery even though it is typeset.
+  const real = out.filter((r) => r.record || r.kind === "headline").length;
   const video = out.filter((r) => r.record?.kind === "clip").length;
   return { shots: out, stats: { shots: out.length, byRung, realShare: out.length ? real / out.length : 0, videoShare: out.length ? video / out.length : 0 },
     context: { crime: ctx.crime, sensitive: ctx.sensitive, explicitHarm: ctx.explicitHarm, publisherDomain: ctx.publisherDomain } };
