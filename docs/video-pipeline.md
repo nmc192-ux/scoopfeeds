@@ -638,6 +638,16 @@ Rules the resolver enforces, each earned by a real failure or a DrJ ruling:
   sample's engine re-set for 9:16, 24 fps). Narration is the existing per-caption voice
   padded to the slide timeline; the existing bed scores it. Every shown record is an
   artifact for Rule 0's publish gate.
+- **Sound (Phase 5)** — `shots/shotSound.js` + `backend/shotengine/mix.py` (ported from the
+  sample's `mix_short.py`). The bed comes from a LIBRARY of eight instrumental beds generated
+  once with ElevenLabs Music (3 neutral/driving, 3 tense/serious, 2 hopeful — restrained
+  documentary underscore), stored at `<data>/music-library/` with `manifest.json`. A bed is
+  used only when `approved: true` (DrJ rules on the previews) AND `vocalFree: true`
+  (speech-to-text found no words); least-recently-used within the group; the procedural
+  synth is the fallback. The story's tone picks the group; deaths, disasters or grief get a
+  very low tense bed and no hits, never a driving bed. Envelope ducking under speech; a soft
+  whoosh on each cut and a low hit on punch/turn shots only; two-pass loudnorm to -14 LUFS /
+  TP -2, re-measured AFTER AAC with a corrective trim if the true peak lands above -1 dBTP.
 - **Pre-resolve** — resolution is minutes cold (measured 214–367 s a short), so a
   rate-gated render cycle does it ahead of the slot and stores a plan; the slot then
   only fetches and renders.
