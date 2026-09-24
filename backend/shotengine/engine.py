@@ -188,13 +188,17 @@ def brand(dst):
 class Shot:
     t0 = 0.0; T = 1.0; vign = False; kick = None; src = None; cred = None; caps = True; chrome = True
     labels = ()
+    fresh = True   # False on the 2nd+ view of a sub-cut shot: the chrome is already up
     def frame(self, tl): raise NotImplementedError
     def post(self, f, tl):
         if self.vign: vignette(f)
         if not self.chrome: return
-        if self.kick: kicker(f, self.kick, prog(tl, 0.1, 0.35))
-        if self.src: source_line(f, self.src, prog(tl, 0.3, 0.4))
-        if self.cred: credit_line(f, self.cred, prog(tl, 0.3, 0.4))
+        # Chrome animates in once per SHOT, not once per cut — replaying the fade
+        # at every sub-cut made the kicker and credit blink (Phase 4 samples).
+        a = (lambda t0, d: prog(tl, t0, d)) if self.fresh else (lambda t0, d: 1.0)
+        if self.kick: kicker(f, self.kick, a(0.1, 0.35))
+        if self.src: source_line(f, self.src, a(0.3, 0.4))
+        if self.cred: credit_line(f, self.cred, a(0.3, 0.4))
         brand(f)
 
 def draw_labels(f, tl, s):

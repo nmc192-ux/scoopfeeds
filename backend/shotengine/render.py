@@ -36,7 +36,8 @@ def build_shot(sp, plan):
         if sp.get('auto'):
             sp['bbox'], sp['cams'] = E.auto_frame(sp.get('codes', []), [(p['lat'], p['lon']) for p in sp.get('pins', [])] +
                                                   [(p['lat'], p['lon']) for p in sp.get('points', [])], sp['t0'], sp['T'],
-                                                  zoom=sp.get('zoom', 1.0), focus=tuple(sp['focus']) if sp.get('focus') else None)
+                                                  zoom=sp.get('zoom', 1.0), focus=tuple(sp['focus']) if sp.get('focus') else None,
+                                                  min_span=sp.get('min_span', 6.0))
         s = E.MapShot(tuple(sp['bbox']), [tuple(c) for c in sp['cams']], hi={iso: (tuple(v[0]), v[1]) for iso, v in sp.get('hi', {}).items()},
                       pins=sp.get('pins', []), texts=sp.get('texts', []), **chrome)
     elif k == 'headline':
@@ -54,6 +55,7 @@ def build_shot(sp, plan):
         raise ValueError(f'unknown shot kind {k!r}')
     s.t0, s.T = sp['t0'], sp['T']
     s.kind = k
+    s.fresh = sp.get('fresh', True)
     return s
 
 # ─── Captions: word-by-word, active word lime (brief §1.5) ──────────────────
@@ -96,7 +98,10 @@ def draw_hook(f, t, hook):
     fade = clamp((hook.get('until', 4.2) + 0.4 - t) / 0.4)
     for i, (text, col) in enumerate(hook['lines'][:2]):
         fg, bg = (WHITE, E.BLACK) if col != 'lime' else (INK, LIME)
-        blit(f, tpatch(text.upper(), ANTON(118), fg, bg, (30, 16)), W / 2, 400 + i * 180, eo(prog(t, 0.15 + i * 0.3, 0.35)) * fade, 'ct')
+        # FIT THE WIDTH: a long hook line ran off both edges in the first samples.
+        size = 118
+        while size > 56 and ANTON(size).getlength(text.upper()) + 2 * 30 > W - 2 * M: size -= 4
+        blit(f, tpatch(text.upper(), ANTON(size), fg, bg, (30, 16)), W / 2, 400 + i * 180, eo(prog(t, 0.15 + i * 0.3, 0.35)) * fade, 'ct')
 
 class Renderer:
     def __init__(self, plan):

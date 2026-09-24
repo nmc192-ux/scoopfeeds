@@ -215,7 +215,7 @@ export function buildPlan({ segments, slides, timeline, local, article, attribut
   for (const p of segments) {
     const slide = slides[p.slide];
     const first = p.shot === 0 && p.view === 0;
-    const base = { t0: p.t0, T: p.T, ...chromeFor(p, slide, first) };
+    const base = { t0: p.t0, T: p.T, fresh: !p.view, ...chromeFor(p, slide, first) };
     const rec = p.record;
     const named = looksNamed(p.subject);
     const label = named && p.view === 0 ? [{ t: 0.3, text: String(p.subject).toUpperCase().slice(0, 34) }] : [];
@@ -255,8 +255,13 @@ export function buildPlan({ segments, slides, timeline, local, article, attribut
       const located = (c.places || []).filter((pl) => pl.lat !== undefined && pl.lat !== null);
       const focus = v > 0 && located.length > 1 ? [located[(v - 1) % located.length].lat, located[(v - 1) % located.length].lon] : null;
       const zoom = [1.0, 0.55, 0.38, 0.75][v % 4];
+      // FRAME TO THE FEATURE'S SCALE: a point with no country (a sea) was framed
+      // at 18° and showed only water. Oceans need a continent in view; a strait
+      // wants its two shores.
+      const marine = /marine (\w+)/.exec(c.how || "")?.[1] || (c.places || []).find((pl) => pl.marine)?.marine;
+      const minSpan = { ocean: 70, sea: 24, gulf: 18, bay: 14, strait: 7, channel: 8, canal: 5 }[marine] ?? 6;
       if (v > 0) for (const pin of pins) pin.t = p.t0 - 1;
-      shots.push({ ...base, kind: "map", auto: true, codes, hi, pins, texts: [], zoom, ...(focus ? { focus } : {}) });
+      shots.push({ ...base, kind: "map", auto: true, codes, hi, pins, texts: [], zoom, min_span: minSpan, ...(focus ? { focus } : {}) });
     } else if (p.kind === "headline") {
       const words = String(article.title || "").split(/\s+/).slice(0, 15).join(" ");
       const spoken = new Set(tokens(spokenSpan(p, timeline.words)));
