@@ -58,6 +58,8 @@ import { restatesAny } from "./textSimilarity.js";
 // Country codes are validated against the shipped atlas, not a pattern — see the
 // map case below for why a plausible-but-absent code is the dangerous one.
 import { knownCountry, knownCity } from "./videoSubjectVisual.js";
+// The shot-list checks (shot engine, dark). Pure; imports nothing.
+import { shotListErrors } from "./videoShotList.js";
 
 // ─── The closed set ─────────────────────────────────────────────────────────
 
@@ -643,7 +645,7 @@ const SHARE_EXEMPT_TYPES = new Set(["title", "kicker"]);
 const CARD_FIELDS = {
   // `outlet` and `date` are CODE-INJECTED onto the title by decorateTitleCard,
   // never model-emitted — they are the absorbed attribution card (see below).
-  title:   { required: ["lines", "caption"],                 optional: ["eyebrow", "sub", "outlet", "date", "visual"] },
+  title:   { required: ["lines", "caption"],                 optional: ["eyebrow", "sub", "outlet", "date", "visual", "shots"] },
   // `visual` is the beat's visual intent: a concrete, photographable noun
   // phrase, accepted on EVERY card type (DrJ, 2026-08-30 — cards are
   // punctuation, imagery is the default). On `photo` the `subject` field
@@ -653,11 +655,11 @@ const CARD_FIELDS = {
   // (the reference cut is ~1 visual per second) and the intent must not be
   // welded to today's composition. Resolution order and the named-subject
   // rules live in videoBeatImagery.js.
-  stat:    { required: ["value", "caption", "source"],       optional: ["eyebrow", "unit", "lines", "hi", "visual"] },
-  diagram: { required: ["nodes", "caption"],                 optional: ["eyebrow", "marker", "visual"] },
-  bars:    { required: ["bars", "caption", "source"],        optional: ["eyebrow", "source_note", "visual"] },
-  turn:    { required: ["lines", "caption"],                 optional: ["eyebrow", "sub", "visual"] },
-  kicker:  { required: ["top", "bottom", "caption"],         optional: ["sub", "visual"] },
+  stat:    { required: ["value", "caption", "source"],       optional: ["eyebrow", "unit", "lines", "hi", "visual", "shots"] },
+  diagram: { required: ["nodes", "caption"],                 optional: ["eyebrow", "marker", "visual", "shots"] },
+  bars:    { required: ["bars", "caption", "source"],        optional: ["eyebrow", "source_note", "visual", "shots"] },
+  turn:    { required: ["lines", "caption"],                 optional: ["eyebrow", "sub", "visual", "shots"] },
+  kicker:  { required: ["top", "bottom", "caption"],         optional: ["sub", "visual", "shots"] },
   // `photo` carries NO image field. The photograph is the article's own
   // (image_url), and the MOUNT is a design decision made in code — a model
   // choosing how a photograph is treated is a model art-directing. There is
@@ -667,11 +669,11 @@ const CARD_FIELDS = {
   // the photograph is expected to SHOW. Without it the renderer takes image_url
   // on trust and nothing anywhere can notice a mismatch — which is the tariffs
   // failure with a new name (DrJ, 2026-08-15).
-  photo:   { required: ["lines", "caption", "subject"],      optional: ["eyebrow", "sub", "visual"] },
+  photo:   { required: ["lines", "caption", "subject"],      optional: ["eyebrow", "sub", "visual", "shots"] },
   // `codes` are ISO 3166-1 alpha-3. `exception` is the ONE member of the set
   // the story excludes — the "all but one" case, which is unreadable without a
   // callout because the excepted country is often a couple of pixels wide.
-  map:     { required: ["codes", "caption"],                 optional: ["eyebrow", "exception", "city", "lines", "visual"] },
+  map:     { required: ["codes", "caption"],                 optional: ["eyebrow", "exception", "city", "lines", "visual", "shots"] },
 };
 
 // Card types the MODEL is allowed to emit. The `attribution` card is GONE —
@@ -1006,6 +1008,10 @@ export function validateSpec(spec, {
   maxSlides = MAX_SLIDES,
   maxDropRatio = MAX_DROP_RATIO,
   maxSourcingDrops = MAX_SOURCING_DROPS,
+  // Shot-engine Phase 2 (dark): when true, every surviving card must carry a
+  // shot list that lines up with its caption. See videoShotList.js.
+  shotList = false,
+  wpm = 150,
 } = {}) {
   const errors   = [];
   const dropped  = [];
@@ -1367,7 +1373,17 @@ export function validateSpec(spec, {
     );
   }
 
-  if (errors.length) return { ok: false, spec: null, errors, warnings, dropped, stats: null };
+  // SHOT LIST (dark). Checked on the cards that SURVIVED, because those are the
+  // ones that will be cut into shots — a dropped card's shots go with it.
+  let shotStats = null;
+  if (shotList) {
+    const r = shotListErrors(kept, { wpm, outlets: allowedSources });
+    errors.push(...r.errors);
+    warnings.push(...r.warnings);
+    shotStats = r.stats;
+  }
+
+  if (errors.length) return { ok: false, spec: null, errors, warnings, dropped, stats: shotStats ? { shots: shotStats } : null };
 
   const byType = {};
   for (const c of kept) byType[c.t] = (byType[c.t] || 0) + 1;
@@ -1388,6 +1404,7 @@ export function validateSpec(spec, {
       beatKinds: beats.reduce((m, b) => { m[b.kind] = (m[b.kind] || 0) + 1; return m; }, {}),
       byType,
       captionWords: kept.reduce((n, c) => n + String(c.caption).trim().split(/\s+/).length, 0),
+      ...(shotStats ? { shots: shotStats } : {}),
     },
   };
 }

@@ -207,6 +207,19 @@ slides.forEach((c, i) => {
   console.log(`  ${String(i + 1).padStart(2)}. [${String(c.t).padEnd(7)}] ${cap.length.toString().padStart(3)}c  ${cap}`);
 });
 
+// THE SHOT LIST (shot engine, dark) — printed only when the spec carries one,
+// so a flag-off run's output is unchanged. Stats come from the same checker the
+// schema gate uses, so the numbers here are the numbers the gate saw.
+if (slides.some((c) => Array.isArray(c.shots))) {
+  const { shotListErrors } = await import("../src/services/videoShotList.js");
+  const { stats } = shotListErrors(slides, { wpm: Number.parseInt(process.env.VIDEO_SPEC_WPM || "150", 10) });
+  console.log("\nshots, in order:");
+  slides.forEach((c, i) => (c.shots || []).forEach((sh, j) =>
+    console.log(`  ${String(i + 1).padStart(2)}.${j + 1} @"${sh.anchor}"  ${String(sh.kind).padEnd(9)} ${String(sh.source_intent).padEnd(9)} ${sh.subject}`)));
+  console.log(`${stats.shots} shots · est. ${stats.spokenSecs}s spoken · avg ${stats.avgShotSecs}s/shot · punch ${stats.punch} · ` +
+    `kinds ${JSON.stringify(stats.byKind)} · intents ${JSON.stringify(stats.byIntent)}`);
+}
+
 // DROPPED CARDS ARE NOT IN THE RETURN VALUE. writeVideoSpec logs them and keeps
 // only the survivors, so the count cannot be printed from `r` — it would always
 // read zero and quietly imply a clean spec. They appear instead as a
