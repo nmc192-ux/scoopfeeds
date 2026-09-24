@@ -508,7 +508,7 @@ It is METADATA, filled in after every other decision: it never changes which bea
 
   "shots": [ { "anchor": "...", "kind": "...", "subject": "...", "source_intent": "..." }, ... ]
 
-  - CUT EVERY CAPTION INTO SHOTS OF ABOUT SIX TO EIGHT SPOKEN WORDS. That is the grain of the format: the picture changes every two or three seconds. So a typical caption is THREE shots, and only a caption of eight words or fewer stays a single shot. Never more than three on one card. Put each cut where the picture should change — a new place, a new person, a new object, a new number — and if the caption has no natural change there, cut to a closer or different view of the same subject.
+  - One to three shots per card, and each one is a REAL PICTURE CHANGE: a new place, a new person, a new object, a new number. A caption with one thing to show is one shot. Never cut to the same subject again just to add a shot — pacing inside a shot is handled by the renderer, not by you.
   - "anchor": the exact words of THIS card's caption the shot starts on — copied verbatim, two to four words. The FIRST shot's anchor is the caption's opening words. Each later anchor comes after the one before it. An anchor that is not word-for-word in the caption makes the spec invalid.
   - "kind", from this closed set:
       satellite  satellite imagery zooming to a place
@@ -520,7 +520,7 @@ It is METADATA, filled in after every other decision: it never changes which bea
       quote      a named speaker's own words, over their own footage or photo
       count      a single number counting up
       graphic    a simple data graphic
-  - "subject": the one thing on screen, as a concrete noun phrase — the FULL exact name for named people, places and organisations ("Mette Frederiksen", "Pituffik Space Base"); the plain physical thing for abstract beats ("container ship at port"). Never a sentence, never a hedge between two things.
+  - "subject": the one thing on screen, SPECIFIC ENOUGH TO SEARCH FOR — a named person, place, organisation, document, vessel or product, or a precise object or event, with its FULL exact name ("Mette Frederiksen", "Pituffik Space Base", "Bhotekoshi River", "2026 Global Gender Gap Report"). Generic nouns ("money", "ocean", "officials", "tech executives") and the outlet's own name are INVALID for satellite, map, photo, clip, quote and headline shots; they are allowed only on count and graphic shots. Never a sentence, never a hedge between two things.
   - "source_intent": where a real picture of that subject would come from, most real first:
       footage (real video of the actual thing) > photo (a real photograph) > satellite / map / data > stock (ABSTRACT beats only, never a named person or place) > card (type only).
     It must fit the kind: satellite -> satellite; map -> map; photo -> photo or stock; clip -> footage or stock; quote -> footage or photo; count and graphic -> data or card; headline and punch -> card.
@@ -883,7 +883,7 @@ RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. 
       WRONG:  "The airline has been fined forty million dollars for refund delays." (the headline again)
       RIGHT:  "The fine is smaller than the interest earned on the money it held."
 
-${shotsOn ? `EVERY card in "slides" — title and kicker included — carries its "shots" array, cut into shots of about six to eight spoken words as described above. A card without "shots", or a long caption left as a single shot, makes the spec invalid.
+${shotsOn ? `EVERY card in "slides" — title and kicker included — carries its "shots" array: one to three real picture changes, each with a specific subject, as described above. A card without "shots" makes the spec invalid.
 
 ` : ""}Return ONLY a JSON object, no markdown fence, with exactly this shape — "beats" first, then "slides":
 

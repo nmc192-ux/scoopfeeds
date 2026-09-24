@@ -51,8 +51,66 @@ export const KIND_INTENTS = Object.freeze({
 
 export const MAX_SHOTS_PER_CARD = 3;
 export const MAX_PUNCH_SHOTS = 2;           // brief §1.2: at most two per short
-export const MAX_AVG_SHOT_SECS = 3.0;       // brief §0: average shot length <= 3.0 s
+export const MAX_AVG_SHOT_SECS = 3.0;       // brief §0 — REPORTED at spec time, enforced at render
 export const MAX_SUBJECT_WORDS = 8;
+
+/**
+ * SUBJECT SPECIFICITY (DrJ, 24 Sep 2026). A shot that goes looking for real
+ * imagery needs something SEARCHABLE: a named person, place, organisation,
+ * document, vessel or product, or a precise object or event. "money", "ocean"
+ * and an outlet's own name find nothing worth showing — the first dry run
+ * emitted all three. Generic subjects stay legal for the kinds that draw their
+ * own picture from data (count, graphic) and for punch, whose subject is its
+ * own words.
+ */
+export const GENERIC_OK_KINDS = Object.freeze(["count", "graphic", "punch"]);
+
+// Words that name a CATEGORY rather than a thing. A subject made only of these
+// (plus articles and prepositions) is generic, however many of them there are:
+// "tech executives", "police patrol", "trade deficit" all fail; "sea cucumber"
+// passes because "cucumber" is not in here. Kept deliberately to broad heads —
+// a precise object ("container ship", "glacial lake") is still precise.
+export const GENERIC_NOUNS = new Set(`
+  money cash dollars currency funds finance financial economy economic market markets trade trading deficit
+  business businesses industry company companies firm firms corporation executives executive tech technology
+  ai internet data chart graph graphic statistics numbers figures percent growth prices price inflation cost costs
+  people person crowd crowds public citizens residents community communities family families women men children
+  kids students workers worker staff employees officials official leaders leader politicians lawmakers government
+  governments authorities authority police military army troops soldiers security forces
+  world globe earth planet nature environment climate weather sky sea ocean oceans water river land landscape
+  country countries nation nations region regions city cities town towns village area areas border borders
+  building buildings office offices headquarters street streets road roads home homes house houses
+  car cars vehicle vehicles ship ships boat boats plane planes aircraft train trains truck trucks
+  phone phones computer computers screen screens device devices
+  document documents paper papers report reports news newspaper headline headlines media press outlet
+  protest protests rally meeting meetings summit talks negotiations deal deals agreement agreements
+  health hospital hospitals school schools food energy oil gas power fishery fisheries farm farms factory factories
+  prison prisons court courts law laws crime issue issues problem problems crisis situation event events
+  patrol patrols scene
+`.split(/\s+/).filter(Boolean));
+const FILLER = new Set(["a", "an", "the", "of", "at", "in", "on", "for", "and", "to", "with", "from", "by", "its", "their", "new", "old", "big", "small", "local", "global", "major", "large", "general"]);
+
+/**
+ * Is this subject specific enough to search for? Specific when it carries a
+ * proper name (a capitalised word that is not a generic noun), a number (a year,
+ * a model, a flight), or at least one content word that is not a category.
+ * An outlet named as the subject is never specific — the outlet is the source
+ * of the story, not a thing on screen.
+ */
+export function subjectIsSpecific(subject, { outlets = [] } = {}) {
+  const raw = String(subject || "").trim();
+  if (!raw) return false;
+  const low = raw.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  for (const o of outlets) {
+    const n = String(o || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+    if (n && (low === n || low === n.replace(/ (english|news|online)$/, ""))) return false;
+  }
+  if (/\d/.test(raw)) return true;
+  const words = raw.split(/\s+/).map((w) => w.replace(/[^A-Za-z0-9'-]/g, "")).filter(Boolean);
+  if (words.some((w) => /^[A-Z]/.test(w) && !GENERIC_NOUNS.has(w.toLowerCase()) && !FILLER.has(w.toLowerCase()))) return true;
+  const content = words.map((w) => w.toLowerCase()).filter((w) => !FILLER.has(w));
+  return content.some((w) => !GENERIC_NOUNS.has(w) && !GENERIC_NOUNS.has(w.replace(/s$/, "")));
+}
 
 export function shotEngineEnabled() {
   return process.env.VIDEO_SHOT_ENGINE_ENABLED === "1";
@@ -82,13 +140,14 @@ export function anchorIndex(caption, anchor, from = 0) {
 /**
  * Check every card's shots and the video-level bars.
  *
- * @returns {{ errors: string[], stats: { shots, punch, spokenSecs, avgShotSecs, byKind, byIntent } }}
+ * @returns {{ errors: string[], warnings: string[], stats: { shots, punch, spokenSecs, avgShotSecs, byKind, byIntent } }}
  *   errors are SPEC-LEVEL (they route into the regeneration retry): a shot list
  *   that does not line up with its captions cannot be salvaged card by card
  *   without the renderer guessing where cuts go.
  */
-export function shotListErrors(slides, { wpm = 150 } = {}) {
+export function shotListErrors(slides, { wpm = 150, outlets = [] } = {}) {
   const errors = [];
+  const warnings = [];
   let shots = 0, punch = 0, words = 0;
   const byKind = {}, byIntent = {};
 
@@ -132,6 +191,10 @@ export function shotListErrors(slides, { wpm = 150 } = {}) {
         if (n > MAX_SUBJECT_WORDS) errors.push(`${sat}: "subject" is a noun phrase, not a sentence — got ${n} words`);
         if (/\s+or\s+|\s*\/\s*|\beither\b/i.test(s.subject)) {
           errors.push(`${sat}: "subject" hedges between alternatives ("${s.subject.trim()}") — name ONE thing`);
+        } else if (!GENERIC_OK_KINDS.includes(s.kind) && !subjectIsSpecific(s.subject, { outlets })) {
+          errors.push(`${sat}: "subject" "${s.subject.trim()}" is too generic for a ${s.kind} shot — name the specific ` +
+            `person, place, organisation, document, vessel, product or event it shows (generic subjects are only ` +
+            `allowed on count and graphic shots)`);
         }
       }
       if (!isStr(s.anchor)) { errors.push(`${sat}: "anchor" must be the words the shot starts on`); return; }
@@ -154,17 +217,20 @@ export function shotListErrors(slides, { wpm = 150 } = {}) {
   if (punch > MAX_PUNCH_SHOTS) {
     errors.push(`${punch} punctuation cards — at most ${MAX_PUNCH_SHOTS} per video; the rest should show something real`);
   }
-  // ESTIMATED from word count at the writer's WPM, because no audio exists at
-  // spec time. The measured value comes from the word timings at render and is
-  // what Phase 6 reports; this is the gate that stops a spec that cannot meet it.
+  // REPORT-ONLY (DrJ, 24 Sep 2026). Estimated from word count at the writer's
+  // WPM, because no audio exists at spec time. The spec names only the REAL
+  // picture changes; the <= 3 s pace is enforced at render (Phase 4) by
+  // sub-cutting any longer shot into a closer or alternate view of the same
+  // subject, and measured from the word timings in Phase 6. Gating it here
+  // made the model pad with repeat shots of one subject (dry run, 24 Sep).
   const spokenSecs = words / (wpm / 60);
   const avgShotSecs = shots ? spokenSecs / shots : 0;
   if (shots && avgShotSecs > MAX_AVG_SHOT_SECS) {
-    errors.push(`average shot length ${avgShotSecs.toFixed(1)}s exceeds ${MAX_AVG_SHOT_SECS}s — cut long captions ` +
-      `into more shots at the words where the picture should change; never change a caption to fit`);
+    warnings.push(`estimated average shot length ${avgShotSecs.toFixed(1)}s is over ${MAX_AVG_SHOT_SECS}s — ` +
+      `the renderer will sub-cut long shots; report only, nothing was refused on it`);
   }
   return {
-    errors,
+    errors, warnings,
     stats: { shots, punch, spokenSecs: Number(spokenSecs.toFixed(1)), avgShotSecs: Number(avgShotSecs.toFixed(2)), byKind, byIntent },
   };
 }

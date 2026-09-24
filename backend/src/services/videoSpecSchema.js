@@ -1377,8 +1377,9 @@ export function validateSpec(spec, {
   // ones that will be cut into shots — a dropped card's shots go with it.
   let shotStats = null;
   if (shotList) {
-    const r = shotListErrors(kept, { wpm });
+    const r = shotListErrors(kept, { wpm, outlets: allowedSources });
     errors.push(...r.errors);
+    warnings.push(...r.warnings);
     shotStats = r.stats;
   }
 

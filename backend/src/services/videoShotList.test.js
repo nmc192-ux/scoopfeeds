@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  shotListErrors, anchorIndex, SHOT_KINDS, SOURCE_INTENTS, KIND_INTENTS,
+  shotListErrors, anchorIndex, subjectIsSpecific, SHOT_KINDS, SOURCE_INTENTS, KIND_INTENTS,
   MAX_PUNCH_SHOTS, MAX_AVG_SHOT_SECS,
 } from "./videoShotList.js";
 import { validateSpec } from "./videoSpecSchema.js";
@@ -69,10 +69,47 @@ test(`no more than ${MAX_PUNCH_SHOTS} punctuation cards per video`, () => {
   assert.ok(r.errors.some((e) => /3 punctuation cards/.test(e)), r.errors.join("\n"));
 });
 
-test("average shot length over 3 s is rejected, estimated from words at the writer's pace", () => {
+test("average shot length over 3 s is REPORTED, never refused — the renderer sub-cuts", () => {
   const r = shotListErrors([card([S("The pact was")])]);   // 20 words / 1 shot = 8 s
-  assert.ok(r.errors.some((e) => /average shot length 7\.[0-9]s exceeds 3s/.test(e)), r.errors.join("\n"));
-  assert.ok(r.errors.some((e) => /never change a caption to fit/.test(e)));
+  assert.deepEqual(r.errors, []);
+  assert.ok(r.warnings.some((w) => /estimated average shot length 7\.[0-9]s is over 3s/.test(w)), r.warnings.join("\n"));
+  assert.ok(r.warnings.some((w) => /report only, nothing was refused/.test(w)));
+});
+
+// ─── Subject specificity (DrJ, 24 Sep 2026) ────────────────────────────────
+
+test("specific subjects pass: names, places, organisations, documents, vessels, products, precise objects", () => {
+  for (const sub of ["Mette Frederiksen", "Pituffik Space Base", "Bhotekoshi River", "2026 Global Gender Gap Report",
+    "USS Gerald R. Ford", "iPhone 17", "Indian coast guard", "sea cucumber", "glacial lake outburst", "Xi Jinping"]) {
+    assert.equal(subjectIsSpecific(sub, { outlets: ["DW English"] }), true, sub);
+  }
+});
+
+test("generic subjects and outlet names fail — the exact ones the first dry run emitted", () => {
+  for (const sub of ["money", "ocean", "fishery", "prison", "tech executives", "police patrol", "trade deficit",
+    "Money", "the government", "DW English", "DW", "The Hill"]) {
+    assert.equal(subjectIsSpecific(sub, { outlets: ["DW English", "The Hill"] }), false, sub);
+  }
+});
+
+test("a generic subject is refused on picture kinds and allowed on count and graphic", () => {
+  const cap = "The trade topped two hundred million dollars last year, and it is still growing fast.";
+  const bad = shotListErrors([card([S("The trade topped", "photo", "money", "photo")], cap)]);
+  assert.ok(bad.errors.some((e) => /"money" is too generic for a photo shot/.test(e)), bad.errors.join("\n"));
+  for (const k of ["satellite", "map", "clip", "quote", "headline"]) {
+    const intent = KIND_INTENTS[k][0];
+    const r = shotListErrors([card([S("The trade topped", k, "ocean", intent)], cap)]);
+    assert.ok(r.errors.some((e) => /too generic/.test(e)), `${k}: ${r.errors.join(" | ")}`);
+  }
+  for (const k of ["count", "graphic"]) {
+    const r = shotListErrors([card([S("The trade topped", k, "money", "data")], cap)]);
+    assert.ok(!r.errors.some((e) => /too generic/.test(e)), `${k} should allow a generic subject`);
+  }
+});
+
+test("the outlet's own name is refused as a picture subject", () => {
+  const r = shotListErrors([card([S("The pact was", "headline", "DW English", "card")])], { outlets: ["DW English"] });
+  assert.ok(r.errors.some((e) => /"DW English" is too generic/.test(e)), r.errors.join("\n"));
 });
 
 // ─── The schema only asks when the flag asks ───────────────────────────────
@@ -144,6 +181,9 @@ test("flag on: the prompt asks for shots, names every kind and intent, and still
   for (const i of SOURCE_INTENTS) assert.ok(p.includes(i), `intent ${i} missing`);
   for (const [k, allowed] of Object.entries(KIND_INTENTS)) assert.ok(allowed.every((a) => p.includes(a)), k);
   assert.match(p, /never changes which beats you found, how many cards you emit, or a single word of any caption/);
+  assert.match(p, /REAL PICTURE CHANGE/);
+  assert.match(p, /SPECIFIC ENOUGH TO SEARCH FOR/);
+  assert.ok(!/six to eight/i.test(p), "the padding pressure is gone");
   // The same length-signal guard the main prompt test runs, now with shots on.
   const banned = [
     /\bAT LEAST \d+ cards?\b/i, /\bAT MOST \d+ cards?\b/i, /\bemit \d+ cards?\b/i, /\bexactly \d+ cards?\b/i,
