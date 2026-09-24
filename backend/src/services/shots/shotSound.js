@@ -30,7 +30,13 @@ import { ENGINE_DIR, enginePython } from "./shotVideo.js";
 export const GROUPS = Object.freeze(["neutral", "tense", "hopeful"]);
 
 const GRIEF = /\b(dead|deaths?|died|dies|killed|kills?|killing|fatal(?:ities|ity)?|victims?|bodies|body of|funerals?|mourn(?:s|ing|ers)?|grief|grieving|massacre|casualt(?:y|ies)|drown(?:ed|ing)?|earthquake|tsunami|landslide|avalanche|wildfire|hurricane|cyclone|typhoon|flood(?:s|ing|ed)?|disaster|tragedy|missing presumed)\b/i;
-const TENSE = /\b(war|wars|conflict|attack(?:s|ed)?|strikes?|missiles?|drones?|troops|military|army|invasion|sanctions?|tariffs?|crackdown|protests?|riots?|coup|crisis|crises|threat(?:s|ens|ened)?|tension|standoff|arrest(?:ed|s)?|charged|indict(?:ed|ment)|convict(?:ed|ion)|fraud|scam|smuggl\w*|traffick\w*|poach\w*|cartel|gang|corruption|scandal|lawsuit|trial|prison|jail|hack(?:ed|ers?)?|breach|espionage|spy|nuclear)\b/i;
+// TENSE has two strengths. A STRONG word makes the story tense on its own; WEAK
+// words are the vocabulary of ordinary political news and need to pile up —
+// one "military" and one "tariff" made a diplomatic summit tense on the first
+// sample, and DrJ's default for news is the neutral bed.
+const TENSE_STRONG = /\b(war|wars|conflict|attack(?:s|ed)?|missiles?|invasion|invaded|coup|riots?|crackdown|arrest(?:ed|s)?|charged|indict(?:ed|ment)|convict(?:ed|ion)|fraud|scam(?:s|med)?|smuggl\w*|traffick\w*|poach\w*|cartel|gang|espionage|hostages?|terror\w*|clash(?:es|ed)?|air ?strikes?|shelling|mobili[sz]\w*|build-?up|mass(?:es|ing)? (?:on|at|near) the border)\b/i;
+const TENSE_WEAK = /\b(strikes?|drones?|troops|military|army|sanctions?|tariffs?|protests?|crisis|crises|threat(?:s|ens|ened)?|tension|standoff|corruption|scandal|lawsuit|trial|prison|jail|hack(?:ed|ers?)?|breach|spy|nuclear)\b/gi;
+export const TENSE_WEAK_MIN = 4;
 const HOPEFUL = /\b(breakthrough|discover(?:y|ed|ies)|scientists?|research(?:ers)?|study finds|vaccine|cure[sd]?|treatment|recover(?:y|ed|ing)|rebuil\w*|restor\w*|record high|milestone|launch(?:ed|es)?|renewable|solar|conservation|rescued|reunited|celebrat\w*|award|wins?|won|peace deal|ceasefire holds)\b/i;
 
 /**
@@ -40,7 +46,7 @@ const HOPEFUL = /\b(breakthrough|discover(?:y|ed|ies)|scientists?|research(?:ers
 export function toneFor(article = {}, spec = {}) {
   const text = [article.title, article.description, ...(spec.slides || []).map((s) => s.caption)].filter(Boolean).join(" \n ");
   if (isExplicitHarmHeadline(article.title || "") || GRIEF.test(text)) return { group: "tense", level: "low", why: "grief" };
-  if (TENSE.test(text)) return { group: "tense", level: "normal", why: "tense" };
+  if (TENSE_STRONG.test(text) || (text.match(TENSE_WEAK) || []).length >= TENSE_WEAK_MIN) return { group: "tense", level: "normal", why: "tense" };
   if (HOPEFUL.test(text)) return { group: "hopeful", level: "normal", why: "hopeful" };
   return { group: "neutral", level: "normal", why: "neutral" };
 }

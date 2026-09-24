@@ -19,6 +19,9 @@ test("tone: conflict and crime are tense; science and recovery hopeful; the rest
   assert.equal(toneFor({ title: "Man arrested over sea cucumber smuggling ring" }).group, "tense");
   assert.equal(toneFor({ title: "Scientists discover new antibiotic in soil" }).group, "hopeful");
   assert.equal(toneFor({ title: "Central bank holds rates steady" }).group, "neutral");
+  // Ordinary political vocabulary alone does not make a story tense — the summit case.
+  assert.equal(toneFor({ title: "Trump welcomes Xi for summit" }, { slides: [{ caption: "Military ties and military talks." }, { caption: "A tariff truce." }] }).group, "neutral");
+  assert.equal(toneFor({ title: "Sanctions, tariffs, troops and a nuclear standoff" }).group, "tense", "four weak words do");
   // The spec's captions count too, not only the headline.
   assert.equal(toneFor({ title: "Quarterly figures published" }, { slides: [{ caption: "The fraud was hidden for years." }] }).group, "tense");
 });
