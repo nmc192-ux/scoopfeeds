@@ -64,6 +64,7 @@ export const VIDEO_BUILDER_FINGERPRINT = sourceFingerprint([
   new URL("./videoSlideChrome.js", import.meta.url).href,
   new URL("./videoSlideRendererVertical.js", import.meta.url).href,
   new URL("./videoAssembler.js", import.meta.url).href,
+  new URL("./videoWordCaptions.js", import.meta.url).href,
   new URL("./videoHouseGrade.js", import.meta.url).href,
   // videoSubjectVisual.js joins for the same reason as the rest of this list,
   // and it was MISSING: it draws the locator map and treats every photograph,
