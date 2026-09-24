@@ -508,7 +508,7 @@ It is METADATA, filled in after every other decision: it never changes which bea
 
   "shots": [ { "anchor": "...", "kind": "...", "subject": "...", "source_intent": "..." }, ... ]
 
-  - One to three shots per card. Cut where the picture should change: at a new place, a new person, a new object, a new number. A short caption that is one idea is one shot.
+  - CUT EVERY CAPTION INTO SHOTS OF ABOUT SIX TO EIGHT SPOKEN WORDS. That is the grain of the format: the picture changes every two or three seconds. So a typical caption is THREE shots, and only a caption of eight words or fewer stays a single shot. Never more than three on one card. Put each cut where the picture should change — a new place, a new person, a new object, a new number — and if the caption has no natural change there, cut to a closer or different view of the same subject.
   - "anchor": the exact words of THIS card's caption the shot starts on — copied verbatim, two to four words. The FIRST shot's anchor is the caption's opening words. Each later anchor comes after the one before it. An anchor that is not word-for-word in the caption makes the spec invalid.
   - "kind", from this closed set:
       satellite  satellite imagery zooming to a place
@@ -883,7 +883,9 @@ RETENTION STRUCTURE — how the video HOLDS someone, not just what it contains. 
       WRONG:  "The airline has been fined forty million dollars for refund delays." (the headline again)
       RIGHT:  "The fine is smaller than the interest earned on the money it held."
 
-Return ONLY a JSON object, no markdown fence, with exactly this shape — "beats" first, then "slides":
+${shotsOn ? `EVERY card in "slides" — title and kicker included — carries its "shots" array, cut into shots of about six to eight spoken words as described above. A card without "shots", or a long caption left as a single shot, makes the spec invalid.
+
+` : ""}Return ONLY a JSON object, no markdown fence, with exactly this shape — "beats" first, then "slides":
 
 {
   "beats":  [ { "kind": "figure", "beat": "...", "evidence": "..." }, ... ],
