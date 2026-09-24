@@ -87,6 +87,8 @@ export const GENERIC_NOUNS = new Set(`
   health hospital hospitals school schools food energy oil gas power fishery fisheries farm farms factory factories
   prison prisons court courts law laws crime issue issues problem problems crisis situation event events
   patrol patrols scene
+  artificial intelligence relations relationship tensions policy policies sanctions tariff tariffs diplomacy
+  cooperation competition conflict war peace security threat threats risk risks future
 `.split(/\s+/).filter(Boolean));
 const FILLER = new Set(["a", "an", "the", "of", "at", "in", "on", "for", "and", "to", "with", "from", "by", "its", "their", "new", "old", "big", "small", "local", "global", "major", "large", "general"]);
 
@@ -96,6 +98,10 @@ const FILLER = new Set(["a", "an", "the", "of", "at", "in", "on", "for", "and", 
  * a model, a flight), or at least one content word that is not a category.
  * An outlet named as the subject is never specific — the outlet is the source
  * of the story, not a thing on screen.
+ *
+ * A HEURISTIC, AND ITS KNOWN LIMIT: a proper name attached to an abstraction
+ * ("US-China relations") passes, because the names are real and searchable.
+ * The list catches bare categories, which is what the dry runs produced.
  */
 export function subjectIsSpecific(subject, { outlets = [] } = {}) {
   const raw = String(subject || "").trim();
@@ -107,6 +113,9 @@ export function subjectIsSpecific(subject, { outlets = [] } = {}) {
   }
   if (/\d/.test(raw)) return true;
   const words = raw.split(/\s+/).map((w) => w.replace(/[^A-Za-z0-9'-]/g, "")).filter(Boolean);
+  // A capital on the FIRST word may just be sentence case ("Artificial
+  // intelligence"), so it only counts as a name when the word is not a category
+  // word; later capitals ("Indian coast guard" -> Indian) count as names.
   if (words.some((w) => /^[A-Z]/.test(w) && !GENERIC_NOUNS.has(w.toLowerCase()) && !FILLER.has(w.toLowerCase()))) return true;
   const content = words.map((w) => w.toLowerCase()).filter((w) => !FILLER.has(w));
   return content.some((w) => !GENERIC_NOUNS.has(w) && !GENERIC_NOUNS.has(w.replace(/s$/, "")));

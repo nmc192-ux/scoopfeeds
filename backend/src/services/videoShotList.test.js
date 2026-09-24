@@ -87,7 +87,7 @@ test("specific subjects pass: names, places, organisations, documents, vessels, 
 
 test("generic subjects and outlet names fail — the exact ones the first dry run emitted", () => {
   for (const sub of ["money", "ocean", "fishery", "prison", "tech executives", "police patrol", "trade deficit",
-    "Money", "the government", "DW English", "DW", "The Hill"]) {
+    "Money", "the government", "DW English", "DW", "The Hill", "Artificial intelligence"]) {
     assert.equal(subjectIsSpecific(sub, { outlets: ["DW English", "The Hill"] }), false, sub);
   }
 });
