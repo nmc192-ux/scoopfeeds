@@ -395,3 +395,26 @@ test("reuse finds a picture shot's earlier answer even when it came from a lower
   assert.equal(r.rung, "reuse:esri");
   assert.equal(calls.vision, 0);
 });
+
+test("news-critical straits and canals all resolve — the 1:10m set plus the hand-added four", async () => {
+  const { deps } = fakes();   // no Wikidata: every one must come from the shipped atlas
+  const want = ["Strait of Hormuz", "Bab-el-Mandeb", "Strait of Malacca", "Taiwan Strait", "Bosporus", "Dardanelles",
+    "Kerch Strait", "Suez Canal", "Panama Canal", "English Channel", "Strait of Gibraltar"];
+  for (const subject of want) {
+    const ctx = contextFor(ARTICLE, { deps });
+    const map = await resolveShot({ anchor: "The pact", kind: "map", subject, source_intent: "map" }, CAP, ctx);
+    assert.equal(map.rung, "natural-earth", `${subject}: ${JSON.stringify(map.trail)}`);
+    assert.ok(Number.isFinite(map.record.coords.lat) && Number.isFinite(map.record.coords.lon), subject);
+    const sat = await resolveShot({ anchor: "The pact", kind: "satellite", subject, source_intent: "satellite" }, CAP, contextFor(ARTICLE, { deps }));
+    assert.equal(sat.rung, "esri", `${subject} satellite: ${JSON.stringify(sat.trail)}`);
+  }
+  // Aliases people actually write.
+  for (const alias of ["Hormuz", "Bosphorus", "Gibraltar", "Bab el-Mandeb"]) {
+    const r = await resolveShot({ anchor: "The pact", kind: "map", subject: alias, source_intent: "map" }, CAP, contextFor(ARTICLE, { deps }));
+    assert.equal(r.rung, "natural-earth", alias);
+  }
+  // A two-place subject naming a strait still draws.
+  const two = await resolveShot({ anchor: "The pact", kind: "map", subject: "Iran and the Strait of Hormuz", source_intent: "map" }, CAP, contextFor(ARTICLE, { deps }));
+  assert.deepEqual(two.record.coords.codes, ["IRN"]);
+  assert.equal(two.record.coords.places.length, 2);
+});

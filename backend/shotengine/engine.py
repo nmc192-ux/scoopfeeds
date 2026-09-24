@@ -6,7 +6,7 @@ vengine.py + short.py). Changes from the reference, each deliberate:
     scripts those faces lack (CJK, Arabic, ...) fall back to a Noto subset
     fetched once from Google Fonts and cached (see fallback_font);
   - geography from the shipped Natural Earth files (countries-50m.geo.json keyed
-    by ISO3 `id`, cities-50m.json, marine-50m.json label points) — no runtime
+    by ISO3 `id`, cities-50m.json, marine-10m.json label points) — no runtime
     fetch except Esri tiles for SatZoom (tiles.py);
   - the subject is framed ABOVE the caption band: map and satellite cameras
     centre at CY (0.42 H), not H/2, because captions start at y 1190;
@@ -362,7 +362,7 @@ def geo():
             big = max(rings, key=len)
             C[iso] = dict(name=ft['properties'].get('name'), rings=rings, centre=big.mean(0),
                           span=float(max(r[:, 0].max() - r[:, 0].min() for r in rings)))
-        marine = json.load(open(os.path.join(GEO_DIR, 'marine-50m.json')))['places']
+        marine = json.load(open(os.path.join(GEO_DIR, 'marine-10m.json')))['places']
         _GEO = (C, marine)
     return _GEO
 
@@ -415,8 +415,14 @@ class MapShot(Shot):
                 cands.append((-px, unit(mp['o'][1], mp['o'][0]), mp['n'], 'sea'))
             for _, uv, text, kind in sorted(cands, key=lambda c: c[0]):
                 x, y = s.scr_u(uv, u, k)
-                if not (80 < x < W - 80 and 380 < y < 1120): continue
+                # The WHOLE label must fit: a name cut by the frame edge reads as a typo.
+                half = (SERIFI(34) if kind == 'sea' else OSW(34, 'Medium')).getlength(text) / 2 + (0 if kind == 'sea' else len(text) * 2.5)
+                if not (40 + half < x < W - 40 - half and 380 < y < 1120): continue
                 if any(abs(x - tx) < 150 and abs(y - ty) < 60 for tx, ty in taken): continue
+                # Never on or against a highlighted country: the fill is the subject.
+                if any(cv2.pointPolygonTest(((r - u) * s.S * k + np.array([W / 2, CY])).astype(np.float32), (float(x), float(y)), True) > -half
+                       for iso in s.hi if iso in C for r in C[iso]['rings']):
+                    continue
                 s.auto.append(dict(x=x, y=y, text=text, kind=kind)); taken.append((x, y))
                 if len(s.auto) >= MAX_AUTO_LABELS: break
     def cam(s, ta):
@@ -444,11 +450,6 @@ class MapShot(Shot):
         Mx = np.float32([[k, 0, W / 2 - k * cpx[0]], [0, k, CY - k * cpx[1]]])
         f = cv2.warpAffine(s.base, Mx, (W, H), flags=cv2.INTER_AREA if k < 0.9 else cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=OCEAN)
         C, _ = geo()
-        for L in s.auto:
-            if L['kind'] == 'sea':
-                blit(f, tpatch(L['text'], SERIFI(34), SEA_TEXT), L['x'], L['y'], 0.9, 'cc')
-            else:
-                blit(f, tpatch(L['text'], OSW(34, 'Medium'), (150, 144, 134), track=5), L['x'], L['y'], 0.9, 'cc')
         for iso, (col, t_in) in s.hi.items():
             a = eo(prog(ta, t_in, 0.6))
             if a <= 0 or iso not in C: continue
@@ -460,6 +461,13 @@ class MapShot(Shot):
             for r in C[iso]['rings']:
                 pts = ((r - u) * s.S * k * 4 + np.array([W / 2, CY]) * 4).astype(np.int32)
                 cv2.polylines(f, [pts], True, tuple(col), 5, cv2.LINE_AA, shift=2)
+        # Receded orientation labels go ABOVE the fills (a fill must not eat a name)
+        # and below the shot's own pins and texts.
+        for L in s.auto:
+            if L['kind'] == 'sea':
+                blit(f, tpatch(L['text'], SERIFI(34), SEA_TEXT), L['x'], L['y'], 0.9, 'cc')
+            else:
+                blit(f, tpatch(L['text'], OSW(34, 'Medium'), (150, 144, 134), track=5), L['x'], L['y'], 0.9, 'cc')
         for pn in s.pins:
             a = eo(prog(ta, pn['t'], 0.5))
             if a <= 0: continue
