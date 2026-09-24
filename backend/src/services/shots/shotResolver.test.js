@@ -386,3 +386,12 @@ test("fallback fonts: Han picks Noto Sans SC, an HTML error page returns nothing
     assert.deepEqual(bad, [], "an error page is not a font");
   } finally { _setFontFetch((u, o) => fetch(u, o)); }
 });
+
+test("reuse finds a picture shot's earlier answer even when it came from a lower rung", async () => {
+  const db = freshDb();
+  upsertRecord(db, { subject: "Joint Base Andrews", kind: "satellite", rung: "esri", media_url: "esri:38.81,-76.87", coords: { lat: 38.81, lon: -76.87 } });
+  const { deps, calls } = fakes();
+  const r = await resolveShot({ anchor: "The pact", kind: "photo", subject: "Joint Base Andrews", source_intent: "photo" }, CAP, contextFor(ARTICLE, { db, deps }));
+  assert.equal(r.rung, "reuse:esri");
+  assert.equal(calls.vision, 0);
+});

@@ -196,7 +196,10 @@ async function wikidataFor(subject, ctx) {
 
 function rungReuse(shot, ctx) {
   if (!ctx.db) return { miss: "no db" };
-  const kinds = shot.kind === "satellite" ? ["satellite"] : shot.kind === "map" ? ["map"] : ["clip", "photo"];
+  // A picture shot may have been answered by a lower rung last time (a place
+  // shot that ended on Esri): look those up too, in ladder order, or the whole
+  // ladder re-runs for nothing (measured 24 Sep: 216 s for one warm shot).
+  const kinds = shot.kind === "satellite" ? ["satellite", "map"] : shot.kind === "map" ? ["map"] : ["clip", "photo", "satellite", "map"];
   for (const k of kinds) {
     for (const r of findRecords(ctx.db, shot.subject, k)) {
       if (ctx.used.has(r.media_url)) continue;
