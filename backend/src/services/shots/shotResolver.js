@@ -43,6 +43,7 @@ import * as commons from "./commons.js";
 import * as media from "./media.js";
 import * as vision from "./vision.js";
 import { cropFor } from "./bannerCrops.js";
+import { scanArtifactForPakistan } from "../videoPakistanBlock.js";
 
 export const RUNGS = Object.freeze([
   "reuse", "incident", "commons-video", "web-photo", "commons-photo", "esri", "natural-earth", "stock", "card",
@@ -52,7 +53,15 @@ const TYPE_KINDS = new Set(["headline", "punch", "count", "graphic"]);
 export const ESRI_CREDIT = "Imagery: Esri World Imagery (Maxar, Earthstar Geographics)";
 export const ESRI_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 export const MIN_CLIP_SECS = 4;
+// Commons' standard WebM transcode heights, largest first. Only those at or
+// below the source's height exist for a given file.
+export const TRANSCODE_HEIGHTS = Object.freeze([1080, 720, 480, 360]);
 export const MAX_VIDEO_CANDIDATES = 2;   // per shot: each costs a probe, ~16 seeks and one vision call
+// THE WHOLE VIDEO'S RESOLVE BUDGET. A Commons clip costs 20–190 s (measured
+// 24 Sep: 16 polite seeks plus one vision call), and the render job holds a
+// 10-minute queue lock. Past the budget the expensive rung is skipped and the
+// cheaper ones still run — the table (reuse) is what makes later shorts fast.
+export const RESOLVE_BUDGET_MS = () => Math.max(30, Number(process.env.VIDEO_SHOT_RESOLVE_BUDGET_S) || 300) * 1000;
 
 // Crime and legal stories — the private-individual rule bites hardest here.
 const CRIME_RE = /\b(arrest(?:ed|s)?|charged|indict(?:ed|ment)|convict(?:ed|ion)|sentenced|fraud|scam(?:med|s)?|murder(?:ed)?|kill(?:ed|ing)|stabb(?:ed|ing)|assault(?:ed)?|robbery|theft|stole|police|suspect(?:s|ed)?|alleged(?:ly)?|court|trial|prosecut(?:or|ors|ion)|lawsuit|sued|jail(?:ed)?|prison|smuggl(?:e|ed|er|ers|ing)|poach(?:er|ers|ing|ed)?|traffick(?:ed|er|ers|ing)|cartel|gang|illegal(?:ly)?)\b/i;
@@ -101,6 +110,7 @@ export function contextFor(article, { db, deps = {}, webDays = 7 } = {}) {
     sensitive: isSensitiveHeadline(article?.title || ""),
     crime: isCrimeStory(article),
     used: new Set(),           // media_url already placed in THIS video
+    deadline: Date.now() + RESOLVE_BUDGET_MS(),
     wikidata: new Map(),       // subject → {qid, facts} memo for this video
   };
 }
@@ -115,6 +125,39 @@ export function isPublisherImage(url, pageUrl, ctx) {
   }
   return null;
 }
+
+/**
+ * RULE 0 ON EVERY CANDIDATE (the Pakistan KILL applies to every shot). The
+ * story text passing is not enough: a Nepal glacier short once picked a Commons
+ * clip titled "... Himalayas from Khyber Pakhtunkhwa". The candidate's OWN
+ * metadata — title, description, author, credit, page URL — is scanned with the
+ * same term list the publish gate uses. Returns a reason string, or null.
+ */
+export function rule0Blocks(meta) {
+  const hits = scanArtifactForPakistan(meta, "shot-candidate");
+  return hits.length ? `Rule 0: ${hits.map((h) => h.signal).slice(0, 3).join(", ")}` : null;
+}
+
+/**
+ * The named core of a subject: its run of capitalised words. "Andaman Islands
+ * coastline" → "Andaman Islands"; "Joint Base Andrews tarmac" → "Joint Base
+ * Andrews". Lookups try the full subject first and fall back to this, so a
+ * descriptive tail does not make a well-known place unfindable. null when the
+ * subject names nothing, or when the core IS the subject.
+ */
+export function namedCore(subject) {
+  const words = String(subject || "").trim().split(/\s+/);
+  let best = [], cur = [];
+  for (const w of words) {
+    if (/^[A-Z0-9]/.test(w) || (cur.length && /^(of|the|de|la|and)$/i.test(w))) cur.push(w);
+    else { if (cur.length > best.length) best = cur; cur = []; }
+  }
+  if (cur.length > best.length) best = cur;
+  while (best.length && /^(of|the|de|la|and)$/i.test(best[best.length - 1])) best.pop();
+  const core = best.join(" ");
+  return core && core !== String(subject).trim() ? core : null;
+}
+const variants = (subject) => [subject, namedCore(subject)].filter(Boolean);
 
 async function wikidataFor(subject, ctx) {
   const k = subjectKey(subject);
@@ -143,6 +186,7 @@ function rungReuse(shot, ctx) {
       if (isPublisherImage(r.media_url, r.source_url, ctx)) continue;
       if (ctx.crime && r.rung === "web-photo") continue;
       if (ctx.explicitHarm && !["satellite", "map"].includes(r.kind)) continue;
+      if (rule0Blocks({ subject: r.subject, source_url: r.source_url, credit: r.credit, author: r.author })) continue;
       return { record: { ...r, reused: true } };
     }
   }
@@ -166,27 +210,46 @@ async function rungIncident(shot, ctx) {
 
 async function rungCommonsVideo(shot, caption, ctx) {
   if (ctx.explicitHarm) return { miss: "explicit-harm headline — no third-party footage" };
+  if (Date.now() > ctx.deadline) return { miss: "resolve budget spent — skipping the slow rung" };
   const d = ctx.deps;
-  let titles;
-  try { titles = await (d.searchFiles || commons.searchFiles)(`"${shot.subject}"`, { mime: "video/webm", limit: 6 }); }
-  catch (err) { return { miss: `commons search failed: ${err.message}` }; }
-  if (!titles.length) {
-    try { titles = await (d.searchFiles || commons.searchFiles)(shot.subject, { mime: "video/webm", limit: 6 }); }
-    catch { titles = []; }
+  // Exact phrase, then loose, then the named core — first query with hits wins.
+  const queries = [`"${shot.subject}"`, shot.subject, ...(namedCore(shot.subject) ? [`"${namedCore(shot.subject)}"`] : [])];
+  let titles = [];
+  for (const q of queries) {
+    try { titles = await (d.searchFiles || commons.searchFiles)(q, { mime: "video/webm", limit: 6 }); }
+    catch (err) { return { miss: `commons search failed: ${err.message}` }; }
+    if (titles.length) break;
   }
   if (!titles.length) return { miss: "no Commons video for the subject" };
   const infos = await (d.fileInfo || commons.fileInfo)(titles).catch(() => []);
-  const usable = infos.filter((i) => commons.licenceUsable(i.licence) && (i.duration || 0) >= MIN_CLIP_SECS);
+  let blocked = 0;
+  const usable = infos.filter((i) => {
+    const why = rule0Blocks({ title: i.title, description: i.description, author: i.author, credit: i.credit, url: i.descUrl });
+    if (why) { blocked++; logger.info(`🚫 ${why} — refused Commons ${String(i.title).slice(0, 60)}`); return false; }
+    return commons.licenceUsable(i.licence) && (i.duration || 0) >= MIN_CLIP_SECS;
+  });
   const refused = infos.length - usable.length;
   let tried = 0;
   for (const info of usable) {
     if (tried >= MAX_VIDEO_CANDIDATES) break;
-    const renderUrl = commons.transcodeUrl(info.title, Math.min(1080, info.height >= 1080 ? 1080 : 720));
-    if (ctx.used.has(renderUrl) || (ctx.db && isRejected(ctx.db, renderUrl))) continue;
+    // The RENDER transcode must exist, and Commons only makes the standard
+    // heights at or below the source's own. So walk down from the largest that
+    // fits and keep the first one ffprobe verifies — never assume a height.
+    const heights = TRANSCODE_HEIGHTS.filter((h) => h <= (info.height || 0));
+    if (!heights.length) continue;
+    const first = commons.transcodeUrl(info.title, heights[0]);
+    if (ctx.used.has(first) || (ctx.db && isRejected(ctx.db, first))) continue;
     tried++;
-    const probeUrl = commons.transcodeUrl(info.title, 480);
-    const p = await (d.probeVideo || media.probeVideo)(probeUrl);
-    if (!p.ok) { logger.info(`🎞 commons ${info.title.slice(0, 50)}: transcode not verified — ${p.reason}`); continue; }
+    let renderUrl = null, p = null;
+    for (const h of heights) {
+      const u = commons.transcodeUrl(info.title, h);
+      const pr = await (d.probeVideo || media.probeVideo)(u);
+      if (pr.ok) { renderUrl = u; p = pr; break; }
+    }
+    if (!renderUrl) { logger.info(`🎞 commons ${info.title.slice(0, 50)}: no transcode verified at ${heights.join("/")}p`); continue; }
+    // Frames for the vision check come from the smallest verified-or-likely
+    // transcode: cheaper seeks, and the vision model needs no more than 360 px.
+    const probeUrl = heights.includes(360) ? commons.transcodeUrl(info.title, 360) : renderUrl;
     const s = await (d.sampleFrames || media.sampleFrames)(probeUrl, p.duration);
     if (!s.frames.length) continue;
     const v = await (d.pickInPoints || vision.pickInPoints)({ frames: s.frames, subject: shot.subject, caption, clipTitle: info.title });
@@ -203,7 +266,7 @@ async function rungCommonsVideo(shot, caption, ctx) {
     return { record: { ...base, in_points: v.picks, crop, coveredSecs: s.coveredSecs,
       note: s.coveredSecs < p.duration ? `sampled first ${Math.round(s.coveredSecs)}s of ${Math.round(p.duration)}s` : null } };
   }
-  return { miss: `${infos.length} Commons video(s): ${refused} refused on licence/length, ${tried} tried, none fit` };
+  return { miss: `${infos.length} Commons video(s): ${refused} refused (${blocked} Rule 0, rest licence/length), ${tried} tried, none fit` };
 }
 
 async function judgeAndRecord({ shot, caption, ctx, url, pageUrl, buf, base }) {
@@ -236,6 +299,8 @@ async function rungWebPhoto(shot, caption, ctx) {
     const pub = isPublisherImage(c.imageUrl, c.pageUrl, ctx);
     if (pub) { reasons.push(pub); continue; }
     if (/instagram|facebook|twitter|tiktok|x\.com|screenshot/i.test(`${c.host} ${c.title}`)) { reasons.push("social"); continue; }
+    const r0 = rule0Blocks({ title: c.title, url: c.pageUrl, host: c.host });
+    if (r0) { reasons.push(r0); continue; }
     if (ctx.used.has(c.imageUrl) || (ctx.db && isRejected(ctx.db, c.imageUrl))) continue;
     const got = await (d.fetchImage)(c.imageUrl, c.pageUrl);
     if (!got?.buf) { reasons.push("fetch failed"); continue; }
@@ -251,14 +316,18 @@ async function rungWebPhoto(shot, caption, ctx) {
 async function rungCommonsPhoto(shot, caption, ctx) {
   if (ctx.explicitHarm) return { miss: "explicit-harm headline — no third-party photos" };
   const d = ctx.deps;
-  const wd = await wikidataFor(shot.subject, ctx);
   const titles = [];
-  if (wd?.facts?.image) titles.push(`File:${wd.facts.image}`);
-  try { for (const t of await (d.searchFiles || commons.searchFiles)(`"${shot.subject}"`, { mime: "image/jpeg", limit: 4 })) titles.push(t); }
-  catch { /* the P18 image alone may still serve */ }
+  for (const v of variants(shot.subject)) {
+    const wd = await wikidataFor(v, ctx);
+    if (wd?.facts?.image) titles.push(`File:${wd.facts.image}`);
+    try { for (const t of await (d.searchFiles || commons.searchFiles)(`"${v}"`, { mime: "image/jpeg", limit: 4 })) titles.push(t); }
+    catch { /* the P18 image alone may still serve */ }
+    if (titles.length) break;
+  }
   if (!titles.length) return { miss: "no Commons/Wikidata photo" };
   const infos = await (d.fileInfo || commons.fileInfo)([...new Set(titles)].slice(0, 5)).catch(() => []);
   for (const info of infos) {
+    if (rule0Blocks({ title: info.title, description: info.description, author: info.author, credit: info.credit, url: info.descUrl })) continue;
     if (!commons.licenceUsable(info.licence)) continue;
     if ((info.width || 0) < 800) continue;
     const thumb = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(commons.underscored(info.title))}?width=1280`;
@@ -275,16 +344,21 @@ async function rungCommonsPhoto(shot, caption, ctx) {
 }
 
 async function placeFor(shot, ctx) {
-  const iso = countryByName(shot.subject);
-  if (iso) return { lat: null, lon: null, codes: [iso], zoom: 4, how: "country" };
-  const city = findCity(shot.subject);
-  if (city) return { lat: city.o[1], lon: city.o[0], codes: [city.c], zoom: 11, how: "atlas city" };
-  const wd = await wikidataFor(shot.subject, ctx);
-  if (wd?.facts?.coords) return { ...wd.facts.coords, codes: [], zoom: 13, how: `wikidata ${wd.qid}` };
+  for (const v of variants(shot.subject)) {
+    const iso = countryByName(v);
+    if (iso) return { lat: null, lon: null, codes: [iso], zoom: 4, how: "country", name: v };
+    const city = findCity(v);
+    if (city) return { lat: city.o[1], lon: city.o[0], codes: [city.c], zoom: 11, how: "atlas city", name: v };
+  }
+  for (const v of variants(shot.subject)) {
+    const wd = await wikidataFor(v, ctx);
+    if (wd?.facts?.coords) return { ...wd.facts.coords, codes: [], zoom: 11, how: `wikidata ${wd.qid} (${v})`, name: v };
+  }
   return null;
 }
 
 async function rungEsri(shot, ctx) {
+  if (rule0Blocks({ subject: shot.subject })) return { miss: "Rule 0" };
   const place = await placeFor(shot, ctx);
   if (!place || place.lat === null) return { miss: place ? "a country, not a point — the map rung draws it" : "no coordinates for the subject" };
   return { record: { subject: shot.subject, kind: "satellite", rung: "esri", media_url: `esri:${place.lat.toFixed(4)},${place.lon.toFixed(4)}`,
@@ -293,6 +367,7 @@ async function rungEsri(shot, ctx) {
 }
 
 async function rungNaturalEarth(shot, ctx) {
+  if (rule0Blocks({ subject: shot.subject })) return { miss: "Rule 0" };
   const place = await placeFor(shot, ctx);
   if (!place) return { miss: "no country, atlas city or coordinates for the subject" };
   return { record: { subject: shot.subject, kind: "map", rung: "natural-earth", media_url: `ne:${subjectKey(shot.subject)}`,

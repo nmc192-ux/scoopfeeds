@@ -33,7 +33,7 @@ async function ask({ prompt, images, deps = {} }) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0, responseMimeType: "application/json" } }),
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(90000),
     });
     if (!res.ok) return { ok: false, reason: `vision HTTP ${res.status}` };
     const j = await res.json();

@@ -1,7 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeTestDb } from "../../testing/testDb.js";
-import { resolveShot, resolveSpecShots, contextFor, ladderFor, isPublisherImage, isCrimeStory } from "./shotResolver.js";
+import Database from "better-sqlite3";
+import * as m038 from "../../db/migrations/038_shot_assets.js";
+
+// A BARE DB WITH ONLY shot_assets — a deliberate exception to "use makeTestDb()".
+// That rule exists so tests never build a HALF schema that migrations then
+// trip over; shot_assets depends on no other table, so there is no half here.
+// And makeTestDb() is the measured trigger of the known SIGABRT (I5): one
+// makeTestDb() followed by one forced GC aborts 4/4 on Node 24.19 +
+// better-sqlite3 11.10 (native frame Statement::~Statement()), while a bare
+// DB with thousands of discarded statements survives 5/5. The incident rung,
+// which needs media_candidates, simply reports no candidates here.
+const freshDb = () => { const db = new Database(":memory:"); m038.up(db); return db; };
+import { resolveShot, resolveSpecShots, contextFor, ladderFor, isPublisherImage, isCrimeStory, rule0Blocks, namedCore } from "./shotResolver.js";
 import { transcodeUrl, licenceUsable, sniff, creditLine } from "./commons.js";
 import { cropFor } from "./bannerCrops.js";
 import { findRecords, upsertRecord, isRejected, subjectKey, importAssetManifest } from "./shotAssets.js";
@@ -97,7 +108,7 @@ test("crime stories are recognised from headline and summary", () => {
 });
 
 test("a Commons clip is found, in-pointed by vision, cropped for its banner, and stored for reuse", async () => {
-  const { db } = makeTestDb();
+  const db = freshDb();
   const { deps, calls } = fakes();
   const ctx = contextFor(ARTICLE, { db, deps });
   const r = await resolveShot({ anchor: "The pact", kind: "clip", subject: "Greenland pact signing", source_intent: "footage" }, CAP, ctx);
@@ -115,8 +126,21 @@ test("a Commons clip is found, in-pointed by vision, cropped for its banner, and
   assert.equal(calls.vision, 1, "reuse costs no vision call");
 });
 
+test("the render transcode is the largest VERIFIED height at or below the source's", async () => {
+  const probed = [];
+  const { deps } = fakes({
+    fileInfo: async (titles) => titles.map((t) => ({ title: t, licence: "CC BY 4.0", author: "A", width: 1024, height: 576, duration: 60, descUrl: "u" })),
+    probeVideo: async (u) => { probed.push(u.match(/\.(\d+)p\.vp9/)[1]); return u.includes(".480p.") || u.includes(".360p.") ? { ok: true, duration: 60 } : { ok: false, reason: "404" }; },
+  });
+  const ctx = contextFor(ARTICLE, { deps });
+  const r = await resolveShot({ anchor: "The pact", kind: "clip", subject: "sea cucumber", source_intent: "footage" }, CAP, ctx);
+  assert.equal(r.rung, "commons-video");
+  assert.match(r.record.media_url, /\.480p\.vp9\.webm$/, "576p source: 1080/720 do not exist, 480 does");
+  assert.deepEqual(probed, ["480"], "never probes a height above the source");
+});
+
 test("sensitive frames reject the clip, record the rejection, and never re-judge it", async () => {
-  const { db } = makeTestDb();
+  const db = freshDb();
   const { deps, calls } = fakes({ pickInPoints: async () => { return { ok: true, picks: [], sensitive: true, bannerAt: null, reason: "injured people" }; } });
   const ctx = contextFor(ARTICLE, { db, deps });
   const r = await resolveShot({ anchor: "The pact", kind: "clip", subject: "Flood rescue", source_intent: "footage" }, CAP, ctx);
@@ -126,7 +150,7 @@ test("sensitive frames reject the clip, record the rejection, and never re-judge
 });
 
 test("the web rung skips the publisher's own photo and social hosts", async () => {
-  const { db } = makeTestDb();
+  const db = freshDb();
   const { deps, calls } = fakes({
     searchFiles: async () => [],
     webSearch: async () => [
@@ -136,7 +160,7 @@ test("the web rung skips the publisher's own photo and social hosts", async () =
     ],
   });
   const ctx = contextFor(ARTICLE, { db, deps });
-  const r = await resolveShot({ anchor: "The pact", kind: "photo", subject: "Greenland pact signing", source_intent: "photo" }, CAP, ctx);
+  const r = await resolveShot({ anchor: "The pact", kind: "photo", subject: "Greenland pact ceremony", source_intent: "photo" }, CAP, ctx);
   assert.equal(r.rung, "web-photo");
   assert.equal(r.record.media_url, "https://ichef.bbci.co.uk/g.jpg");
   assert.equal(r.record.credit, "Photo: bbc.com");
@@ -144,7 +168,7 @@ test("the web rung skips the publisher's own photo and social hosts", async () =
 });
 
 test("crime story + a person: no open-web photo, whatever the search returns", async () => {
-  const { db } = makeTestDb();
+  const db = freshDb();
   const crime = { ...ARTICLE, title: "Man arrested over fraud posing as NFL player" };
   const { deps, calls } = fakes({
     searchFiles: async () => [],
@@ -159,20 +183,20 @@ test("crime story + a person: no open-web photo, whatever the search returns", a
 });
 
 test("a photo the vision check calls a screenshot or a private individual is refused and recorded", async () => {
-  const { db } = makeTestDb();
+  const db = freshDb();
   const { deps } = fakes({
     searchFiles: async () => [],
     webSearch: async () => [{ imageUrl: "https://news.example/a.jpg", pageUrl: "https://news.example/a", host: "news.example", title: "Greenland", confidence: "high" }],
     judgePhoto: async () => ({ ok: true, usable: false, matches: true, screenshot: true, privatePerson: false, sensitive: false }),
   });
   const ctx = contextFor(ARTICLE, { db, deps });
-  const r = await resolveShot({ anchor: "The pact", kind: "photo", subject: "Greenland pact signing", source_intent: "photo" }, CAP, ctx);
+  const r = await resolveShot({ anchor: "The pact", kind: "photo", subject: "Greenland pact table", source_intent: "photo" }, CAP, ctx);
   assert.notEqual(r.rung, "web-photo");
   assert.ok(isRejected(db, "https://news.example/a.jpg"));
 });
 
 test("explicit-harm headline: no third-party pictures, but maps still draw", async () => {
-  const { db } = makeTestDb();
+  const db = freshDb();
   const { deps, calls } = fakes();
   const ctx = contextFor({ ...ARTICLE, title: "Dozens killed as floods hit Nepal" }, { db, deps });
   const r = await resolveShot({ anchor: "The pact", kind: "clip", subject: "Nepal", source_intent: "footage" }, CAP, ctx);
@@ -199,19 +223,19 @@ test("stock is refused for a named subject", async () => {
 });
 
 test("a stored record that is THIS article's publisher photo is not reused", async () => {
-  const { db } = makeTestDb();
-  upsertRecord(db, { subject: "Greenland", kind: "photo", rung: "web-photo", media_url: "https://static.dw.com/image/12345_6.jpg" });
+  const db = freshDb();
+  upsertRecord(db, { subject: "Nuuk harbour", kind: "photo", rung: "web-photo", media_url: "https://static.dw.com/image/12345_6.jpg" });
   const { deps } = fakes({ searchFiles: async () => [] });
   const ctx = contextFor(ARTICLE, { db, deps });
-  const r = await resolveShot({ anchor: "The pact", kind: "photo", subject: "Greenland", source_intent: "photo" }, CAP, ctx);
+  const r = await resolveShot({ anchor: "The pact", kind: "photo", subject: "Nuuk harbour", source_intent: "photo" }, CAP, ctx);
   assert.notEqual(r.rung, "reuse:web-photo");
 });
 
 test("resolveSpecShots reports real-imagery and real-video shares", async () => {
-  const { db } = makeTestDb();
+  const db = freshDb();
   const { deps } = fakes();
   const spec = { slides: [
-    { t: "title", caption: CAP, shots: [{ anchor: "The pact", kind: "clip", subject: "Greenland pact signing", source_intent: "footage" }] },
+    { t: "title", caption: CAP, shots: [{ anchor: "The pact", kind: "clip", subject: "UN General Assembly hall", source_intent: "footage" }] },
     { t: "turn", caption: "Not a sale.", shots: [{ anchor: "Not a", kind: "punch", subject: "NOT A SALE", source_intent: "card" }] },
   ] };
   const r = await resolveSpecShots(spec, ARTICLE, { db, deps });
@@ -221,7 +245,7 @@ test("resolveSpecShots reports real-imagery and real-video shares", async () => 
 });
 
 test("the manifest importer skips and counts entries it cannot map, never guesses", () => {
-  const { db } = makeTestDb();
+  const db = freshDb();
   const r = importAssetManifest(db, { assets: [
     { subject: "Pituffik Space Base", type: "image", url: "https://x/p.jpg", licence: "Public domain" },
     { title: "no url here", type: "video" },
@@ -230,4 +254,38 @@ test("the manifest importer skips and counts entries it cannot map, never guesse
   assert.equal(r.skipped.length, 1);
   assert.equal(findRecords(db, "pituffik space base", "photo").length, 1);
   assert.equal(subjectKey("  Pituffik  SPACE base! "), "pituffik space base");
+});
+
+test("Rule 0 runs on every candidate's own metadata — the Khyber Pakhtunkhwa clip is refused", async () => {
+  assert.match(rule0Blocks({ title: "File:Indus Nanga Parbat Himalayas from Khyber Pakhtunkhwa.webm" }), /Rule 0/);
+  assert.equal(rule0Blocks({ title: "File:Everest from Kala Patthar.webm" }), null);
+  const { deps, calls } = fakes({
+    searchFiles: async (q, { mime }) => (mime === "video/webm" ? ["File:Indus Nanga Parbat Himalayas from Khyber Pakhtunkhwa.webm"] : []),
+    fileInfo: async (titles) => titles.map((t) => ({ title: t, licence: "CC BY-SA 4.0", author: "A", width: 1920, height: 1080, duration: 60, descUrl: "u" })),
+  });
+  const ctx = contextFor(ARTICLE, { deps });
+  const r = await resolveShot({ anchor: "The pact", kind: "clip", subject: "Himalayas", source_intent: "footage" }, CAP, ctx);
+  assert.notEqual(r.rung, "commons-video");
+  assert.equal(calls.vision, 0, "a Rule 0 candidate never even reaches the vision check");
+  assert.ok(r.trail.some((t) => /1 Rule 0/.test(t.outcome)), JSON.stringify(r.trail));
+});
+
+test("the named core lets a descriptive subject find its place", async () => {
+  assert.equal(namedCore("Andaman Islands coastline"), "Andaman Islands");
+  assert.equal(namedCore("Joint Base Andrews tarmac"), "Joint Base Andrews");
+  assert.equal(namedCore("sea cucumber"), null);
+  assert.equal(namedCore("Kabul"), null, "the core that IS the subject is not a variant");
+  const { deps } = fakes();
+  const r = await resolveShot({ anchor: "The pact", kind: "satellite", subject: "Kabul airport tarmac", source_intent: "satellite" }, CAP, contextFor(ARTICLE, { deps }));
+  assert.equal(r.rung, "esri", JSON.stringify(r.trail));
+});
+
+test("past the resolve budget the Commons video rung is skipped, cheaper rungs still run", async () => {
+  const { deps, calls } = fakes();
+  const ctx = contextFor(ARTICLE, { deps });
+  ctx.deadline = Date.now() - 1;
+  const r = await resolveShot({ anchor: "The pact", kind: "clip", subject: "Kabul", source_intent: "footage" }, CAP, ctx);
+  assert.equal(calls.vision, 0);
+  assert.ok(r.trail.some((t) => t.rung === "commons-video" && /budget spent/.test(t.outcome)));
+  assert.equal(r.rung, "esri");
 });

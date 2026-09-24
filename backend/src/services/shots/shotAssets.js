@@ -6,6 +6,20 @@
  * and never the picture itself (DrJ, 29 Aug: no large in-house library).
  */
 
+// PREPARED ONCE PER CONNECTION. A fresh db.prepare() per call leaves a trail of
+// Statement objects for the GC, and better-sqlite3 11.x's Statement destructor
+// running inside a GC weak callback is what aborts with
+// "Assertion failed: (env) != nullptr" (CLAUDE.md known-flaky, I5 — native
+// frame Statement::~Statement() in better_sqlite3.node, seen 24 Sep 2026).
+const _stmts = new WeakMap();
+function stmt(db, sql) {
+  let m = _stmts.get(db);
+  if (!m) { m = new Map(); _stmts.set(db, m); }
+  let st = m.get(sql);
+  if (!st) { st = db.prepare(sql); m.set(sql, st); }
+  return st;
+}
+
 const J = (v) => (v === undefined || v === null ? null : JSON.stringify(v));
 const P = (v) => { try { return v ? JSON.parse(v) : null; } catch { return null; } };
 
@@ -23,7 +37,7 @@ function hydrate(row) {
 
 /** Usable records for a subject and kind, least recently used first. */
 export function findRecords(db, subject, kind, { limit = 5 } = {}) {
-  return db.prepare(`
+  return stmt(db, `
     SELECT * FROM shot_assets
     WHERE subject_key = ? AND kind = ? AND status = 'ok'
     ORDER BY COALESCE(last_used_at, 0) ASC, id ASC
@@ -34,7 +48,7 @@ export function findRecords(db, subject, kind, { limit = 5 } = {}) {
 /** Has this exact media already been judged and refused? Stops re-fetch/re-judge loops. */
 export function isRejected(db, mediaUrl) {
   if (!mediaUrl) return false;
-  return Boolean(db.prepare(`SELECT 1 FROM shot_assets WHERE media_url = ? AND status = 'rejected' LIMIT 1`).get(mediaUrl));
+  return Boolean(stmt(db, `SELECT 1 FROM shot_assets WHERE media_url = ? AND status = 'rejected' LIMIT 1`).get(mediaUrl));
 }
 
 /** Insert or refresh a record. Returns its id. */
@@ -42,7 +56,7 @@ export function upsertRecord(db, rec, { now = Date.now() } = {}) {
   const key = subjectKey(rec.subject);
   if (!key) throw new Error("shotAssets: a record needs a subject");
   if (!rec.kind || !rec.rung) throw new Error("shotAssets: a record needs kind and rung");
-  db.prepare(`
+  stmt(db, `
     INSERT INTO shot_assets (subject_key, subject, kind, rung, source_url, media_url, licence, credit, author,
       width, height, duration_s, in_points, crop, coords, data_series, quotes, status, reject_reason, found_for, created_at)
     VALUES (@key, @subject, @kind, @rung, @source_url, @media_url, @licence, @credit, @author,
@@ -61,12 +75,12 @@ export function upsertRecord(db, rec, { now = Date.now() } = {}) {
     data_series: J(rec.data_series), quotes: J(rec.quotes), status: rec.status || "ok",
     reject_reason: rec.reject_reason ?? null, found_for: rec.found_for ?? null, now,
   });
-  return db.prepare(`SELECT id FROM shot_assets WHERE subject_key = ? AND kind = ? AND media_url IS ?`)
+  return stmt(db, `SELECT id FROM shot_assets WHERE subject_key = ? AND kind = ? AND media_url IS ?`)
     .get(key, rec.kind, rec.media_url ?? null)?.id ?? null;
 }
 
 export function markUsed(db, id, { now = Date.now() } = {}) {
-  db.prepare(`UPDATE shot_assets SET last_used_at = ?, uses = uses + 1 WHERE id = ?`).run(now, id);
+  stmt(db, `UPDATE shot_assets SET last_used_at = ?, uses = uses + 1 WHERE id = ?`).run(now, id);
 }
 
 /**
