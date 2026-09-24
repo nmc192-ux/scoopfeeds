@@ -1859,6 +1859,11 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     videoToBluesky: _videoToBluesky = videoToBluesky,
     videoToTikTok: _videoToTikTok = videoToTikTok,
     videoToX: _videoToX = videoToX,
+    // The shot engine's pre-resolve seam — injectable so the cycle's routing
+    // (prepare when gated, take the plan when open) is testable without a render.
+    prepareShotPlan: _prepareShotPlan = prepareShotPlan,
+    loadPlan: _loadPlan = loadPlan,
+    hasFreshPlan: _hasFreshPlan = hasFreshPlan,
   } = deps;
 
   if (!autopostEnabled()) {
@@ -1909,7 +1914,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     // one per cycle. `prepare` forces it (dry-run harnesses).
     let prepareOnly = Boolean(prepare) && shotEngineEnabled();
     if (!rate.ok) {
-      if (shotEngineEnabled() && !dryRun && !hasFreshPlan({ now })) {
+      if (shotEngineEnabled() && !dryRun && !_hasFreshPlan({ now })) {
         prepareOnly = true;
         logger.info(`🎯 video cycle: ${rate.gate} — pre-resolving the next short while the slot is closed`);
       } else {
@@ -2042,7 +2047,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       rec.stage = "spec";
       // A PRE-RESOLVED PLAN carries a spec that already passed writeVideoSpec's
       // validation, and its resolved shots. Using it costs no spec call.
-      const plan = shotEngineEnabled() && !prepareOnly ? loadPlan(article.id, { now }) : null;
+      const plan = shotEngineEnabled() && !prepareOnly ? _loadPlan(article.id, { now }) : null;
       let r;
       if (plan) {
         r = { ok: true, spec: plan.spec, costUsd: 0, attempts: 0 };
@@ -2090,7 +2095,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       if (prepareOnly) {
         rec.stage = "prepare";
         try {
-          await prepareShotPlan(article, r.spec, attribution);
+          await _prepareShotPlan(article, r.spec, attribution);
           rec.stage = "prepared";
         } catch (err) {
           rec.reason = err.message;

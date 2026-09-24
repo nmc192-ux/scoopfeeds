@@ -1603,3 +1603,76 @@ test("THE PLUMBING HOLDS: the photo reaches writeVideoSpec", async () => {
   assert.equal(seen, "https://cdn.test/real.jpg",
     "writeVideoSpec must receive the photo; it is the argument every card builder reads it from");
 });
+
+// ─── Shot engine: pre-resolve and plans (dark: VIDEO_SHOT_ENGINE_ENABLED=1) ──
+
+/** A video published just now, and a long spacing interval: the slot is closed. */
+function closeSpacingGate() {
+  process.env.VIDEO_MIN_INTERVAL_MS = String(3600_000);
+  const prev = seedArticle({ source: "Earlier Wire", cred: 9 });
+  // A headline nothing like the candidate's, so the title-similarity cooldown
+  // (a real gate, correctly) does not refuse the article under test.
+  const other = "Glacier lakes threaten valley towns downstream";
+  db.prepare("UPDATE articles SET title = ? WHERE id = ?").run(other, prev);
+  claimVideoPost({ articleId: prev, sourceName: "Earlier Wire", title: other });
+  markVideoPublished(prev, { youtubeId: "ytPrev", privacyStatus: "public" });
+}
+
+test("SHOT ENGINE: a rate-gated cycle pre-resolves the next short — one spec, no render, no claim", async () => {
+  cycleEnv();
+  process.env.VIDEO_SHOT_ENGINE_ENABLED = "1";
+  try {
+    closeSpacingGate();
+    const a = seedArticle({ source: "AP", cred: 8 });
+    const calls = { spec: 0, prepared: [], produce: 0 };
+    const res = await runVideoRenderCycle({
+      deps: {
+        ...baseDeps(),
+        writeVideoSpec: async () => { calls.spec++; return { ok: true, spec: OK_SPEC, costUsd: 0.0003, reason: null, attempts: 1 }; },
+        produceVideo: async () => { calls.produce++; return { path: "x", slides: [] }; },
+        hasFreshPlan: () => false,
+        prepareShotPlan: async (article) => { calls.prepared.push(article.id); },
+      },
+    });
+    assert.equal(res.error, undefined, `cycle threw: ${res.error}`);
+    assert.deepEqual(calls.prepared, [a], JSON.stringify({ skipped: res.skipped, reason: res.reason, attempts: res.attempts }));
+    assert.equal(calls.spec, 1);
+    assert.equal(calls.produce, 0, "a pre-resolve never renders");
+    assert.equal(res.attempts[0].stage, "prepared");
+    assert.ok(!getVideoPost(a), "and never claims a video_posts row");
+  } finally { delete process.env.VIDEO_SHOT_ENGINE_ENABLED; }
+});
+
+test("SHOT ENGINE: an open slot takes the stored plan — no spec call, the plan reaches the render", async () => {
+  cycleEnv();
+  process.env.VIDEO_SHOT_ENGINE_ENABLED = "1";
+  try {
+    const a = seedArticle({ source: "AP", cred: 8 });
+    const calls = { spec: 0, planSeen: null };
+    const res = await runVideoRenderCycle({
+      dryRun: true,
+      deps: {
+        ...baseDeps(),
+        writeVideoSpec: async () => { calls.spec++; return { ok: true, spec: OK_SPEC, costUsd: 0.0003, reason: null, attempts: 1 }; },
+        loadPlan: (id) => (id === a ? { spec: OK_SPEC, resolved: [{ slide: 0 }] } : null),
+        produceVideo: async (_art, _spec, _attr, opts) => { calls.planSeen = opts?.plan; return { path: path.join(TMP, "v.mp4"), slides: [], shots: [] }; },
+      },
+    });
+    assert.equal(res.error, undefined, `cycle threw: ${res.error}`);
+    assert.equal(calls.spec, 0);
+    assert.equal(res.specCalls, 0);
+    assert.deepEqual(calls.planSeen?.resolved, [{ slide: 0 }]);
+    assert.equal(res.produced?.articleId, a);
+  } finally { delete process.env.VIDEO_SHOT_ENGINE_ENABLED; }
+});
+
+test("SHOT ENGINE OFF: a gated cycle skips exactly as before — nothing is prepared", async () => {
+  cycleEnv();
+  delete process.env.VIDEO_SHOT_ENGINE_ENABLED;
+  closeSpacingGate();
+  seedArticle({ source: "AP", cred: 8 });
+  let prepared = 0;
+  const res = await runVideoRenderCycle({ deps: { ...baseDeps(), prepareShotPlan: async () => { prepared++; } } });
+  assert.ok(res.skipped, "the gate still skips");
+  assert.equal(prepared, 0);
+});
