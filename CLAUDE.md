@@ -93,8 +93,11 @@ Commonly affected: `src/db/bootstrapOrder.test.js`, `src/services/videoAutopost.
 judgmentOnPresence,ownership_2_4_a,pageDiscovery,primaryLinks,siteFetch,wikidataClient}.test.js`,
 `src/skills/scoring/runtime/founderReview.test.js`.
 
-Next diagnostic step: the native frames beneath `node::Assert` in the assertion output name
-the addon. Tracked as insurance item I5 in `docs/STATE_OF_PLAY.md`.
+**Addon identified 2026-09-24:** the frame beneath `node::Assert` is
+`Statement::~Statement()` in better-sqlite3 11.10.0, running in a GC weak callback mid-test.
+`makeTestDb()` followed by one forced GC aborts 4/4; a bare DB with thousands of discarded
+statements survives. Measurements and next steps are under insurance item I5 in
+`docs/STATE_OF_PLAY.md`.
 
 **Never call `runMigrations()` directly to build a test DB** — use
 `makeTestDb()` from `src/testing/testDb.js`, which seeds the real base schema in the real
