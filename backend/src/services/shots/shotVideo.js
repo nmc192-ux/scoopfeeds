@@ -100,22 +100,29 @@ export function placeShots(slides, resolved, timeline, audio) {
   return placed.filter((p) => p.T > 0.05);
 }
 
-const HOLD_KINDS = new Set(["headline", "punch", "count", "graphic", "map", "satellite"]);
+// Only deliberate punctuation is held: a punch card is two or three words and
+// is meant to land as one beat. Everything else longer than MAX_SHOT_SECS is cut
+// into VIEWS OF THE SAME SUBJECT (DrJ, 24 Sep) — measured on the Phase 4 samples,
+// held maps and type cards ran 9–13 s and put the average shot at 3.7–5.0 s.
+const HOLD_KINDS = new Set(["punch"]);
+const TYPE_KINDS = new Set(["headline", "count", "graphic"]);
+export const MIN_TYPE_VIEW_SECS = 2.4;   // a type view must stay up long enough to read
 
 /**
- * Split a shot longer than MAX_SHOT_SECS into views of the same subject.
- * Returns the segments with `view` = 0, 1, 2 … which the plan builder turns
- * into another in-point (clips) or a tighter framing (photos).
+ * Split a shot longer than MAX_SHOT_SECS into `view` 0, 1, 2 … of the same
+ * subject. What a view IS depends on the shot — see buildPlan: another in-point
+ * or a tighter crop (pictures), a closer framing or the next named place (maps),
+ * a deeper zoom step (satellite), a push into the highlighted words (headline),
+ * the settled figure over a picture (count), the next bar lit (graphic).
  */
 export function subCut(shot) {
-  if (shot.T <= MAX_SHOT_SECS + 0.25 || HOLD_KINDS.has(shot.kind) || !shot.record ||
-      ["map", "satellite"].includes(shot.record.kind)) return [{ ...shot, view: 0 }];
-  // A map or satellite move is ONE purposeful camera move and is held; only
-  // real pictures (clips, photos) are cut into views.
-  const n = Math.max(2, Math.ceil(shot.T / MAX_SHOT_SECS));
+  if (shot.T <= MAX_SHOT_SECS + 0.25 || HOLD_KINDS.has(shot.kind)) return [{ ...shot, view: 0 }];
+  const isType = TYPE_KINDS.has(shot.kind) || !shot.record;
+  const minLen = isType ? MIN_TYPE_VIEW_SECS : MIN_SUBCUT_SECS;
+  const n = Math.min(Math.ceil(shot.T / MAX_SHOT_SECS), Math.floor(shot.T / minLen));
+  if (n < 2) return [{ ...shot, view: 0 }];
   const len = shot.T / n;
-  if (len < MIN_SUBCUT_SECS) return [{ ...shot, view: 0 }];
-  return Array.from({ length: n }, (_, i) => ({ ...shot, t0: +(shot.t0 + i * len).toFixed(3), T: +len.toFixed(3), view: i }));
+  return Array.from({ length: n }, (_, i) => ({ ...shot, t0: +(shot.t0 + i * len).toFixed(3), T: +len.toFixed(3), view: i, views: n }));
 }
 
 // ─── Assets ────────────────────────────────────────────────────────────────
@@ -229,7 +236,10 @@ export function buildPlan({ segments, slides, timeline, local, article, attribut
     } else if (rec?.kind === "satellite" && rec.coords?.lat !== undefined) {
       const { lat, lon, zoom = 12 } = rec.coords;
       const zEnd = Math.min(15, zoom + 1), zStart = Math.max(3, zEnd - 8);
-      shots.push({ ...base, kind: "satellite", keys: [[p.t0, zStart, lat, lon], [p.t0 + 0.4, zStart, lat, lon], [p.t0 + p.T - 0.2, zEnd, lat, lon]],
+      // Views step the zoom: each cut starts a little deeper than the last view ended.
+      const n = p.views || 1, step = (zEnd - zStart) / n;
+      const zs = zStart + p.view * step + (p.view > 0 ? 0.4 : 0), ze = zStart + (p.view + 1) * step;
+      shots.push({ ...base, kind: "satellite", keys: [[p.t0, zs, lat, lon], [p.t0 + 0.3, zs, lat, lon], [p.t0 + p.T - 0.1, ze, lat, lon]],
         slabels: [{ lat, lon, text: String(p.subject).toUpperCase().slice(0, 30), pin: true, from_z: zStart + 3 }] });
     } else if (rec?.kind === "map") {
       const c = rec.coords || {};
@@ -237,14 +247,24 @@ export function buildPlan({ segments, slides, timeline, local, article, attribut
       const pins = [];
       for (const pl of c.places || []) if (pl.lat !== undefined && pl.lat !== null) pins.push({ lat: pl.lat, lon: pl.lon, t: p.t0 + 0.4, text: String(pl.name).toUpperCase() });
       if (!c.places && c.lat !== undefined && c.lat !== null) pins.push({ lat: c.lat, lon: c.lon, t: p.t0 + 0.4, text: String(p.subject).toUpperCase().slice(0, 30) });
-      const hi = Object.fromEntries(codes.map((iso, i) => [iso, [LIME, +(p.t0 + 0.3 + i * 0.25).toFixed(2)]]));
-      shots.push({ ...base, kind: "map", auto: true, codes, hi, pins, texts: [] });
+      // Views: the whole subject, then closer — and on a multi-place map, each
+      // named place in turn. Fills are already in on later views.
+      const v = p.view || 0;
+      const fillAt = (i) => (v === 0 ? +(p.t0 + 0.3 + i * 0.25).toFixed(2) : p.t0 - 1);
+      const hi = Object.fromEntries(codes.map((iso, i) => [iso, [LIME, fillAt(i)]]));
+      const located = (c.places || []).filter((pl) => pl.lat !== undefined && pl.lat !== null);
+      const focus = v > 0 && located.length > 1 ? [located[(v - 1) % located.length].lat, located[(v - 1) % located.length].lon] : null;
+      const zoom = [1.0, 0.55, 0.38, 0.75][v % 4];
+      if (v > 0) for (const pin of pins) pin.t = p.t0 - 1;
+      shots.push({ ...base, kind: "map", auto: true, codes, hi, pins, texts: [], zoom, ...(focus ? { focus } : {}) });
     } else if (p.kind === "headline") {
       const words = String(article.title || "").split(/\s+/).slice(0, 15).join(" ");
       const spoken = new Set(tokens(spokenSpan(p, timeline.words)));
       const hl = String(article.title || "").split(/\s+/).filter((w) => spoken.has(w.toLowerCase().replace(/[^a-z0-9]/g, "")) && w.length > 3).slice(0, 4).join(" ");
       shots.push({ ...base, kind: "headline", outlet: attribution.publisher || article.source_name || "", headline: words,
-        date: new Date(article.published_at || Date.now()).toISOString().slice(0, 10), hl, hl_at: p.t0 + 0.8, bg: firstPicture || null, caps: false });
+        date: new Date(article.published_at || Date.now()).toISOString().slice(0, 10), hl,
+        // View 0 is the whole clipping with the highlight sweeping in; later views push into the highlighted words.
+        hl_at: p.view ? p.t0 - 1 : p.t0 + 0.8, zoom: p.view ? 1.3 : 1.0, bg: firstPicture || null, caps: false });
     } else if (p.kind === "punch") {
       shots.push({ ...base, kind: "punch", lines: [[p.t0 + 0.1, String(p.subject).toUpperCase().slice(0, 22), 150, LIME]], caps: false });
     } else if (p.kind === "count") {
@@ -255,13 +275,13 @@ export function buildPlan({ segments, slides, timeline, local, article, attribut
         const decimals = Number.isInteger(n.value) ? 0 : 1;
         shots.push({ ...base, kind: "count", value: n.value, decimals, suffix: n.pct ? "%" : "",
           label: slide.t === "stat" ? [slide.unit, ...(slide.lines || [])].filter(Boolean).join(" ") : `${n.scaleWord} ${p.subject}`.trim(),
-          t_start: p.t0 + 0.2, bg: firstPicture || null });
+          t_start: p.t0 + 0.2, bg: firstPicture || null, settled: Boolean(p.view) });
       } else {
         shots.push({ ...base, kind: "graphic", title: p.subject }); fallbacks.push(`${p.slide}.${p.shot} count→graphic (no number spoken)`);
       }
     } else if (p.kind === "graphic") {
-      if (slide.t === "bars" && Array.isArray(slide.bars)) shots.push({ ...base, kind: "graphic", title: slide.eyebrow || p.subject, bars: slide.bars });
-      else if (slide.t === "diagram" && Array.isArray(slide.nodes)) shots.push({ ...base, kind: "graphic", title: p.subject, lines: slide.nodes.map((n) => n[0]) });
+      if (slide.t === "bars" && Array.isArray(slide.bars)) shots.push({ ...base, kind: "graphic", title: slide.eyebrow || p.subject, bars: slide.bars, hi: (p.view || 0) % slide.bars.length });
+      else if (slide.t === "diagram" && Array.isArray(slide.nodes)) shots.push({ ...base, kind: "graphic", title: p.subject, lines: slide.nodes.map((n) => n[0]), hi: (p.view || 0) % slide.nodes.length });
       else shots.push({ ...base, kind: "graphic", title: p.subject });
     } else {
       // A picture shot with no picture: say so on screen with the subject, and count it.

@@ -43,15 +43,19 @@ test("a shot starts on its anchor word; the first shot of a slide starts with th
   assert.ok(Math.abs(placed.at(-1).t0 + placed.at(-1).T - tl.narrationSecs) < 1e-6, "the last shot runs to the end of the narration");
 });
 
-test("sub-cut: real pictures over 3 s become views of the same subject; maps and type cards are held", () => {
+test("sub-cut: every shot over 3 s becomes views of the same subject; only punch cards are held", () => {
   const pic = { kind: "photo", t0: 10, T: 7.2, record: { kind: "photo" } };
   const cut = subCut(pic);
   assert.equal(cut.length, 3);
   assert.ok(cut.every((c) => c.T <= MAX_SHOT_SECS));
   assert.deepEqual(cut.map((c) => c.view), [0, 1, 2]);
-  assert.equal(subCut({ kind: "punch", t0: 0, T: 5, record: null }).length, 1);
-  assert.equal(subCut({ kind: "map", t0: 0, T: 6, record: { kind: "map" } }).length, 1);
-  assert.equal(subCut({ kind: "photo", t0: 0, T: 6, record: { kind: "satellite" } }).length, 1, "a photo shot answered by satellite is one camera move");
+  assert.equal(subCut({ kind: "punch", t0: 0, T: 5, record: null }).length, 1, "punctuation lands as one beat");
+  assert.equal(subCut({ kind: "map", t0: 0, T: 9.1, record: { kind: "map" } }).length, 4, "a 9 s map is four views");
+  assert.equal(subCut({ kind: "photo", t0: 0, T: 12.6, record: { kind: "satellite" } }).length, 5);
+  const card = subCut({ kind: "graphic", t0: 0, T: 10.8, record: null });
+  assert.equal(card.length, 4);
+  assert.ok(card.every((c) => c.T >= 2.4), "a type view stays up long enough to read");
+  assert.equal(subCut({ kind: "headline", t0: 0, T: 4.0, record: null }).length, 1, "4 s of type cannot make two readable views");
   assert.equal(subCut({ kind: "clip", t0: 0, T: 3.1, record: { kind: "clip" } }).length, 1);
 });
 

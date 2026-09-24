@@ -493,8 +493,8 @@ def _norm(w): return re.sub(r'[^a-z0-9]', '', w.lower())
 class Headline(Shot):
     """A recreated headline clipping with a highlight sweep: outlet, date, under 15
     words, never an article body (brief, Phase 4). Over a darkened background."""
-    def __init__(s, outlet, headline, date, hl='', hl_at=None, bg=None, tilt=-1.5, **chrome):
-        s.outlet, s.headline, s.date, s.hl, s.hl_at, s.bg, s.tilt = outlet, ' '.join(headline.split()[:15]), date, hl, hl_at, bg, tilt
+    def __init__(s, outlet, headline, date, hl='', hl_at=None, bg=None, tilt=-1.5, zoom=1.0, **chrome):
+        s.outlet, s.headline, s.date, s.hl, s.hl_at, s.bg, s.tilt, s.zoom = outlet, ' '.join(headline.split()[:15]), date, hl, hl_at, bg, tilt, zoom
         s.card = None; s.bgimg = None; s.caps = False
         for k, v in chrome.items(): setattr(s, k, v)
     def build(s):
@@ -527,8 +527,16 @@ class Headline(Shot):
                 if wv > 0: cv2.rectangle(ov, (int(x0), int(y0)), (int(x0 + wv), int(y1)), (221, 231, 6, 255), -1)
             m = (ov[..., :3] != card[..., :3]).any(2, keepdims=True)
             card[..., :3] = np.where(m, np.minimum(card[..., :3], ov[..., :3]), card[..., :3])
-        e = eo(prog(tl, 0.0, 0.5)); ch, cw = card.shape[:2]; sc = W * 0.88 / cw * lerp(0.92, 1.0, e)
-        Mx = cv2.getRotationMatrix2D((cw / 2, ch / 2), s.tilt, sc); Mx[0, 2] += W / 2 - cw / 2; Mx[1, 2] += 700 - ch / 2 + 80 * (1 - e)
+        e = eo(prog(tl, 0.0, 0.5)) if s.zoom == 1.0 else 1.0; ch, cw = card.shape[:2]; sc = W * 0.88 / cw * lerp(0.92, 1.0, e) * s.zoom
+        # A closer view pushes into the highlighted words (or the headline's first line).
+        fx, fy = cw / 2, ch / 2
+        if s.zoom != 1.0:
+            if s.hlr: fx = (s.hlr[0][0] + s.hlr[-1][2]) / 2; fy = (s.hlr[0][1] + s.hlr[0][3]) / 2
+            else: fy = 380
+            fx = lerp(cw / 2, fx, 0.7)
+        # The push-in view anchors the highlight lower, so the enlarged card stays below the kicker/brand row.
+        anchor_y = 700 if s.zoom == 1.0 else 880
+        Mx = cv2.getRotationMatrix2D((fx, fy), s.tilt, sc); Mx[0, 2] += W / 2 - fx; Mx[1, 2] += anchor_y - fy + 80 * (1 - e)
         wp = cv2.warpAffine(card, Mx, (W, H), flags=cv2.INTER_AREA, borderValue=(0, 0, 0, 0))
         al = wp[..., 3:4].astype(np.float32) / 255 * e
         f[:] = (wp[..., :3] * al + f * (1 - al)).astype(np.uint8)
@@ -551,8 +559,8 @@ class Punch(Shot):
 
 class Count(Shot):
     """Count-up number over a darkened picture or the house ground."""
-    def __init__(s, value, label='', prefix='', suffix='', decimals=0, t_start=None, bg=None, **chrome):
-        s.value, s.label, s.prefix, s.suffix, s.decimals, s.t_start, s.bg = value, label, prefix, suffix, decimals, t_start, bg
+    def __init__(s, value, label='', prefix='', suffix='', decimals=0, t_start=None, bg=None, settled=False, **chrome):
+        s.value, s.label, s.prefix, s.suffix, s.decimals, s.t_start, s.bg, s.settled = value, label, prefix, suffix, decimals, t_start, bg, settled
         s.bgimg = None
         for k, v in chrome.items(): setattr(s, k, v)
     def frame(s, tl):
@@ -560,7 +568,7 @@ class Count(Shot):
             s.bgimg = Photo(s.bg, dark=0.66); s.bgimg.T = s.T; s.bgimg.t0 = s.t0
         f = s.bgimg.frame(tl) if s.bgimg else blank()
         ta = s.t0 + tl; t0 = s.t_start if s.t_start is not None else s.t0 + 0.2
-        v = s.value * eo(prog(ta, t0, 0.9))
+        v = s.value if s.settled else s.value * eo(prog(ta, t0, 0.9))
         txt = f'{s.prefix}{v:,.{s.decimals}f}{s.suffix}'
         size = 420 if len(txt) <= 4 else max(160, int(420 * 4 / len(txt)))
         blit(f, tpatch(txt, ANTON(size), WHITE), W / 2, 560, 1, 'ct')
@@ -571,8 +579,8 @@ class Count(Shot):
 
 class Graphic(Shot):
     """Simple data graphic: horizontal bars when given, else a titled statement."""
-    def __init__(s, title='', bars=(), unit='', lines=(), **chrome):
-        s.title, s.bars, s.unit, s.lines = title, list(bars), unit, list(lines)
+    def __init__(s, title='', bars=(), unit='', lines=(), hi=0, **chrome):
+        s.title, s.bars, s.unit, s.lines, s.hi = title, list(bars), unit, list(lines), hi
         for k, v in chrome.items(): setattr(s, k, v)
     def frame(s, tl):
         f = blank()
@@ -584,13 +592,14 @@ class Graphic(Shot):
             for i, (lab, v) in enumerate(s.bars):
                 e = eo(prog(tl, 0.3 + i * 0.2, 0.8)); y = top + i * rowh
                 blit(f, tpatch(str(lab).upper(), OSW(40, 'SemiBold'), BONE), M, y, prog(tl, 0.2 + i * 0.2, 0.3))
-                rect(f, M, y + 52, M + max(6, bw * 0.78 * abs(v) / mv * e), y + 52 + rowh * 0.4, LIME if i == 0 else BONE)
+                rect(f, M, y + 52, M + max(6, bw * 0.78 * abs(v) / mv * e), y + 52 + rowh * 0.4, LIME if i == s.hi else BONE)
                 if e > 0.05:
                     blit(f, tpatch(f'{v * e:,.0f}{s.unit}', INTER(40, 'Bold'), WHITE), M + bw * 0.78 * abs(v) / mv * e + 20, y + 52 + rowh * 0.2, 1, 'lc')
         else:
-            for i, ln in enumerate(s.lines[:3]):
+            for i, ln in enumerate(s.lines[:4]):
+                col = LIME if (i == s.hi and len(s.lines) > 1) else BONE
                 for j, sub in enumerate(wrap(ln, INTER(58, 'SemiBold'), W - 2 * M)[:2]):
-                    blit(f, tpatch(sub, INTER(58, 'SemiBold'), BONE), M, 760 + i * 170 + j * 72, eo(prog(tl, 0.3 + i * 0.3, 0.4)))
+                    blit(f, tpatch(sub, INTER(58, 'SemiBold'), col), M, 760 + i * 150 + j * 72, eo(prog(tl, 0.3 + i * 0.3, 0.4)))
         return f
 
 class EndCard(Shot):
@@ -611,7 +620,7 @@ class EndCard(Shot):
         return f
 
 
-def auto_frame(codes=(), points=(), t0=0.0, T=3.0, min_span=6.0):
+def auto_frame(codes=(), points=(), t0=0.0, T=3.0, min_span=6.0, zoom=1.0, focus=None):
     """Frame a map on its subject: the union of each named country's MAINLAND
     (largest ring — an overseas territory must not aim the camera, the 17 Sep
     finding) and any marked points. Returns (bbox, cams): a slow push-in from
@@ -637,11 +646,17 @@ def auto_frame(codes=(), points=(), t0=0.0, T=3.0, min_span=6.0):
     need_h = (v1 - v0) * 1.5 * W / (H * 0.55)
     span = max(min_span if codes else max(min_span, 18.0), max(need_w, need_h) * 360)
     span = min(span, 330)
-    cams = [(t0, clon, clat, span * 1.25), (t0 + T, clon, clat, span)]
+    # A VIEW of the same map (sub-cut, DrJ 24 Sep): closer (`zoom` < 1) and/or
+    # centred on one named place (`focus`). The base extent below still covers
+    # the widest of the views, so every view of the shot shares one raster.
+    if focus is not None: clat, clon = focus
+    span_v = max(2.5, span * zoom)
+    cams = [(t0, clon, clat, span_v * 1.12), (t0 + T, clon, clat, span_v)]
+    wide_span = span
     # The base must cover the WIDEST view in both axes, measured in mercator:
     # at span S degrees across W px, the frame is S*H/W "degrees" tall in unit
     # space, CY px of it above the centre and H-CY below.
-    wide = span * 1.25 * 1.05
+    wide = max(wide_span, span_v) * 1.25 * 1.05
     uc, vc = unit(clat, clon)
     su = wide / 360
     v_top, v_bot = vc - su * CY / W, vc + su * (H - CY) / W

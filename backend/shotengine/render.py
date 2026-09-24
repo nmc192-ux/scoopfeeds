@@ -35,18 +35,19 @@ def build_shot(sp, plan):
     elif k == 'map':
         if sp.get('auto'):
             sp['bbox'], sp['cams'] = E.auto_frame(sp.get('codes', []), [(p['lat'], p['lon']) for p in sp.get('pins', [])] +
-                                                  [(p['lat'], p['lon']) for p in sp.get('points', [])], sp['t0'], sp['T'])
+                                                  [(p['lat'], p['lon']) for p in sp.get('points', [])], sp['t0'], sp['T'],
+                                                  zoom=sp.get('zoom', 1.0), focus=tuple(sp['focus']) if sp.get('focus') else None)
         s = E.MapShot(tuple(sp['bbox']), [tuple(c) for c in sp['cams']], hi={iso: (tuple(v[0]), v[1]) for iso, v in sp.get('hi', {}).items()},
                       pins=sp.get('pins', []), texts=sp.get('texts', []), **chrome)
     elif k == 'headline':
-        s = E.Headline(sp['outlet'], sp['headline'], sp.get('date', ''), hl=sp.get('hl', ''), hl_at=sp.get('hl_at'), bg=sp.get('bg'), **chrome)
+        s = E.Headline(sp['outlet'], sp['headline'], sp.get('date', ''), hl=sp.get('hl', ''), hl_at=sp.get('hl_at'), bg=sp.get('bg'), zoom=sp.get('zoom', 1.0), **chrome)
     elif k == 'punch':
         s = E.Punch([tuple(x) for x in sp['lines']], **chrome)
     elif k == 'count':
         s = E.Count(sp['value'], label=sp.get('label', ''), prefix=sp.get('prefix', ''), suffix=sp.get('suffix', ''),
-                    decimals=sp.get('decimals', 0), t_start=sp.get('t_start'), bg=sp.get('bg'), **chrome)
+                    decimals=sp.get('decimals', 0), t_start=sp.get('t_start'), bg=sp.get('bg'), settled=sp.get('settled', False), **chrome)
     elif k == 'graphic':
-        s = E.Graphic(title=sp.get('title', ''), bars=sp.get('bars', []), unit=sp.get('unit', ''), lines=sp.get('lines', []), **chrome)
+        s = E.Graphic(title=sp.get('title', ''), bars=sp.get('bars', []), unit=sp.get('unit', ''), lines=sp.get('lines', []), hi=sp.get('hi', 0), **chrome)
     elif k == 'end':
         s = E.EndCard(sp.get('sources', []), bg=sp.get('bg'), **chrome)
     else:
