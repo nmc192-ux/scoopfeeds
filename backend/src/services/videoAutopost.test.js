@@ -1676,3 +1676,76 @@ test("SHOT ENGINE OFF: a gated cycle skips exactly as before — nothing is prep
   assert.ok(res.skipped, "the gate still skips");
   assert.equal(prepared, 0);
 });
+
+// ─── Plans follow selection (first prod day, 25 Sep 2026) ───────────────────
+// A plan for an article that is no longer eligible blocked every pre-resolve,
+// and the open slot picked a different article and resolved it cold inside the
+// render lock. These pin the three halves of the fix.
+
+test("SHOT ENGINE: a gated cycle with a plan for an ELIGIBLE article waits — nothing new is prepared", async () => {
+  cycleEnv();
+  process.env.VIDEO_SHOT_ENGINE_ENABLED = "1";
+  try {
+    closeSpacingGate();
+    const a = seedArticle({ source: "AP", cred: 8 });
+    let prepared = 0, pruneKeep = null;
+    const res = await runVideoRenderCycle({
+      deps: {
+        ...baseDeps(),
+        loadPlan: (id) => (id === a ? { spec: OK_SPEC, resolved: [] } : null),
+        prunePlans: (keep) => { pruneKeep = keep; return 0; },
+        prepareShotPlan: async () => { prepared++; },
+      },
+    });
+    assert.ok(res.skipped, "the gate still skips");
+    assert.equal(prepared, 0);
+    assert.ok(pruneKeep?.has(a), "the eligible article's plan is kept");
+  } finally { delete process.env.VIDEO_SHOT_ENGINE_ENABLED; }
+});
+
+test("SHOT ENGINE: a plan whose article is no longer eligible is dropped, and the gated cycle pre-resolves", async () => {
+  cycleEnv();
+  process.env.VIDEO_SHOT_ENGINE_ENABLED = "1";
+  try {
+    closeSpacingGate();
+    const a = seedArticle({ source: "AP", cred: 8 });
+    const calls = { prepared: [], pruneKeep: null };
+    const res = await runVideoRenderCycle({
+      deps: {
+        ...baseDeps(),
+        writeVideoSpec: async () => ({ ok: true, spec: OK_SPEC, costUsd: 0.0003, reason: null, attempts: 1 }),
+        loadPlan: (id) => (id === "published-yesterday" ? { spec: OK_SPEC, resolved: [] } : null),
+        prunePlans: (keep) => { calls.pruneKeep = keep; return keep.has("published-yesterday") ? 0 : 1; },
+        prepareShotPlan: async (article) => { calls.prepared.push(article.id); },
+      },
+    });
+    assert.equal(res.error, undefined, `cycle threw: ${res.error}`);
+    assert.ok(!calls.pruneKeep.has("published-yesterday"), "the orphan plan is not in the keep set");
+    assert.deepEqual(calls.prepared, [a], "the orphan no longer blocks the pre-resolve");
+  } finally { delete process.env.VIDEO_SHOT_ENGINE_ENABLED; }
+});
+
+test("SHOT ENGINE: an open slot takes the PLANNED article first, even when another ranks above it", async () => {
+  cycleEnv();
+  process.env.VIDEO_SHOT_ENGINE_ENABLED = "1";
+  try {
+    // Title-distinct, so the title-similarity cooldown sees two stories.
+    const top = seedArticle({ source: "Reuters", cred: 10 });
+    const planned = seedArticle({ source: "AP", cred: 8 });
+    db.prepare("UPDATE articles SET title = ? WHERE id = ?").run("Central bank holds rates as inflation cools", top);
+    db.prepare("UPDATE articles SET title = ? WHERE id = ?").run("Volcano erupts on remote island chain", planned);
+    const calls = { spec: 0, produced: null };
+    const res = await runVideoRenderCycle({
+      dryRun: true,
+      deps: {
+        ...baseDeps(),
+        writeVideoSpec: async () => { calls.spec++; return { ok: true, spec: OK_SPEC, costUsd: 0.0003, reason: null, attempts: 1 }; },
+        loadPlan: (id) => (id === planned ? { spec: OK_SPEC, resolved: [{ slide: 0 }] } : null),
+        produceVideo: async (art) => { calls.produced = art.id; return { path: path.join(TMP, "v.mp4"), slides: [], shots: [] }; },
+      },
+    });
+    assert.equal(res.error, undefined, `cycle threw: ${res.error}`);
+    assert.equal(calls.produced, planned, "the planned article is produced, not the higher-ranked one");
+    assert.equal(calls.spec, 0, "and it costs no spec call");
+  } finally { delete process.env.VIDEO_SHOT_ENGINE_ENABLED; }
+});

@@ -70,7 +70,7 @@ import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.j
 import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
 import { wordCaptionsEnabled, buildWordCaptionTrack } from "./videoWordCaptions.js";
 import { shotEngineEnabled } from "./videoShotList.js";
-import { produceShotVideo, prepareShotPlan, loadPlan, hasFreshPlan } from "./shots/shotProduce.js";
+import { produceShotVideo, prepareShotPlan, loadPlan, prunePlans } from "./shots/shotProduce.js";
 import { markPublished as markShotPublished } from "./shots/shotMetrics.js";
 import { uploadToYouTube, isYouTubeConfigured, setYouTubeThumbnail } from "./youtubeClient.js";
 import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from "./facebookClient.js";
@@ -1864,7 +1864,7 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     // (prepare when gated, take the plan when open) is testable without a render.
     prepareShotPlan: _prepareShotPlan = prepareShotPlan,
     loadPlan: _loadPlan = loadPlan,
-    hasFreshPlan: _hasFreshPlan = hasFreshPlan,
+    prunePlans: _prunePlans = prunePlans,
   } = deps;
 
   if (!autopostEnabled()) {
@@ -1911,13 +1911,16 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     // PRE-RESOLVE (shot engine only). A rate-gated cycle — most of them — does
     // the slow part of the NEXT short now: select, write the spec, resolve every
     // shot, store the plan. It never renders and never publishes. It runs only
-    // when no fresh plan is waiting, so it costs one spec call per short, not
-    // one per cycle. `prepare` forces it (dry-run harnesses).
+    // when no ELIGIBLE article already has a plan, so it costs one spec call per
+    // short, not one per cycle. `prepare` forces it (dry-run harnesses).
     let prepareOnly = Boolean(prepare) && shotEngineEnabled();
+    // Whether a gated cycle actually pre-resolves is decided AFTER selection
+    // (below): only a plan for an article that is still ELIGIBLE counts.
+    let gatedPrepare = false;
     if (!rate.ok) {
-      if (shotEngineEnabled() && !dryRun && !_hasFreshPlan({ now })) {
+      if (shotEngineEnabled() && !dryRun) {
         prepareOnly = true;
-        logger.info(`🎯 video cycle: ${rate.gate} — pre-resolving the next short while the slot is closed`);
+        gatedPrepare = true;
       } else {
         logger.info(`🎬 video cycle: ${rate.gate} — ${rate.reason}`);
         return finish({ skipped: rate.gate, reason: rate.reason });
@@ -1986,11 +1989,38 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     tally(cooled.map((d) => d.article), "cooldown set aside (published inside 24h)");
     tally(crowded, "diversity set aside");
 
+    // PLANS FOLLOW SELECTION (shot engine). A plan is only worth anything for an
+    // article this cycle could publish, so: drop plans for articles that are no
+    // longer eligible (published since, cooled down, pruned); a gated cycle
+    // pre-resolves only when no eligible article has a plan; and an open slot
+    // takes a planned article FIRST. Before this, a stale plan blocked every
+    // pre-resolve while the open slot picked a different article and resolved it
+    // cold inside the 10-minute render lock — twice on the first prod day, the
+    // second one past the lock.
+    let queue = eligible;
+    if (shotEngineEnabled() && !dryRun) {
+      const dropped = _prunePlans(new Set(eligible.map((a) => a.id)));
+      if (dropped) logger.info(`🎯 video cycle: dropped ${dropped} plan(s) whose article is no longer eligible`);
+    }
+    if (shotEngineEnabled()) {
+      const planned = eligible.filter((a) => _loadPlan(a.id, { now }));
+      if (gatedPrepare) {
+        if (planned.length) {
+          logger.info(`🎬 video cycle: ${rate.gate} — ${rate.reason} · plan ready for ${planned[0].id}`);
+          return finish({ skipped: rate.gate, reason: rate.reason });
+        }
+        logger.info(`🎯 video cycle: ${rate.gate} — pre-resolving the next short while the slot is closed`);
+      } else if (!prepareOnly && planned.length) {
+        queue = [...planned, ...eligible.filter((a) => !planned.includes(a))];
+        logger.info(`🎯 video cycle: ${planned.length} planned article(s) go first — ${planned.map((a) => a.id).join(", ")}`);
+      }
+    }
+
     // Built ONCE. cooldownGate ran this query per article, on the ~92% with no
     // event linkage, for a result that cannot change while the cycle scans.
     const titleCorpus = buildRecentTitleCorpus({ now });
 
-    for (const article of eligible) {
+    for (const article of queue) {
       // THE MONEY. Checked here so the cycle stops before selecting an article
       // it cannot afford to write a spec for, rather than after.
       if (specCalls >= maxSpecCalls) {
