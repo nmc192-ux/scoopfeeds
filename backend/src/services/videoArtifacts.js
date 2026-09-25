@@ -218,7 +218,9 @@ export async function sweepAtStartup() {
   const videos = sweepVideos({ pendingUrlFetch: hasPendingUrlFetchPublish });
   const { sweepTtsCache } = await import("./videoVoice.js");
   const tts = sweepTtsCache();
-  return { frames, videos, tts };
+  const { sweepShotMetrics } = await import("./shots/shotMetrics.js");
+  const shotMetrics = sweepShotMetrics();
+  return { frames, videos, tts, shotMetrics };
 }
 
 export const _internals = { BACKEND_ROOT };

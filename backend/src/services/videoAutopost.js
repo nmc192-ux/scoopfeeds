@@ -71,6 +71,7 @@ import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
 import { wordCaptionsEnabled, buildWordCaptionTrack } from "./videoWordCaptions.js";
 import { shotEngineEnabled } from "./videoShotList.js";
 import { produceShotVideo, prepareShotPlan, loadPlan, hasFreshPlan } from "./shots/shotProduce.js";
+import { markPublished as markShotPublished } from "./shots/shotMetrics.js";
 import { uploadToYouTube, isYouTubeConfigured, setYouTubeThumbnail } from "./youtubeClient.js";
 import { postVideoToFacebook, postReelToFacebook, isFacebookConfigured } from "./facebookClient.js";
 import { postReelToInstagram, isInstagramConfigured } from "./instagramClient.js";
@@ -2161,6 +2162,9 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
         });
         produced = { articleId: article.id, youtubeId: up.videoId || up.id, title };
         rec.stage = "ok";
+        // Shot engine only: the metrics record becomes a PUBLISHED short for the
+        // daily digest. Files, never throws — it cannot touch the publish above.
+        if (video.metrics) markShotPublished(article.id, { youtubeId: produced.youtubeId });
         logger.info(`🎬 PUBLISHED ${produced.youtubeId} — "${title}"`);
 
         // ─── Custom thumbnail ──────────────────────────────────────────────
