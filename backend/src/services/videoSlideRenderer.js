@@ -35,6 +35,7 @@ import { logger } from "./logger.js";
 import { HORIZONTAL, geometryFor, DEFAULT_ORIENTATION } from "./videoGeometry.js";
 import { makePrimitives, COLORS as C, FONTS as F, GROUND, groundOf } from "./videoSlideChrome.js";
 import { verticalStatesForCard } from "./videoSlideRendererVertical.js";
+import { withVoiceIdentity } from "./videoVoice.js";
 
 export const VIDEO_DESIGN_VER = "vid-v1";
 // EVERY MODULE WHOSE CODE DETERMINES A RENDERED PIXEL. This used to hash only
@@ -58,7 +59,12 @@ export const VIDEO_DESIGN_VER = "vid-v1";
 // cutaway composites. Change either with an unchanged key and prod keeps
 // serving the MP4 it already cached, with the only human step that would catch
 // it being the one nobody remembers to do.
-export const VIDEO_BUILDER_FINGERPRINT = sourceFingerprint([
+//
+// THE VOICE IS FOLDED IN TOO (withVoiceIdentity): provider + voice when the
+// provider is Kokoro, so a Kokoro render and an ElevenLabs render never share a
+// key. For ElevenLabs — the code default — it adds nothing, and the key is
+// byte-identical to what it was before Kokoro existed.
+const BUILDER_SOURCE_FINGERPRINT = sourceFingerprint([
   import.meta.url,
   new URL("./videoGeometry.js", import.meta.url).href,
   new URL("./videoSlideChrome.js", import.meta.url).href,
@@ -74,6 +80,7 @@ export const VIDEO_BUILDER_FINGERPRINT = sourceFingerprint([
   new URL("./videoSubjectVisual.js", import.meta.url).href,
   new URL("./incident/incidentFiles.js", import.meta.url).href,
 ]);
+export const VIDEO_BUILDER_FINGERPRINT = withVoiceIdentity(BUILDER_SOURCE_FINGERPRINT);
 export const videoDesignKey = () => `${VIDEO_DESIGN_VER}-${VIDEO_BUILDER_FINGERPRINT}`;
 
 // ─── Geometry — 16:9, moved to videoGeometry.js and re-exported ─────────────

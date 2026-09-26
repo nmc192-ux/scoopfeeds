@@ -49,8 +49,17 @@ Every hour a cron in the **scheduler** picks a fresh news article, turns it into
 up to 4 a day.
 
 The chain: select article → fetch full text → LLM writes a slide spec →
-validate → ElevenLabs voices each caption → render keyframes → ffmpeg assembles
+validate → TTS voices each caption → render keyframes → ffmpeg assembles
 → upload → record in `video_posts`.
+
+**The voice (2026-09-26).** TTS is ElevenLabs *or* self-hosted Kokoro (`bm_george`), chosen by
+`VIDEO_TTS_PROVIDER` alone; Kokoro runs as the internal `tts` compose service at $0 per video.
+The switch was forced by ElevenLabs running out of credits on Sep 26 (every cycle died at
+`SKIP produce: ElevenLabs 401 quota_exceeded`). Both providers return the same per-caption
+`{audio, words}` shape, so captions, word-anchored cuts and the music bed do not know which
+spoke. A Kokoro failure skips that video with `🔊 kokoro failed: <reason>` — no silent
+fallback. Long-form films are unaffected and stay on ElevenLabs. Flags, cache and fingerprint
+details: `docs/reference/env_reference.md` → *TTS provider*.
 
 Cost is about **1–4 cents per published video**, including the candidates that
 get rejected on the way.

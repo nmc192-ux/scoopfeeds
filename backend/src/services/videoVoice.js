@@ -1,5 +1,9 @@
 /**
- * videoVoice.js — one ElevenLabs call per slide caption, cached by content.
+ * videoVoice.js — one TTS call per slide caption, cached by content.
+ *
+ * The provider is ElevenLabs (code default) or self-hosted Kokoro, chosen by
+ * VIDEO_TTS_PROVIDER alone — see "Provider" below. Both return the same
+ * { buf, words } shape, so nothing downstream knows which one spoke.
  *
  * DELIBERATELY NOT ttsService.generateTts. That function is reused by the three
  * legacy generators and every one of its behaviours is wrong here:
@@ -123,6 +127,73 @@ export const VOICE_SETTINGS = Object.freeze({
   speed:            envNumber("VIDEO_VOICE_SPEED",      1.05, { min: 0.7, max: 1.2 }),
 });
 
+// ─── Provider: ElevenLabs or self-hosted Kokoro ─────────────────────────────
+//
+// ONE EXPLICIT SWITCH, never a first-key-wins chain (that is ttsService's bug,
+// described at the top of this file). VIDEO_TTS_PROVIDER names the provider;
+// nothing else can change it. The code default is "elevenlabs", so merging this
+// changes nothing until the env line is written.
+//
+// Kokoro (Kokoro-82M, Apache 2.0) runs as the `tts` compose service on our own
+// box — docker-compose.production.yml. It is reachable only on the internal
+// Docker network, at http://tts:8880.
+//
+// Read at CALL TIME, like voiceGapSecs, so a test can flip it; prod reads it
+// once per recreate like every other env var.
+//
+// THE LONGFORM FILMS DO NOT COME THROUGH HERE. longform/engine/narrate.mjs has
+// its own ElevenLabs call and reads VIDEO_VOICE_ID — which is exactly why Kokoro
+// has its own VIDEO_TTS_KOKORO_* names instead of reusing that one.
+
+export function voiceProvider() {
+  const raw = String(process.env.VIDEO_TTS_PROVIDER ?? "").trim().toLowerCase();
+  if (!raw || raw === "elevenlabs") return "elevenlabs";
+  if (raw === "kokoro") return "kokoro";
+  logger.warn(`🔊 VIDEO_TTS_PROVIDER="${process.env.VIDEO_TTS_PROVIDER}" is not kokoro|elevenlabs — using elevenlabs`);
+  return "elevenlabs";
+}
+
+/** Everything the Kokoro call needs. Read per call, so a recreate is all a change takes. */
+export function kokoroConfig() {
+  return {
+    url: String(process.env.VIDEO_TTS_KOKORO_URL || "http://tts:8880").trim().replace(/\/+$/, ""),
+    voice: String(process.env.VIDEO_TTS_KOKORO_VOICE || "").trim() || "bm_george",
+    speed: envNumber("VIDEO_TTS_KOKORO_SPEED", 1.0, { min: 0.5, max: 2 }),
+    // Longer than ElevenLabs' 30s: this runs on the same 2-vCPU box as the
+    // render, and one core synthesising a long caption while ffmpeg holds the
+    // other is slower than a hosted API. Still bounded — a hung tts container
+    // must cost one video, not the render job's 10-minute lock.
+    timeoutMs: envNumber("VIDEO_TTS_KOKORO_TIMEOUT_MS", 60000, { min: 1000, max: 300000 }),
+  };
+}
+
+/**
+ * The OPT-IN second provider when Kokoro fails. Default: none — a failed Kokoro
+ * call skips the video. A silent fallback to ElevenLabs would hide a broken
+ * Kokoro behind a bill (or, with no credits, behind a 401 that names the wrong
+ * provider).
+ */
+export function fallbackProvider() {
+  const raw = String(process.env.VIDEO_TTS_FALLBACK ?? "").trim().toLowerCase();
+  return voiceProvider() === "kokoro" && raw === "elevenlabs" ? "elevenlabs" : null;
+}
+
+/**
+ * What the design keys fold in, so a Kokoro render can never be mistaken for an
+ * ElevenLabs one. NULL FOR ELEVENLABS ON PURPOSE: the default keeps every
+ * fingerprint byte-identical to the pre-Kokoro code.
+ */
+export function voiceIdentity(provider = voiceProvider()) {
+  return provider === "kokoro" ? `kokoro|${kokoroConfig().voice}` : null;
+}
+
+/** Fold the voice identity into a hex fingerprint, keeping its length. Identity-less = unchanged. */
+export function withVoiceIdentity(fingerprint, identity = voiceIdentity()) {
+  if (!identity) return fingerprint;
+  return createHash("sha1").update(String(fingerprint)).update("|").update(identity)
+    .digest("hex").slice(0, String(fingerprint).length);
+}
+
 /**
  * Trailing silence after each caption, in seconds. Default 0 — inert.
  *
@@ -164,12 +235,44 @@ export class VoiceError extends Error {
   }
 }
 
+/**
+ * Can the selected provider be called at all? Kokoro needs no key — its URL has
+ * a default — so whether the service is actually UP is a runtime question,
+ * answered by probeTtsService at worker boot and by each call's own timeout.
+ */
 export function isVoiceConfigured() {
+  if (voiceProvider() === "kokoro") return true;
   return Boolean(process.env.ELEVENLABS_API_KEY);
 }
 
-/** sha1(caption + voice + model + settings) — content, never identity. */
-export function cacheKeyFor(caption) {
+/** Why isVoiceConfigured() is false, in words the cycle log can print. */
+export function voiceConfigProblem() {
+  return isVoiceConfigured() ? null : `ELEVENLABS_API_KEY is not set (VIDEO_TTS_PROVIDER=${voiceProvider()})`;
+}
+
+// Bump only if the Kokoro MODEL (not the server image) ever changes: the weights
+// decide the audio, and the key must move with them.
+const KOKORO_MODEL = "kokoro-82m-v1.0";
+
+/**
+ * sha1(caption + voice + model + settings) — content, never identity.
+ *
+ * TWO KEY SPACES, ONE DIRECTORY. The ElevenLabs material below is UNCHANGED
+ * byte for byte (pinned by "THE CACHE DIGEST IS UNCHANGED"), so flipping back to
+ * ElevenLabs finds its 7-day cache intact. Kokoro digests its own material, led
+ * by the literal "kokoro", so the two can never collide on the same caption.
+ */
+export function cacheKeyFor(caption, provider = voiceProvider()) {
+  if (provider === "kokoro") {
+    const k = kokoroConfig();
+    return createHash("sha1")
+      .update(String(caption))
+      .update("|kokoro|").update(KOKORO_MODEL)
+      .update("|").update(k.voice)
+      .update("|").update(JSON.stringify({ speed: k.speed }))
+      .digest("hex")
+      .slice(0, 24);
+  }
   return createHash("sha1")
     .update(String(caption))
     .update("|").update(VOICE_ID)
@@ -297,6 +400,104 @@ export function wordsFromAlignment(alignment) {
   return words.length ? words : null;
 }
 
+/** A word reduced to what can be compared across spellings: "E.ON," and "E-ON" are both "eon". */
+const normWord = (s) => String(s ?? "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]/g, "");
+
+/**
+ * Map Kokoro's SPOKEN tokens back onto the caption's OWN words.
+ *
+ * Kokoro times the text after its normaliser has rewritten it, so the tokens
+ * are not the caption. Measured on v0.9.0: "$83 million" comes back as
+ * `eighty-three` `million` `dollars`, "2027" as `twenty` `twenty-seven`, "E.ON"
+ * as `E-ON`, and every punctuation mark as a token of its own. ElevenLabs'
+ * `alignment` indexes the text we SENT, and every consumer is built on that:
+ * shotVideo.anchorTime needs exactly one entry per whitespace word of the
+ * caption (else it scales the cut and warns), and the burned captions DISPLAY
+ * `word` — so they must say "$83", not "eighty-three".
+ *
+ * So the output is the ElevenLabs shape exactly: one { word, start, end } per
+ * whitespace-separated caption word, in the caption's spelling, seconds from
+ * the clip's start.
+ *
+ *   1. ANCHOR. The longest common subsequence of normalised caption words and
+ *      normalised tokens (a word may also equal up to four tokens joined, for a
+ *      name the normaliser splits). Monotonic and globally optimal, so a common
+ *      word like "the" cannot be matched to a later "the" and steal a span.
+ *   2. FILL. The caption words between two anchors share the time of the
+ *      tokens between them — "$83" takes `eighty-three` — split by character
+ *      weight. Punctuation-only words ("—") get zero length at the gap's start.
+ *   3. ABSORB. Tokens with no caption word to own them (the `dollars` the
+ *      normaliser added after "million") extend the previous word, which is
+ *      where they are heard.
+ *
+ * @returns {{ words: Array, matched: number } | null}
+ */
+export function alignKokoroWords(caption, stamps) {
+  const raw = String(caption ?? "").trim().split(/\s+/).filter(Boolean);
+  if (!raw.length || !Array.isArray(stamps)) return null;
+  const toks = stamps
+    .map((t) => ({ n: normWord(t?.word), s: Math.max(0, Number(t?.start_time)), e: Math.max(0, Number(t?.end_time)) }))
+    .filter((t) => t.n && Number.isFinite(t.s) && Number.isFinite(t.e) && t.e >= t.s);
+  if (!toks.length) return null;
+
+  const W = raw.map(normWord), n = W.length, m = toks.length, MAXJOIN = 4;
+  // How many tokens starting at j join to caption word i (0 = no match).
+  const span = (i, j) => {
+    if (!W[i]) return 0;
+    let acc = "";
+    for (let k = 0; k < MAXJOIN && j + k < m; k++) {
+      acc += toks[j + k].n;
+      if (acc === W[i]) return k + 1;
+      if (!W[i].startsWith(acc)) return 0;
+    }
+    return 0;
+  };
+  // LCS table, filled from the end so the walk below reads forwards.
+  const best = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      const k = span(i, j);
+      best[i][j] = Math.max(best[i + 1][j], best[i][j + 1], k ? 1 + best[i + 1][j + k] : 0);
+    }
+  }
+  const anchors = [];   // { i, a, b } — caption word i owns tokens a..b
+  for (let i = 0, j = 0; i < n && j < m;) {
+    const k = span(i, j);
+    if (k && best[i][j] === 1 + best[i + 1][j + k]) { anchors.push({ i, a: j, b: j + k - 1 }); i++; j += k; }
+    else if (best[i][j] === best[i + 1][j]) i++;
+    else j++;
+  }
+
+  const words = raw.map((word) => ({ word, start: 0, end: 0 }));
+  const put = (i, s, e) => { words[i].start = s; words[i].end = Math.max(s, e); };
+  for (const a of anchors) put(a.i, toks[a.a].s, toks[a.b].e);
+
+  // Gaps, including before the first anchor and after the last.
+  const bounds = [{ i: -1, b: -1 }, ...anchors, { i: n, a: m }];
+  for (let g = 0; g + 1 < bounds.length; g++) {
+    const L = bounds[g], R = bounds[g + 1];
+    const gapWords = []; for (let i = L.i + 1; i < R.i; i++) gapWords.push(i);
+    const t0 = L.b + 1, t1 = R.a - 1;                     // unmatched tokens between
+    const weights = gapWords.map((i) => W[i].length);
+    const total = weights.reduce((x, y) => x + y, 0);
+    const from = t0 <= t1 ? toks[t0].s : (L.b >= 0 ? toks[L.b].e : toks[0].s);
+    const to = t0 <= t1 ? toks[t1].e : (R.a < m ? toks[R.a].s : toks[m - 1].e);
+    if (!total) {
+      // Nobody in the gap can own the tokens: the previous word does (ABSORB).
+      if (t0 <= t1 && L.i >= 0) words[L.i].end = Math.max(words[L.i].end, toks[t1].e);
+      for (const i of gapWords) put(i, from, from);
+      continue;
+    }
+    let t = from;
+    gapWords.forEach((i, x) => {
+      const d = ((to - from) * weights[x]) / total;
+      put(i, t, t + d); t += d;
+    });
+  }
+  const r3 = (x) => +x.toFixed(3);
+  return { words: words.map((w) => ({ word: w.word, start: r3(w.start), end: r3(w.end) })), matched: anchors.length };
+}
+
 /**
  * Synthesise one caption, WITH per-word timings when the API will give them.
  *
@@ -359,18 +560,159 @@ async function elevenLabs(caption) {
 }
 
 /**
- * Voice one caption. Returns { path, durationSecs, cached, key }.
+ * Kokoro, via Kokoro-FastAPI's /dev/captioned_speech — the endpoint that
+ * returns word timestamps. `stream: false` is REQUIRED: the endpoint streams
+ * by default, and a stream is a sequence of JSON chunks, not one document.
+ * The non-stream reply is `{ audio: base64, audio_format, timestamps: [{ word,
+ * start_time, end_time }] }`, seconds (kokoro-fastapi v0.9.0,
+ * api/src/routers/development.py).
+ *
+ * MP3, so the cache holds an honest `.mp3` the sweeper knows. Kokoro writes it
+ * at 24 kHz; nothing downstream cares — both render paths resample to 48 kHz
+ * and the duration is probed from the file.
+ *
+ * UNLIKE the ElevenLabs path there is no plain-endpoint retry: the same server
+ * answers both, so a second call to a broken Kokoro only doubles the wait.
+ * Timings that fail to map cost the captions, never the audio.
+ *
+ * @returns {Promise<{buf: Buffer, words: Array|null}>}
+ */
+async function kokoro(caption) {
+  const k = kokoroConfig();
+  const text = String(caption).slice(0, 5000);
+  let res;
+  try {
+    res = await fetch(`${k.url}/dev/captioned_speech`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        model: "kokoro", input: text, voice: k.voice, speed: k.speed,
+        response_format: "mp3", stream: false, return_timestamps: true,
+      }),
+      signal: AbortSignal.timeout(k.timeoutMs),
+    });
+  } catch (err) {
+    // AbortSignal.timeout rejects with a TimeoutError whose message does not say
+    // how long it waited; the operator needs the number.
+    if (err?.name === "TimeoutError") throw new Error(`timeout after ${k.timeoutMs}ms (${k.url})`);
+    throw new Error(`${k.url} unreachable — ${String(err?.cause?.code || err?.message || err)}`);
+  }
+  if (!res.ok) {
+    const b = await res.text().catch(() => "");
+    const e = new Error(`HTTP ${res.status}: ${b.slice(0, 200)}`);
+    e.status = res.status;
+    throw e;
+  }
+  const json = await res.json();
+  const buf = Buffer.from(String(json?.audio || ""), "base64");
+  if (buf.length < 256) throw new Error(`decoded ${buf.length} bytes — not audio`);
+  let words = null;
+  try {
+    const aligned = alignKokoroWords(text, json?.timestamps);
+    if (aligned) {
+      words = aligned.words;
+      const guessed = words.length - aligned.matched;
+      // Expected for numbers, symbols and punctuation-only words — the normaliser
+      // rewrites them — not a fault. A caption where MOST words are placed is.
+      if (guessed) logger.info(`🔊 kokoro: ${aligned.matched}/${words.length} words timed directly, ${guessed} placed between them (words the normaliser rewrote)`);
+    } else {
+      logger.warn(`🔊 kokoro returned audio but no usable timestamps — this clip has no word timings`);
+    }
+  } catch (err) {
+    logger.warn(`🔊 kokoro word mapping failed (${String(err.message).slice(0, 80)}) — this clip has no word timings`);
+  }
+  return { buf, words };
+}
+
+/**
+ * The selected provider, and the only fallback there is: the opt-in one.
+ * Every failure is named in the log before anything else happens.
+ */
+async function synthesise(text) {
+  if (voiceProvider() !== "kokoro") return { ...(await elevenLabs(text)), provider: "elevenlabs" };
+  try {
+    return { ...(await kokoro(text)), provider: "kokoro" };
+  } catch (err) {
+    const reason = String(err?.message || err).slice(0, 240);
+    logger.warn(`🔊 kokoro failed: ${reason}`);
+    if (fallbackProvider() === "elevenlabs") {
+      logger.warn("🔊 VIDEO_TTS_FALLBACK=elevenlabs — voicing this caption with ElevenLabs instead");
+      return { ...(await elevenLabs(text)), provider: "elevenlabs" };
+    }
+    throw new VoiceError(`kokoro failed: ${reason}`, { caption: text, status: err?.status ?? null });
+  }
+}
+
+// ─── Spend ──────────────────────────────────────────────────────────────────
+//
+// Characters actually synthesised, per provider, since the process started.
+// The cycle snapshots it at entry and prints the difference on its summary line
+// (videoAutopost `finish`). Kokoro is $0 — it runs on our own box. ElevenLabs
+// is reported in CHARACTERS ONLY: the per-character rate depends on the plan,
+// and an invented dollar figure would be worse than none. Cache hits cost
+// nothing and are not counted. Per-process by design: voice runs in the same
+// worker process as the cycle that reads it.
+const usage = { elevenlabs: { calls: 0, chars: 0 }, kokoro: { calls: 0, chars: 0 } };
+
+export function ttsUsageSnapshot() {
+  return JSON.parse(JSON.stringify(usage));
+}
+
+/** The cycle-log segment: "tts kokoro $0.00 (812 chars)" / "tts elevenlabs 812 chars". */
+export function ttsSpendSince(snapshot = { elevenlabs: { chars: 0, calls: 0 }, kokoro: { chars: 0, calls: 0 } }) {
+  const d = (p) => ({ calls: usage[p].calls - (snapshot?.[p]?.calls || 0), chars: usage[p].chars - (snapshot?.[p]?.chars || 0) });
+  const fmt = (p, x) => (p === "kokoro" ? `tts kokoro $0.00 (${x.chars} chars)` : `tts elevenlabs ${x.chars} chars`);
+  const active = voiceProvider();
+  const parts = [];
+  for (const p of ["kokoro", "elevenlabs"]) {
+    const x = d(p);
+    if (p === active || x.calls > 0) parts.push(fmt(p, x));
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * Can this process reach the tts service? One GET of /health with a short
+ * timeout; never throws. The worker logs the answer once at boot, whatever the
+ * provider, so "Kokoro is up" is known BEFORE the env is flipped to it.
+ */
+export async function probeTtsService({ timeoutMs = 5000 } = {}) {
+  const { url } = kokoroConfig();
+  const t0 = Date.now();
+  try {
+    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(timeoutMs) });
+    return { ok: res.ok, url, ms: Date.now() - t0, error: res.ok ? null : `HTTP ${res.status}` };
+  } catch (err) {
+    const why = err?.name === "TimeoutError" ? `timeout after ${timeoutMs}ms` : String(err?.cause?.code || err?.message || err);
+    return { ok: false, url, ms: Date.now() - t0, error: why };
+  }
+}
+
+/** The boot line. Loud (error) only when Kokoro is the SELECTED provider and is down. */
+export async function logTtsReachability({ log = logger } = {}) {
+  const provider = voiceProvider();
+  const who = provider === "kokoro" ? `provider=kokoro voice=${kokoroConfig().voice}` : "provider=elevenlabs";
+  const r = await probeTtsService();
+  if (r.ok) log.info(`🔊 tts: ${who} · tts service ${r.url} reachable (${r.ms}ms)`);
+  else if (provider === "kokoro") log.error(`🔊 tts: ${who} · tts service ${r.url} UNREACHABLE (${r.error}) — every Short will skip until it is up`);
+  else log.info(`🔊 tts: ${who} · tts service ${r.url} unreachable (${r.error}) — not in use`);
+  return r;
+}
+
+/**
+ * Voice one caption. Returns { path, durationSecs, cached, key, words, provider }.
  * Throws VoiceError on any failure — never returns silence.
  */
 export async function voiceCaption(caption, { slideIndex = -1 } = {}) {
   const text = String(caption || "").trim();
   if (!text) throw new VoiceError(`slide ${slideIndex}: empty caption — every card must carry its narration line`);
-  if (!isVoiceConfigured()) throw new VoiceError("ELEVENLABS_API_KEY is not set");
+  if (!isVoiceConfigured()) throw new VoiceError(`voice not configured: ${voiceConfigProblem()}`);
 
   if (!existsSync(TTS_CACHE_DIR)) mkdirSync(TTS_CACHE_DIR, { recursive: true });
-  const key = cacheKeyFor(text);
-  const file = path.join(TTS_CACHE_DIR, `${key}.mp3`);
-  const wordsFile = wordsPathFor(key);
+  const provider = voiceProvider();
+  let key = cacheKeyFor(text, provider);
+  let file = path.join(TTS_CACHE_DIR, `${key}.mp3`);
+  let wordsFile = wordsPathFor(key);
 
   if (existsSync(file) && statSync(file).size > 256) {
     const durationSecs = probeDurationSecs(file);
@@ -385,11 +727,21 @@ export async function voiceCaption(caption, { slideIndex = -1 } = {}) {
       `${words ? `${words.length} word timings` : "NO word timings — cached before timestamps"} ` +
       `"${text.slice(0, 48)}"`
     );
-    return { path: file, durationSecs, cached: true, key, words };
+    return { path: file, durationSecs, cached: true, key, words, provider };
   }
 
   const t0 = Date.now();
-  const { buf, words } = await elevenLabs(text);
+  const { buf, words, provider: spoke } = await synthesise(text);
+  // Cached under the key of the provider that ACTUALLY spoke. With the opt-in
+  // fallback, an ElevenLabs clip filed under the Kokoro key would be served as
+  // Kokoro forever after — the old/new mixing the separate key spaces prevent.
+  if (spoke !== provider) {
+    key = cacheKeyFor(text, spoke);
+    file = path.join(TTS_CACHE_DIR, `${key}.mp3`);
+    wordsFile = wordsPathFor(key);
+  }
+  usage[spoke].calls++;
+  usage[spoke].chars += text.length;
   writeFileSync(file, buf);
   // Written AFTER the audio, and never allowed to fail the clip: the sidecar is
   // an enhancement, the mp3 is the product.
@@ -399,11 +751,11 @@ export async function voiceCaption(caption, { slideIndex = -1 } = {}) {
   }
   const durationSecs = probeDurationSecs(file);
   logger.info(
-    `🔊 voice slide ${slideIndex}: CACHE MISS ${key} — synthesised ${(buf.length / 1024).toFixed(0)}KB / ` +
+    `🔊 voice slide ${slideIndex}: CACHE MISS ${key} — ${spoke} synthesised ${(buf.length / 1024).toFixed(0)}KB / ` +
     `${durationSecs.toFixed(2)}s in ${Date.now() - t0}ms ` +
     `${words ? `+ ${words.length} word timings` : "(no word timings)"} "${text.slice(0, 48)}"`
   );
-  return { path: file, durationSecs, cached: false, key, words };
+  return { path: file, durationSecs, cached: false, key, words, provider: spoke };
 }
 
 /**
@@ -468,4 +820,4 @@ export function sweepTtsCache({ retentionMs = TTS_RETENTION_MS, now = Date.now()
   return { removed, bytes, kept };
 }
 
-export const _internals = { elevenLabs, BACKEND_ROOT };
+export const _internals = { elevenLabs, kokoro, synthesise, BACKEND_ROOT };

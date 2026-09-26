@@ -67,7 +67,7 @@ import { assembleSlide, concatSlides, holdForAudio, slideTotalSecs, captionForCa
 } from "./videoAssembler.js";
 import { deriveShortArc, buildBed, scoreShort } from "./videoMusicBed.js";
 import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "./videoArtifacts.js";
-import { voiceSpec, isVoiceConfigured } from "./videoVoice.js";
+import { voiceSpec, isVoiceConfigured, voiceConfigProblem, ttsUsageSnapshot, ttsSpendSince } from "./videoVoice.js";
 import { wordCaptionsEnabled, buildWordCaptionTrack } from "./videoWordCaptions.js";
 import { shotEngineEnabled } from "./videoShotList.js";
 import { produceShotVideo, prepareShotPlan, loadPlan, hasFreshPlan } from "./shots/shotProduce.js";
@@ -1904,6 +1904,9 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
   // half-finished loop is not a budget.
   const maxSpecCalls = MAX_SPEC_CALLS(), maxScan = MAX_SCAN();
   let produced = null, spendUsd = 0;
+  // TTS characters are counted by videoVoice per process; the difference from
+  // this snapshot is what THIS cycle synthesised (cache hits are free).
+  const ttsSnap = ttsUsageSnapshot();
   let current = null;   // the attempt in flight, so a throw is attributable
 
   try {
@@ -1940,8 +1943,9 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       return finish({ skipped: "no-spec", reason: "VIDEO_SPEC_ENABLED or GEMINI_API_KEY unset" });
     }
     if (!_isVoiceConfigured()) {
-      logger.error("🚨 video cycle ABORTED — ELEVENLABS_API_KEY unset; §5 makes voice a hard requirement.");
-      return finish({ skipped: "no-voice", reason: "ELEVENLABS_API_KEY unset" });
+      const why = voiceConfigProblem() || "voice not configured";
+      logger.error(`🚨 video cycle ABORTED — ${why}; §5 makes voice a hard requirement.`);
+      return finish({ skipped: "no-voice", reason: why });
     }
     if (!_isYouTubeConfigured() && !dryRun) {
       logger.error("🚨 video cycle ABORTED — YouTube is not configured and this is not a dry run.");
@@ -2361,7 +2365,8 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
       `🎬 video cycle done: examined ${tried}, spec calls ${specCalls}/${maxSpecCalls}, ` +
       `produced ${produced ? 1 : 0}` +
       (specCalls ? ` (yield 1 in ${specCalls} spec call(s))` : "") +
-      ` · spec spend $${spendUsd.toFixed(5)}`
+      ` · spec spend $${spendUsd.toFixed(5)}` +
+      ` · ${ttsSpendSince(ttsSnap)}`
     );
     try {
       recordHeartbeat(VIDEO_CYCLE_HEARTBEAT, {

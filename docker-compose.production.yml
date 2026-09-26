@@ -132,6 +132,63 @@ services:
     stop_grace_period: 60s
     command: ["npm", "run", "start:worker"]
 
+  # SELF-HOSTED TTS — Kokoro-82M (Apache 2.0) behind Kokoro-FastAPI, CPU build.
+  #
+  # Voices the automated Shorts when VIDEO_TTS_PROVIDER=kokoro (videoVoice.js).
+  # Present but idle until then: the code default is still ElevenLabs. The
+  # longform films never call it — they keep ElevenLabs (longform/engine/narrate.mjs).
+  #
+  # PINNED BY TAG AND DIGEST, never "latest": a silent image change would change
+  # the voice of every Short with no commit to show for it. Digest read from
+  # ghcr.io on 2026-09-26 for v0.9.0 (multi-arch index).
+  #
+  # NOT PUBLISHED. No `ports:` on purpose — it is reachable only from the other
+  # containers on this compose network, as http://tts:8880. Nothing on the
+  # internet can reach it, and it has no auth of its own.
+  #
+  # NO depends_on FROM THE WORKER, on purpose: a broken tts must cost Shorts,
+  # never block ingestion, social or the graph from starting. The worker logs
+  # whether it can reach this service once at boot ("🔊 tts: …").
+  #
+  # MEMORY — sized from measurements, not guessed:
+  #   • VPS 2026-09-26: 7.75 GiB RAM, 2 vCPU, ~5.5 GiB available; container
+  #     peaks worker 2.6 / scheduler 3.1 / web 1.7 / graph 1.2 GiB (cgroup
+  #     memory.peak, which includes page cache and is not simultaneous).
+  #   • Kokoro measured in the sandbox on a 24 s caption: 2.34 GiB peak RSS,
+  #     1.94 GiB steady. A public CPU benchmark reports ~2.8 GB peak.
+  #   3.5g is 25% over the higher of those. memswap_limit = mem_limit gives it
+  #   NO swap: over the ceiling it is OOM-killed and restarted (that one video
+  #   skips with "kokoro failed: …") rather than paging onto the disk the SQLite
+  #   database lives on.
+  #
+  # cpus: 1.0 — half the box. A render keeps the other core. OMP_NUM_THREADS=1
+  # matches torch's thread pool to that quota instead of two threads fighting
+  # over one core's worth of CFS time. Measured at ~1x real time on one core.
+  #
+  # The model is baked into the image; the named volume keeps it across
+  # recreates, and the entrypoint's download step no-ops when it is present.
+  # ⚠️ A future image that ships NEW weights will not reach an existing volume —
+  # remove `kokoro_models` when upgrading across a model change.
+  tts:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.0@sha256:ee3111d6a2c903ed62f3b4fa19543c6901205ed39fce3c177e895b34a8386b9c
+    restart: unless-stopped
+    environment:
+      OMP_NUM_THREADS: "1"
+    volumes:
+      - kokoro_models:/app/api/src/models
+    mem_limit: 3.5g
+    memswap_limit: 3.5g
+    cpus: 1.0
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8880/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # Model load + warmup synthesis on one core before /health answers.
+      start_period: 120s
+
 volumes:
   scoop_data:
   redis_data:
+  kokoro_models:

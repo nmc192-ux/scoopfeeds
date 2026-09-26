@@ -15,6 +15,7 @@ import {
 } from "../services/scheduler.js";
 import { sweepAtStartup } from "../services/videoArtifacts.js";
 import { assertFFmpegCapable } from "../services/ffmpegCapability.js";
+import { logTtsReachability } from "../services/videoVoice.js";
 import { runVideoRenderCycle } from "../services/videoAutopost.js";
 import { longformCycleJob } from "../services/longform/runLongformCycle.js";
 import { runSocialCycleWithTimeout } from "../services/socialPublisher.js";
@@ -111,6 +112,14 @@ try {
   // video jobs and fail every one of them. So this throws to the outer catch,
   // which exits — visible immediately, to the person deploying.
   assertFFmpegCapable();
+
+  // CAN THIS PROCESS REACH THE `tts` SERVICE? One line, whatever the provider,
+  // so "Kokoro is up" is on record BEFORE VIDEO_TTS_PROVIDER is flipped to it.
+  // NOT awaited and never throws: the worker also runs ingestion and social,
+  // and a missing tts container must not delay or fail any of that. If Kokoro
+  // is the selected provider and is down, the line is an error and each Short
+  // skips with "kokoro failed: …".
+  logTtsReachability().catch(() => {});
 
   try {
     const swept = await sweepAtStartup();
