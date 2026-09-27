@@ -16,7 +16,7 @@ import path from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from "fs";
 import { logger } from "../logger.js";
 import { getDb } from "../../models/database.js";
-import { voiceSpec } from "../videoVoice.js";
+import { voiceSpec, withVoiceIdentity } from "../videoVoice.js";
 import { getFFmpegPath } from "../videoGenerator.js";
 import { acquireFrameDir, releaseFrameDir, VIDEOS_DIR } from "../videoArtifacts.js";
 import { sourceFingerprint } from "../renderCore.js";
@@ -29,7 +29,8 @@ import {
 } from "./shotVideo.js";
 
 // ─── The design key: every file that decides pixels ────────────────────────
-export const SHOT_BUILDER_FINGERPRINT = sourceFingerprint([
+// Plus the voice, when it is Kokoro (withVoiceIdentity) — unchanged for ElevenLabs.
+const SHOT_SOURCE_FINGERPRINT = sourceFingerprint([
   import.meta.url,
   new URL("./shotVideo.js", import.meta.url).href,
   new URL("./shotResolver.js", import.meta.url).href,
@@ -39,6 +40,7 @@ export const SHOT_BUILDER_FINGERPRINT = sourceFingerprint([
   `file://${path.join(ENGINE_DIR, "mix.py")}`,
   new URL("./shotSound.js", import.meta.url).href,
 ]);
+export const SHOT_BUILDER_FINGERPRINT = withVoiceIdentity(SHOT_SOURCE_FINGERPRINT);
 export const shotDesignKey = () => `shot-v1-${SHOT_BUILDER_FINGERPRINT}`;
 
 // ─── Plan store ─────────────────────────────────────────────────────────────

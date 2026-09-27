@@ -200,6 +200,46 @@ but the model also carries its own per-character rate — so switching tiers re-
 corpus at the *new* price. Verified 2026-08-11: with everything at defaults the key is
 `2d080f87…`; setting `VIDEO_VOICE_MODEL=eleven_multilingual_v2` moves it to `c281f131…`.
 
+### TTS provider — ElevenLabs or self-hosted Kokoro (2026-09-26)
+
+Which engine voices the **automated Shorts** (`videoVoice.js`). Kokoro-82M (Apache 2.0) runs as
+the `tts` service in `docker-compose.production.yml` — CPU image, pinned by tag + digest,
+internal network only (`http://tts:8880`, no published port), `mem_limit 3.5g`, `cpus 1.0`.
+**The longform films are not affected by any of this**: `longform/engine/narrate.mjs` keeps its
+own ElevenLabs call and reads `VIDEO_VOICE_ID`, which is why Kokoro has its own names.
+
+Every `VIDEO_VOICE_*` var above is **ElevenLabs-only** and is ignored while Kokoro speaks.
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `VIDEO_TTS_PROVIDER` | `elevenlabs` | default (**`kokoro` once flipped**) | recreate | `kokoro` \| `elevenlabs`. The only thing that selects the provider — never the presence of a key. Case-insensitive; an unknown value warns and uses `elevenlabs`. Under `kokoro` the cycle's voice gate no longer needs `ELEVENLABS_API_KEY`. Flipping back is this one line. |
+| `VIDEO_TTS_KOKORO_VOICE` | `bm_george` | default | recreate | Kokoro voice (British male — DrJ's pick, 2026-09-26). In the Kokoro cache key and in the design-key fingerprint. |
+| `VIDEO_TTS_KOKORO_SPEED` | `1.0` | default | recreate | Kokoro speed, range 0.5–2 (out of range warns and falls back). In the Kokoro cache key. Slide duration *is* audio duration, so this paces the whole Short. |
+| `VIDEO_TTS_KOKORO_URL` | `http://tts:8880` | default | recreate | The compose service. Only change it for a sandbox or a moved service. |
+| `VIDEO_TTS_KOKORO_TIMEOUT_MS` | `60000` | default | recreate | Per-caption timeout (`AbortSignal.timeout`), range 1000–300000. Longer than ElevenLabs' 30s because synthesis shares a 2-vCPU box with the render: measured ~1× real time on one core (24s of audio in 23.8s), and Short captions run 5–15s. A timeout costs that one video: `🔊 kokoro failed: timeout after …ms`. |
+| `VIDEO_TTS_FALLBACK` | unset (**off**) | unset | recreate | `elevenlabs` = if Kokoro fails, voice that caption with ElevenLabs instead (logged, and the clip is cached under ElevenLabs' key, never Kokoro's). **Off by default on purpose**: a silent fallback would hide a broken Kokoro behind a bill — and with no credits, behind a 401 that names the wrong provider. Off, a Kokoro failure logs `🔊 kokoro failed: <reason>` and that Short is skipped (`SKIP produce: kokoro failed: …`). |
+
+**Caches never mix.** ElevenLabs clips keep their exact key (`2d080f87…` for the pinned test
+caption — unchanged by this work), so flipping back finds the 7-day ElevenLabs cache intact.
+Kokoro clips use their own key (caption + `kokoro` + model + voice + speed). The design-key
+fingerprints (`VIDEO_BUILDER_FINGERPRINT`, `SHOT_BUILDER_FINGERPRINT`) fold in `kokoro|<voice>`
+only when Kokoro is selected — under ElevenLabs they are byte-identical to before.
+
+**Word timings.** Kokoro times its *spoken* tokens after normalising the text ("$83 million" →
+`eighty-three million dollars`, "2027" → `twenty twenty-seven`, punctuation as tokens).
+`alignKokoroWords` maps them back onto the caption's own words, so the sidecar has the
+ElevenLabs shape exactly: one `{word, start, end}` per whitespace word, caption spelling,
+seconds. Rewritten words are placed between their directly-timed neighbours, and the log says how
+many (`🔊 kokoro: 17/21 words timed directly, 4 placed between them`).
+
+**Spend.** The cycle summary line now ends `· tts kokoro $0.00 (N chars)` or
+`· tts elevenlabs N chars` (characters only — the per-character price depends on the plan and
+is not invented). Cache hits are free and not counted.
+
+**Boot.** Every worker process logs once at start whether it can reach the service:
+`🔊 tts: provider=kokoro voice=bm_george · tts service http://tts:8880 reachable (…ms)`. That
+line is an **error** only when Kokoro is the selected provider and is unreachable.
+
 `SLIDE_TAIL_SECS` (`VIDEO_SLIDE_TAIL`, `0.3`) is **not** the same knob: it is the mechanical
 margin that stops the last consonant being clipped by the cut. Shortening the editorial gap
 must never be able to clip a slide, so the two stay separate numbers.

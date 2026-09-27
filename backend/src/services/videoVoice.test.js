@@ -108,9 +108,16 @@ test("there is NO silent fallback anywhere in the module", () => {
     "the audio path must throw on failure, never hand back null for a missing clip");
 });
 
-test("ElevenLabs is called unconditionally — no provider chain", () => {
+test("no first-key-wins chain — the provider is named by VIDEO_TTS_PROVIDER alone", () => {
+  // Kokoro (2026-09-26) made this module two-provider, so "ElevenLabs,
+  // unconditionally" no longer holds. What this test existed to stop still
+  // must: ttsService's chain, where the presence of a KEY picks the provider
+  // and a prod OPENAI_API_KEY would silently override the ruling.
   assert.ok(!/OPENAI_API_KEY|GOOGLE_TTS_KEY|ttsProvider/.test(SRC),
-    "a first-key-wins chain would let a prod OPENAI_API_KEY override the ElevenLabs ruling");
+    "a first-key-wins chain would let a prod OPENAI_API_KEY override the provider ruling");
+  const fn = SRC.slice(SRC.indexOf("export function voiceProvider"), SRC.indexOf("export function kokoroConfig"));
+  assert.match(fn, /VIDEO_TTS_PROVIDER/);
+  assert.ok(!/API_KEY/.test(fn), "a key's presence must never choose the provider");
   assert.match(SRC, /api\.elevenlabs\.io/);
 });
 
