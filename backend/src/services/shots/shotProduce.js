@@ -73,6 +73,25 @@ export function hasFreshPlan({ now = Date.now() } = {}) {
   return false;
 }
 
+/**
+ * Delete every plan whose article is not in `keepIds` — plans that can never be
+ * used. A plan for an article that has since published, or that the publisher
+ * cooldown now sets aside, used to sit "fresh" for its whole 6h TTL: the gated
+ * cycle saw a fresh plan and pre-resolved nothing, and the open slot then picked
+ * a different article and resolved it cold, inside the render lock. On the
+ * first prod day that was two cold resolves in a row, the second past the lock.
+ */
+export function prunePlans(keepIds) {
+  const dir = plansDir();
+  if (!existsSync(dir)) return 0;
+  let removed = 0;
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".json") || keepIds.has(f.slice(0, -5))) continue;
+    try { unlinkSync(path.join(dir, f)); removed++; } catch { /* a racing delete is fine */ }
+  }
+  return removed;
+}
+
 /** Pre-resolve: resolve every shot of a validated spec and store the plan. */
 export async function prepareShotPlan(article, spec, attribution, { deps = null } = {}) {
   const t0 = Date.now();
