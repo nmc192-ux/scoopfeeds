@@ -232,6 +232,15 @@ ElevenLabs shape exactly: one `{word, start, end}` per whitespace word, caption 
 seconds. Rewritten words are placed between their directly-timed neighbours, and the log says how
 many (`🔊 kokoro: 17/21 words timed directly, 4 placed between them`).
 
+**Pronunciation overrides** (not an env var — a list in code,
+`backend/src/services/ttsPronunciations.js`, one line per name: `{ word: "Xi", say: "Shee" }`).
+Kokoro is sent the respelled text; the captions keep the original spelling, because the word
+mapper matches Kokoro's tokens against the respelling and writes back the caption's own word.
+Starts with `Xi → Shee` and `E.ON → ee-on` (both measured wrong on v0.9.0, both right after).
+Whole-word and case-sensitive (`Xi`, not `XI` or `Xinhua`); `word` must be one word. Kokoro
+only. Editing the list re-voices just the captions it touches — the respelled text enters the
+Kokoro cache key only when it differs from the caption.
+
 **Spend.** The cycle summary line now ends `· tts kokoro $0.00 (N chars)` or
 `· tts elevenlabs N chars` (characters only — the per-character price depends on the plan and
 is not invented). Cache hits are free and not counted.

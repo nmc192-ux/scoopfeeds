@@ -40,6 +40,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync,
 import path from "path";
 import { logger } from "./logger.js";
 import { getFFmpegPath } from "./videoGenerator.js";
+import { applyPronunciations } from "./ttsPronunciations.js";
 
 const BACKEND_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 
@@ -265,13 +266,18 @@ const KOKORO_MODEL = "kokoro-82m-v1.0";
 export function cacheKeyFor(caption, provider = voiceProvider()) {
   if (provider === "kokoro") {
     const k = kokoroConfig();
-    return createHash("sha1")
+    const h = createHash("sha1")
       .update(String(caption))
       .update("|kokoro|").update(KOKORO_MODEL)
       .update("|").update(k.voice)
-      .update("|").update(JSON.stringify({ speed: k.speed }))
-      .digest("hex")
-      .slice(0, 24);
+      .update("|").update(JSON.stringify({ speed: k.speed }));
+    // The respelled text (ttsPronunciations.js) decides the audio, so it is in
+    // the key — but ONLY when it differs. A caption the list does not touch
+    // keeps its existing key, so editing the list re-voices just the captions
+    // it affects.
+    const spoken = applyPronunciations(caption);
+    if (spoken !== String(caption)) h.update("|said:").update(spoken);
+    return h.digest("hex").slice(0, 24);
   }
   return createHash("sha1")
     .update(String(caption))
@@ -430,9 +436,14 @@ const normWord = (s) => String(s ?? "").toLowerCase().normalize("NFKD").replace(
  *      normaliser added after "million") extend the previous word, which is
  *      where they are heard.
  *
+ * RESPELLINGS. `say` maps one caption word to what Kokoro was actually sent
+ * for it (ttsPronunciations.js: "Xi" → "Shee"). Anchoring compares Kokoro's
+ * tokens against THAT, while the output keeps the caption's own word — so the
+ * audio says "Shee" and the caption still reads "Xi", timed directly.
+ *
  * @returns {{ words: Array, matched: number } | null}
  */
-export function alignKokoroWords(caption, stamps) {
+export function alignKokoroWords(caption, stamps, { say = (w) => w } = {}) {
   const raw = String(caption ?? "").trim().split(/\s+/).filter(Boolean);
   if (!raw.length || !Array.isArray(stamps)) return null;
   const toks = stamps
@@ -440,7 +451,7 @@ export function alignKokoroWords(caption, stamps) {
     .filter((t) => t.n && Number.isFinite(t.s) && Number.isFinite(t.e) && t.e >= t.s);
   if (!toks.length) return null;
 
-  const W = raw.map(normWord), n = W.length, m = toks.length, MAXJOIN = 4;
+  const W = raw.map((w) => normWord(say(w))), n = W.length, m = toks.length, MAXJOIN = 4;
   // How many tokens starting at j join to caption word i (0 = no match).
   const span = (i, j) => {
     if (!W[i]) return 0;
@@ -580,13 +591,15 @@ async function elevenLabs(caption) {
 async function kokoro(caption) {
   const k = kokoroConfig();
   const text = String(caption).slice(0, 5000);
+  // Kokoro hears the respelled text; the caption keeps its own spelling.
+  const spoken = applyPronunciations(text);
   let res;
   try {
     res = await fetch(`${k.url}/dev/captioned_speech`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
-        model: "kokoro", input: text, voice: k.voice, speed: k.speed,
+        model: "kokoro", input: spoken, voice: k.voice, speed: k.speed,
         response_format: "mp3", stream: false, return_timestamps: true,
       }),
       signal: AbortSignal.timeout(k.timeoutMs),
@@ -608,7 +621,7 @@ async function kokoro(caption) {
   if (buf.length < 256) throw new Error(`decoded ${buf.length} bytes — not audio`);
   let words = null;
   try {
-    const aligned = alignKokoroWords(text, json?.timestamps);
+    const aligned = alignKokoroWords(text, json?.timestamps, { say: (w) => applyPronunciations(w) });
     if (aligned) {
       words = aligned.words;
       const guessed = words.length - aligned.matched;
