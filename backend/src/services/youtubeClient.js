@@ -127,8 +127,12 @@ async function _getAccessToken() {
 //   tags        — string[] (up to 500 chars total)
 //   category    — numeric YouTube category ID (default 25 = News & Politics)
 //   isShort     — if true, appends #Shorts to description
+//   containsSyntheticMedia — the AI-content disclosure. Defaults to true, which
+//                 is right for everything the pipeline renders; only a manual
+//                 post of real, externally made footage sets it false.
 //
-export async function uploadToYouTube({ filePath, title, description = "", tags = [], category = 25, isShort = true } = {}) {
+export async function uploadToYouTube({ filePath, title, description = "", tags = [], category = 25, isShort = true,
+  containsSyntheticMedia = true } = {}) {
   if (!isYouTubeConfigured()) throw new Error("YouTube not configured (YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN missing)");
   if (!filePath || !existsSync(filePath)) throw new Error(`YouTube upload: file not found at ${filePath}`);
 
@@ -152,7 +156,7 @@ export async function uploadToYouTube({ filePath, title, description = "", tags 
       privacyStatus:           getPrivacy(),
       selfDeclaredMadeForKids: false,
       // Required AI-generated content disclosure (YouTube policy since 2024).
-      containsSyntheticMedia:  true,
+      containsSyntheticMedia:  containsSyntheticMedia !== false,
     },
   };
 
