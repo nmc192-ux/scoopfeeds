@@ -592,6 +592,32 @@ tick both permission boxes, exchange for tokens, replace
 `YOUTUBE_REFRESH_TOKEN`. Verify with `getChannelInfo` — it prints the channel
 name, which is the only reliable way to confirm *where* it will publish.
 
+**Posting a one-off, externally made video** (`backend/scripts/manualPost.mjs`, 2026-09-27)
+
+For a reel that did not come out of the loop. It calls the same client functions
+the fan-out uses (`uploadToYouTube`, `postReelToFacebook`, `postVideoToThreads`,
+`postVideoToBluesky`, `postToX`) with the same credentials, but not the
+`videoAutopost` wrappers — those are keyed to an article row and write
+`video_posts`, and a manual post has neither. A per-platform JSON manifest holds
+the file and text; the header of the script documents its shape.
+
+- **Dry run is the default**; `--publish` is the only path that sends. The dry
+  run prints the exact payload after every client transform and fails a platform
+  where a client would truncate — no silent caps.
+- **Rule 0 runs over the whole manifest** and stops every platform on a match.
+  No override. The sensitivity tiers are reported, not enforced (they are image
+  and CTA guards, not publish gates).
+- YouTube's AI disclosure must be set explicitly per manifest
+  (`containsSyntheticMedia`); the client default stays `true` for rendered video.
+- Threads is URL-fetch: the file is staged as `<id>-shorts.mp4` under
+  `VIDEOS_DIR`, HEAD-checked on the public route, and deleted after the post.
+- Results go to `<data>/manual-posts/<id>.json`. Delete the media afterwards —
+  there is no in-house media library.
+- Run it inside the worker container (it has the env). To use code not yet in
+  the image, copy `backend/src` + `package.json` to a tmp dir in the container,
+  overlay the changed files, symlink `node_modules`, and run from there — never
+  edit `/app` in a running container.
+
 ---
 
 ## 9. Method notes worth keeping
