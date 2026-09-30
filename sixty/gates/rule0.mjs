@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
- * pakistan.mjs — Standing rule 1 as a HARD GATE. Agents may run it; they cannot
+ * rule0.mjs — Standing rule 1 as a HARD GATE. Agents may run it; they cannot
  * edit it (runner permissions deny writes under sixty/gates/, and the runner
  * hashes this directory before and after every run — a changed gate voids the film).
  *
  * It is a thin CLI over prod Rule 0 (backend/src/services/videoPakistanBlock.js):
  * the same deterministic matcher, no prompt, no override, over-blocking correct.
  *
- *   node sixty/gates/pakistan.mjs selection <candidates.json>
+ *   node sixty/gates/rule0.mjs selection <candidates.json>
  *       candidates.json: [{ id, title, description?, content?, source_name?, category?, tags? }]
  *       Writes <candidates>.rule0.json { kept: [...], blocked: [{id, title, signals}] }. Exit 0.
  *
- *   node sixty/gates/pakistan.mjs film <filmdir>
+ *   node sixty/gates/rule0.mjs film <filmdir>
  *       Re-runs the full matcher over the pick AND every artifact the agents
  *       produced (register, fact-check, script, plan, package). Exit 0 = clear,
  *       3 = BLOCKED (the film must be dropped, not edited until it passes).
@@ -61,5 +61,5 @@ if (stage === "film") {
   process.exit(verdict.allowed ? 0 : 3);
 }
 
-console.error("usage: pakistan.mjs selection <candidates.json> | film <filmdir>");
+console.error("usage: rule0.mjs selection <candidates.json> | film <filmdir>");
 process.exit(1);

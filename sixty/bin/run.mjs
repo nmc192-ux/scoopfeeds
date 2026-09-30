@@ -54,9 +54,15 @@ function gatesHash() {
 }
 
 // ─── Agents: prompt files + model routing from config ─────────────────────
+export function routing(variant) {
+  const v = cfg.variants[variant];
+  if (!v) throw new Error(`unknown variant ${variant}`);
+  const r = { ...(v.base ? routing(v.base) : {}), ...Object.fromEntries(Object.entries(v).filter(([k]) => !k.startsWith("_") && k !== "base")) };
+  for (const [role, x] of Object.entries(r)) if ((cfg.never?.[x.model] || []).includes(x.effort)) throw new Error(`config: ${role} on ${x.model} at ${x.effort} effort is forbidden`);
+  return r;
+}
 function agentsJson(variant) {
-  const models = cfg.variants[variant];
-  if (!models) throw new Error(`unknown variant ${variant}`);
+  const models = routing(variant);
   const contract = readFileSync(path.join(SIXTY, "agents/_contract.md"), "utf8");
   const out = {};
   for (const f of readdirSync(path.join(SIXTY, "agents"))) {
@@ -65,7 +71,9 @@ function agentsJson(variant) {
     const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(src);
     const fm = Object.fromEntries(m[1].split("\n").map((l) => { const i = l.indexOf(":"); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; }));
     const role = f.replace(/\.md$/, "");
-    out[fm.name] = { description: fm.description, tools: fm.tools.split(",").map((s) => s.trim()), model: models[role], prompt: `${contract}\n\n${m[2]}` };
+    if (!models[role]) continue;   // a role this phase does not run
+    out[fm.name] = { description: fm.description, tools: fm.tools.split(",").map((s) => s.trim()), model: models[role].model,
+      ...(models[role].effort ? { effort: models[role].effort } : {}), prompt: `${contract}\n\n${m[2]}` };
   }
   return out;
 }
@@ -78,7 +86,7 @@ function settingsFile(dir) {
     allow: ["Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch", "Agent", "Task",
       "Bash(node:*)", "Bash(ffmpeg:*)", "Bash(ffprobe:*)", "Bash(file:*)", "Bash(ls:*)", "Bash(mkdir:*)", "Bash(cp:*)",
       "Bash(mv:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(jq:*)", "Bash(python3:*)",
-      `Bash(${childEnv.SIXTY_PY}:*)`, "Bash(curl:*)", "Bash(shasum:*)", "Bash(grep:*)", "Bash(sed -n:*)", "Bash(echo:*)", "Bash(date:*)"],
+      `Bash(${childEnv.SIXTY_PY}:*)`, "Bash(curl:*)", "Bash(yt-dlp:*)", "Bash(shasum:*)", "Bash(grep:*)", "Bash(sed -n:*)", "Bash(echo:*)", "Bash(date:*)"],
     deny: [`Edit(${repoAbs}/**)`, `Write(${repoAbs}/**)`, "Bash(git:*)", "Bash(ssh:*)", "Bash(scp:*)", "Bash(sudo:*)",
       "Bash(rm -rf:*)", "Bash(curl -X POST:*)", "Bash(curl --data:*)", "Bash(curl -d:*)", "Bash(crontab:*)", "Bash(launchctl:*)",
       "Bash(osascript:*)", "Bash(open:*)", "Read(~/.ssh/**)", "Read(~/.scoopfeeds.env)", `Read(${repoAbs}/backend/.env)`, "Read(~/.claude/**)"],
@@ -154,12 +162,16 @@ async function session({ dir, prompt, variant, tag }) {
   const agents = agentsJson(variant);
   const producerPrompt = readFileSync(path.join(SIXTY, "agents/producer.md"), "utf8");
   const L = newLedger();
-  const cliArgs = ["-p", prompt, "--model", cfg.producer, "--output-format", "stream-json", "--verbose",
+  const esc = cfg.escalate_to;
+  const escalation = `\n\nESCALATION (DrJ): if a stage running on sonnet fails twice, or returns thin output, run that same subagent ` +
+    `once more with model "${esc.model}" (Agent tool model override) and record the escalation in producer.md. Never escalate to or ` +
+    `run anything at max effort. Never downgrade a stage to a cheaper model.\nROUTING for this run: ${JSON.stringify(routing(variant))}`;
+  const cliArgs = ["-p", prompt, "--model", cfg.producer.model, "--effort", cfg.producer.effort, "--output-format", "stream-json", "--verbose",
     "--strict-mcp-config", "--setting-sources", "project", "--settings", settings, "--add-dir", REPO,
-    "--agents", JSON.stringify(agents), "--append-system-prompt", producerPrompt,
+    "--agents", JSON.stringify(agents), "--append-system-prompt", producerPrompt + escalation,
     "--disallowedTools", "CronCreate,CronDelete,ScheduleWakeup,RemoteTrigger,PushNotification,Workflow,DesignSync,EnterWorktree,ExitWorktree,SendMessage,Skill,Monitor"];
   const stream = path.join(dir, `stream-${tag}.jsonl`);
-  log(`▶ ${tag}: claude ${cfg.producer} producer, variant=${variant}, dir=${dir}`);
+  log(`▶ ${tag}: claude ${cfg.producer.model}/${cfg.producer.effort} producer, variant=${variant}, dir=${dir}`);
   const t0 = Date.now();
   const stopped = await new Promise((resolve) => {
     const ch = spawn("claude", cliArgs, { cwd: dir, env: childEnv, stdio: ["ignore", "pipe", "pipe"] });
@@ -239,7 +251,7 @@ async function runFilm(pickPath, dir, variant, tag) {
   copyFileSync(pickPath, path.join(dir, "pick.json"));
   spawnSync(process.execPath, [path.join(SIXTY, "gates/cap.mjs"), "record", path.basename(dir), "started"]);
   const prompt = `Make ONE 60 · film from pick.json in this folder (${dir}). Run, in order: sixty-researcher → ` +
-    `Rule 0 gate (node ${SIXTY}/gates/pakistan.mjs film .) → sixty-factchecker → sixty-writer → sixty-render → ` +
+    `Rule 0 gate (node ${SIXTY}/gates/rule0.mjs film .) → sixty-factchecker → sixty-writer → sixty-render → ` +
     `QA gate (node ${SIXTY}/gates/qa.mjs .) → sixty-qa → Rule 0 gate again → sixty-packager. ` +
     `Retry per your instructions. Do not post anything. Finish with producer.md.`;
   return session({ dir, prompt, variant, tag });
@@ -253,17 +265,32 @@ try {
     const before = preflight();
     const intake = spawnSync(process.execPath, [path.join(SIXTY, "tools/trends.mjs"), path.join(day, "candidates.json")], { encoding: "utf8" });
     writeFileSync(path.join(day, "intake.log"), intake.stdout + intake.stderr);
-    spawnSync(process.execPath, [path.join(SIXTY, "gates/pakistan.mjs"), "selection", path.join(day, "candidates.json")]);
+    spawnSync(process.execPath, [path.join(SIXTY, "gates/rule0.mjs"), "selection", path.join(day, "candidates.json")]);
     const h0 = gatesHash();
     const usage = await session({ dir: day, variant: opt("variant", cfg.live_variant), tag: "pick",
       prompt: `Pick today's 60 · films. In this folder: run sixty-scout (reads candidates.rule0.json, intake.log; writes stories.json), ` +
         `then sixty-editor for ${films} films + 2 reserves (writes picks.json, picks.md). Then run ` +
-        `node ${SIXTY}/gates/pakistan.mjs selection picks-flat.json after writing picks-flat.json = the picks as ` +
+        `node ${SIXTY}/gates/rule0.mjs selection picks-flat.json after writing picks-flat.json = the picks as ` +
         `[{id, title, description: promise, category}] — any pick it blocks is dropped. Finish with producer.md.` });
     usage.gatesIntact = gatesHash() === h0;
     usage.usageBefore = before; usage.usageAfter = usageSnapshot();
     writeFileSync(path.join(day, "usage-pick.json"), JSON.stringify(usage, null, 1));
     log(`✔ pick done in ${usage.minutes} min, gates intact=${usage.gatesIntact}`);
+  } else if (mode === "repick") {
+    // Editor only, on an existing day's stories.json (DrJ: re-run the Editor for a NEW story).
+    const day = opt("day"); const films = Number(opt("films", 1)); const exclude = opt("exclude", "");
+    const before = preflight(); const h0 = gatesHash();
+    const tag = `repick-${Date.now()}`;
+    const usage = await session({ dir: day, variant: opt("variant", cfg.live_variant), tag,
+      prompt: `Re-pick today's 60 · film. In this folder, run ONLY sixty-editor on stories.json for ${films} film(s) + 2 reserves, ` +
+        `writing picks.json and picks.md (overwrite). Excluded stories (do not pick): ${exclude}. HARD REQUIREMENT: real event footage ` +
+        `must be obtainable for every pick — the editor must find and list at least one concrete, reachable clip URL of the actual event ` +
+        `from an official government, agency or company channel (their own download or their YouTube upload; public-domain government ` +
+        `video first). No footage found = not pickable. Then write picks-flat.json = [{id, title, description: promise, category}] and ` +
+        `run node ${SIXTY}/gates/rule0.mjs selection picks-flat.json — any pick it blocks is dropped. Finish with producer.md.` });
+    usage.gatesIntact = gatesHash() === h0; usage.usageBefore = before; usage.usageAfter = usageSnapshot();
+    writeFileSync(path.join(day, `usage-${tag}.json`), JSON.stringify(usage, null, 1));
+    log(`✔ repick done in ${usage.minutes} min, gates intact=${usage.gatesIntact}`);
   } else if (mode === "film") {
     const before = preflight({ needKokoro: true }); const h0 = gatesHash();
     const variant = opt("variant", cfg.live_variant);
@@ -274,7 +301,7 @@ try {
   } else if (mode === "ab") {
     const story = opt("dir"); mkdirSync(story, { recursive: true });
     const keyFile = path.join(story, ".ab-key.json");
-    const key = existsSync(keyFile) ? JSON.parse(readFileSync(keyFile, "utf8")) : (randomInt(2) ? { A: "top", B: "mix" } : { A: "mix", B: "top" });
+    const key = existsSync(keyFile) ? JSON.parse(readFileSync(keyFile, "utf8")) : (randomInt(2) ? { A: "fable-ab", B: "routing" } : { A: "routing", B: "fable-ab" });
     writeFileSync(keyFile, JSON.stringify({ ...key, note: "SEALED — open only after DrJ has rated A and B." }));
     for (const label of (opt("only") ? [opt("only")] : ["A", "B"])) {
       const before = preflight({ needKokoro: true }); const h0 = gatesHash();

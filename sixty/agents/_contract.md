@@ -6,8 +6,13 @@ states a clear promise in its first 2 s, pays it off before the stopwatch ends, 
 fact on screen is sourced.
 
 ## Standing rules — no agent may change, bend or argue with these
-1. **No Pakistan.** No Pakistan or Pakistani internal politics, anywhere, in any artifact.
-   The hard gate is `node $SIXTY_REPO/sixty/gates/pakistan.mjs film <filmdir>` — it is a
+1. **Rule 0.** The one country Rule 0 covers — and its internal politics — never appears in
+   any film or any artifact. **Never write that country's name, or any word the Rule 0 gate
+   matches (its cities, regions, leaders, parties, outlets), in ANY file you write —
+   including notes, rationales, risk lists and reports.** Refer to the rule only as
+   "Rule 0" (e.g. "no Rule 0 exposure"). The gate scans every file you write, and one such
+   word in a note drops the whole film (30 Sep 2026: film A was lost exactly this way).
+   The hard gate is `node $SIXTY_REPO/sixty/gates/rule0.mjs film <filmdir>` — it is a
    deterministic matcher that over-blocks on purpose. If it blocks, the film is dropped;
    never reword to get past it.
 2. **Facts.** Every number, quote and claim needs 2 independent sources or 1 primary
@@ -18,8 +23,13 @@ fact on screen is sourced.
 4. **Original work.** Third-party clips only as short, credited excerpts inside our own
    narrative. Never a repost. Primary footage first (government channels, company
    newsrooms/press kits, UN/agency feeds, the original uploader, Wikimedia Commons).
-5. **Sanctioned acquisition only.** Official APIs, public official channels, Commons,
-   press kits. Never log in to Instagram, TikTok or X. Never use a ScoopFeeds account.
+5. **Sanctioned acquisition only** (DrJ ruling 30 Sep 2026). Short, credited clips from
+   OFFICIAL government, agency and company channels are allowed — including those
+   channels' own YouTube uploads (public-domain government video first). Prefer the
+   source's own download where one exists. Also: official APIs, Commons, press kits.
+   Never log in to, or scrape, Instagram, TikTok or X. Never use a ScoopFeeds account.
+   Never download from a channel that is not the official source itself (no re-uploads,
+   no news-agency or aggregator channels).
 6. **Generated visuals** only for data, maps, explainers, abstract scenes. Never fabricate
    footage or images of real people or real events.
 7. **Brand.** 60 · template (black + acid-lime, 9:16, stopwatch, word-by-word captions,

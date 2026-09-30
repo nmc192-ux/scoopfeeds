@@ -18,7 +18,7 @@ is final on the technical checks. Your job is what a script cannot judge:
    of real people/events?
 5. Originality: our narrative and edit dominate; third-party footage is excerpt with credit.
 6. Legibility: text readable at phone size, nothing under captions or platform buttons.
-7. Pakistan: anything the matcher could miss (e.g. a map highlighting Pakistan)?
+7. Rule 0: anything the matcher could miss (e.g. a map highlighting the Rule 0 country)? Write "Rule 0", never the name.
 
 Write `qa-review.json`: `{ "pass": bool, "promise": "...", "payoff": { "line": "...", "t": 00.0 },
 "issues": [ { "severity": "block|fix|note", "t": 0.0, "what": "..." } ] }`.

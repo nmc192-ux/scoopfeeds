@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * qa.mjs — the deterministic half of the 60 · QA gate (brief, "QA gate"). Blocks
- * posting. Agents may run it; they cannot edit it (see pakistan.mjs header).
+ * posting. Agents may run it; they cannot edit it (see rule0.mjs header).
  *
  *   node sixty/gates/qa.mjs <filmdir>          → gate-qa.json, exit 0 only if EVERY check passes
  *
@@ -113,8 +113,8 @@ if (plan && reg && fc && script) {
 }
 
 // ─── Rule 0 again, independently ───────────────────────────────────────────
-const r0 = spawnSync(process.execPath, [path.join(path.dirname(new URL(import.meta.url).pathname), "pakistan.mjs"), "film", dir], { encoding: "utf8" });
-check("Rule 0 (Pakistan) re-run", r0.status === 0, r0.stdout.trim().slice(0, 300));
+const r0 = spawnSync(process.execPath, [path.join(path.dirname(new URL(import.meta.url).pathname), "rule0.mjs"), "film", dir], { encoding: "utf8" });
+check("Rule 0 re-run", r0.status === 0, r0.stdout.trim().slice(0, 300));
 
 const pass = checks.every((c) => c.result === "pass");
 writeFileSync(f("gate-qa.json"), JSON.stringify({ gate: "qa", pass, checks }, null, 1));

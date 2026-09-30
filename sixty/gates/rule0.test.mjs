@@ -8,7 +8,7 @@ import path from "path";
 import { spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 
-const GATE = path.join(path.dirname(fileURLToPath(import.meta.url)), "pakistan.mjs");
+const GATE = path.join(path.dirname(fileURLToPath(import.meta.url)), "rule0.mjs");
 const gate = (...a) => spawnSync(process.execPath, [GATE, ...a], { encoding: "utf8" });
 const tmp = () => mkdtempSync(path.join(tmpdir(), "sixty-rule0-"));
 const w = (d, f, o) => { mkdirSync(path.dirname(path.join(d, f)), { recursive: true }); writeFileSync(path.join(d, f), typeof o === "string" ? o : JSON.stringify(o)); };

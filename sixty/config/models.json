@@ -1,17 +1,28 @@
 {
-  "_note": "Model routing for 60 ·. Aliases only (fable/opus/sonnet/haiku). DrJ 30 Sep 2026: quality first. A role moves to a cheaper model only after DrJ cannot tell A from B. There is NO automatic downgrade: when headroom is low, fewer films are made (runner), never a cheaper model.",
-  "producer": "sonnet",
+  "_note": "Model + effort routing for 60 ·. Aliases only. DrJ 30 Sep 2026 (revision 2): quality first, no waste. Opus 5.5 for judgment and writing, Sonnet 5.5 at medium for tool-heavy stages, Haiku for publisher/analyst. Fable is NOT used by default; it returns (writer only) only if DrJ's blind A/B verdict says the Fable film was clearly better. Sonnet never runs at max effort; a Sonnet stage that fails twice or returns thin output is escalated to opus by the Producer. No automatic downgrade ever: low headroom = fewer films.",
+  "producer": { "model": "sonnet", "effort": "medium" },
   "variants": {
-    "top": {
-      "scout": "sonnet", "editor": "fable", "researcher": "opus", "factchecker": "opus",
-      "writer": "fable", "render": "opus", "qa": "opus", "packager": "opus",
-      "publisher": "sonnet", "analyst": "sonnet", "strategist": "opus"
+    "routing": {
+      "editor":      { "model": "opus",   "effort": "high" },
+      "writer":      { "model": "opus",   "effort": "high" },
+      "factchecker": { "model": "opus",   "effort": "high" },
+      "strategist":  { "model": "opus",   "effort": "high" },
+      "qa":          { "model": "opus",   "effort": "medium" },
+      "researcher":  { "model": "sonnet", "effort": "medium" },
+      "render":      { "model": "sonnet", "effort": "medium" },
+      "packager":    { "model": "sonnet", "effort": "medium" },
+      "scout":       { "model": "sonnet", "effort": "medium" },
+      "publisher":   { "model": "haiku" },
+      "analyst":     { "model": "haiku" }
     },
-    "mix": {
-      "scout": "sonnet", "editor": "opus", "researcher": "sonnet", "factchecker": "sonnet",
-      "writer": "opus", "render": "sonnet", "qa": "sonnet", "packager": "sonnet",
-      "publisher": "sonnet", "analyst": "sonnet", "strategist": "opus"
+    "fable-ab": {
+      "_note": "Phase 0 blind A/B arm: routing, except editor and writer on fable.",
+      "base": "routing",
+      "editor":      { "model": "fable",  "effort": "high" },
+      "writer":      { "model": "fable",  "effort": "high" }
     }
   },
-  "live_variant": "top"
+  "escalate_to": { "model": "opus", "effort": "high" },
+  "never": { "sonnet": ["max"] },
+  "live_variant": "routing"
 }

@@ -23,8 +23,15 @@ Find real footage and photos that show THIS story. Acquisition routes allowed:
 - Official sources' own downloads: government/agency/company press kits and newsrooms,
   NASA/ESA/NOAA/USGS media, UN media — direct file download with `curl -L -o` is fine.
 - Maps, satellite and data are made by the Render engineer; just note the places/series.
-NOT allowed: YouTube/Instagram/TikTok/X downloads, news agencies' paywalled footage,
-anything whose licence you could not read. If the licence is unclear, do not use it.
+- OFFICIAL channels' YouTube uploads (White House, a department/agency, a company's own
+  channel — verify the channel IS the official source): download ONLY the short window you
+  need, e.g. `yt-dlp -f "bv*[height<=1080][ext=mp4]/bv*[height<=1080]" --download-sections "*120-150"
+  --no-playlist -o media/M3.%(ext)s <url>`. Record channel name, channel URL, video URL,
+  upload date and the window in the register; credit = "Video: <channel>". US federal
+  government video is public domain; for company/agency video record the usage basis
+  ("official channel, short credited excerpt").
+NOT allowed: Instagram/TikTok/X (no logins, no scraping), re-uploads or aggregator channels,
+news agencies' own footage, anything whose licence or origin you could not establish.
 Verify every download with `ffprobe` (video) or `file` (image): error pages arrive as
 HTML under the media filename. For each video, pick in-points: extract a contact sheet
 (`node $SIXTY_REPO/sixty/tools/frames.mjs <video> <out.jpg>`), LOOK at it with Read, and

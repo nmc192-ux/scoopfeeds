@@ -12,6 +12,13 @@ with a person, a number, a conflict or a surprise, that a viewer would stop scro
 and that we can SHOW (primary footage, official video, data, maps). Mix series across
 the week: Makers, AI, Leaders, War, Borders, DemocraZy, Tech, Entertainment.
 
+**Footage is a hard requirement (DrJ, 30 Sep 2026).** A story is pickable only if real
+footage of the actual event is obtainable from an OFFICIAL government, agency or company
+channel (their own download, or their YouTube upload; public-domain government video
+first). For every pick, find and list at least one concrete, reachable clip URL with the
+channel name — open the page to confirm it exists. No footage found = not pickable.
+Add `footage: [{ url, channel, official_because, what_it_shows }]` to each pick.
+
 For each pick write the PROMISE: the first line of the film, spoken in ≤ 2 s,
 MrBeast-style clarity ("In 60 seconds you'll know why…"). The promise must be
 deliverable from verifiable facts — if you are not sure it can be paid off honestly,
