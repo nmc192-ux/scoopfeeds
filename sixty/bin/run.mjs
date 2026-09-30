@@ -89,8 +89,9 @@ function settingsFile(dir) {
 }
 
 // ─── Usage accounting from the stream ─────────────────────────────────────
-function newLedger() { return { byAgent: {}, seen: new Set(), toolAgent: {}, limits: [], results: [] }; }
+function newLedger() { return { byAgent: {}, seen: new Set(), toolAgent: {}, limits: [], results: [], sessionIds: new Set() }; }
 function account(L, ev) {
+  if (ev.session_id) L.sessionIds.add(ev.session_id);
   if (ev.type === "rate_limit_event") L.limits.push({ at: Date.now(), ...ev.rate_limit_info });
   if (ev.type === "result") L.results.push({ modelUsage: ev.modelUsage, total_cost_usd: ev.total_cost_usd, is_error: ev.is_error, num_turns: ev.num_turns, duration_ms: ev.duration_ms, result: String(ev.result || "").slice(0, 400) });
   if (ev.type !== "assistant") return;
@@ -105,6 +106,46 @@ function account(L, ev) {
   a.turns++; a.input += u.input_tokens || 0; a.output += u.output_tokens || 0;
   a.cacheWrite += u.cache_creation_input_tokens || 0; a.cacheRead += u.cache_read_input_tokens || 0;
 }
+// Exact per-agent usage: the stream reports each message's usage at its START (output
+// tokens undercounted), so the authoritative per-agent numbers come from the session's
+// transcripts on disk (main + subagents/*.jsonl, agentType in *.meta.json), reconciled
+// against the result's modelUsage. What no transcript accounts for (Claude Code's own
+// Haiku calls, e.g. WebFetch summaries) is reported as "claude-code-internal".
+function transcriptUsage(sessionId, modelUsage) {
+  const root = path.join(process.env.HOME, ".claude/projects");
+  const proj = readdirSync(root).map((d) => path.join(root, d)).find((d) => existsSync(path.join(d, `${sessionId}.jsonl`)));
+  if (!proj) return null;
+  const sum = (file, agent, out) => {
+    const seen = new Map();
+    for (const l of readFileSync(file, "utf8").split("\n")) {
+      let d; try { d = JSON.parse(l); } catch { continue; }
+      const m = d.message || {};
+      if (d.type === "assistant" && m.usage && m.id) seen.set(m.id, m);
+    }
+    for (const m of seen.values()) {
+      const k = `${agent}|${m.model}`, u = m.usage;
+      const a = (out[k] ||= { agent, model: m.model, turns: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0 });
+      a.turns++; a.input += u.input_tokens || 0; a.output += u.output_tokens || 0;
+      a.cacheWrite += u.cache_creation_input_tokens || 0; a.cacheRead += u.cache_read_input_tokens || 0;
+    }
+  };
+  const out = {};
+  sum(path.join(proj, `${sessionId}.jsonl`), "producer", out);
+  const sub = path.join(proj, sessionId, "subagents");
+  if (existsSync(sub)) for (const f of readdirSync(sub).filter((f) => f.endsWith(".jsonl"))) {
+    let agent = "subagent?"; try { agent = JSON.parse(readFileSync(path.join(sub, f.replace(/\.jsonl$/, ".meta.json")), "utf8")).agentType; } catch { /* keep ? */ }
+    sum(path.join(sub, f), agent, out);
+  }
+  for (const [model, mu] of Object.entries(modelUsage || {})) {
+    const rows = Object.values(out).filter((r) => r.model === model);
+    const rest = { agent: "claude-code-internal", model, turns: null,
+      input: mu.inputTokens - rows.reduce((n, r) => n + r.input, 0), output: mu.outputTokens - rows.reduce((n, r) => n + r.output, 0),
+      cacheWrite: mu.cacheCreationInputTokens - rows.reduce((n, r) => n + r.cacheWrite, 0), cacheRead: mu.cacheReadInputTokens - rows.reduce((n, r) => n + r.cacheRead, 0) };
+    if (rest.input || rest.output || rest.cacheWrite || rest.cacheRead) out[`internal|${model}`] = rest;
+  }
+  return Object.values(out).sort((a, b) => a.agent.localeCompare(b.agent));
+}
+
 const LIMIT_TEXT = /usage limit|hit your limit|limit reached|rate.?limit(ed)?|out of (extra )?usage|weekly limit|session limit|5-hour limit/i;
 
 // ─── One headless Producer session ────────────────────────────────────────
@@ -151,7 +192,9 @@ async function session({ dir, prompt, variant, tag }) {
   const lastResult = L.results.at(-1) || {};
   const firstLim = L.limits[0], lastLim = L.limits.at(-1);
   const usage = { tag, variant, dir, minutes: +((Date.now() - t0) / 60000).toFixed(1), exit: stopped.code, stopped: stopped.stop,
-    byAgent: rows,
+    byAgent: transcriptUsage([...L.sessionIds][0], lastResult.modelUsage) || rows,
+    byAgentSource: "transcripts (exact) — falls back to stream (output undercounted) if transcripts are missing",
+    sessionIds: [...L.sessionIds],
     modelUsage: lastResult.modelUsage || null,
     apiListEquivalentUSD: lastResult.total_cost_usd ?? null,   // NOT billed: what the same tokens would cost at API list price
     window: firstLim && lastLim ? {
@@ -242,6 +285,15 @@ try {
       log(`✔ ${label} done in ${usage.minutes} min, gates intact=${usage.gatesIntact}, stopped=${usage.stopped}`);
       if (usage.stopped) break;
     }
+  } else if (mode === "reaccount") {
+    // Recompute byAgent for a finished run from its stream + transcripts (no model calls).
+    const f = path.join(opt("dir"), `usage-${opt("tag")}.json`);
+    const u = JSON.parse(readFileSync(f, "utf8"));
+    const sid = u.sessionIds?.[0] || readFileSync(path.join(opt("dir"), `stream-${opt("tag")}.jsonl`), "utf8").match(/"session_id":"([^"]+)"/)[1];
+    u.byAgent = transcriptUsage(sid, u.modelUsage); u.sessionIds = [sid];
+    u.byAgentSource = "transcripts (exact), recomputed";
+    writeFileSync(f, JSON.stringify(u, null, 1));
+    console.log(JSON.stringify(u.byAgent, null, 1));
   } else {
     console.error("usage: run.mjs pick --day <dir> [--films n] | film --pick <f> --dir <d> [--variant v] | ab --pick <f> --dir <d> [--only A|B]");
     process.exit(1);
