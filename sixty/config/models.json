@@ -1,0 +1,17 @@
+{
+  "_note": "Model routing for 60 ·. Aliases only (fable/opus/sonnet/haiku). DrJ 30 Sep 2026: quality first. A role moves to a cheaper model only after DrJ cannot tell A from B. There is NO automatic downgrade: when headroom is low, fewer films are made (runner), never a cheaper model.",
+  "producer": "sonnet",
+  "variants": {
+    "top": {
+      "scout": "sonnet", "editor": "fable", "researcher": "opus", "factchecker": "opus",
+      "writer": "fable", "render": "opus", "qa": "opus", "packager": "opus",
+      "publisher": "sonnet", "analyst": "sonnet", "strategist": "opus"
+    },
+    "mix": {
+      "scout": "sonnet", "editor": "opus", "researcher": "sonnet", "factchecker": "sonnet",
+      "writer": "opus", "render": "sonnet", "qa": "sonnet", "packager": "sonnet",
+      "publisher": "sonnet", "analyst": "sonnet", "strategist": "opus"
+    }
+  },
+  "live_variant": "top"
+}
