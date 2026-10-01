@@ -34,3 +34,15 @@ Output: `script.json`, `script.md`.
 Anchors are assertions: the words must appear verbatim in that line. At most two punch
 (text-only) cards. Prefer real footage and photos; maps/data when the story is about
 places or numbers.
+
+## Playbook duties (Writer-director)
+- Line 1 is the hook: the news + a twist or stakes. Promise as question or twist is fine.
+- Soundbites: where the register holds a primary clip of the speaker, write it as a line with
+  `"kind": "soundbite"`, `"media": ["Mx"]`, `"in": s, "out": s` (in the source clip),
+  `"speaker"`, `"title"`, and `"text"` = their exact words from the transcript. Narration
+  only bridges. Aim for 2–3 soundbites totalling 10–20 s when they exist.
+- Give `pin` (one line, ≤ 40 characters: the headline or the question) and `keywords`
+  (3–8 words the captions should highlight).
+- Order the beats as the viewer's questions; answer the obvious objection; one line for the
+  sceptic/other side; every big number gets a felt comparison (with its own claim id).
+- End on what happens next, or loop to the opening line.

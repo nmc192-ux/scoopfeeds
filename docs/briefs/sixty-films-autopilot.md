@@ -47,6 +47,45 @@ Build from the Mac Mini, in phases, stopping at every checkpoint for DrJ's "go" 
 - **Phase 0 blind A/B:** one arm = routing with fable for editor and writer; the other = routing
   exactly. Labels A/B at random, key sealed.
 
+## DrJ's A/B verdict and editorial playbook, 1 Oct 2026
+**Verdict:** film A (routing: Opus writer) was better on story construction, animation and
+presentation. Fable stays out; the routing stands. Both films shared the same flaw: one
+presentation style, too text-heavy, and no real voices. Rulings: change the narrator to a
+fresher FREE voice (candidates from local Kokoro sent to DrJ); use original photos and video of
+the event, and let the decision-maker's own recorded words be HEARD (soundbites) — screen-written
+remarks only when no recording exists; visuals must improve.
+
+**Editorial playbook** (from BBC, 60 Minutes and Al Jazeera benchmark reels). It is in the
+Editor, Writer-director, Render engineer and QA instructions (`sixty/agents/_playbook.md`,
+prepended by the runner), and QA checks each rule and flags misses:
+
+1. **Hook.** The first sentence = the news + a twist or the stakes. The promise may be a
+   question or a twist. Do NOT open every film with "In 60 seconds…" — vary it.
+2. **Real voices first.** Where a primary clip of the decision-maker or an expert exists, let
+   them speak: soundbites with their own audio and a name/title lower-third. Narration only
+   bridges between voices. Text-on-screen quotes only when no recording exists.
+3. **Pin a one-line headline or question card** on screen for the whole film (plan `pin`).
+4. **Every big number gets a comparison that makes it felt** — time, an everyday object, a
+   rival figure ("170 generals: more than every four-star in NATO combined" — only if verified).
+5. **Structure = the viewer's questions, answered in order.** Pre-empt the obvious objection.
+6. **Balance.** Give the other side or the sceptic at least one line.
+7. **Pace.** Numbers appear on screen the moment they are spoken; a visual change every
+   2–3 s; captions highlight the key word (plan `keywords`).
+8. **Ending.** Close on "what happens next", or loop back to the opening line so a rewatch
+   flows.
+Comparisons, sceptic lines and soundbites are facts like any other: they need register
+claim ids and pass the fact-check. QA checks every rule and flags each miss.
+
+**Built for it (1 Oct):** soundbites with original audio (`sixty/tools/transcribe.mjs` —
+whisper.cpp small.en, free and local; `voice.mjs` leaves the narration silent under a soundbite
+and takes captions from the speaker's word timings; `mix.mjs` lays the speaker's audio into the
+voice stem so the bed ducks under it); a pinned headline/question card (`plan.pin`) and key-word
+caption highlighting (`plan.keywords`) in `render60.py`; measured playbook flags in
+`sixty/gates/qa.mjs` (`gate-qa.json → playbook`, reported, not blocking — including real-footage
+share and text-only share; on the Phase 0 films: A 10% real / 90% text-only, B 38% / 53%).
+The runner refuses to start below 8 GB free disk, and agents download only the clip sections
+they need.
+
 ## Implementation notes (Phase 0, as built)
 - Code: `sixty/` in the repo (runner `sixty/bin/run.mjs`, agent prompts `sixty/agents/*.md`,
   hard gates `sixty/gates/`, tools `sixty/tools/`, 60 · chrome `sixty/render/render60.py`).

@@ -38,6 +38,16 @@ HTML under the media filename. For each video, pick in-points: extract a contact
 note which seconds show what. Reject any frame with casualties, bodies or violence
 against people.
 
+## Real voices (playbook rule 2)
+Look hardest for clips where the decision-maker or an expert SPEAKS about this story. For each
+one you download, transcribe it: `node $SIXTY_REPO/sixty/tools/transcribe.mjs media/Mx.mp4`
+(free, local; writes `media/Mx.mp4.words.json` with word timings). In the register, add to
+that media item `"soundbites": [{ "in": s, "out": s, "text": "exact words", "speaker": "...",
+"title": "..." }]` — the best 3–10 s moments. Whisper can mishear names and numbers: a
+soundbite's text must also match a published transcript/report, or be marked
+`"verified_by": "listened"` with your note. Quotes from soundbites are register claims like
+any other.
+
 ## register.json
 ```
 { "claims": [ { "id": "C1", "text": "...", "value": "42%", "status": "verified|unverified|cut",

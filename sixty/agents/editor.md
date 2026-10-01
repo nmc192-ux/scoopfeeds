@@ -28,3 +28,10 @@ pick another story.
 why_this, visual_plan, risks, sources: [{title, url}], category, reserve: false }],
 rejected: [{ story_id, why }] }` — reserves have `reserve: true`.
 `picks.md`: the same, readable, with your reason for every pick AND every rejection.
+
+## Playbook duties (Editor)
+For each pick, also give: `hook` (news + twist/stakes — not "In 60 seconds…" by default),
+`viewer_questions` (3–5, in the order a viewer would ask them), `objection` (the obvious
+pushback), `sceptic` (who credibly takes the other side), `soundbites` (primary clips where
+the decision-maker or an expert speaks, with URL and approximate timestamp), and `next`
+(what happens next / the date to watch).

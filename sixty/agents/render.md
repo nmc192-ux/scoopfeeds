@@ -43,3 +43,17 @@ Input: `script.json`, `register.json`, `media/`. Output: `plan.json`, `final.mp4
 2. Full render → mix → `contact` sheet; look at it.
 3. Run `node $SIXTY_REPO/sixty/gates/qa.mjs .` — it is the hard gate. Fix what it flags
    (never by deleting claim ids or credits). Report its final result verbatim.
+
+## Playbook duties (Render engineer)
+- Put the writer's `pin` and `keywords` in plan.json (`"pin": {"text": "...", "from": <hook end>}`,
+  `"keywords": [...]`). The pin is drawn under the chrome row for the whole film.
+- Soundbites play with their ORIGINAL audio, automatically: the writer's soundbite lines go
+  through `voice.mjs` (narration is silent there; `voice/voice.json` lines of kind
+  "soundbite" give `start`, `secs`, `src`, `in`), and `mix.mjs` lays the speaker's audio in.
+  Your job is the picture: on each soundbite, a `clip` shot of `src` with `"start": in`,
+  `t0 = start`, `T = secs` (not sub-cut), the speaker on screen, and a name/title lower-third
+  (`"labels": [{"t": 0.3, "text": "NAME · TITLE"}]`). The captions there are the speaker's
+  own words, already timed.
+- A number appears on screen at the word where it is spoken (take the time from voice.json).
+- Visual change every 2–3 s; prefer real footage and photos over text cards. Text-only
+  shots are the exception, not the format.

@@ -112,11 +112,46 @@ if (plan && reg && fc && script) {
   check("word-by-word captions present", Array.isArray(plan.words) && plan.words.length > 50, plan.words?.length);
 }
 
+// ─── Playbook (DrJ, 1 Oct 2026): MEASURED FLAGS, reported, never blocking here ──
+// The QA agent judges rules 4–6 and reconciles these. A miss is a flag in gate-qa.json.
+const playbook = [];
+const flag = (rule, met, evidence) => playbook.push({ rule, met, evidence });
+if (plan && script) {
+  const first = String(script.lines?.[0]?.text || "");
+  flag(1, !/^\s*in\s+(60|sixty)\s+seconds/i.test(first), `opening line: "${first.slice(0, 90)}"`);
+  const voice2 = load("voice/voice.json") || load("voice.json");
+  const sbSecs = voice2?.soundbiteSecs || 0;
+  const hasVideo = (load("register.json")?.media || []).some((m) => m.kind === "video");
+  flag(2, sbSecs > 0 || !hasVideo, sbSecs > 0 ? `${sbSecs}s of real voices` : hasVideo ? "video in the register but NO soundbite — was a speaking clip available?" : "no video in register");
+  flag(3, !!plan.pin?.text && (plan.pin.from ?? 0) <= 6, plan.pin?.text ? `pin: "${plan.pin.text}" from ${plan.pin.from ?? 0}s` : "no pinned headline/question card");
+  // 7a: numbers on screen when spoken (non-caption screen text, ±1 s)
+  const screenAt = (t) => plan.shots.filter((x) => x.t0 - 1 <= t && t <= x.t0 + x.T).map((x) => JSON.stringify([x.lines, x.value, x.title, x.bars, x.headline, x.labels, x.text, x.texts, x.label])).join(" ");
+  const misses = [];
+  for (const w of voice2?.words || []) {
+    const d = String(w.w).replace(/[^0-9.]/g, "").replace(/\.$/, "");
+    if (d.length && !screenAt(w.s).replace(/,/g, "").includes(d)) misses.push(`${d}@${w.s}s`);
+  }
+  flag(7, misses.length === 0, misses.length ? `spoken numbers not on screen: ${misses.slice(0, 12).join(", ")}` : "every spoken number on screen");
+  const content = plan.shots.filter((x) => x.kind !== "end");
+  const long = content.filter((x) => x.T > 3.5 && !(x.kind === "clip" && sbSecs)).map((x) => `${x.kind}@${x.t0}s ${x.T}s`);
+  flag(7, long.length === 0, long.length ? `shots held > 3.5 s: ${long.slice(0, 10).join(", ")}` : "visual change ≤ 3.5 s throughout");
+  flag(7, Array.isArray(plan.keywords) && plan.keywords.length > 0, `caption keywords: ${JSON.stringify(plan.keywords || [])}`);
+  const last = (script.lines || []).filter((l) => l.kind !== "soundbite").at(-1) || {};
+  flag(8, ["next", "loop"].includes(last.beat) || /\bnext\b|\bwatch\b|\bby\s+\d|\bon\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(last.text || ""),
+    `last narration line (${last.beat || "no beat"}): "${String(last.text || "").slice(0, 90)}"`);
+  // Text-heaviness (DrJ: "people don't watch shorts if they are too text heavy")
+  const secs = content.reduce((n, x) => n + x.T, 0) || 1;
+  const real = content.filter((x) => ["clip", "photo", "satellite", "map"].includes(x.kind) || (x.kind.startsWith("x-") && (x.media || []).length)).reduce((n, x) => n + x.T, 0);
+  const textOnly = content.filter((x) => ["punch", "count", "graphic", "headline"].includes(x.kind) || (x.kind.startsWith("x-") && !(x.media || []).length && !/map|chart|bar|graph/.test(x.kind))).reduce((n, x) => n + x.T, 0);
+  flag("visuals", !(hasVideo && real / secs < 0.6) && textOnly / secs <= 0.15,
+    `real footage/photos/maps ${Math.round(100 * real / secs)}% · text-only ${Math.round(100 * textOnly / secs)}% (targets: ≥60% real when footage exists, ≤15% text-only)`);
+}
+
 // ─── Rule 0 again, independently ───────────────────────────────────────────
 const r0 = spawnSync(process.execPath, [path.join(path.dirname(new URL(import.meta.url).pathname), "rule0.mjs"), "film", dir], { encoding: "utf8" });
 check("Rule 0 re-run", r0.status === 0, r0.stdout.trim().slice(0, 300));
 
 const pass = checks.every((c) => c.result === "pass");
-writeFileSync(f("gate-qa.json"), JSON.stringify({ gate: "qa", pass, checks }, null, 1));
-console.log(JSON.stringify({ gate: "qa", pass, failed: checks.filter((c) => c.result !== "pass").map((c) => c.name) }));
+writeFileSync(f("gate-qa.json"), JSON.stringify({ gate: "qa", pass, checks, playbook }, null, 1));
+console.log(JSON.stringify({ gate: "qa", pass, failed: checks.filter((c) => c.result !== "pass").map((c) => c.name), playbook_misses: playbook.filter((p) => !p.met).map((p) => `rule ${p.rule}: ${p.evidence}`) }));
 process.exit(pass ? 0 : 4);

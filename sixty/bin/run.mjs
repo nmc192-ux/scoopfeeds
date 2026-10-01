@@ -64,6 +64,8 @@ export function routing(variant) {
 function agentsJson(variant) {
   const models = routing(variant);
   const contract = readFileSync(path.join(SIXTY, "agents/_contract.md"), "utf8");
+  const playbook = readFileSync(path.join(SIXTY, "agents/_playbook.md"), "utf8");
+  const PLAYBOOK_ROLES = new Set(["editor", "writer", "render", "qa"]);   // DrJ, 1 Oct 2026
   const out = {};
   for (const f of readdirSync(path.join(SIXTY, "agents"))) {
     if (!f.endsWith(".md") || f.startsWith("_") || f === "producer.md") continue;
@@ -73,7 +75,7 @@ function agentsJson(variant) {
     const role = f.replace(/\.md$/, "");
     if (!models[role]) continue;   // a role this phase does not run
     out[fm.name] = { description: fm.description, tools: fm.tools.split(",").map((s) => s.trim()), model: models[role].model,
-      ...(models[role].effort ? { effort: models[role].effort } : {}), prompt: `${contract}\n\n${m[2]}` };
+      ...(models[role].effort ? { effort: models[role].effort } : {}), prompt: `${contract}\n\n${PLAYBOOK_ROLES.has(role) ? playbook + "\n\n" : ""}${m[2]}` };
   }
   return out;
 }
@@ -230,6 +232,9 @@ function notify(text) {
 }
 
 function preflight({ needKokoro = false } = {}) {
+  // A film's media plus renders is ~1–2 GB; the Mac mini ran down to 6 GB free on 1 Oct 2026.
+  const freeGB = Number(spawnSync("df", ["-k", HOME], { encoding: "utf8" }).stdout.trim().split("\n").pop().split(/\s+/)[3]) / 1048576;
+  if (!(freeGB >= 8)) throw new Error(`only ${freeGB.toFixed(1)} GB free on the Mac — need 8 GB. Not starting.`);
   if (existsSync(path.join(HOME, "STOP"))) throw new Error(`STOP present: ${readFileSync(path.join(HOME, "STOP"), "utf8").trim()}`);
   if (process.env.ANTHROPIC_API_KEY) log("ℹ ANTHROPIC_API_KEY is set in the parent shell — removed from the job environment");
   const u = usageSnapshot();

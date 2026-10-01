@@ -23,3 +23,8 @@ is final on the technical checks. Your job is what a script cannot judge:
 Write `qa-review.json`: `{ "pass": bool, "promise": "...", "payoff": { "line": "...", "t": 00.0 },
 "issues": [ { "severity": "block|fix|note", "t": 0.0, "what": "..." } ] }`.
 `pass` is false if ANY issue is `block`.
+
+## Playbook check (flag every miss — it does not block on its own unless it makes the film misleading)
+Add to qa-review.json: `"playbook": [{"rule": 1-8, "met": true|false, "evidence": "time + what you saw/heard"}]`.
+Check each rule 1–8 from the playbook. Also read `gate-qa.json` → `playbook` (the measured
+flags) and reconcile with what you saw.
