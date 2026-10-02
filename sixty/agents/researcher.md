@@ -17,21 +17,40 @@ Direct quotes ONLY from the original video or transcript, with its timestamp.
 Find real footage and photos that show THIS story. Acquisition routes allowed:
 - Wikimedia Commons (NOTE 30 Sep 2026: the Mac mini's network currently refuses
   commons.wikimedia.org; if the tool fails with ENOTFOUND, say so in research.md and use
-  the official routes below — do not try other hostnames or resolvers): `node $SIXTY_REPO/sixty/tools/commons.mjs search "<query>" [--mime video/webm|image]`,
+  the other routes below — do not try other hostnames or resolvers): `node $SIXTY_REPO/sixty/tools/commons.mjs search "<query>" [--mime video/webm|image]`,
   `... info "<File:title>"`, `... fetch "<File:title>" <out> [--start s --end s]`
   (polite queue, transcodes, licence read for you — never hit upload.wikimedia.org directly).
 - Official sources' own downloads: government/agency/company press kits and newsrooms,
   NASA/ESA/NOAA/USGS media, UN media — direct file download with `curl -L -o` is fine.
 - Maps, satellite and data are made by the Render engineer; just note the places/series.
-- OFFICIAL channels' YouTube uploads (White House, a department/agency, a company's own
-  channel — verify the channel IS the official source): download ONLY the short window you
-  need, e.g. `yt-dlp -f "bv*[height<=1080][ext=mp4]/bv*[height<=1080]" --download-sections "*120-150"
-  --no-playlist -o media/M3.%(ext)s <url>`. Record channel name, channel URL, video URL,
-  upload date and the window in the register; credit = "Video: <channel>". US federal
-  government video is public domain; for company/agency video record the usage basis
-  ("official channel, short credited excerpt").
-NOT allowed: Instagram/TikTok/X (no logins, no scraping), re-uploads or aggregator channels,
-news agencies' own footage, anything whose licence or origin you could not establish.
+- Video from YouTube or a public social post (official channels, NEWS NETWORKS, public
+  social accounts — contract rule 5): download ONLY the few seconds you need, never logged in:
+  `yt-dlp -f "bv*[height<=1080]+ba/b[height<=1080]" --download-sections "*120-130" --no-playlist
+  -o media/M3.%(ext)s <url>` (keep the audio: soundbites need it). Never pass cookies or log in;
+  if a post needs a login, it is not public — skip it.
+- Newspaper front pages, headlines, article and post SCREENSHOTS:
+  `node $SIXTY_REPO/sixty/tools/screenshot.mjs <url> media/S1.png [--width 1080 --height 1350]`
+  (headless Chromium, empty profile, never logged in). LOOK at every screenshot with Read:
+  a bot check (e.g. Cloudflare "verifying you are human"), a login wall, a cookie wall or a
+  blank page = NOT usable — never try to get past it; find another outlet or the
+  outlet's own social post. Paywalled or private = not used. Never crop out the
+  outlet's or account's logo/name.
+- Check `$SIXTY_REPO/sixty/config/strike-sources.json` before using any source: listed = never.
+- Preference order for the same moment: the original/official source → a news network's
+  clip → a public social post.
+
+### Verify every excerpt (contract 5c) — record HOW
+For each media item: is it THIS event (date, place, people match; not old, recycled or
+AI-generated)? Evidence: upload date vs event time, the uploader is the original source or a
+known network, matching details across two outlets, a reverse check of a frame where you can.
+Write it in `verified_how`. Unverifiable = not used.
+
+### Register fields for every media item (contract 5e)
+`source_type` (official|news|social|newspaper|commons|press-kit), `source` (outlet or account,
+as credited on screen), `url`, `channel_url` (if any), `upload_date`, `window` ("mm:ss–mm:ss"
+used, or "screenshot"), `credit` (on-screen text, e.g. "Video: Al Jazeera" or "Post: @handle on X"),
+`licence` (basis: "US gov public domain", "news excerpt, credited", "public post, credited"),
+`verified_how`, `third_party: true`.
 Verify every download with `ffprobe` (video) or `file` (image): error pages arrive as
 HTML under the media filename. For each video, pick in-points: extract a contact sheet
 (`node $SIXTY_REPO/sixty/tools/frames.mjs <video> <out.jpg>`), LOOK at it with Read, and

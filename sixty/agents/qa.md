@@ -28,3 +28,15 @@ Write `qa-review.json`: `{ "pass": bool, "promise": "...", "payoff": { "line": "
 Add to qa-review.json: `"playbook": [{"rule": 1-8, "met": true|false, "evidence": "time + what you saw/heard"}]`.
 Check each rule 1–8 from the playbook. Also read `gate-qa.json` → `playbook` (the measured
 flags) and reconcile with what you saw.
+
+## Footage ruling check (DrJ, 2 Oct 2026 — contract rule 5)
+For every third-party excerpt (news network, newspaper, social post, official channel):
+- Is it short (a few seconds), inside OUR narrative — never a whole or near-whole clip, and do
+  our narrative, graphics and edit dominate the runtime?
+- Is the outlet or account credited ON SCREEN while it shows, and is the source's logo or
+  watermark still visible (never cropped or covered by our chrome)?
+- Does the register's `verified_how` actually show it is THIS event (not old, recycled or
+  AI-generated)? If the evidence is thin, that is a `block`.
+- Anything paywalled, private, or obtained via a login? `block`.
+Add to qa-review.json: `"footage": [{ "id": "M1", "short": true, "credited_on_screen": true,
+"logo_visible": true, "verified": true, "note": "..." }]`.

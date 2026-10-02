@@ -12,12 +12,14 @@ with a person, a number, a conflict or a surprise, that a viewer would stop scro
 and that we can SHOW (primary footage, official video, data, maps). Mix series across
 the week: Makers, AI, Leaders, War, Borders, DemocraZy, Tech, Entertainment.
 
-**Footage is a hard requirement (DrJ, 30 Sep 2026).** A story is pickable only if real
-footage of the actual event is obtainable from an OFFICIAL government, agency or company
-channel (their own download, or their YouTube upload; public-domain government video
-first). For every pick, find and list at least one concrete, reachable clip URL with the
-channel name — open the page to confirm it exists. No footage found = not pickable.
-Add `footage: [{ url, channel, official_because, what_it_shows }]` to each pick.
+**Footage is a hard requirement (DrJ, 30 Sep / 2 Oct 2026).** A story is pickable only if real
+footage of the actual event is obtainable without logging in: official government, agency or
+company channels (public-domain government video first), news networks' clips (incl. their
+YouTube uploads), or public social posts/videos (contract rule 5). Prefer clips where the
+decision-maker or an expert SPEAKS (playbook rule 2). For every pick, list at least one
+concrete, reachable clip URL — open the page to confirm it exists and is public. No footage
+found = not pickable. Never pick on a source in `$SIXTY_REPO/sixty/config/strike-sources.json`.
+Add `footage: [{ url, source, source_type, what_it_shows, speaks: true|false }]` to each pick.
 
 For each pick write the PROMISE: the first line of the film, spoken in ≤ 2 s,
 MrBeast-style clarity ("In 60 seconds you'll know why…"). The promise must be

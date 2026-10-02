@@ -180,6 +180,31 @@ ScoopFeeds competes with WSJ, Al Jazeera, NYT and TIME on short-form. Every film
 5. **Analyst + Strategist:** first weekly playbook. Checkpoint: DrJ reviews it.
 6. **Full auto:** `SIXTY_FILMS_AUTOPOST=auto` on DrJ's word; post-upload daily digest; rollback flag `off`.
 
+## Footage ruling, 2 Oct 2026 (REPLACES the official-only rule and the "no re-uploads, aggregator
+channels or news-agency footage" line)
+ALLOWED, as short credited excerpts inside our own narrative: official government, agency and
+company channels (public-domain government video first); news networks' clips (Al Jazeera, BBC,
+CNN, Reuters, AP, Sky, CNBC…) incl. their YouTube uploads, for evidence, perspectives, coverage
+montages or the hook; newspaper front pages, headlines and article screenshots; public social
+posts and videos (X, Instagram, TikTok, YouTube, Truth Social…) — screenshots, and short clips of
+public videos downloaded WITHOUT logging in.
+STILL APPLIES: (1) a few seconds per clip, never whole or near-whole; our narrative, graphics and
+edit dominate; (2) every excerpt credited on screen with the outlet/account; never remove or crop
+the source's logo/watermark; (3) verify each clip is genuine and THIS event (not old, recycled or
+AI-generated), record how; unverifiable = not used; (4) never log in, never a ScoopFeeds account,
+no paywalled/private content; (5) record source, URL, upload date and time window per excerpt;
+(6) occasional Content ID claims acceptable, a copyright strike is not — skip sources known to
+strike (`sixty/config/strike-sources.json`, DrJ maintains it); (7) Rule 0 and all standing rules
+unchanged.
+Where it lives: contract rule 5 (`sixty/agents/_contract.md`, all agents), Editor (footage
+requirement now covers news/social), Researcher (acquisition, verification, register fields),
+QA agent (short / credited / logo visible / verified per excerpt), QA gate (`sixty/gates/qa.mjs`:
+register fields complete, news/social excerpts ≤ 6 s, no `ymax` crop on news/social clips, no
+strike source — HARD checks). New tool `sixty/tools/screenshot.mjs` (headless Chromium, fresh
+empty profile, never logged in); bot checks/login walls are treated as unusable, never bypassed —
+measured 2 Oct: example.com works, apnews.com shows a Cloudflare bot check, aljazeera.com failed the
+TLS handshake from the Mac.
+
 ---
 
 ## HANDOVER — state at 2 Oct 2026 (for a fresh session; read this first)
@@ -215,9 +240,8 @@ strategist; opus/medium QA; sonnet/medium researcher, render, packager, scout, p
 publisher, analyst; sonnet never at max; sonnet stage failing twice → opus). Never downgrade;
 low headroom = fewer films; no API key; no paid overage. Interim cap 6/day; stop on any limit
 signal. Rule 0 wording: agents never write the country or any gate word anywhere. Footage:
-official government/agency/company channels incl. their YouTube uploads (public-domain gov first,
-own download preferred); no logins/scraping of Instagram/TikTok/X; no re-uploads or aggregator
-channels. Text-only screen time > 15% = HARD FAIL (charts/counters/maps are visuals); < 60% real
+see "Footage ruling, 2 Oct 2026" above (official, news networks, newspapers, public social —
+short credited excerpts, never logged in, logos never cropped, verified, no strike sources). Text-only screen time > 15% = HARD FAIL (charts/counters/maps are visuals); < 60% real
 footage = flag. Playbook rules 1–8 flagged by QA. Voice stays `bm_george` until DrJ picks from
 the samples in `~/sixty/films/2026-09-30-phase0/film2/review/voices/`.
 
@@ -236,8 +260,8 @@ not yet stated by DrJ. Extra usage is OFF (org_level_disabled).
 6. Scout sources not wired: YouTube Data API (key on Mac = credential decision), Reddit API, TikTok
    Creative Center, X.
 7. Stop notification is local only; emailing DrJ needs the mail credential on the Mac (DrJ).
-8. A "news-network/social footage ruling" DrJ referred to on 2 Oct was not found in this session —
-   only the official-channels ruling above is applied. Re-send if there was another.
+8. Footage ruling of 2 Oct received and applied (see above). Screenshots: some outlets show bot
+   checks to the headless browser — treated as unusable, never bypassed.
 9. `.claude/settings.json` still has the ssh/scp/merge deny rules removed (from the shot-engine
    build) — restore with `git checkout .claude/settings.json` when DrJ says.
 10. Phase 0 scratch films are kept in `~/sixty/films/2026-09-30-phase0/` (~0.7 GB) for reference.

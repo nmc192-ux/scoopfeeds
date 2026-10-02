@@ -20,16 +20,30 @@ fact on screen is sourced.
    not softened.
 3. **Promise = payoff.** Title and thumbnail promise only what the film delivers. No fake
    urgency, no invented stakes.
-4. **Original work.** Third-party clips only as short, credited excerpts inside our own
-   narrative. Never a repost. Primary footage first (government channels, company
-   newsrooms/press kits, UN/agency feeds, the original uploader, Wikimedia Commons).
-5. **Sanctioned acquisition only** (DrJ ruling 30 Sep 2026). Short, credited clips from
-   OFFICIAL government, agency and company channels are allowed — including those
-   channels' own YouTube uploads (public-domain government video first). Prefer the
-   source's own download where one exists. Also: official APIs, Commons, press kits.
-   Never log in to, or scrape, Instagram, TikTok or X. Never use a ScoopFeeds account.
-   Never download from a channel that is not the official source itself (no re-uploads,
-   no news-agency or aggregator channels).
+4. **Original work.** Third-party material appears only as SHORT, credited excerpts inside
+   our own narrative — a few seconds per clip, never a whole or near-whole clip. Our
+   narrative, graphics and edit dominate the runtime. Never a repost.
+5. **Footage and sources (DrJ ruling 2 Oct 2026 — replaces the official-only rule).** ALLOWED,
+   as short credited excerpts:
+   - Official government, agency and company channels (public-domain government video first;
+     the source's own download preferred).
+   - News networks' clips (e.g. Al Jazeera, BBC, CNN, Reuters, AP, Sky, CNBC), including their
+     YouTube uploads — for evidence, perspectives, coverage montages or the hook.
+   - Newspaper front pages, headlines and article screenshots.
+   - Public social media posts and videos (X, Instagram, TikTok, YouTube, Truth Social…):
+     screenshots of posts, and short clips of public videos downloaded WITHOUT logging in.
+   RULES THAT STILL APPLY:
+   a. Short excerpts only (see 4).
+   b. Credit every excerpt ON SCREEN with the outlet or account. NEVER remove or crop out the
+      source's logo or watermark (no banner crops on news/social material).
+   c. Verify every clip is genuine and shows THIS event — not old, recycled or AI-generated —
+      and record HOW in the register. Unverifiable = not used.
+   d. Never log in to any platform, never use a ScoopFeeds account, no paywalled or private
+      content.
+   e. Record every excerpt (source, URL, upload date, time window used) in the register.
+   f. An occasional YouTube Content ID revenue claim is acceptable; a copyright STRIKE is not.
+      Never use a source listed in `$SIXTY_REPO/sixty/config/strike-sources.json`.
+   g. Rule 0 and every other standing rule unchanged.
 6. **Generated visuals** only for data, maps, explainers, abstract scenes. Never fabricate
    footage or images of real people or real events.
 7. **Brand.** 60 · template (black + acid-lime, 9:16, stopwatch, word-by-word captions,
