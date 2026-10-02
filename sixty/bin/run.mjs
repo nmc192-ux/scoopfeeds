@@ -235,6 +235,11 @@ function preflight({ needKokoro = false } = {}) {
   // A film's media plus renders is ~1–2 GB; the Mac mini ran down to 6 GB free on 1 Oct 2026.
   const freeGB = Number(spawnSync("df", ["-k", HOME], { encoding: "utf8" }).stdout.trim().split("\n").pop().split(/\s+/)[3]) / 1048576;
   if (!(freeGB >= 8)) throw new Error(`only ${freeGB.toFixed(1)} GB free on the Mac — need 8 GB. Not starting.`);
+  // ~/sixty/films may be a symlink to an external SSD: refuse if it is unplugged or full.
+  const films = path.join(HOME, "films");
+  if (!existsSync(films)) throw new Error(`${films} is missing (external SSD unplugged?). Not starting.`);
+  const filmsGB = Number(spawnSync("df", ["-k", films + "/"], { encoding: "utf8" }).stdout.trim().split("\n").pop().split(/\s+/)[3]) / 1048576;
+  if (!(filmsGB >= 8)) throw new Error(`only ${filmsGB.toFixed(1)} GB free where films are stored — need 8 GB. Not starting.`);
   if (existsSync(path.join(HOME, "STOP"))) throw new Error(`STOP present: ${readFileSync(path.join(HOME, "STOP"), "utf8").trim()}`);
   if (process.env.ANTHROPIC_API_KEY) log("ℹ ANTHROPIC_API_KEY is set in the parent shell — removed from the job environment");
   const u = usageSnapshot();

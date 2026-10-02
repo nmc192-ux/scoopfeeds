@@ -179,3 +179,74 @@ ScoopFeeds competes with WSJ, Al Jazeera, NYT and TIME on short-form. Every film
 4. **Packager + Publisher, approval mode:** one-tap approve on phone before each post. Run 1 week.
 5. **Analyst + Strategist:** first weekly playbook. Checkpoint: DrJ reviews it.
 6. **Full auto:** `SIXTY_FILMS_AUTOPOST=auto` on DrJ's word; post-upload daily digest; rollback flag `off`.
+
+---
+
+## HANDOVER — state at 2 Oct 2026 (for a fresh session; read this first)
+
+**Where things are.** Branch `feat/sixty-phase0` (local only, never pushed, not merged). Code in
+`sixty/`; runtime on the Mac mini in `~/sixty/` (films, logs, ledger, render venv `shotengine/`,
+local Kokoro `kokoro/` + `kokoro-start.sh`, models `models/` (whisper small.en, YuNet), beds
+`data/music-library/`). The VPS is untouched (publishing only, later phases).
+
+**Phase:** 0, not closed. Done: subscription-only runner with per-agent usage accounting, hard
+gates (Rule 0 + 7 tests, QA, daily cap 6, STOP switch, gate-hash integrity), blind A/B (verdict:
+A = routing/Opus writer was better; Fable stays out), playbook, soundbites, pin card, keyword
+captions, new stopwatch pill. NEXT: DrJ approves the stopwatch stills
+(`~/sixty/review/stopwatch-stills.jpg`) → ONE test film on the routing, Hegseth "1 in 5
+generals" story WITH his recorded voice, balance rule applies, not posted → checkpoint.
+
+**How to run** (from the repo root, on the Mac mini; start Kokoro first):
+```
+~/sixty/kokoro-start.sh &                       # local Kokoro on 127.0.0.1:8880
+node sixty/bin/run.mjs film --pick <pick.json> --dir ~/sixty/films/<day>/<name>   # one film, routing
+node sixty/bin/run.mjs pick --day ~/sixty/films/<day> --films 2                   # Scout + Editor
+node sixty/bin/run.mjs repick --day <dir> --films 1 --exclude "..."               # Editor only
+node sixty/bin/run.mjs ab --pick <pick.json> --dir <dir>                          # blind A/B
+node --test sixty/gates/rule0.test.mjs
+```
+The Hegseth pick: `~/sixty/films/2026-09-30-phase0/pick2.json`. The runner refuses to start if:
+not on subscription login, `~/sixty/STOP` exists, daily cap reached, Kokoro down, < 8 GB free
+(Mac or the films location).
+
+**Decisions in force (DrJ).** Mac mini runs agents+render; VPS publishes only. Aliases only;
+routing+effort in `sixty/config/models.json` (opus/high editor, writer, fact-checker,
+strategist; opus/medium QA; sonnet/medium researcher, render, packager, scout, producer; haiku
+publisher, analyst; sonnet never at max; sonnet stage failing twice → opus). Never downgrade;
+low headroom = fewer films; no API key; no paid overage. Interim cap 6/day; stop on any limit
+signal. Rule 0 wording: agents never write the country or any gate word anywhere. Footage:
+official government/agency/company channels incl. their YouTube uploads (public-domain gov first,
+own download preferred); no logins/scraping of Instagram/TikTok/X; no re-uploads or aggregator
+channels. Text-only screen time > 15% = HARD FAIL (charts/counters/maps are visuals); < 60% real
+footage = flag. Playbook rules 1–8 flagged by QA. Voice stays `bm_george` until DrJ picks from
+the samples in `~/sixty/films/2026-09-30-phase0/film2/review/voices/`.
+
+**Measured (Phase 0 A/B, Hegseth story).** Per film ≈ 22–31 points of the 5-hour window and
+2–3 points of the weekly cap; story pick ≈ 3–7 window points. 6/day does not fit the weekly cap
+on the current plan (≈ 85–125% of a week); ≈ 3–4/day does. Proposed real cap: 4/day. Plan tier
+not yet stated by DrJ. Extra usage is OFF (org_level_disabled).
+
+**Open items.**
+1. Stopwatch stills — awaiting DrJ's approval (gates the test film).
+2. Voice choice (DrJ listening).
+3. Plan tier → final daily cap.
+4. Disk: Mac mini at ~8 GB free; cleanup list proposed to DrJ (synapse logs, caches) — awaiting
+   approval. Moving films to an external SSD: see below.
+5. Commons unreachable from the Mac (router DNS refuses commons.wikimedia.org) — DrJ's network call.
+6. Scout sources not wired: YouTube Data API (key on Mac = credential decision), Reddit API, TikTok
+   Creative Center, X.
+7. Stop notification is local only; emailing DrJ needs the mail credential on the Mac (DrJ).
+8. A "news-network/social footage ruling" DrJ referred to on 2 Oct was not found in this session —
+   only the official-channels ruling above is applied. Re-send if there was another.
+9. `.claude/settings.json` still has the ssh/scp/merge deny rules removed (from the shot-engine
+   build) — restore with `git checkout .claude/settings.json` when DrJ says.
+10. Phase 0 scratch films are kept in `~/sixty/films/2026-09-30-phase0/` (~0.7 GB) for reference.
+
+**Moving films to an external SSD** (when plugged in, e.g. `/Volumes/SSD`; with no run active):
+```
+mkdir -p /Volumes/SSD/sixty-films
+rsync -a ~/sixty/films/ /Volumes/SSD/sixty-films/ && mv ~/sixty/films ~/sixty/films.old
+ln -s /Volumes/SSD/sixty-films ~/sixty/films
+# check a film plays from the SSD, then: rm -rf ~/sixty/films.old
+```
+If the SSD is unplugged the runner refuses to start (the films path is checked).

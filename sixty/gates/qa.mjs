@@ -108,6 +108,26 @@ if (plan && reg && fc && script) {
   check("originality: third-party video ≤ 50% of runtime, no single clip > 8 s, narration ≥ 45 s",
     voice ? thirdSecs <= 30 && longest <= 8 && voice.narrationSecs >= 45 : null,
     { thirdPartyClipSecs: +thirdSecs.toFixed(1), longestClip: longest, narrationSecs: voice?.narrationSecs });
+  // TEXT-HEAVINESS — HARD FAIL (DrJ 2 Oct 2026): more than 15% text-only screen time fails
+  // the film and sends it back. Animated data graphics (charts, counters, maps) are VISUALS.
+  // Built-in kinds are classified here; a custom x- shot must declare "class":
+  // "real" | "data" | "text" — undeclared counts as text (fail-safe).
+  const cls = (x) => {
+    if (["clip", "photo", "satellite"].includes(x.kind)) return "real";
+    if (["map", "count", "graphic"].includes(x.kind)) return "data";
+    if (["punch", "headline"].includes(x.kind)) return "text";
+    if (x.kind.startsWith("x-")) return ["real", "data", "text"].includes(x.class) ? x.class : "text";
+    return "text";
+  };
+  const content2 = plan.shots.filter((x) => x.kind !== "end");
+  const secs2 = content2.reduce((n, x) => n + x.T, 0) || 1;
+  const byClass = { real: 0, data: 0, text: 0 };
+  for (const x of content2) byClass[cls(x)] += x.T;
+  const textShare = byClass.text / secs2;
+  globalThis.__realShare = byClass.real / secs2;
+  check("text-only screen time ≤ 15% (charts, counters and maps count as visuals)", textShare <= 0.15,
+    { textOnlyPct: Math.round(100 * textShare), realPct: Math.round(100 * byClass.real / secs2), dataPct: Math.round(100 * byClass.data / secs2),
+      textShots: content2.filter((x) => cls(x) === "text").map((x) => `${x.kind}@${x.t0}s ${x.T}s${x.kind.startsWith("x-") && !x.class ? " (no class → text)" : ""}`).slice(0, 15) });
   check("promise is stated in the first 2 s (hook present, until ≥ 2)", plan.hook ? (plan.hook.until ?? 0) >= 2 && !!script.promise : null, script.promise);
   check("word-by-word captions present", Array.isArray(plan.words) && plan.words.length > 50, plan.words?.length);
 }
@@ -117,6 +137,7 @@ if (plan && reg && fc && script) {
 const playbook = [];
 const flag = (rule, met, evidence) => playbook.push({ rule, met, evidence });
 if (plan && script) {
+  const realShare = globalThis.__realShare ?? 0;
   const first = String(script.lines?.[0]?.text || "");
   flag(1, !/^\s*in\s+(60|sixty)\s+seconds/i.test(first), `opening line: "${first.slice(0, 90)}"`);
   const voice2 = load("voice/voice.json") || load("voice.json");
@@ -139,12 +160,8 @@ if (plan && script) {
   const last = (script.lines || []).filter((l) => l.kind !== "soundbite").at(-1) || {};
   flag(8, ["next", "loop"].includes(last.beat) || /\bnext\b|\bwatch\b|\bby\s+\d|\bon\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(last.text || ""),
     `last narration line (${last.beat || "no beat"}): "${String(last.text || "").slice(0, 90)}"`);
-  // Text-heaviness (DrJ: "people don't watch shorts if they are too text heavy")
-  const secs = content.reduce((n, x) => n + x.T, 0) || 1;
-  const real = content.filter((x) => ["clip", "photo", "satellite", "map"].includes(x.kind) || (x.kind.startsWith("x-") && (x.media || []).length)).reduce((n, x) => n + x.T, 0);
-  const textOnly = content.filter((x) => ["punch", "count", "graphic", "headline"].includes(x.kind) || (x.kind.startsWith("x-") && !(x.media || []).length && !/map|chart|bar|graph/.test(x.kind))).reduce((n, x) => n + x.T, 0);
-  flag("visuals", !(hasVideo && real / secs < 0.6) && textOnly / secs <= 0.15,
-    `real footage/photos/maps ${Math.round(100 * real / secs)}% · text-only ${Math.round(100 * textOnly / secs)}% (targets: ≥60% real when footage exists, ≤15% text-only)`);
+  // Real-footage share: FLAG only (DrJ 2 Oct 2026). Real = footage, photos, satellite.
+  flag("visuals", !(hasVideo && realShare < 0.6), `real footage/photos ${Math.round(100 * realShare)}% of screen time (flag below 60% when footage exists)`);
 }
 
 // ─── Rule 0 again, independently ───────────────────────────────────────────

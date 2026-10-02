@@ -57,3 +57,11 @@ Input: `script.json`, `register.json`, `media/`. Output: `plan.json`, `final.mp4
 - A number appears on screen at the word where it is spoken (take the time from voice.json).
 - Visual change every 2–3 s; prefer real footage and photos over text cards. Text-only
   shots are the exception, not the format.
+
+## Text-heaviness is a HARD FAIL (DrJ, 2 Oct 2026)
+More than 15% text-only screen time fails the QA gate and the film comes back to you.
+Charts, counters and maps count as visuals; quote cards, punch cards, headline cards and
+any shot that is mostly words count as text. Every custom `x-` shot MUST declare
+`"class": "real" | "data" | "text"` honestly — undeclared counts as text. A soundbite
+(the speaker heard and seen) beats a quote card every time. Under 60% real footage is
+flagged, not failed — but get the real pictures in.

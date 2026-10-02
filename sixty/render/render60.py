@@ -37,24 +37,82 @@ def _patch(key, make):
     if key not in _mark: _mark[key] = make()
     return _mark[key]
 
+# DrJ 2 Oct 2026: a small SOLID pill so it reads on dark and pale footage alike; in a
+# corner; never over a face (a face under it moves it to the other top corner) and never
+# over captions (they start at y 1190, the pill lives at y 250).
+PILL_W, PILL_H, PILL_Y = 196, 72, 238
+_faces = {'t': -9, 'boxes': []}
+# YuNet (OpenCV's own DNN face detector, ~230 KB, free) handles profiles and faces cut by
+# the frame edge, which the Haar cascades missed on the 2 Oct stills. Haar is the fallback.
+_YUNET = os.path.join(os.path.expanduser('~'), 'sixty', 'models', 'face_detection_yunet_2023mar.onnx')
+_yunet = None
+try:
+    if os.path.exists(_YUNET):
+        _yunet = cv2.FaceDetectorYN.create(_YUNET, '', (W // 4, 480), 0.6, 0.3, 50)
+except Exception:
+    _yunet = None
+try:
+    _cascade = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, 'haarcascade_frontalface_default.xml'))
+except Exception:
+    _cascade = None
+
+def faces(dst, t):
+    """Face boxes in full-frame coords, re-detected every 0.25 s on a 1/4-size frame."""
+    if t - _faces['t'] >= 0.25 or t < _faces['t']:
+        small = cv2.resize(dst, (W // 4, dst.shape[0] // 4))
+        found = []
+        if _yunet is not None:
+            _yunet.setInputSize((small.shape[1], small.shape[0]))
+            _, det = _yunet.detect(cv2.cvtColor(small, cv2.COLOR_RGB2BGR))
+            found = [tuple(int(v) for v in d[:4]) for d in (det if det is not None else [])]
+        elif _cascade is not None:
+            found = list(_cascade.detectMultiScale(cv2.cvtColor(small, cv2.COLOR_RGB2GRAY), 1.15, 8, minSize=(18, 18)))
+        _faces['boxes'] = [(x * 4, y * 4, w * 4, h * 4) for (x, y, w, h) in found]
+        _faces['t'] = t
+    return _faces['boxes']
+
+def _overlaps(box, x0, y0, x1, y1, pad=6):
+    x, y, w, h = box
+    return not (x + w < x0 - pad or x > x1 + pad or y + h < y0 - pad or y > y1 + pad)
+
 def stopwatch(dst):
     t = _now['t']
     left = max(0, math.ceil(FILM_SECS - t - 1e-6))
-    cx, cy, r = W - M - 40, 250 + 40, 36
-    # dark disc so the ring reads on any picture
-    cv2.circle(dst, (cx, cy), r + 10, (12, 10, 9), -1, cv2.LINE_AA)
-    cv2.circle(dst, (cx, cy), r, (62, 58, 52), 5, cv2.LINE_AA)
+    # Corner decided on the bare picture (before chrome) in post() below.
+    if _now.get('side') == 'left': x0 = M; x1 = M + PILL_W
+    else: x1 = W - M; x0 = x1 - PILL_W
+    y0, y1 = PILL_Y, PILL_Y + PILL_H
+    r = PILL_H // 2
+    pill = dst[y0:y1, x0:x1]
+    ov = pill.copy()
+    cv2.rectangle(ov, (r, 0), (PILL_W - r, PILL_H), (8, 7, 6), -1)
+    cv2.circle(ov, (r, r), r, (8, 7, 6), -1, cv2.LINE_AA); cv2.circle(ov, (PILL_W - r, r), r, (8, 7, 6), -1, cv2.LINE_AA)
+    pill[:] = cv2.addWeighted(ov, 0.94, pill, 0.06, 0)
+    cx, cy, rr = x1 - r, y0 + r, r - 12
+    cv2.circle(dst, (cx, cy), rr, (70, 66, 60), 5, cv2.LINE_AA)
     frac = min(1.0, t / FILM_SECS)
-    if frac < 1.0:  # remaining time as a lime arc, sweeping clockwise from 12 o'clock
-        cv2.ellipse(dst, (cx, cy), (r, r), -90, 360 * frac, 360, LIME, 5, cv2.LINE_AA)
-    num = _patch(('n', left), lambda: tpatch(str(left), ANTON(40), WHITE))
+    if frac < 1.0: cv2.ellipse(dst, (cx, cy), (rr, rr), -90, 360 * frac, 360, LIME, 5, cv2.LINE_AA)
+    num = _patch(('n', left), lambda: tpatch(str(left), ANTON(30), WHITE))
     blit(dst, num, cx, cy - num.shape[0] // 2, 1.0, 'ct')
-    word = _patch('60', lambda: tpatch('60 ·', ANTON(52), LIME))
-    blit(dst, word, cx - r - 22, cy - word.shape[0] // 2, 1.0, 'rt')
-    sf = _patch('sf', lambda: tpatch('SCOOPFEEDS', MONO(20), (215, 211, 200)))
-    blit(dst, sf, W - M, cy + r + 18, 0.8, 'rt')
+    word = _patch('60', lambda: tpatch('60 ·', ANTON(44), LIME))
+    blit(dst, word, x0 + 22, cy - word.shape[0] // 2, 1.0, 'lt')
 
 E.brand = stopwatch   # Shot.post() calls brand(f) on every chromed frame
+
+_post = E.Shot.post
+def post(self, f, tl):
+    # Faces are found on the picture BEFORE any chrome is drawn, then the pill picks a corner.
+    xr1 = W - M; xr0 = xr1 - PILL_W
+    _now['side'] = 'left' if any(_overlaps(b, xr0, PILL_Y, xr1, PILL_Y + PILL_H) for b in faces(f, _now['t'])) else 'right'
+    return _post(self, f, tl)
+E.Shot.post = post
+
+_kicker = E.kicker
+def kicker(dst, text, a=1.0):
+    # When the pill takes the top-left corner, the kicker tag moves just below it.
+    if _now.get('side') != 'left': return _kicker(dst, text, a)
+    blit(dst, tpatch(text.upper(), E.OSW(38, 'SemiBold'), INK, LIME, (16, 9), track=3), M, PILL_Y + PILL_H + 10, a)
+E.kicker = kicker
 
 # ─── 2. Per-film shot code ─────────────────────────────────────────────────
 _custom = {}
@@ -86,8 +144,9 @@ R.build_shot = build_shot
 # plan.pin = {"text": "WHO DECIDES: PENTAGON OR CONGRESS?", "from": 2.4, "until": 57.4}
 #   One line, on screen for the whole film (playbook rule 3), under the chrome row.
 # plan.keywords = ["20%", "congress"] — caption words drawn INK on a LIME box (rule 7).
-PIN_Y = 372
+PIN_Y = 396
 _pin = {}
+PIN_LOW_Y = 1108   # above the captions (1190), below lower-thirds (which end at 1080)
 def draw_pin(f, t, pin):
     if not pin or not (pin.get('from', 0) <= t < pin.get('until', FILM_SECS - 2.6)): return
     if 'p' not in _pin:
@@ -95,7 +154,10 @@ def draw_pin(f, t, pin):
         while size > 26 and ANTON(size).getlength(txt) + 40 > W - 2 * M - 120: size -= 2
         _pin['p'] = tpatch(txt, ANTON(size), WHITE, (12, 10, 9), (18, 10))
     a = E.eo(E.prog(t, pin.get('from', 0), 0.35))
-    blit(f, _pin['p'], M, PIN_Y, 0.92 * a)
+    h, w = _pin['p'].shape[:2]
+    # Never over a face: while one sits under the pin's usual place, it drops above the captions.
+    y = PIN_Y if not any(_overlaps(b, M, PIN_Y, M + w, PIN_Y + h) for b in _faces['boxes']) else PIN_LOW_Y
+    blit(f, _pin['p'], M, y, 0.92 * a)
 
 _norm = lambda w: re.sub(r'[^a-z0-9%$]', '', str(w).lower())
 KEYWORDS = set()
