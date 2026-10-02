@@ -15,7 +15,7 @@
  * never switch to a cheaper model, never use paid overage. Headroom low → fewer films.
  */
 import { spawn, spawnSync } from "child_process";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, appendFileSync, copyFileSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, appendFileSync, copyFileSync, statSync } from "fs";
 import { createHash, randomInt } from "crypto";
 import path from "path";
 import { HOME, REPO } from "../tools/env.mjs";
@@ -48,7 +48,11 @@ function gatesHash() {
   const h = createHash("sha256");
   for (const d of ["gates", "tools", "render", "config", "agents", "bin"]) {
     const dir = path.join(SIXTY, d);
-    for (const f of readdirSync(dir).sort()) { h.update(`${d}/${f}`); h.update(readFileSync(path.join(dir, f))); }
+    for (const f of readdirSync(dir).sort()) {
+      const full = path.join(dir, f);
+      if (f === "__pycache__" || f === "node_modules" || !statSync(full).isFile()) continue;   // caches are not code
+      h.update(`${d}/${f}`); h.update(readFileSync(full));
+    }
   }
   return h.digest("hex");
 }
