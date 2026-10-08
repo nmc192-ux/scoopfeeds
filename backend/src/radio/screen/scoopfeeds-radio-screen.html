@@ -119,6 +119,11 @@ body.broadcast{background:#090706;}
 
 /* news */
 .s-news{display:grid; grid-template-columns:1.45fr 1fr; gap:36px;}
+/* R2: no story photo → no plate; the headline column and "Also this hour" take the full width */
+.s-news.nophoto{grid-template-columns:1fr;}
+.s-news.nophoto > .plate{display:none;}
+/* R2: placeholder labels never air on live data */
+body.live .ph{display:none;}
 .wave{position:absolute; left:24px; bottom:22px; display:flex; gap:5px; align-items:flex-end; height:56px;}
 .wave i{width:6px; height:100%; background:var(--ink); opacity:.85; transform-origin:bottom; animation:bar 1.1s ease-in-out infinite;}
 .also h3{margin:0 0 6px; font-size:20px; font-weight:500; color:var(--muted); font-stretch:85%;}
@@ -376,7 +381,9 @@ const hasExplains = () => !!STATE.explains && Array.isArray(STATE.explains.bars)
 const hasNowNext  = () => !!(STATE.now && STATE.now.title && STATE.next && STATE.next.title);
 const hasNext     = () => !!(STATE.next && STATE.next.title);
 const hasLater    = () => Array.isArray(STATE.later) && STATE.later.length > 0;
-const sceneAvailable = name => name === 'markets' ? hasMarkets() : name === 'weather' ? hasWeather() : name === 'explains' ? hasExplains() : name === 'next' ? hasNext() : true;
+const hasFilm     = () => !!(STATE.film && STATE.film.title);
+const hasPhoto    = () => typeof STATE.photo === 'string' && STATE.photo.length > 0;
+const sceneAvailable = name => name === 'markets' ? hasMarkets() : name === 'weather' ? hasWeather() : name === 'explains' ? hasExplains() : name === 'next' ? hasNext() : name === 'film' ? hasFilm() : true;
 
 function marketsLine(){
   const open = EXCHANGES.map(e => ({ e, s:status(e) })).filter(x => x.s.state === 'open');
@@ -405,7 +412,7 @@ const SEG = {
   weather:  { tag:'Weather',             head:() => STATE.weatherLine },
   next:     { tag:'Coming up',           head:() => (hasNext() ? `${STATE.next.title} at ${STATE.next.start}` : '') },
   music:    { tag:'Music break',         head:() => 'More news at the top of the half hour' },
-  film:     { tag:'Film Hour',           head:() => `${STATE.film.series}: ${STATE.film.title}` }
+  film:     { tag:'Film Hour',           head:() => (hasFilm() ? `${STATE.film.series}: ${STATE.film.title}` : '') }
 };
 
 function renderClocks(){
@@ -429,6 +436,11 @@ function renderStatic(){
   $('sampleTag').textContent = st;
   $('sampleTag').style.display = st ? '' : 'none';
   $('photoCredit').textContent = STATE.photoCredit || '';
+  const news = document.querySelector('.s-news'), plate = news.querySelector('.plate');
+  news.classList.toggle('nophoto', !STATE.sample && !hasPhoto());
+  plate.style.backgroundImage = hasPhoto() ? `url("${encodeURI(STATE.photo)}")` : '';
+  plate.style.backgroundSize = hasPhoto() ? 'cover' : '';
+  plate.style.backgroundPosition = hasPhoto() ? 'center' : '';
   $('also').innerHTML = STATE.alsoThisHour.map(a => `<div class="item"><p>${esc(a.h)}</p><span>${esc(a.src)}</span></div>`).join('');
 
   // SCHEDULE (R2): hidden when there is no schedule data, the same as markets.
@@ -476,7 +488,7 @@ function renderStatic(){
   $('nextSeries').textContent = hasNext() ? (STATE.next.series || '') : '';
 
   $('mcards').innerHTML = STATE.music.map((m,i) => `<div class="mcard ${i === 0 ? 'on' : ''}"><div class="cat">${esc(m.cat)}</div><p>${esc(m.h)}</p><div class="src">${esc(m.src)}</div></div>`).join('');
-  $('filmCap').innerHTML = `<b>${esc(STATE.film.series)}</b><span>${esc(STATE.film.title)}</span>`;
+  $('filmCap').innerHTML = !hasFilm() ? '' : `<b>${esc(STATE.film.series)}</b><span>${esc(STATE.film.title)}</span>`;
 }
 
 function renderBoard(){
@@ -563,6 +575,11 @@ window.ScoopRadio = {
       STATE.weatherLine = ''; STATE.explains = null;
       STATE.now = null; STATE.next = null; STATE.later = null;   // no schedule feed in R2
       STATE.photoCredit = '';                                    // no story photos in R2
+      STATE.film = null;                                         // no film schedule in R2
+      // Placeholder labels ("Story photo", "… plays here") must never air: hide them AND
+      // remove their text, so nothing placeholder-shaped is left in the page at all.
+      document.body.classList.add('live');
+      document.querySelectorAll('.ph').forEach(el => { el.hidden = true; el.textContent = ''; });
     }
     Object.assign(STATE, patch); renderStatic(); renderBoard(); buildTicker(); setScene(STATE.scene);
   },

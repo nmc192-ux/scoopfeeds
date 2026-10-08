@@ -20,6 +20,8 @@ const SAMPLE_VALUES = [
   "Fed officials signal patience",                                                                    // sample headline
   "Top-of-hour News", "10:05 AM ET", "Feature: Tech", "Closing Bell",                                 // sample schedule
   "Photo: agency credit",                                                                             // sample photo credit
+  "The Invisible Hand",                                                                               // sample film
+  "Story photo", "plays here",                                                                        // placeholder labels
 ];
 
 const LIVE = {
@@ -119,4 +121,31 @@ test("schedule data present → Now/Next and Later show, and the music list step
   await expect(page.locator("#nowNext")).toContainText("Markets Wrap");
   await expect(page.locator("#later")).toContainText("Closing Bell");
   await expect(page.locator("#sideMusic")).toBeHidden();
+});
+
+test("no film data → the Film Hour scene is skipped (falls back to News)", async ({ page }) => {
+  await page.goto(`${SCREEN}?broadcast=1`);
+  await page.evaluate((s) => window.ScoopRadio.set(s), LIVE);
+  await page.evaluate(() => window.ScoopRadio.scene("film"));
+  expect(await page.evaluate(() => window.ScoopRadio.state().scene)).toBe("news");
+  await expect(page.locator('section.scene[data-scene="film"]')).not.toHaveClass(/active/);
+});
+
+test("no story photo → the News plate is dropped and 'Also this hour' takes the full main column", async ({ page }) => {
+  await page.goto(`${SCREEN}?broadcast=1`);
+  await page.evaluate((s) => window.ScoopRadio.set(s), LIVE);
+  await expect(page.locator(".s-news > .plate")).toBeHidden();
+  await expect(page.locator(".ph")).toHaveCount(4);
+  for (const ph of await page.locator(".ph").all()) await expect(ph).toBeHidden();
+  const [news, also] = await Promise.all([
+    page.locator(".s-news").boundingBox(), page.locator(".s-news .also").boundingBox(),
+  ]);
+  expect(Math.abs(also.width - news.width)).toBeLessThan(2);
+});
+
+test("a story photo, when supplied, fills the plate instead", async ({ page }) => {
+  await page.goto(`${SCREEN}?broadcast=1`);
+  await page.evaluate((s) => window.ScoopRadio.set({ ...s, photo: "https://example.com/story.jpg" }), LIVE);
+  await expect(page.locator(".s-news > .plate")).toBeVisible();
+  expect(await page.locator(".s-news > .plate").evaluate((el) => el.style.backgroundImage)).toContain("story.jpg");
 });
