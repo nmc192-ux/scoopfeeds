@@ -126,5 +126,5 @@ test("ATOMIC WRITE: a reader looping on the file never sees a partial or unparsa
   assert.deepEqual(fs.readdirSync(dir).filter((n) => n.endsWith(".tmp")), [], "temp files left behind");
 });
 
-test.skip("SCREEN (Playwright): sample:false with no markets shows no sample numbers — BLOCKED: the R1 template " +
-  "(scoopfeeds-radio-screen.html) is not in the repo or the brief's attachments; the screen change and this test land with it", () => {});
+// The screen itself (sample:false never shows the template's sample numbers) is covered by
+// frontend/tests/e2e/radio-screen.spec.js (Playwright), which loads the template from disk.
