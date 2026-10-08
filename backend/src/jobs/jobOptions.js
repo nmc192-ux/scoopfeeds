@@ -20,6 +20,7 @@ export const QUEUE_NAMES = {
   newsletter: "newsletter",
   brief: "brief",
   maintenance: "maintenance",
+  radio: "radio",               // ScoopFeeds Radio state builder (dark behind RADIO_ENABLED)
 };
 
 export const JOB_NAMES = {
@@ -38,6 +39,7 @@ export const JOB_NAMES = {
   geoUsgs: "geo.usgs.sync",
   eventsPromote: "events.promote",
   realityIndexCompose: "reality-index.compose",
+  radioStateBuild: "radio.state.build",
 };
 
 export const JOB_IDS = {
@@ -54,6 +56,7 @@ export const JOB_IDS = {
   [JOB_NAMES.geoUsgs]: "geo-usgs-singleton",
   [JOB_NAMES.eventsPromote]: "events-promote-singleton",
   [JOB_NAMES.realityIndexCompose]: "reality-index-compose-singleton",
+  [JOB_NAMES.radioStateBuild]: "radio-state-build-singleton",
 };
 
 export const defaultJobOptions = {
@@ -124,6 +127,9 @@ export const defaultJobOptions = {
 export const queueLockDuration = {
   [QUEUE_NAMES.ingestion]:    parseIntEnv("QUEUE_LOCK_MS_INGESTION", 2 * 60_000),
   [QUEUE_NAMES.video]:        parseIntEnv("QUEUE_LOCK_MS_VIDEO", 2 * 60_000),
+  // Radio state: DB reads, title grouping and up to four short LLM calls — seconds,
+  // not minutes. 2 minutes is ample and keeps a hung build from holding the slot long.
+  [QUEUE_NAMES.radio]:        parseIntEnv("QUEUE_LOCK_MS_RADIO", 2 * 60_000),
   [QUEUE_NAMES.enrichment]:   parseIntEnv("QUEUE_LOCK_MS_ENRICHMENT", 2 * 60_000),
   [QUEUE_NAMES.videoRender]:  parseIntEnv("QUEUE_LOCK_MS_VIDEO_RENDER", 10 * 60_000),
   // 30 MIN. A full bundle — 71 cards of satori+resvg, a 9-minute encode, five
@@ -200,4 +206,7 @@ export const queueConcurrency = {
   // flag, which a second concurrent consumer would not see.
   analysis: parseIntEnv("QUEUE_CONCURRENCY_ANALYSIS", 1),
   realityIndex: parseIntEnv("QUEUE_CONCURRENCY_REALITY_INDEX", 1),
+  // 1: one state file, one writer. Two builders racing would both be atomic
+  // but could land out of order (an older state replacing a newer one).
+  radio: parseIntEnv("QUEUE_CONCURRENCY_RADIO", 1),
 };

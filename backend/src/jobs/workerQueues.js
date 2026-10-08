@@ -43,6 +43,7 @@ export const ALL_WORKER_QUEUES = Object.freeze([
   QUEUE_NAMES.enrichment,
   QUEUE_NAMES.analysis,
   QUEUE_NAMES.realityIndex,
+  QUEUE_NAMES.radio,
 ]);
 
 /**

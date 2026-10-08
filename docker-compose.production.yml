@@ -84,7 +84,7 @@ services:
       USE_BULLMQ: "true"
       REDIS_URL: redis://redis:6379
       SCOOP_PERSISTENT_DATA_DIR: /var/lib/scoop
-      WORKER_QUEUES: "ingestion,video,video_render,longform,social,enrichment"
+      WORKER_QUEUES: "ingestion,video,video_render,longform,social,enrichment,radio"
     volumes:
       - scoop_data:/var/lib/scoop
     stop_grace_period: 60s

@@ -56,6 +56,8 @@ export const HEARTBEAT_PING_URLS = {
   // decided by video_posts: rows in the window → success, none → /fail.
   videoOutcome: "VIDEO_OUTCOME_PING_URL",
   ingestion:    "INGESTION_HEARTBEAT_PING_URL",
+  // ScoopFeeds Radio state builder — pinged on COMPLETION only (radio/radioState.js).
+  radio:        "RADIO_PING_URL",
 };
 
 // An unset switch is silent BY DESIGN, which makes "not configured" and

@@ -20,6 +20,7 @@ import { runVideoRenderCycle } from "../services/videoAutopost.js";
 import { longformCycleJob } from "../services/longform/runLongformCycle.js";
 import { runSocialCycleWithTimeout } from "../services/socialPublisher.js";
 import { runXTextCycle } from "../services/xTextPoster.js";
+import { runRadioStateCycle } from "../radio/radioState.js";
 import { withJobRunLogging } from "./jobLogger.js";
 import { queueConcurrency, queueLockDuration, DEFAULT_LOCK_MS, JOB_NAMES, QUEUE_NAMES, BULLMQ_PREFIX } from "./jobOptions.js";
 import { resolveWorkerQueues } from "./workerQueues.js";
@@ -213,6 +214,16 @@ try {
       JOB_NAMES.xTextPost,
       queueConcurrency.social,
       async () => runXTextCycle()
+    );
+    // SCOOPFEEDS RADIO (R2). Builds the screen state JSON every ~5 minutes; a
+    // no-op unless RADIO_ENABLED=true. Its own queue, concurrency 1: one state
+    // file, one writer. runRadioStateCycle never throws — a retry would only
+    // repeat the same failure five minutes early.
+    registerIfMine(
+      QUEUE_NAMES.radio,
+      JOB_NAMES.radioStateBuild,
+      queueConcurrency.radio,
+      async () => runRadioStateCycle()
     );
     // ─── The four cycles that used to block the scheduler's event loop ──────
     //
