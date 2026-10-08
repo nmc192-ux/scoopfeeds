@@ -17,6 +17,7 @@ const queueDefinitions = {
   newsletterQueue: QUEUE_NAMES.newsletter,
   briefQueue: QUEUE_NAMES.brief,
   maintenanceQueue: QUEUE_NAMES.maintenance,
+  radioQueue: QUEUE_NAMES.radio,
 };
 
 let queues = null;
@@ -237,4 +238,4 @@ export { JOB_NAMES, QUEUE_NAMES };
  * in the temporal dead zone and throws at import.
  * Not part of the module's contract.
  */
-export const __testing = { withStepDeadline, enqueueWithQueue, DEDUP_HOLDING_STATES };
+export const __testing = { withStepDeadline, enqueueWithQueue, DEDUP_HOLDING_STATES, queueDefinitions };
