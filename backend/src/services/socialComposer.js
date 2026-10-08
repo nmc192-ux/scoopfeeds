@@ -113,7 +113,7 @@ function utmUrl(articleId, network) {
 // "BBC Sport: ...", trailing dashes ("- BBC News"), bracketed annotations
 // ("[VIDEO]", "(Reuters)"), and ALL-CAPS prefixes ("EXCLUSIVE: ...") all
 // either duplicate info we already show or read as templated.
-function cleanHeadline(raw) {
+export function cleanHeadline(raw) {
   let h = String(raw || "").trim();
   if (!h) return "";
   // Trailing " - Source" / " — Source" / " | Source" — but ONLY when the

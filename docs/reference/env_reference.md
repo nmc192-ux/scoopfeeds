@@ -33,7 +33,7 @@ not exist before; `backend/.env.example` documented 77 of the ~262 vars the code
 | `EVENT_UNIFIED_AFFINITY` | `false` | **`true`** | yes | Wave 2. One `storyAffinity` measure shared by promoter/merge/breaker. Killed the create-merge-split treadmill. |
 | `EVENT_MIN_ARTICLES` | `5` | default | yes | Cluster size (or ≥1 bound market) required to promote an event. |
 | `PROMOTER_YIELD_MS` | `50` | default | yes | Ceiling on how long the promoter may hold the worker's JS thread between yields. `0` disables yielding and restores the pre-2026-08-31 monopolising behaviour — the only value for which a promote cycle can again starve RSS timeouts and BullMQ lock renewal. Garbage or negative falls back to `50` rather than to `0`. |
-| `WORKER_QUEUES` | unset = every queue | `ingestion,video,video_render,longform,social,enrichment` on `worker`; `analysis,reality-index` on `worker-graph` | no (restart) | Which queues a worker container consumes. The two lists must PARTITION the queue set — a queue in both runs its cycle twice (the `isRunning` guards are process-local), a queue in neither goes silently dark. `workerQueues.test.js` reads the compose file and fails on either. An unknown name refuses the boot. |
+| `WORKER_QUEUES` | unset = every queue | `ingestion,video,video_render,longform,social,enrichment,radio` on `worker`; `analysis,reality-index` on `worker-graph` | no (restart) | Which queues a worker container consumes. The two lists must PARTITION the queue set — a queue in both runs its cycle twice (the `isRunning` guards are process-local), a queue in neither goes silently dark. `workerQueues.test.js` reads the compose file and fails on either. An unknown name refuses the boot. |
 | `EVENT_MATCH_TAU` | `0.78` | default | yes | Cluster↔event centroid-cosine floor for a match. |
 | `EVENT_MERGE_TAU` | `0.86` | default | yes | Event↔event cosine floor confirming a convergence merge. |
 | `EVENT_MATCH_COSINE_FLOOR` | = `MATCH_TAU` | default | yes | Override the match cosine floor independently. |
@@ -438,6 +438,7 @@ monitor is visible in the boot log rather than indistinguishable from a healthy 
 |---|---|---|---|---|
 | `SOCIAL_HEARTBEAT_PING_URL` | unset (**no switch**) | **set** | restart | Social posting cycle. Runs `*/30` **from a host crontab**, not node-cron — see the social note below. |
 | `VIDEO_HEARTBEAT_PING_URL` | unset (**no switch**) | **set** | restart | Video render/publish cycle (`videoAutopost`), hourly at **`:12`**. |
+| `RADIO_PING_URL` | unset (**no switch**) | unset | restart | ScoopFeeds Radio state builder. Pinged on **completion only** (no `/start`), ~12×/hour at `:00,06,10,15,21,25,30,36,40,45,51,55`. |
 | `VIDEO_OUTCOME_PING_URL` | unset (**no switch**) | unset — **DrJ creates the check, grace 2–3h** | restart | The OUTCOME switch: pinged from the video cycle's end, but the verdict comes from `video_posts` — rows published in the last `VIDEO_OUTCOME_WINDOW_HOURS` → success, none → `/fail` with the last-publish age and cycle shape. Exists because the cycle dead-man ran green through two zero-output outages (2026-08-12, 2026-08-30 — cause upstream of the runner both times; the second short-circuited at the daily cap without attempting a spec). Piggybacked on the cycle so a dead runner pages by silence and a starved one pages immediately. A deliberate pause (`VIDEO_AUTOPOST_ENABLED` unset) goes silent rather than lying success — pause the monitor alongside the loop. |
 | `VIDEO_OUTCOME_WINDOW_HOURS` | `6` | unset (code default) | restart | The outcome window, measured not chosen: 30 days of publishes show healthy gaps at p50 2.0h / p90 3.0h; every gap over 6h in that window was an outage or a deliberate pause. |
 | `INGESTION_HEARTBEAT_PING_URL` | unset (**no switch**) | **set** | restart | RSS ingestion, **`2,32`** — the **root** cycle; breaking-push hangs off it. |
@@ -519,6 +520,8 @@ FAIL-with-reason, so the three cases separate themselves:
 | `DISPATCH_STUCK_MS` | `60000` | default | yes | A dispatch pending this long logs `STUCK`. Set **above** `QUEUE_ENQUEUE_TIMEOUT_MS` so an enqueue hang surfaces as a named rejection first and this only fires for a hang elsewhere. |
 | `QUEUE_ENQUEUE_TIMEOUT_MS` | `10000` | default | yes | Per-await deadline inside `enqueueSingletonJob` (`getJob` / `getState` / `remove` / `add`). **Rejects naming the step, queue, job and jobId — never retries.** A hang turned into a silent retry is the same failure wearing a hat. |
 | `QUEUE_CONCURRENCY_SOCIAL` | `1` | default | restart | **Strictly 1.** `socialPublisher`'s single-flight guard is process-local, so a second concurrent consumer would not see it and both would post. |
+| `QUEUE_CONCURRENCY_RADIO` | `1` | default | restart | **Keep at 1.** One state file, one writer: two radio builders would each write atomically but could land out of order, an older state replacing a newer one. |
+| `QUEUE_LOCK_MS_RADIO` | `120000` | default | restart | BullMQ lock for the radio state build. A build is seconds; two minutes keeps a hung one from holding the slot. |
 
 > ⚠️ **`assertRedisAvailable` does no I/O.** It is `Boolean(REDIS_URL)` plus a `REQUIRE_REDIS`
 > throw — no socket, no PING, no connection object. It cannot hang and cannot be affected by
@@ -719,3 +722,10 @@ respect: its own table (`longform_posts`), its own cadence, its own gates.
 publishes with **no human ack before the publishAt slot** — DrJ's decision,
 2026-08-25, scoped to this loop only. See CLAUDE.md. What stands in for the ack
 is `longformQcGate.js`; treat changes to it as changes to a publishing control.
+
+## ScoopFeeds Radio (R2)
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `RADIO_ENABLED` | `false` (anything but literally `"true"`) | unset (**dark**) | yes (read each cycle and each request) | Turns on the radio state builder (`radio/radioState.js`, worker `radio` queue, ~every 5 min) and the two routes `GET /api/radio/state.json` and `GET /radio/screen`. Off: the cycle returns at once and both routes are 404. Turn on only after DrJ has looked at `/radio/screen?broadcast=1&state=/api/radio/state.json` in a dry run. |
+| `RADIO_PING_URL` | unset | unset | restart | See the heartbeat table above. |

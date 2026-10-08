@@ -49,6 +49,7 @@ import articlesOpsRouter from "./src/routes/articles-ops.js";
 import metricsOpsRouter  from "./src/routes/metrics-ops.js";
 import briefsRouter      from "./src/routes/briefs.js";
 import embedRouter       from "./src/routes/embed.js";
+import { radioApiRouter, radioScreenRouter } from "./src/routes/radio.js";
 import macroRouter       from "./src/routes/macro.js";
 import syntheticMarketsRouter from "./src/routes/syntheticMarkets.js";
 import v1Router            from "./src/routes/v1.js";
@@ -276,6 +277,8 @@ app.use("/api/ri",         predictionsLimiter, cacheMiddleware("short"), reality
 app.use("/api/watchlists", watchlistsRouter);                            // Reality Index Phase 4: per-user follow lists (auth-gated; no caching)
 app.use("/api/briefs",     cacheMiddleware("short"), briefsRouter);      // Reality Index Phase 4: published analyst briefs (drafts in /scoop-ops)
 app.use("/embed",          embedRouter);                                 // Phase 5: public iframe embeds for blogs/Substacks (no auth, frame-ancestors *)
+app.use("/api/radio",      standardReadLimiter, radioApiRouter);   // ScoopFeeds Radio (R2): /state.json — 404 unless RADIO_ENABLED=true
+app.use("/radio",          radioScreenRouter);                     // ScoopFeeds Radio (R2): /screen — above the SPA catch-all; 404 unless RADIO_ENABLED=true
 app.use("/api/macro",      cacheMiddleware("medium"), macroRouter);     // Phase 5: macro indicators (FRED today; WB/IMF later)
 app.use("/api/synthetic-markets", syntheticMarketsRouter);              // Phase 6 foundation: x*y=k AMM markets (no caching — trades mutate)
 app.use("/api/v1",         publicV1EdgeLimiter, cacheMiddleware("medium"), v1Router);        // Phase 7: public read-only API, key-authed + per-key rate-limited

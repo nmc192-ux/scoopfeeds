@@ -175,6 +175,15 @@ const dispatchSocialCycle = () => dispatchCycle({
 // `inProcess: null` deliberately: there is no degraded mode where the scheduler
 // posts to X itself, because that is the process whose blocked event loop
 // caused the 2026-08 cron outage.
+// ScoopFeeds Radio (R2): the state builder runs on the worker. `inProcess: null`:
+// it does DB reads and an LLM call, which have no business on the scheduler's
+// event loop. The RADIO_ENABLED gate lives in the cycle, so turning radio on or
+// off is one env var, not a deploy.
+const dispatchRadioStateCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.radio, job: JOB_NAMES.radioStateBuild,
+  inProcess: null, label: "radio state",
+});
+
 const dispatchXTextCycle = () => dispatchCycle({
   queue: QUEUE_NAMES.social, job: JOB_NAMES.xTextPost,
   inProcess: null, label: "x text posts",
@@ -658,6 +667,10 @@ export function startScheduler() {
   // cron sharing a minute with in-process work is how ingestion died for 43
   // hours.
   scheduleCron("10,40 * * * *", () => runDispatch(() => dispatchXTextCycle(), "x text posts"));
+  // Radio state every ~5 minutes on the twelve minutes that carry no in-process
+  // work (scheduler.cronCollision.test.js): gaps of 4–6 minutes, never 5 exactly,
+  // because every */5 offset lands on at least three in-process minutes.
+  scheduleCron("0,6,10,15,21,25,30,36,40,45,51,55 * * * *", () => runDispatch(() => dispatchRadioStateCycle(), "radio state"));
   scheduleCron("9 * * * *",     () => runDispatch(() => dispatchVideoCycle(), "video ingestion"));
   scheduleCron("6,22,36,52 * * * *", () => runDispatch(() => dispatchEnrichCycle({ batchSize: 40, concurrency: 4 }), "article enrichment"));
   scheduleCron("28 * * * *",   () => runDispatch(() => dispatchEventsCycle(), "events refresh"));
