@@ -8,7 +8,7 @@
  * atomic on one filesystem, so a reader sees the old file or the new one, never part.
  *
  * Keys match the R1 screen's STATE exactly:
- *   sample:false · updatedAt · headline · alsoThisHour[{h,src}] · music[{cat,h,src}]
+ *   sample:false · updatedAt · headline · alsoThisHour[{h,src}] (5) · music[{cat,h,src}] (4–6)
  * weatherLine / markets / weather / key are OMITTED in R2 (no feed yet).
  *
  * Pipeline: candidates (this hour, not duplicate, credibility ≥ 7, not a programming

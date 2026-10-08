@@ -32,6 +32,8 @@ const LIVE = {
     { h: "Fed holds rates steady as inflation cools", src: "Reported by CNBC" },
     { h: "Magnitude 7.1 earthquake strikes off Japan", src: "Reported by NPR News and BBC News" },
     { h: "EU agrees new rules for AI chatbots", src: "Reported by Politico Europe" },
+    { h: "Wildfire forces evacuations in California hills", src: "Reported by LA Times and NPR News" },
+    { h: "Oil prices climb on supply worries", src: "Reported by MarketWatch" },
   ],
   music: [
     { cat: "Business", h: "Oil climbs on supply worries", src: "Reported by MarketWatch" },
@@ -148,4 +150,19 @@ test("a story photo, when supplied, fills the plate instead", async ({ page }) =
   await page.evaluate((s) => window.ScoopRadio.set({ ...s, photo: "https://example.com/story.jpg" }), LIVE);
   await expect(page.locator(".s-news > .plate")).toBeVisible();
   expect(await page.locator(".s-news > .plate").evaluate((el) => el.style.backgroundImage)).toContain("story.jpg");
+});
+
+test("no photo → the wave bars are restored at the foot of the main column, under 'Also this hour'", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`${SCREEN}?broadcast=1`);
+  await page.evaluate((s) => window.ScoopRadio.set(s), LIVE);
+  const wave = page.locator("#wave");
+  await expect(wave).toBeVisible();
+  expect(await wave.evaluate((el) => el.parentElement.classList.contains("s-news"))).toBe(true);
+  await expect(page.locator("#also .item")).toHaveCount(5);
+  const [w, last, news] = await Promise.all([
+    wave.boundingBox(), page.locator("#also .item").last().boundingBox(), page.locator(".s-news").boundingBox(),
+  ]);
+  expect(w.y).toBeGreaterThanOrEqual(last.y + last.height - 1);          // below the last item, no overlap
+  expect(Math.abs((w.y + w.height) - (news.y + news.height))).toBeLessThan(2);   // anchored at the column's foot
 });

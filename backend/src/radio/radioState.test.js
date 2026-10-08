@@ -61,7 +61,7 @@ test("BUILD: screen keys, sample:false, caps, attribution — and no market/weat
   for (const k of ["markets", "weather", "key", "weatherLine"]) assert.equal(k in state, false, `${k} must be omitted in R2`);
   assert.equal(state.headline, quake);                                 // three outlets, US-weighted: the lead
   assert.ok(state.headline.length <= 90);
-  assert.ok(state.alsoThisHour.length <= 3 && state.alsoThisHour.every((x) => x.h && /^Reported by /.test(x.src)));
+  assert.ok(state.alsoThisHour.length <= 5 && state.alsoThisHour.every((x) => x.h && /^Reported by /.test(x.src)));
   assert.ok(state.music.every((x) => x.cat && x.h && /^Reported by /.test(x.src)));
   assert.match(stats.wording, /^fallback/);
   const text = JSON.stringify(state);

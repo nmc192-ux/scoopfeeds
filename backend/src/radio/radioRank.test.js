@@ -85,6 +85,7 @@ test("CAPS: ten BBC Sport stories → at most 1 sport item and at most 2 BBC ite
   const perPub = new Map();
   for (const s of all) perPub.set(s.lead.source_name, (perPub.get(s.lead.source_name) || 0) + 1);
   for (const [pub, c] of perPub) assert.ok(c <= 2, `${pub} appears ${c} times`);
+  assert.equal(also.length, 5, `alsoThisHour has ${also.length} items`);
   assert.ok(music.length >= 4 && music.length <= 6, `music rotator has ${music.length} items`);
 });
 

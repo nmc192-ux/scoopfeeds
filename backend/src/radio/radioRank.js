@@ -125,7 +125,8 @@ export function attribution(outlets) {
  * @param {object[]} ranked   rankStories() output, already gate-filtered
  * @returns {{ headline: object|null, also: object[], music: object[] }}
  */
-export function pickSlots(ranked, { alsoCount = 3, musicMin = 4, musicMax = 6 } = {}) {
+export const ALSO_THIS_HOUR = 5;   // DrJ, 8 Oct 2026 (was 3)
+export function pickSlots(ranked, { alsoCount = ALSO_THIS_HOUR, musicMin = 4, musicMax = 6 } = {}) {
   const perPublisher = new Map();
   let sportUsed = 0;
   const taken = new Set();

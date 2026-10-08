@@ -122,6 +122,8 @@ body.broadcast{background:#090706;}
 /* R2: no story photo → no plate; the headline column and "Also this hour" take the full width */
 .s-news.nophoto{grid-template-columns:1fr;}
 .s-news.nophoto > .plate{display:none;}
+/* …and the animated wave bars move out of the dropped plate to the foot of the main column, under "Also this hour" */
+.s-news.nophoto > .wave{left:0; bottom:0;}
 /* R2: placeholder labels never air on live data */
 body.live .ph{display:none;}
 .wave{position:absolute; left:24px; bottom:22px; display:flex; gap:5px; align-items:flex-end; height:56px;}
@@ -437,7 +439,10 @@ function renderStatic(){
   $('sampleTag').style.display = st ? '' : 'none';
   $('photoCredit').textContent = STATE.photoCredit || '';
   const news = document.querySelector('.s-news'), plate = news.querySelector('.plate');
-  news.classList.toggle('nophoto', !STATE.sample && !hasPhoto());
+  const noPhoto = !STATE.sample && !hasPhoto();
+  news.classList.toggle('nophoto', noPhoto);
+  const wave = $('wave'), waveHome = noPhoto ? news : plate;
+  if (wave.parentElement !== waveHome) waveHome.appendChild(wave);
   plate.style.backgroundImage = hasPhoto() ? `url("${encodeURI(STATE.photo)}")` : '';
   plate.style.backgroundSize = hasPhoto() ? 'cover' : '';
   plate.style.backgroundPosition = hasPhoto() ? 'center' : '';
