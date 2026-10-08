@@ -18,6 +18,8 @@ const SAMPLE_VALUES = [
   "Mild along the East Coast",                                                                       // weatherLine
   "4.1%", "Why job growth is cooling",                                                               // explains
   "Fed officials signal patience",                                                                    // sample headline
+  "Top-of-hour News", "10:05 AM ET", "Feature: Tech", "Closing Bell",                                 // sample schedule
+  "Photo: agency credit",                                                                             // sample photo credit
 ];
 
 const LIVE = {
@@ -90,4 +92,31 @@ test("no markets but weather present → the strip runs weather-only", async ({ 
   await expect(page.locator("#track")).toContainText("Boston");
   const text = await domText(page);
   expect(text).not.toContain("6,512.40");
+});
+
+test("no schedule data → Now/Next and Later are hidden and the side panel shows the music-break headlines", async ({ page }) => {
+  await page.goto(`${SCREEN}?broadcast=1`);
+  await page.evaluate((s) => window.ScoopRadio.set(s), LIVE);
+  await expect(page.locator("#nowNext")).toBeHidden();
+  await expect(page.locator("#later")).toBeHidden();
+  await expect(page.locator("#sideMusic")).toBeVisible();
+  await expect(page.locator("#sideMusic")).toContainText("In the music break");
+  await expect(page.locator("#sideMusic")).toContainText("Apple unveils cheaper laptop line");
+  // "Coming up" has nothing to show either, so it falls back to News.
+  await page.evaluate(() => window.ScoopRadio.scene("next"));
+  expect(await page.evaluate(() => window.ScoopRadio.state().scene)).toBe("news");
+});
+
+test("schedule data present → Now/Next and Later show, and the music list steps aside", async ({ page }) => {
+  await page.goto(`${SCREEN}?broadcast=1`);
+  await page.evaluate((s) => window.ScoopRadio.set({
+    ...s,
+    now: { title: "Top-of-hour News", start: "3:00 PM ET" },
+    next: { title: "Markets Wrap", start: "3:30 PM ET" },
+    later: [{ when: "4:00 PM", title: "Closing Bell" }],
+  }), LIVE);
+  await expect(page.locator("#nowNext")).toBeVisible();
+  await expect(page.locator("#nowNext")).toContainText("Markets Wrap");
+  await expect(page.locator("#later")).toContainText("Closing Bell");
+  await expect(page.locator("#sideMusic")).toBeHidden();
 });

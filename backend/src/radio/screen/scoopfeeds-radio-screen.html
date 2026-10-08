@@ -255,6 +255,7 @@ body.broadcast{background:#090706;}
           <div class="box nn" id="nowNext"></div>
           <div class="box key" id="key"></div>
           <div class="later" id="later"></div>
+          <div class="later" id="sideMusic"></div>
         </aside>
 
         <footer class="strip">
@@ -372,7 +373,10 @@ const hasMarkets  = () => !!STATE.markets && Object.keys(STATE.markets).length >
 const hasWeather  = () => Array.isArray(STATE.weather) && STATE.weather.length > 0;
 const hasKey      = () => !!STATE.key && Array.isArray(STATE.key.series) && STATE.key.series.length > 1;
 const hasExplains = () => !!STATE.explains && Array.isArray(STATE.explains.bars) && STATE.explains.bars.length > 0;
-const sceneAvailable = name => name === 'markets' ? hasMarkets() : name === 'weather' ? hasWeather() : name === 'explains' ? hasExplains() : true;
+const hasNowNext  = () => !!(STATE.now && STATE.now.title && STATE.next && STATE.next.title);
+const hasNext     = () => !!(STATE.next && STATE.next.title);
+const hasLater    = () => Array.isArray(STATE.later) && STATE.later.length > 0;
+const sceneAvailable = name => name === 'markets' ? hasMarkets() : name === 'weather' ? hasWeather() : name === 'explains' ? hasExplains() : name === 'next' ? hasNext() : true;
 
 function marketsLine(){
   const open = EXCHANGES.map(e => ({ e, s:status(e) })).filter(x => x.s.state === 'open');
@@ -399,7 +403,7 @@ const SEG = {
   markets:  { tag:'Markets Now',         head:() => marketsLine() },
   explains: { tag:'ScoopFeeds Explains', head:() => (STATE.explains ? STATE.explains.title : '') },
   weather:  { tag:'Weather',             head:() => STATE.weatherLine },
-  next:     { tag:'Coming up',           head:() => `${STATE.next.title} at ${STATE.next.start}` },
+  next:     { tag:'Coming up',           head:() => (hasNext() ? `${STATE.next.title} at ${STATE.next.start}` : '') },
   music:    { tag:'Music break',         head:() => 'More news at the top of the half hour' },
   film:     { tag:'Film Hour',           head:() => `${STATE.film.series}: ${STATE.film.title}` }
 };
@@ -427,7 +431,9 @@ function renderStatic(){
   $('photoCredit').textContent = STATE.photoCredit || '';
   $('also').innerHTML = STATE.alsoThisHour.map(a => `<div class="item"><p>${esc(a.h)}</p><span>${esc(a.src)}</span></div>`).join('');
 
-  $('nowNext').innerHTML = `<span class="k">Now</span><span class="v">${esc(STATE.now.title)}<span>Since ${esc(STATE.now.start)}</span></span>
+  // SCHEDULE (R2): hidden when there is no schedule data, the same as markets.
+  $('nowNext').style.display = hasNowNext() ? '' : 'none';
+  $('nowNext').innerHTML = !hasNowNext() ? '' : `<span class="k">Now</span><span class="v">${esc(STATE.now.title)}<span>Since ${esc(STATE.now.start)}</span></span>
     <span class="k">Next</span><span class="v">${esc(STATE.next.title)}<span>At ${esc(STATE.next.start)}</span></span>`;
 
   $('key').style.display = hasKey() ? '' : 'none';
@@ -444,8 +450,14 @@ function renderStatic(){
       <circle cx="${last[0]-4}" cy="${last[1]}" r="5" fill="#F2EEE6"/></svg>`;
   }
 
-  $('later').innerHTML = `<h3>Later on ScoopFeeds Radio (ET)</h3>` +
+  $('later').style.display = hasLater() ? '' : 'none';
+  $('later').innerHTML = !hasLater() ? '' : `<h3>Later on ScoopFeeds Radio (ET)</h3>` +
     STATE.later.map(l => `<div class="row"><span class="when num">${esc(l.when)}</span><span>${esc(l.title)}</span></div>`).join('');
+  // With no "Later" schedule, the side panel carries the music-break headlines instead.
+  const sideMusic = !hasLater() && Array.isArray(STATE.music) && STATE.music.length > 0;
+  $('sideMusic').style.display = sideMusic ? '' : 'none';
+  $('sideMusic').innerHTML = !sideMusic ? '' : `<h3>In the music break</h3>` +
+    STATE.music.map(m => `<div class="row"><span class="when">${esc(m.cat)}</span><span>${esc(m.h)}</span></div>`).join('');
 
   if (!hasExplains()) $('dd').innerHTML = '';
   else {
@@ -460,8 +472,8 @@ function renderStatic(){
     <div><div class="f num">${c.f}°F<small>${Math.round((c.f-32)*5/9)}°C</small></div><div class="cond">${esc(c.cond)}</div>
     <div class="hl num">High ${c.hi}° Low ${c.lo}°</div></div></div>`).join('');
 
-  $('nextText').innerHTML = `<div class="when">Coming up at ${esc(STATE.next.start)}</div><h2>${esc(STATE.next.title)}</h2><p>${esc(STATE.next.blurb || '')}</p>`;
-  $('nextSeries').textContent = STATE.next.series || '';
+  $('nextText').innerHTML = !hasNext() ? '' : `<div class="when">Coming up at ${esc(STATE.next.start)}</div><h2>${esc(STATE.next.title)}</h2><p>${esc(STATE.next.blurb || '')}</p>`;
+  $('nextSeries').textContent = hasNext() ? (STATE.next.series || '') : '';
 
   $('mcards').innerHTML = STATE.music.map((m,i) => `<div class="mcard ${i === 0 ? 'on' : ''}"><div class="cat">${esc(m.cat)}</div><p>${esc(m.h)}</p><div class="src">${esc(m.src)}</div></div>`).join('');
   $('filmCap').innerHTML = `<b>${esc(STATE.film.series)}</b><span>${esc(STATE.film.title)}</span>`;
@@ -549,6 +561,8 @@ window.ScoopRadio = {
       liveSeen = true;
       STATE.markets = null; STATE.weather = null; STATE.key = null;
       STATE.weatherLine = ''; STATE.explains = null;
+      STATE.now = null; STATE.next = null; STATE.later = null;   // no schedule feed in R2
+      STATE.photoCredit = '';                                    // no story photos in R2
     }
     Object.assign(STATE, patch); renderStatic(); renderBoard(); buildTicker(); setScene(STATE.scene);
   },
