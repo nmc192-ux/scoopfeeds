@@ -25,6 +25,7 @@
  * disasters; editorialSensitivity.js only MARKS items sensitive (radioState.js).
  */
 import { isVideoEligible } from "../services/videoEditorialPolicy.js";
+import { isSensitiveHeadline } from "../services/editorialSensitivity.js";
 import { isIndianOutlet } from "./sourceRegions.js";
 
 // Anything that makes a story "about Pakistan" for rules 3–5.
@@ -69,6 +70,52 @@ const CRITICAL_TERMS = new RegExp(
   "i"
 );
 
+// ─── Hard news only ─────────────────────────────────────────────────────────
+// A news radio airs news. Each pattern is its own named rule so radio_dropped and the
+// cycle log show how many candidates each one removes. Anchored where a bare word
+// would eat real news ("Pentagon review of strikes", "How Iran's fuel ban changes…"
+// is soft, "Court to review ruling" is not).
+export const SOFT_RULES = [
+  ["radio:soft-shopping", /\b(prime day|black friday|cyber monday|on sale|best deals?|deals? (?:of|on|for)|discount(?:ed|s)?|coupons?|promo codes?|gift guide|where to buy|buy now|\d+% off)\b/i],
+  ["radio:soft-review", /(?:^review\b|\breview\s*[:|–—-]|\breview\s*$|\b(?:movie|film|album|game|laptop|phone|tv|car|show|book|hands-on) review\b|\b(?:hands-on|first look|we tested|i tested|our review)\b)/i],
+  ["radio:soft-howto", /(?:\bhow to\b|^how (?:do|does|can|should|will|would)\b|^how\b.*\b(?:change[sd]?|changing)\b|\b(?:what you need to know|everything you need to know|a beginner'?s guide|step[- ]by[- ]step|explainer)\b)/i],
+  ["radio:soft-listicle", /(?:^\d{1,2}\s+(?:[a-z'’-]+\s+){0,3}(?:things|ways|reasons|tips|signs|facts|ideas|mistakes|tricks|hacks|best|worst|foods|moves|questions|lessons)\b|\b\d{1,2}\s+(?:things|ways|reasons|tips|signs|facts|ideas|mistakes|tricks|hacks)\b)/i],
+  ["radio:soft-first-person", /(?:^(?:i|my|we|our)\s|\bI\s+(?:only |just |never |always |finally )?(?:bought|tried|spent|quit|learned|lost|used|tested|ate|wore|switched|stopped|started|stayed|asked)\b)/],
+];
+
+/** @returns {{ allowed: boolean, rule: string|null, reason: string|null }} */
+export function softNewsVerdict(article) {
+  const title = String(article?.title || "");
+  for (const [rule, re] of SOFT_RULES) {
+    const m = title.match(re);
+    if (m) return { allowed: false, rule, reason: `"${m[0].trim()}"` };
+  }
+  return { allowed: true, rule: null, reason: null };
+}
+
+// ─── Sensitive topics (music is never allowed to sit under these) ───────────
+// The shared isSensitiveHeadline() catches tragedy WORDS (killed, dead, attack…) but not
+// topics phrased without them — "Suicide is up among Black Americans" matched nothing and
+// reached the music rotator. This list is radio-local on purpose: widening the shared
+// guard would also change social CTAs, card photos and video stock.
+export const SENSITIVE_TOPICS = new RegExp(
+  "\\b(" + [
+    "suicid\\w*", "self[- ]?harm\\w*", "overdos\\w*", "fentanyl deaths?",
+    "sexual(?:ly)? (?:abus\\w*|assault\\w*|exploit\\w*|misconduct)", "child (?:sex(?:ual)?\\s+)?(?:abus\\w*|exploit\\w*|molest\\w*|porn\\w*|trafficking)",
+    "(?:sex|child) abuse", "molest\\w*", "rap(?:e|ed|es|ist|ists)", "sex(?:ual)? trafficking",
+    "mass (?:shooting|shootings|killing|killings|casualty)", "school shooting\\w*", "shooting spree", "gunman",
+    "terror(?:ist)? attacks?", "terrorist", "terrorists", "suicide (?:bomb\\w*|attack\\w*)", "bombing",
+  ].join("|") + ")\\b",
+  "i"
+);
+
+/** Shared tragedy-word guard OR the radio topic list. Empty text is sensitive (fail closed). */
+export function isRadioSensitive(...texts) {
+  const list = texts.flat().filter((t) => String(t || "").trim());
+  if (!list.length) return true;
+  return list.some((t) => isSensitiveHeadline(t) || SENSITIVE_TOPICS.test(String(t)));
+}
+
 const textOf = (a) => `${a?.title || ""} ${a?.description || ""}`;
 
 /** True when an item mentions Pakistan, its cities, army, politicians or parties. */
@@ -84,6 +131,10 @@ export function radioRulesVerdict(article) {
   // 1 · D1 as the video track defines it — imported, not copied.
   const d1 = isVideoEligible(article);
   if (!d1.allowed) return { allowed: false, rule: d1.rule || "d1", reason: d1.reason || "D1" };
+
+  // 1b · hard news only
+  const soft = softNewsVerdict(article);
+  if (!soft.allowed) return soft;
 
   const text = textOf(article);
   // 2 · Named Pakistani politicians, parties and institutions.

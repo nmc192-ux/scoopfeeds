@@ -106,3 +106,16 @@ test("display categories map onto the rotator's six", () => {
   assert.equal(displayCategory("environment"), "Science");
   assert.equal(displayCategory("whatever"), "World");
 });
+
+import { pickSlots as _pick, topicOf } from "./radioRank.js";
+test("TOPIC CAP: at most one crypto item across headline + also + music", () => {
+  const mk = (i, title, cat = "business") => ({ score: 10 - i, outlets: ["BBC News"], last: i, sport: false, sensitive: false, lead: { id: `x${i}`, title, category: cat, source_name: `Pub${i}` }, articles: [] });
+  const ranked = [
+    mk(0, "Bitcoin jumps past record high"), mk(1, "Ethereum rallies as ETF inflows grow"), mk(2, "Crypto exchange halts withdrawals"),
+    mk(3, "Fed holds rates"), mk(4, "EU passes chip act", "politics"), mk(5, "Malaria vaccine approved", "health"),
+    mk(6, "Moon lander delayed", "science"), mk(7, "Laptop line unveiled", "tech"), mk(8, "Floods hit region", "international"),
+  ];
+  const { headline, also, music } = _pick(ranked);
+  const aired = [headline, ...also, ...music].filter(Boolean);
+  assert.equal(aired.filter((s) => topicOf(s) === "crypto").length, 1);
+});

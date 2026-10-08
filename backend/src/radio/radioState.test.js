@@ -93,12 +93,56 @@ test("drops are logged once per (article, rule) per day and pruned after 14 days
   cleanup();
 });
 
-test("fitHeadline caps at 90 characters on a word boundary", () => {
+test("fitHeadline never truncates mid-sentence and never ends in an ellipsis", () => {
   const long = "The quick brown fox jumps over the lazy dog ".repeat(4).trim();
-  const h = fitHeadline(long);
-  assert.ok(h.length <= 90, `${h.length}`);
-  assert.ok(h.endsWith("…"));
+  assert.equal(fitHeadline(long), "", "no clause boundary → no line, not a cut");
   assert.equal(fitHeadline("Short headline"), "Short headline");
+  // over-long, but has a clause boundary that leaves a whole headline
+  const clause = "Senate passes the annual defense spending bill after weeks of debate, sending it to the president's desk";
+  assert.ok(clause.length > 90);
+  assert.equal(fitHeadline(clause), "Senate passes the annual defense spending bill after weeks of debate");
+  for (const h of [fitHeadline(clause), fitHeadline("Wrapped up…")]) assert.ok(!h.endsWith("…"));
+});
+
+test("LLM-worded lines over the limit are rejected, not cut", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-llm-long-" });
+  seed(db, ROWS);
+  const { state } = await buildRadioState({
+    db, now: NOW,
+    gateLlm: async (p) => ({ verdicts: [...p.matchAll(/id=(\S+)/g)].map((m) => ({ id: m[1], verdict: "keep" })) }),
+    wordLlm: async (p) => ({ items: [...p.matchAll(/id=(\S+)/g)].map((m) => ({ id: m[1], h: "A reworded headline that goes on and on far past the ninety character limit without ever ending " })) }),
+  });
+  for (const h of [state.headline, ...state.alsoThisHour.map((x) => x.h), ...state.music.map((x) => x.h)]) {
+    assert.ok(h.length <= 90 && !h.endsWith("…") && !h.startsWith("A reworded"), h);
+  }
+  cleanup();
+});
+
+test("a story whose every title is too long to fit whole does not air", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-nofit-" });
+  const longTitle = "Officials in several countries continue to discuss a wide ranging set of proposals on regional trade without agreement";
+  seed(db, [{ title: longTitle, source: "BBC News" }, ...ROWS]);
+  const { state, stats } = await buildRadioState({ db, now: NOW, gateLlm: async () => ({ verdicts: [] }), wordLlm: async () => null });
+  const all = [state.headline, ...state.alsoThisHour.map((x) => x.h), ...state.music.map((x) => x.h)];
+  assert.ok(!all.some((h) => h.startsWith("Officials in several")));
+  assert.equal(stats.drops["radio:no-fitting-headline"], 1);
+  cleanup();
+});
+
+test("SENSITIVE topics reach News at most — never the music rotator", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-sens-" });
+  seed(db, [
+    { title: "Suicide is up among Black Americans", source: "NPR News", category: "health" },
+    { title: "Fed holds interest rates steady as inflation cools", source: "CNBC", category: "business" },
+    { title: "EU agrees sweeping new rules for AI chatbots", source: "Politico Europe", category: "politics" },
+    { title: "WHO approves malaria vaccine for wider use in Africa", source: "WHO News", category: "health" },
+    { title: "NASA delays crewed moon lander test to 2027", source: "NASA News", category: "science" },
+    { title: "Apple unveils cheaper laptop line for students", source: "The Verge", category: "tech" },
+    { title: "Mayor opens new bridge across the river", source: "Reuters", category: "international" },
+  ]);
+  const { state } = await buildRadioState({ db, now: NOW, gateLlm: async () => ({ verdicts: [] }), wordLlm: async () => null });
+  assert.ok(!state.music.some((m) => /suicide/i.test(m.h)), "suicide headline in music");
+  cleanup();
 });
 
 test("ATOMIC WRITE: a reader looping on the file never sees a partial or unparsable file", async () => {
