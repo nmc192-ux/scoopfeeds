@@ -172,3 +172,82 @@ test("ATOMIC WRITE: a reader looping on the file never sees a partial or unparsa
 
 // The screen itself (sample:false never shows the template's sample numbers) is covered by
 // frontend/tests/e2e/radio-screen.spec.js (Playwright), which loads the template from disk.
+
+// Tonight's two live leaks (10 Oct 2026), both of which reached the music rotator.
+const LEAK_OPINION = "Voters can prevent another Jan. 6 by defeating these Republicans, an opinion piece argues";
+const LEAK_EXECUTION = "Vance says he will not watch a live-streamed execution under a Hegseth plan";
+const keepAll = async (p) => ({ verdicts: [...p.matchAll(/id=(\S+)/g)].map((m) => ({ id: m[1], verdict: "keep" })) });
+const HARD = [
+  { title: "Senate passes stopgap bill to avert shutdown", source: "AP News", category: "politics" },
+  { title: "Oil prices climb as supply talks stall", source: "CNBC", category: "business" },
+  { title: "WHO approves malaria vaccine for wider use in Africa", source: "WHO News", category: "health" },
+  { title: "NASA delays crewed moon lander test to 2027", source: "NASA News", category: "science" },
+  { title: "EU agrees sweeping new rules for AI chatbots", source: "Politico Europe", category: "tech" },
+  { title: "Storm system brings heavy rain across the Gulf Coast", source: "Reuters", category: "international" },
+];
+/** A headline call that answers every id: verdict from `judge(title)`, h = title. */
+const answering = (judge) => async (p) => ({
+  items: [...p.matchAll(/id=(\S+) \| (.*)/g)].map(([, id, t]) => ({ id, h: t.slice(0, 90), opinion: false, soft: false, sensitive: false, ...judge(t) })),
+});
+
+test("LIVE LEAKS 10 Oct 2026: neither leaked headline can reach music — rules floor, even if Claude calls them safe", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-leak-" });
+  seed(db, [...HARD, { title: LEAK_OPINION, source: "NY Times", category: "politics" }, { title: LEAK_EXECUTION, source: "The Hill", category: "politics" }]);
+  // Worst case: Claude says both are fine. The keyword floor must still hold.
+  const { state, stats } = await buildRadioState({ db, now: NOW, gateLlm: keepAll, wordLlm: answering(() => ({})) });
+  const text = JSON.stringify(state);
+  assert.equal(text.includes("an opinion piece argues"), false, "the opinion leak aired at all");
+  assert.equal(state.music.some((m) => /execution/i.test(m.h)), false, "the execution leak reached music");
+  assert.ok(stats.drops["radio:soft-opinion"] >= 1, "opinion floor did not log a drop");
+  assert.ok(state.music.length > 0, "music emptied although every story had a verdict");
+  cleanup();
+});
+
+test("CLAUDE VERDICT ADDS to the rules: opinion/soft are dropped, sensitive is raised", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-verdict-" });
+  seed(db, [...HARD,
+    { title: "Lawmakers trade blame as the deadline nears and voters lose patience", source: "The Hill", category: "politics" },
+    { title: "Governor signs order on prison policy after court ruling", source: "Reuters", category: "politics" },
+  ]);
+  const { state, stats } = await buildRadioState({
+    db, now: NOW, gateLlm: keepAll,
+    wordLlm: answering((t) => ({ opinion: /voters lose patience/.test(t), sensitive: /prison/.test(t) })),
+  });
+  assert.equal(/voters lose patience/.test(JSON.stringify(state)), false, "a Claude-opinion item aired");
+  assert.equal(state.music.some((m) => /prison/.test(m.h)), false, "a Claude-sensitive item reached music");
+  assert.match(stats.wording, /^llm:/);
+  assert.ok(db.prepare(`SELECT 1 FROM radio_dropped WHERE rule = 'radio:llm-opinion'`).get(), "verdict drop not logged");
+  cleanup();
+});
+
+test("FAIL SAFE: no verdict means sensitive — a failed, null, malformed or partial headline call never lets music through", async () => {
+  const cases = {
+    throws: async () => { throw new Error("529 overloaded"); },
+    null: async () => null,
+    malformed: async () => ({ nope: true }),
+    "no flags": async (p) => ({ items: [...p.matchAll(/id=(\S+) \| (.*)/g)].map(([, id, t]) => ({ id, h: t.slice(0, 90) })) }),
+    "string flags": async (p) => ({ items: [...p.matchAll(/id=(\S+)/g)].map((m) => ({ id: m[1], opinion: "false", soft: "false", sensitive: "false" })) }),
+  };
+  for (const [name, wordLlm] of Object.entries(cases)) {
+    const { db, cleanup } = makeTestDb({ prefix: "radio-failsafe-" });
+    seed(db, HARD);
+    const { state, stats } = await buildRadioState({ db, now: NOW, gateLlm: keepAll, wordLlm });
+    assert.equal(state.music.length, 0, `${name}: music aired without a verdict`);
+    assert.ok(state.headline, `${name}: news must still air on the cleaned titles`);
+    assert.ok(stats.noVerdict > 0, `${name}: noVerdict not reported`);
+    cleanup();
+  }
+  // Partial answer: only the stories WITH a verdict may reach music.
+  const { db, cleanup } = makeTestDb({ prefix: "radio-partial-" });
+  seed(db, HARD);
+  const onlyOil = async (p) => ({ items: [...p.matchAll(/id=(\S+) \| (.*)/g)].filter(([, , t]) => /Oil/.test(t)).map(([, id, t]) => ({ id, h: t, opinion: false, soft: false, sensitive: false })) });
+  const { state } = await buildRadioState({ db, now: NOW, gateLlm: keepAll, wordLlm: onlyOil });
+  assert.ok(state.music.every((m) => /Oil/.test(m.h)), "a story without a verdict reached music");
+  cleanup();
+});
+
+test("the headline call is logged under task radio-headline", async () => {
+  const src = fs.readFileSync(new URL("./radioState.js", import.meta.url), "utf8");
+  assert.match(src, /callJson\(p, \{ task: "radio-headline"/);
+  assert.equal(/radio-screen/.test(src), false, "a separate radio-screen task crept back in");
+});

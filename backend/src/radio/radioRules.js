@@ -81,6 +81,11 @@ export const SOFT_RULES = [
   ["radio:soft-howto", /(?:\bhow to\b|^how (?:do|does|can|should|will|would)\b|^how\b.*\b(?:change[sd]?|changing)\b|\b(?:what you need to know|everything you need to know|a beginner'?s guide|step[- ]by[- ]step|explainer)\b)/i],
   ["radio:soft-listicle", /(?:^\d{1,2}\s+(?:[a-z'’-]+\s+){0,3}(?:things|ways|reasons|tips|signs|facts|ideas|mistakes|tricks|hacks|best|worst|foods|moves|questions|lessons)\b|\b\d{1,2}\s+(?:things|ways|reasons|tips|signs|facts|ideas|mistakes|tricks|hacks)\b)/i],
   ["radio:soft-first-person", /(?:^(?:i|my|we|our)\s|\bI\s+(?:only |just |never |always |finally )?(?:bought|tried|spent|quit|learned|lost|used|tested|ate|wore|switched|stopped|started|stayed|asked)\b)/],
+  // Opinion is not news. Labels ("Opinion:", "Op-Ed") and the rewritten form the headline
+  // LLM produces ("…, an opinion piece argues") — live leak 10 Oct 2026.
+  ["radio:soft-opinion", /(?:^(?:opinion|op-ed|editorial|commentary|analysis|column|perspective|viewpoint)\s*[:|–—-]|\b(?:an? )?(?:opinion|op-ed) (?:piece|column|essay|writer|contributor)\b|\b(?:op-ed|opinion column|editorial board)\b|\b(?:columnist|commentator)s? (?:argues?|says|writes)\b)/i],
+  // Roundups, podcasts and newsletters are packaging, not a story.
+  ["radio:soft-roundup", /(?:\b(?:daily|weekly|morning|evening)\s*:|\bpodcast\b|\bnewsletter\b|^(?:live updates?|live)\s*[:|–—-]|\bthe week in\b|\bweekly (?:roundup|recap|digest)\b)/i],
 ];
 
 /** @returns {{ allowed: boolean, rule: string|null, reason: string|null }} */
@@ -105,6 +110,14 @@ export const SENSITIVE_TOPICS = new RegExp(
     "(?:sex|child) abuse", "molest\\w*", "rap(?:e|ed|es|ist|ists)", "sex(?:ual)? trafficking",
     "mass (?:shooting|shootings|killing|killings|casualty)", "school shooting\\w*", "shooting spree", "gunman",
     "terror(?:ist)? attacks?", "terrorist", "terrorists", "suicide (?:bomb\\w*|attack\\w*)", "bombing",
+    // Capital punishment — live leak 10 Oct 2026 ("…live-streamed execution…" under music).
+    // Explicit per DrJ: executions, death sentences, capital punishment. The bare singular
+    // "execution" needs a qualifier (trade/strategy execution is business news).
+    "capital punishment", "death sentences?", "sentenced to death", "death row", "death penalty",
+    "executions", "executed",
+    "(?:live[- ]?stream(?:ed)?|public|televised|state|firing[- ]squad|botched|scheduled|planned|stay of) executions?",
+    "executions? (?:of|by|under|plan|date|order|warrant|chamber)",
+    "lethal injection", "firing squad", "hanged", "gallows", "beheaded\\w*", "beheading\\w*",
   ].join("|") + ")\\b",
   "i"
 );

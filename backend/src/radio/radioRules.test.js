@@ -113,3 +113,38 @@ test("SENSITIVE: the exact headlines that must never sit under music", () => {
   for (const t of ["Fed holds interest rates steady as inflation cools", "NASA delays crewed moon lander test to 2027"]) assert.equal(isRadioSensitive(t), false, t);
   assert.equal(isRadioSensitive(""), true, "empty fails closed");
 });
+
+test("LIVE LEAKS 10 Oct 2026: opinion and roundups are dropped by rule; executions are sensitive", () => {
+  const opinion = [
+    "Voters can prevent another Jan. 6 by defeating these Republicans, an opinion piece argues",
+    "Opinion | Voters Can Prevent Another Jan. 6",
+    "Op-Ed: The Fed is moving too slowly",
+    "Editorial: A budget that ducks the hard choices",
+    "Columnist argues the AI boom is a bubble",
+  ];
+  for (const title of opinion) {
+    const v = softNewsVerdict({ title });
+    assert.equal(v.allowed, false, title);
+    assert.equal(v.rule, "radio:soft-opinion", title);
+  }
+  for (const title of ["9to5Mac Daily: October 8, 2026 — iPad mini rumors, iCloud+", "The Daily podcast: inside the shutdown", "Live updates: Hurricane makes landfall"]) {
+    assert.equal(softNewsVerdict({ title }).rule, "radio:soft-roundup", title);
+  }
+  for (const title of [
+    "Vance says he will not watch a live-streamed execution under a Hegseth plan",
+    "Texas carries out execution by lethal injection",
+    "Man on death row granted last-minute stay",
+    "Iran carries out 10 executions in a week",
+    "Court upholds death sentence for bomber",
+    "Man sentenced to death in murder case",
+    "States debate capital punishment",
+    "Prisoner executed in Alabama",
+  ]) assert.equal(isRadioSensitive(title), true, title);
+  // Hard news that shares a word stays.
+  for (const title of ["Firm improves trade execution speed", "Executive order on tariffs signed", "Analysts expect the Fed to hold rates", "Opinion polls show a tight Senate race"]) {
+    assert.equal(softNewsVerdict({ title }).allowed, true, title);
+  }
+  for (const title of ["Firm improves trade execution speed", "Executive order on tariffs signed"]) {
+    assert.equal(isRadioSensitive(title), false, title);
+  }
+});
