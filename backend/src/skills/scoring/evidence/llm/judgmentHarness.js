@@ -68,7 +68,7 @@ const LOW_RESOURCE_FACTOR = 0.7;
 
 function isLlmDisabled() {
   // Read at call time (not module load) so it is honored dynamically + testable.
-  return String(process.env.LLM_DISABLED || process.env.GEMINI_DISABLED || "").toLowerCase() === "1";
+  return String(process.env.LLM_DISABLED || "").toLowerCase() === "1";
 }
 
 function norm(s) {

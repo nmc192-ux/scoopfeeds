@@ -1,10 +1,10 @@
 /**
- * analysisService.js — Gemini-powered news analysis pipeline.
+ * analysisService.js — LLM-powered news analysis pipeline.
  *
  * Runs every 2h via the scheduler. Produces:
- *   • Story clusters   — heuristic bigram grouping + Gemini briefing
+ *   • Story clusters   — heuristic bigram grouping + LLM briefing
  *   • Perspectives     — per-cluster outlet framing (top 3 clusters only)
- *   • Explained pieces — long-form Gemini analysis for top-2 categories
+ *   • Explained pieces — long-form LLM analysis for top-2 categories
  *   • Topic trends     — pure SQL count aggregation (no LLM cost)
  *
  * Article deep dives are on-demand only (called from the route handler,
@@ -31,29 +31,28 @@ import { logger } from "./logger.js";
 import { clusterWindow } from "../realityIndex/clustering/semanticClusterer.js";
 import { detectTemplates } from "../realityIndex/clustering/templateFilter.js";
 import { runEventPromoter } from "../realityIndex/intelligence/eventPromoter.js";
-import { callJson, isTaskRoutable } from "../realityIndex/llmQueue.js";
+import { callJson, isLlmAvailable } from "../realityIndex/llmQueue.js";
 
 // Model pin, thinking-budget degrade, dead-model handling, the daily call cap
-// and usage logging all live in llmQueue now. Tasks here are pinned to Gemini
-// unless LLM_TASK_PROVIDER routes them elsewhere.
+// and usage logging all live in llmQueue now.
 // Briefs/perspectives/explainers had NO output cap — with thinking billing
 // as output, per-call spend was unbounded.
-const GEMINI_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.ANALYSIS_MAX_OUTPUT_TOKENS || "1024", 10);
+const LLM_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.ANALYSIS_MAX_OUTPUT_TOKENS || "1024", 10);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Free-tier Gemini intermittently returns 503 UNAVAILABLE (overload) and
-// 429 RESOURCE_EXHAUSTED (rate limit); llmQueue backs off and retries those
+// The API intermittently returns 503/529 (overload) and 429 (rate limit);
+// llmQueue backs off and retries those
 // (up to 3 retries). Permanent errors come back as null on the first failure.
 async function callAnalysisLlm(prompt, task = "analysis") {
-  if (!isTaskRoutable(task)) return null;
+  if (!isLlmAvailable()) return null;
   try {
     return await callJson(prompt, {
       task,
       temperature: 0.2,
-      maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+      maxOutputTokens: LLM_MAX_OUTPUT_TOKENS,
       timeoutMs: 25000,
       strictJson: true,
     });
@@ -317,9 +316,9 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
   const now   = Date.now();
   const TTL_CLUSTER   = 24 * 60 * 60 * 1000; // 24h
   const TTL_EXPLAINED = 12 * 60 * 60 * 1000; // 12h
-  const hasGemini = isTaskRoutable("analysis-brief");
+  const hasLlm = isLlmAvailable();
 
-  if (!hasGemini) {
+  if (!hasLlm) {
     logger.info("📊 Analysis: no LLM provider configured for analysis — clusters saved with deterministic briefs only");
   }
 
@@ -331,7 +330,7 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
   logger.info(`📊 Found ${clusters.length} story clusters`);
 
   // 2. Persist ALL clusters (clusters are size-sorted). Brief only substantial ones
-  //    (article_count >= 5, top 20 by size — Gemini quota); smaller clusters persist with
+  //    (article_count >= 5, top 20 by size — LLM quota); smaller clusters persist with
   //    an empty brief. Perspectives: the top 3 briefed clusters. Empty brief is safe
   //    downstream — eventPromoter keys off article_count/article_ids/title, not brief.
   const briefable = new Set(clusters.filter(c => c.article_count >= 5).slice(0, 20).map(c => c.id));
@@ -342,7 +341,7 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
     let perspectives = null;
 
     if (briefable.has(cluster.id)) {
-      briefData = fallbackBrief(cluster); // deterministic baseline (also the no-Gemini path)
+      briefData = fallbackBrief(cluster); // deterministic baseline (also the no-LLM path)
 
       // Idempotency (2026-07-15 cost incident): a cluster whose ARTICLE SET
       // is unchanged since its last LLM brief re-uses that brief instead of
@@ -367,7 +366,7 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
         } catch { /* malformed stored JSON → treat as no reuse */ }
       }
 
-      if (!reused && hasGemini) {
+      if (!reused && hasLlm) {
         briefsCalled++;
         const result = await callAnalysisLlm(buildBriefingPrompt(cluster), "analysis-brief");
         if (result?.brief) {
@@ -431,7 +430,7 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
 
     if (catArticles.length < 5) continue;
 
-    if (hasGemini) {
+    if (hasLlm) {
       const topicName = category.charAt(0).toUpperCase() + category.slice(1);
       const result = await callAnalysisLlm(buildExplainedPrompt(topicName, catArticles), "analysis-explained");
       await sleep(4000);
@@ -532,7 +531,7 @@ export async function getOrCreateDeepDive(articleId, { allowGenerate = false } =
     return { article_id: articleId, takeaways: [], tone: "neutral", tone_reason: "Sign in for AI analysis", related_ids, pending: true };
   }
 
-  if (!isTaskRoutable("deep-dive")) {
+  if (!isLlmAvailable()) {
     const result = { article_id: articleId, takeaways: [], tone: "neutral", tone_reason: "AI analysis not configured", related_ids };
     upsertArticleAnalysisCache(result);
     return result;

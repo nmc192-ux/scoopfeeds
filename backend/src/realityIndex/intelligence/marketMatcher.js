@@ -10,7 +10,7 @@
  *   PASS B — match unbound clusters to top-K markets.
  *     • For each cluster: embedQuery on a composed query string.
  *     • vector search (top 20 markets) → keep top 8 by liquidity floor.
- *     • Gemini re-ranks the shortlist into the top 3 with explicit weights.
+ *     • the LLM re-ranks the shortlist into the top 3 with explicit weights.
  *     • Persist via setClusterMarketLinks().
  *
  * Both passes are bounded per cycle so we don't blow the LLM queue or the
@@ -21,7 +21,7 @@ import { getDb } from "../../models/database.js";
 import { listUnmatchedClusters, setClusterMarketLinks } from "../dal/linksDao.js";
 import { listMarkets, getMarketById } from "../dal/marketsDao.js";
 import { searchNearest, getEmbeddingMeta } from "../dal/embeddingsDao.js";
-import { embedDocument, embedQuery } from "../embeddings/embeddingService.js";
+import { embedDocument, embedQuery, embeddingsConfig } from "../embeddings/embeddingService.js";
 import { isVecAvailable } from "../schema.js";
 import { callJson } from "../llmQueue.js";
 import { logger } from "../../services/logger.js";
@@ -53,7 +53,7 @@ function listMarketsNeedingEmbedding(limit) {
   `).all(limit);
 }
 
-function marketEmbeddingText(m) {
+export function marketEmbeddingText(m) {
   const parts = [m.question?.trim()];
   if (m.description) parts.push(m.description.trim().slice(0, 1500));
   if (m.category) parts.push(`Category: ${m.category}`);
@@ -133,7 +133,7 @@ async function matchOneCluster(cluster) {
   const qVec = await embedQuery(queryText);
   if (!qVec) return { ok: false, reason: "embed_failed" };
 
-  const hits = searchNearest({ vector: qVec, k: SHORTLIST_K, scope: "market" });
+  const hits = searchNearest({ vector: qVec, k: SHORTLIST_K, scope: "market", model: embeddingsConfig().model });
   if (!hits.length) return { ok: false, reason: "no_candidates" };
 
   // Hydrate market rows; filter low-liquidity to avoid noisy probabilities.

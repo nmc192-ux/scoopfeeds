@@ -70,15 +70,22 @@ export function upsertEmbedding({ scope, scope_id, model, vector }) {
 /**
  * Top-K nearest neighbours within an optional scope filter.
  * Returns [{ scope, scope_id, distance }] sorted by distance asc (closer = better).
+ *
+ * `model`: only return vectors written by that embedding model. Vectors from
+ * two different models live in DIFFERENT spaces — a cosine between them is
+ * noise — and vec0 has no model column, so the KNN is global and the filter is
+ * applied afterwards (hence the over-fetch). Pass the current model wherever a
+ * query vector is compared to stored ones; after a model switch it keeps any
+ * straggler old-model vectors out of the results.
  */
-export function searchNearest({ vector, k = 20, scope = null } = {}) {
+export function searchNearest({ vector, k = 20, scope = null, model = null } = {}) {
   if (!isVecAvailable()) return [];
   try {
     const db = getDb();
     const buf = Buffer.from(toF32(vector).buffer);
     // vec0 KNN: rank by distance, take top-K, then join sidecar for metadata.
     // We over-fetch and post-filter by scope to keep the query simple.
-    const rawK = scope ? Math.max(k * 4, k + 32) : k;
+    const rawK = (scope || model) ? Math.max(k * 4, k + 32) : k;
     const rows = db.prepare(`
       SELECT e.rowid, e.distance
       FROM embeddings e
@@ -92,7 +99,7 @@ export function searchNearest({ vector, k = 20, scope = null } = {}) {
     const ids = rows.map(r => r.rowid);
     const placeholders = ids.map(() => "?").join(",");
     const meta = db.prepare(`
-      SELECT rowid, scope, scope_id FROM embedding_meta WHERE rowid IN (${placeholders})
+      SELECT rowid, scope, scope_id, model FROM embedding_meta WHERE rowid IN (${placeholders})
     `).all(...ids);
     const byRowid = Object.fromEntries(meta.map(m => [m.rowid, m]));
 
@@ -101,6 +108,7 @@ export function searchNearest({ vector, k = 20, scope = null } = {}) {
         const m = byRowid[r.rowid];
         if (!m) return null;
         if (scope && m.scope !== scope) return null;
+        if (model && m.model !== model) return null;
         return { scope: m.scope, scope_id: m.scope_id, distance: r.distance };
       })
       .filter(Boolean)
@@ -142,4 +150,29 @@ export function deleteEmbedding(scope, scope_id) {
   });
   tx();
   return 1;
+}
+
+/** Stored vector counts per (scope, model) — the "is the index mixed?" check. */
+export function countEmbeddingsByModel() {
+  if (!isVecAvailable()) return [];
+  return getDb().prepare(
+    `SELECT scope, model, COUNT(*) AS n FROM embedding_meta GROUP BY scope, model ORDER BY scope, n DESC`
+  ).all();
+}
+
+/**
+ * Delete EVERY stored vector (vec0 rows + sidecar). Used once, by
+ * scripts/reembed.mjs --clear, when switching embedding models: old and new
+ * vectors must not coexist in one index. Returns the number removed.
+ */
+export function clearAllEmbeddings() {
+  if (!isVecAvailable()) return 0;
+  const db = getDb();
+  const tx = db.transaction(() => {
+    const n = db.prepare(`SELECT COUNT(*) AS n FROM embedding_meta`).get().n;
+    db.prepare(`DELETE FROM embeddings`).run();
+    db.prepare(`DELETE FROM embedding_meta`).run();
+    return n;
+  });
+  return tx();
 }

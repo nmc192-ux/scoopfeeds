@@ -9,13 +9,9 @@
  * Slides 1-3 and 7 are mechanical (event title, events.summary, coverage
  * counts, static CTA) and never touch this module.
  *
- * PROVIDER. Prod has LLM_PROVIDER / LLM_PREMIUM_PROVIDER / CEREBRAS_API_KEY /
- * GROQ_API_KEY all unset (verified 2026-07-28), so llmQueue's auto-detect
- * falls through to gemini. That means rawCallJsonGemini applies
- * buildGeminiGenerationConfig -> thinkingBudget:0, and responseMimeType is
- * already "application/json", so JSON mode is on. The prompt below is written
- * for Gemini accordingly: schema stated once, plainly, with the constraints
- * as rules rather than as few-shot examples.
+ * PROVIDER. Claude, via llmQueue (task "event-carousel"). JSON mode is on.
+ * The prompt below states the schema once, plainly, with the constraints as
+ * rules rather than as few-shot examples.
  *
  * REFUSAL, NOT REPAIR. Every validation failure returns null and the caller
  * falls back to the 3-slide article carousel. Nothing is truncated — not even
@@ -446,7 +442,7 @@ export async function ensureEventCarouselCopy(eventId, { callJsonFn = callJson }
     return null;
   }
 
-  recordAttempt(db, eventId, hash, now, { copy: v.copy, model: "gemini" });
+  recordAttempt(db, eventId, hash, now, { copy: v.copy, model: "claude" });
   logger.info(`🎠 carousel copy ready for ${eventId.slice(0, 8)} (${v.copy.figures.length} grounded figures)`);
   return v.copy;
 }

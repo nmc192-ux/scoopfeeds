@@ -21,6 +21,7 @@
 import { Router } from "express";
 import { getDb } from "../models/database.js";
 import { getQueueStatus } from "../realityIndex/llmQueue.js";
+import { countEmbeddingsByModel } from "../realityIndex/dal/embeddingsDao.js";
 import { getSchedulerStatus } from "../services/scheduler.js";
 import {
   listBriefs, getBriefById, setBriefStatus,
@@ -113,6 +114,8 @@ router.get("/dashboard", (_req, res) => {
       now,
       counts,
       provider:  getQueueStatus(),
+      // More than one model per scope here = a MIXED index (cosines across models are noise).
+      embeddings_by_model: (() => { try { return countEmbeddingsByModel(); } catch { return []; } })(),
       scheduler: getSchedulerStatus(),
       topEvents,
       topMarkets,

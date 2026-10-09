@@ -310,7 +310,7 @@ export function staticGate(article) {
  * the same answer. Asked once per article it was the same query 7 times, and —
  * because it ran inside the attempt loop — it spent 7 of the cycle's 8 attempts
  * to learn at most 4 facts. The live symptom was `tried 8, produced 0 · spec
- * spend $0.00000`: the whole budget consumed without one Gemini call.
+ * spend $0.00000`: the whole budget consumed without one LLM call.
  *
  * This is the same correction `diversifyByPublisher` already carries one layer
  * up — "the publish-time cooldown cannot fix that: it refuses the second VIDEO,

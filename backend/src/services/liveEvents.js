@@ -4,18 +4,16 @@
  * For each seeded event:
  *   1. Pull related articles from the DB (keyword OR-match, preferred-
  *      source boost). See findArticlesForEvent.
- *   2. Ask Gemini 1.5 Flash (free tier, 15 RPM) to collapse them into a
+ *   2. Ask Claude (llmQueue task "live-events") to collapse them into a
  *      timestamped point-wise brief + extract metric estimates. If no
- *      GEMINI_API_KEY is configured, fall back to a deterministic brief
+ *      ANTHROPIC_API_KEY is configured, fall back to a deterministic brief
  *      built straight from article headlines (no hallucination risk).
  *   3. Fetch live metrics (crude oil quote) and overlay them onto the
  *      LLM output.
  *   4. Cache the dossier in live_events (JSON blobs).
  *
- * Why Gemini 1.5 Flash: it's free, fast, and handles 30–50 article
- * excerpts in one prompt without hitting the free-tier rate limits when
- * refreshed hourly. Phase C will route this through a self-hosted model
- * on HF if the free tier is insufficient.
+ * Why a small, fast model: it handles 30–50 article excerpts in one prompt
+ * cheaply when refreshed hourly.
  */
 
 import axios from "axios";
@@ -27,13 +25,13 @@ import {
 import { rankByAuthenticity, scoreFor } from "../config/mediaAuthenticity.js";
 import { fetchEventSocialSignals } from "./socialSignals.js";
 import { logger } from "./logger.js";
-import { callJson, isTaskRoutable } from "../realityIndex/llmQueue.js";
+import { callJson, isLlmAvailable } from "../realityIndex/llmQueue.js";
 
 // Model pin, thinking-budget degrade, dead-model handling, the daily call cap
 // and usage logging all live in llmQueue now (task "live-events", pinned to
-// Gemini unless LLM_TASK_PROVIDER says otherwise). This site once had no
+// Claude). This site once had no
 // output cap while thinking billed as output (2026-07-15 cost incident).
-const GEMINI_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.LIVE_EVENTS_MAX_OUTPUT_TOKENS || "1536", 10);
+const LLM_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.LIVE_EVENTS_MAX_OUTPUT_TOKENS || "1536", 10);
 
 // ─── Metric fetchers ───────────────────────────────────────────────────────
 
@@ -93,7 +91,7 @@ function buildCeasefireTile(ceasefireIso) {
   };
 }
 
-// ─── Gemini synthesizer ────────────────────────────────────────────────────
+// ─── LLM synthesizer ──────────────────────────────────────────────────────
 
 function buildPrompt(event, articles, socialPosts = []) {
   const items = articles.map((a, i) => {
@@ -139,23 +137,22 @@ ${items}${socialBlock}`;
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Free-tier Gemini intermittently returns 503 UNAVAILABLE / 429 RESOURCE_EXHAUSTED
-// for prompts of this size; llmQueue retries transient errors with exponential
+// The API intermittently returns 503/429/529 under load; llmQueue retries transient errors with exponential
 // backoff so we don't silently fall back to deterministic briefs every cycle.
-async function synthesizeWithGemini(event, articles, socialPosts = []) {
-  if (!isTaskRoutable("live-events")) return null;
+async function synthesizeBrief(event, articles, socialPosts = []) {
+  if (!isLlmAvailable()) return null;
   if (articles.length === 0 && socialPosts.length === 0) return null;
   const prompt = buildPrompt(event, articles, socialPosts);
   try {
     const parsed = await callJson(prompt, {
       task: "live-events",
       temperature: 0.2,
-      maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+      maxOutputTokens: LLM_MAX_OUTPUT_TOKENS,
       timeoutMs: 25000,
       strictJson: true,
     });
     if (!parsed) return null;
-    // Attach source objects using the indices Gemini returned.
+    // Attach source objects using the indices the model returned.
     const brief = (parsed.brief || []).map((p) => ({
       ts: p.ts,
       text: p.text,
@@ -170,7 +167,7 @@ async function synthesizeWithGemini(event, articles, socialPosts = []) {
       metrics: parsed.metrics || {},
     };
   } catch (err) {
-    logger.warn("Gemini synthesis failed", { event: event.id, error: err.message });
+    logger.warn("LLM synthesis failed", { event: event.id, error: err.message });
     return null;
   }
 }
@@ -225,7 +222,7 @@ export async function refreshEvent(eventConfig) {
   const social = await fetchEventSocialSignals(eventConfig);
 
   // Try LLM first, fall back to deterministic brief.
-  let synth = await synthesizeWithGemini(eventConfig, articles, social.posts);
+  let synth = await synthesizeBrief(eventConfig, articles, social.posts);
   if (!synth) synth = fallbackSynthesize(eventConfig, articles, social.posts);
 
   // Merge LLM metrics with live fetchers.
@@ -254,7 +251,7 @@ export async function refreshEvent(eventConfig) {
     })),
     socialEnabled: social.enabled,
     socialPosts: social.posts.length,
-    llmUsed: isTaskRoutable("live-events"),
+    llmUsed: isLlmAvailable(),
   };
 
   upsertLiveEvent({
@@ -288,7 +285,7 @@ export async function refreshAllEvents() {
     } catch (err) {
       logger.error("Event refresh failed", { event: evt.id, error: err.message });
     }
-    // Space Gemini calls out — free tier is 15 RPM and these prompts are
+    // Space LLM calls out — these prompts are
     // large enough to hit transient 503/429. 5s gap keeps us safely under
     // the limit without dragging the cycle out.
     if (i < LIVE_EVENTS.length - 1) await sleep(5000);

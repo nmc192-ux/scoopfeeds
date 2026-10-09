@@ -58,6 +58,10 @@ export const HEARTBEAT_PING_URLS = {
   ingestion:    "INGESTION_HEARTBEAT_PING_URL",
   // ScoopFeeds Radio state builder — pinged on COMPLETION only (radio/radioState.js).
   radio:        "RADIO_PING_URL",
+  // LLM provider health (llmQueue): /fail on a HARD error — billing, auth,
+  // permission, dead model — and a success ping when a call works again, so
+  // the check goes red the moment Claude stops answering and green on recovery.
+  llm:          "LLM_HEALTH_PING_URL",
 };
 
 // An unset switch is silent BY DESIGN, which makes "not configured" and

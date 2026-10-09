@@ -173,37 +173,14 @@ test("no logRejection call site omits `model`", () => {
   }
 });
 
-// ─── INVALID_ARGUMENT classifier (evidence-gated, not a widened match) ──────
+// ─── provider plumbing now lives in llmQueue ────────────────────────────────
 
-test("isInvalidArgument matches a bare 400 with no mention of thinking", () => {
-  const { isInvalidArgument } = _internals;
-  const err = { response: { status: 400, data: { error: { code: 400, message: "Request contains an invalid argument", status: "INVALID_ARGUMENT" } } } };
-  assert.equal(isInvalidArgument(err), true);
-});
-
-test("isInvalidArgument ignores non-400s and unrelated 400s", () => {
-  const { isInvalidArgument } = _internals;
-  assert.equal(isInvalidArgument({ response: { status: 404 } }), false);
-  assert.equal(isInvalidArgument({ response: { status: 429, data: { error: { message: "quota" } } } }), false);
-  assert.equal(isInvalidArgument({ response: { status: 400, data: { error: { message: "API key not valid" } } } }), false);
-});
-
-test("the shared thinking classifier is NOT widened to bare 400s", () => {
-  // Widening llmQueue's predicate would let any malformed request flip the
-  // process-wide flag for igSummary, scriptWriter and llmQueue itself. The
-  // probe lives here, gated on the retry's outcome, precisely to avoid that.
-  const raw = readFileSync(new URL("../realityIndex/llmQueue.js", import.meta.url), "utf8");
-  const fn = raw.slice(raw.indexOf("export function isGeminiThinkingRejection"));
-  assert.match(fn.slice(0, 300), /\/thinking\/i\.test/);
-  assert.ok(!/INVALID_ARGUMENT/.test(fn.slice(0, 300)),
-    "the shared classifier must stay evidence-specific");
-});
-
-test("the probe only fires when thinkingConfig was actually sent", () => {
+test("videoSpecWriter carries no provider-specific code: calls go through llmQueue", () => {
   const raw = readFileSync(new URL("./videoSpecWriter.js", import.meta.url), "utf8");
-  assert.match(raw, /isInvalidArgument\(err\) && sentThinkingConfig && !thinkingRetryUsed/);
-  // And the shared flag is flipped only after the retry SUCCEEDS.
-  assert.match(raw, /if \(forceNoThinking && !thinkingConfirmed\)[\s\S]{0,200}markGeminiThinkingRejected/);
+  assert.match(raw, /from "\.\.\/realityIndex\/llmQueue\.js"/);
+  assert.ok(!/gemini|generativelanguage|axios|thinkingConfig|isInvalidArgument/i.test(raw),
+    "no direct provider call, no thinking/probe machinery");
+  assert.equal(_internals.isInvalidArgument, undefined);
 });
 
 test("the prompt carries the SUPPLIED body text, not the stored content", () => {

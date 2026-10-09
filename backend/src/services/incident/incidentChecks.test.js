@@ -245,7 +245,7 @@ test("no vision pass configured is cannot-confirm, never a pass", async () => {
 });
 
 test("a vision pass that throws is cannot-confirm, never a pass", async () => {
-  const vision = async () => { throw new Error("gemini 429"); };
+  const vision = async () => { throw new Error("vision 429"); };
   assert.equal((await checkContext({ story: STORY, vision })).reason, "context_vision_failed");
   assert.equal((await checkContext({ story: PK_STORY, vision })).verdict, VERDICTS.KILL);
 });

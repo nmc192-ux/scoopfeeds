@@ -11,7 +11,7 @@
  * grade — and importing it from behind that boundary would break the guard.
  * Restating it here instead would leave two copies of one number set to drift
  * apart, which is the failure this repo has already had with the tragedy
- * keywords and with GEMINI_GENERATION_MODEL's two defaults.
+ * keywords and with the old split LLM-model defaults.
  *
  * So the definition moves to the runtime side and the script imports it. That is
  * the direction the boundary permits, it leaves exactly one definition, and

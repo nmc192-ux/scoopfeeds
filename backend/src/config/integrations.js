@@ -57,12 +57,9 @@ export function collectIntegrationStatus({ schedulerEnabled }) {
       youtube:   isYouTubeConfigured(),
     },
     ai: {
-      cerebras:   Boolean(process.env.CEREBRAS_API_KEY),
-      groq:       Boolean(process.env.GROQ_API_KEY),
-      cloudflare: Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN),
-      nvidia:     Boolean(process.env.NVIDIA_API_KEY),
-      gemini:     Boolean(process.env.GEMINI_API_KEY),
-      ollama:     Boolean(process.env.OLLAMA_BASE_URL),
+      anthropic:  Boolean(process.env.ANTHROPIC_API_KEY),   // generation
+      ollama:     Boolean(process.env.OLLAMA_BASE_URL),     // embeddings (default)
+      cloudflare: Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN), // embeddings (alt)
     },
     external: {
       openweather: Boolean(process.env.OPENWEATHER_API_KEY),

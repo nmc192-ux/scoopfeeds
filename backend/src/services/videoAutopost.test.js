@@ -1045,7 +1045,7 @@ test("the public URL is built from the ARTICLE ID, not the filename", async () =
 // The defect these pin, verbatim from prod: `tried 8, produced 0 · spec spend
 // $0.00000`. All eight attempts were pre-spec refusals (7 publisher-24h, 1
 // event-48h), so they cost nothing — and still consumed a budget whose entire
-// purpose is capping Gemini spend.
+// purpose is capping LLM spend.
 
 const {
   publisherCooldownFilter, buildRecentTitleCorpus, cooldownGate, diversifyByPublisher,

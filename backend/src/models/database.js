@@ -566,7 +566,7 @@ export function initializeSchema(db) {
     -- ─── News Analysis — Story Clusters ───────────────────────────────
     -- Auto-detected trending story groups built from bigram clustering of
     -- recent article titles. Brief and perspectives are JSON blobs generated
-    -- by Gemini 1.5 Flash every 2h. expires_at = created_at + 24h.
+    -- by the LLM every 2h. expires_at = created_at + 24h.
     CREATE TABLE IF NOT EXISTS story_clusters (
       id           TEXT PRIMARY KEY,
       title        TEXT NOT NULL,
@@ -585,7 +585,7 @@ export function initializeSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_clusters_updated  ON story_clusters(updated_at DESC);
 
     -- ─── News Analysis — Explained Pieces ─────────────────────────────
-    -- Long-form Gemini-generated explainers for top-2 trending categories.
+    -- Long-form LLM-generated explainers for top-2 trending categories.
     -- content is HTML. facts/timeline/sources are JSON arrays.
     -- expires_at = created_at + 12h.
     CREATE TABLE IF NOT EXISTS explained_pieces (
@@ -606,7 +606,7 @@ export function initializeSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_explained_updated ON explained_pieces(updated_at DESC);
 
     -- ─── News Analysis — Article Analysis Cache ────────────────────────
-    -- On-demand per-article Gemini analysis. Cached 6h per article_id.
+    -- On-demand per-article LLM analysis. Cached 6h per article_id.
     -- Populated lazily when the user opens the article deep dive panel.
     CREATE TABLE IF NOT EXISTS article_analysis_cache (
       article_id   TEXT PRIMARY KEY,

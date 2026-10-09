@@ -1,10 +1,10 @@
 // Generates a punchy 2–3 sentence Instagram caption body for an article using
-// the LLM (task "ig-summary" — Gemini unless LLM_TASK_PROVIDER says otherwise). The generated summary is persisted in articles.ig_summary so it's
+// the LLM (llmQueue task "ig-summary"). The generated summary is persisted in articles.ig_summary so it's
 // only generated once per article (lazy, on first IG post attempt).
 //
 // Falls back gracefully when:
 //   - no provider configured          → returns null (caller uses description)
-//   - Gemini call fails / times out   → returns null
+//   - LLM call fails / times out      → returns null
 //   - Article already has ig_summary  → returns cached value instantly
 //
 // Usage in socialPublisher.js:
@@ -13,7 +13,7 @@
 
 import { getDb } from "../models/database.js";
 import { logger } from "./logger.js";
-import { callJson, isTaskRoutable } from "../realityIndex/llmQueue.js";
+import { callJson, isLlmAvailable } from "../realityIndex/llmQueue.js";
 
 // Model pin, thinking-budget degrade (thinkingBudget:0, retry once without it
 // on a rejection), dead-model handling and usage logging live in llmQueue.
@@ -21,7 +21,7 @@ import { callJson, isTaskRoutable } from "../realityIndex/llmQueue.js";
 // Build a 2-3 sentence punchy Instagram summary via the LLM.
 // Returns the summary string on success, null on any failure.
 async function generateSummary(article) {
-  if (!isTaskRoutable("ig-summary")) return null;
+  if (!isLlmAvailable()) return null;
 
   // Combine headline + description + up to 800 chars of content for context.
   const rawContext = [
@@ -82,7 +82,7 @@ async function generateSummary(article) {
 }
 
 // Public. Mutates article.ig_summary in-place, persists to DB, returns the value.
-// Safe to call even when Gemini is not configured (returns null, no DB write).
+// Safe to call even when no LLM is configured (returns null, no DB write).
 export async function ensureIgSummary(article) {
   // Fast path: already on the object (e.g. freshly selected with ig_summary col)
   if (article.ig_summary) return article.ig_summary;

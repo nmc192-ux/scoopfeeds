@@ -61,22 +61,22 @@ test("breaker: providers are independent", () => {
   assert.equal(b.isOpen("gemini"), false);
 });
 
-test("pricing: haiku-5-5 short and long-prompt tiers; gemini rates", () => {
+test("pricing: haiku-5-5 short and long-prompt tiers; sonnet-5-5 flat rate", () => {
   _resetPricingWarnings();
   assert.ok(Math.abs(estimateCostUsd("anthropic", "claude-haiku-5-5", 100_000, 100_000) - 0.06) < 1e-9); // at the threshold: short tier
   assert.ok(Math.abs(estimateCostUsd("anthropic", "claude-haiku-5-5", 200_000, 10_000) - (0.2 * 0.5 + 0.01 * 2.5)) < 1e-9);
-  assert.ok(Math.abs(estimateCostUsd("gemini", "gemini-3.1-flash-lite", 1_000_000, 1_000_000) - 1.75) < 1e-9);
-  assert.ok(Math.abs(estimateCostUsd("gemini", "gemini-3.5-flash", 1_000_000, 1_000_000) - 10.5) < 1e-9);
+  assert.ok(Math.abs(estimateCostUsd("anthropic", "claude-sonnet-5-5", 1_000_000, 1_000_000) - 12) < 1e-9);
   assert.equal(LLM_PRICES.anthropic["claude-haiku-5-5"].cacheRead, 0.01);
+  assert.equal(LLM_PRICES.gemini, undefined, "no Gemini prices");
 });
 
 test("pricing: unknown model or unknown tokens → null; warns once per model", () => {
   _resetPricingWarnings();
   const lines = [];
   const logger = { warn: (m) => lines.push(m) };
-  assert.equal(estimateCostUsd("gemini", "gemini-9", 10, 10, { logger }), null);
-  assert.equal(estimateCostUsd("gemini", "gemini-9", 10, 10, { logger }), null);
+  assert.equal(estimateCostUsd("anthropic", "claude-9", 10, 10, { logger }), null);
+  assert.equal(estimateCostUsd("anthropic", "claude-9", 10, 10, { logger }), null);
   assert.equal(lines.length, 1);
-  assert.equal(estimateCostUsd("gemini", "gemini-3.1-flash-lite", null, null, { logger }), null);
+  assert.equal(estimateCostUsd("anthropic", "claude-haiku-5-5", null, null, { logger }), null);
   assert.equal(lines.length, 1);
 });

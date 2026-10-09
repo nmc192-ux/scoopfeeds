@@ -8,7 +8,7 @@
  * survived, never what they were. This separates generation from rendering so a
  * prompt can be judged on its output before a frame exists.
  *
- * Run it in the worker, where the Gemini key already lives:
+ * Run it in the worker, where the Anthropic key already lives:
  *
  *   cd /opt/scoopfeeds
  *   docker compose -f docker-compose.production.yml exec -T worker \
@@ -24,8 +24,8 @@
  * the database is opened with `readonly: true`, which is also why this does not
  * use getDb() — that runs bootstrapSchema and would apply migrations as a side
  * effect of an inspection command. Nothing is claimed, rendered, uploaded or
- * marked. The only writes anywhere are Gemini's own billing and, on two specific
- * API failures, llmQueue's in-memory degrade flags (which are not persisted).
+ * marked. The only writes anywhere are the model API's own billing and what
+ * llmQueue records for the call (an llm_usage row and the daily-budget counter).
  *
  * IT COSTS ONE SPEC CALL. Roughly a cent at current rates, printed at the end so
  * the number is never a guess.
@@ -142,7 +142,7 @@ if (PROMPT_ONLY) {
 }
 
 if (!isVideoSpecEnabled()) {
-  console.error("\nVIDEO_SPEC_ENABLED is not 1, or GEMINI_API_KEY is unset — no spec can be generated.");
+  console.error("\nVIDEO_SPEC_ENABLED is not 1, or ANTHROPIC_API_KEY is unset — no spec can be generated.");
   process.exit(2);
 }
 

@@ -1,11 +1,13 @@
 /**
- * llmQueue — Anthropic provider, per-task routing, hard-error fallback,
- * circuit breaker, text mode and usage logging.
+ * llmQueue — Claude as the only generation provider: the Anthropic handler,
+ * text / images / schema modes, hard-error handling (loud error + Healthchecks
+ * ping + circuit breaker), transient retry, usage logging, and the Ollama /
+ * Cloudflare embedding lane.
  *
- * llmQueue reads its config (keys, LLM_TASK_PROVIDER, ...) at import, so each
- * scenario imports a FRESH instance via a cache-busting query string after
- * setting env. Gemini is stubbed at axios.post; Anthropic through the module's
- * client seam. No network, no real keys.
+ * llmQueue reads its config (keys, EMBED_PROVIDER, breaker settings) at import,
+ * so each scenario imports a FRESH instance via a cache-busting query string
+ * after setting env. Anthropic goes through the module's client seam; axios is
+ * stubbed for pings and embeddings. No network, no real keys.
  */
 
 import test from "node:test";
@@ -21,136 +23,83 @@ const { default: axios } = await import("axios");
 const { logger } = await import("../services/logger.js");
 const { getDb } = await import("../models/database.js");
 
-const PROVIDER_ENV = [
-  "LLM_PROVIDER", "LLM_PREMIUM_PROVIDER", "LLM_TASK_PROVIDER", "LLM_DISABLED", "GEMINI_DISABLED",
-  "CEREBRAS_API_KEY", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "GROQ_API_KEY",
-  "DEEPSEEK_API_KEY", "NVIDIA_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL",
-  "GEMINI_GENERATION_MODEL", "LLM_FALLBACK_DISABLED", "LLM_BREAKER_THRESHOLD",
+const CONFIG_ENV = [
+  "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_RPM", "LLM_DISABLED", "LLM_BREAKER_THRESHOLD",
+  "LLM_BREAKER_COOLDOWN_MS", "LLM_HEALTH_PING_URL", "EMBED_PROVIDER", "OLLAMA_EMBED_MODEL",
+  "OLLAMA_EMBED_PREFIX", "OLLAMA_BASE_URL", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
 ];
 
 let n = 0;
 async function load(env = {}) {
-  for (const k of PROVIDER_ENV) delete process.env[k];
+  for (const k of CONFIG_ENV) delete process.env[k];
   process.env.LLM_DAILY_CALL_CAP = "100000";
   process.env.LLM_RETRY_DELAYS_MS = "1,1,1";
-  Object.assign(process.env, { GEMINI_API_KEY: "g-key", ANTHROPIC_API_KEY: "a-key", LLM_PROVIDER: "gemini" }, env);
+  Object.assign(process.env, { ANTHROPIC_API_KEY: "a-key" }, env);
   for (const [k, v] of Object.entries(env)) if (v === null) delete process.env[k];
   return import(`./llmQueue.js?t=${++n}`);
 }
 
-const httpErr = (status, message, data) => Object.assign(new Error(message), { status, response: { status, data } });
-const geminiOk = (text, usage = { promptTokenCount: 100, candidatesTokenCount: 50 }, finishReason = "STOP") =>
-  ({ data: { candidates: [{ content: { parts: [{ text }] }, finishReason }], usageMetadata: usage } });
-const anthropicOk = (text, usage = { input_tokens: 1000, output_tokens: 500 }, stop_reason = "end_turn") =>
+const httpErr = (status, message) => Object.assign(new Error(message), { status });
+const claudeOk = (text, usage = { input_tokens: 1000, output_tokens: 500 }, stop_reason = "end_turn") =>
   ({ content: [{ type: "text", text }], usage, stop_reason });
 
-function stubGemini(handler) {
-  const calls = [];
-  const orig = axios.post;
-  axios.post = async (url, body, cfg) => { calls.push({ url, body, cfg }); return handler(calls.length, { url, body, cfg }); };
-  return { calls, restore: () => { axios.post = orig; } };
-}
-function fakeAnthropic(handler) {
+function fakeClaude(handler) {
   const calls = [];
   return { calls, messages: { create: async (params, opts) => { calls.push({ params, opts }); return handler(calls.length, params); } } };
 }
-function captureWarnings() {
-  const lines = [];
-  const orig = logger.warn;
-  logger.warn = (...a) => { lines.push(a.map(String).join(" ")); };
-  return { lines, restore: () => { logger.warn = orig; } };
+function capture() {
+  const warns = [], errors = [];
+  const ow = logger.warn, oe = logger.error;
+  logger.warn = (...a) => { warns.push(a.map(String).join(" ")); };
+  logger.error = (...a) => { errors.push(a.map(String).join(" ")); };
+  return { warns, errors, restore: () => { logger.warn = ow; logger.error = oe; } };
+}
+function stubAxios(handler = () => ({ status: 200, data: {} })) {
+  const posts = [], gets = [];
+  const op = axios.post, og = axios.get;
+  axios.post = async (url, body, cfg) => { posts.push({ url, body, cfg }); return handler("post", url, body); };
+  axios.get = async (url, cfg) => { gets.push({ url, cfg }); return handler("get", url); };
+  return { posts, gets, restore: () => { axios.post = op; axios.get = og; } };
 }
 const usageRows = (task) => getDb().prepare("SELECT * FROM llm_usage WHERE task = ? ORDER BY id").all(task);
 const budgetCalls = (task) => getDb().prepare("SELECT COALESCE(SUM(calls),0) AS c FROM llm_daily_calls WHERE task = ? AND day = date('now')").get(task).c;
+const settle = () => new Promise(r => setTimeout(r, 15)); // pings are fire-and-forget
 
-// ─── routing ───────────────────────────────────────────────────────────────
+// ─── availability / kill switches ──────────────────────────────────────────
 
-test("parseTaskProviderMap: valid pairs parse, junk and unknown providers are dropped, empty is {}", async () => {
+test("no ANTHROPIC_API_KEY → callJson resolves null without touching the budget; isLlmAvailable is false", async () => {
+  const q = await load({ ANTHROPIC_API_KEY: null });
+  const before = budgetCalls("no-key");
+  assert.equal(await q.callJson("p", { task: "no-key" }), null);
+  assert.equal(budgetCalls("no-key"), before);
+  assert.equal(q.isLlmAvailable(), false);
+});
+
+test("LLM_DISABLED=1 short-circuits to null and reports unavailable", async () => {
+  const q = await load({ LLM_DISABLED: "1" });
+  q._test.setAnthropicClient(fakeClaude(() => { throw new Error("must not be called"); }));
+  assert.equal(await q.callJson("p", { task: "x" }), null);
+  assert.equal(q.isLlmAvailable(), false);
+});
+
+test("the old `tier` option is accepted and ignored: one provider, one model", async () => {
   const q = await load();
-  const w = captureWarnings();
-  try {
-    assert.deepEqual(q.parseTaskProviderMap("ig-summary=anthropic, actors = Anthropic"), { "ig-summary": "anthropic", actors: "anthropic" });
-    assert.deepEqual(q.parseTaskProviderMap("actors=notaprovider,=gemini,lonely"), {});
-    assert.equal(w.lines.filter(l => /LLM_TASK_PROVIDER: ignoring/.test(l)).length, 3);
-    assert.deepEqual(q.parseTaskProviderMap(""), {});
-    assert.deepEqual(q.parseTaskProviderMap(undefined), {});
-  } finally { w.restore(); }
+  const c = fakeClaude(() => claudeOk('{"ok":1}'));
+  q._test.setAnthropicClient(c);
+  assert.deepEqual(await q.callJson("p", { task: "t-tier", tier: "premium" }), { ok: 1 });
+  assert.equal(c.calls[0].params.model, "claude-haiku-5-5");
+  assert.equal(q.getQueueStatus().provider, "anthropic");
+  assert.equal(q.getQueueStatus().premiumProvider, "anthropic");
 });
 
-test("routing: with LLM_TASK_PROVIDER unset, an unlisted task keeps tier routing (zero change)", async () => {
-  const q = await load({ LLM_PROVIDER: "gemini" });
-  assert.equal(q._test.resolveRoute("standard", "actors").provider, "gemini");
-  const g = stubGemini(() => geminiOk('{"x":1}'));
-  const a = fakeAnthropic(() => { throw new Error("anthropic must not be called"); });
-  q._test.setAnthropicClient(a);
-  try {
-    assert.deepEqual(await q.callJson("p", { task: "actors" }), { x: 1 });
-    assert.equal(g.calls.length, 1);
-    assert.equal(a.calls.length, 0);
-  } finally { g.restore(); }
-});
+// ─── handler: JSON / schema / text / images ────────────────────────────────
 
-test("routing: a listed task goes to Anthropic, an unlisted one stays on Gemini", async () => {
-  const q = await load({ LLM_TASK_PROVIDER: "actors=anthropic" });
-  const a = fakeAnthropic(() => anthropicOk('{"who":"claude"}'));
-  q._test.setAnthropicClient(a);
-  const g = stubGemini(() => geminiOk('{"who":"gemini"}'));
-  try {
-    assert.deepEqual(await q.callJson("p", { task: "actors" }), { who: "claude" });
-    assert.deepEqual(await q.callJson("p", { task: "market-match" }), { who: "gemini" });
-    assert.equal(a.calls.length, 1);
-    assert.equal(g.calls.length, 1);
-  } finally { g.restore(); }
-});
-
-test("routing: an env override to a provider with no credentials is ignored (normal routing, one warning)", async () => {
-  const q = await load({ LLM_TASK_PROVIDER: "actors=anthropic", ANTHROPIC_API_KEY: null });
-  const w = captureWarnings();
-  const g = stubGemini(() => geminiOk('{"ok":true}'));
-  try {
-    assert.equal(q._test.resolveRoute("standard", "actors").provider, "gemini");
-    await q.callJson("p", { task: "actors" });
-    await q.callJson("p", { task: "actors" });
-    assert.equal(g.calls.length, 2);
-    assert.equal(w.lines.filter(l => /no credentials/.test(l)).length, 1);
-  } finally { g.restore(); w.restore(); }
-});
-
-test("routing: the four formerly-direct tasks stay on Gemini even when LLM_PROVIDER is another provider", async () => {
-  const q = await load({ LLM_PROVIDER: "groq", GROQ_API_KEY: "q" });
-  for (const task of ["live-events", "analysis-brief", "analysis-persp", "analysis-explained", "deep-dive", "ig-summary", "script-writer"]) {
-    assert.equal(q._test.resolveRoute("standard", task).provider, "gemini", task);
-  }
-  assert.equal(q._test.resolveRoute("standard", "actors").provider, "groq");
-});
-
-test("pinned task with no Gemini key returns null without touching the daily budget or the network", async () => {
-  const q = await load({ GEMINI_API_KEY: null, ANTHROPIC_API_KEY: null });
-  const g = stubGemini(() => { throw new Error("no network expected"); });
-  try {
-    const before = budgetCalls("ig-summary");
-    assert.equal(await q.callJson("p", { task: "ig-summary", text: true }), null);
-    assert.equal(budgetCalls("ig-summary"), before);
-    assert.equal(q.isTaskRoutable("ig-summary"), false);
-  } finally { g.restore(); }
-});
-
-test("isTaskRoutable: a Gemini-pinned task is routable via the Anthropic fallback when only Anthropic has a key", async () => {
-  const q = await load({ GEMINI_API_KEY: null });
-  assert.equal(q.isTaskRoutable("ig-summary"), true);
-  const q2 = await load({ GEMINI_API_KEY: null, LLM_FALLBACK_DISABLED: "1" });
-  assert.equal(q2.isTaskRoutable("ig-summary"), false);
-});
-
-// ─── Anthropic handler ─────────────────────────────────────────────────────
-
-test("anthropic JSON mode: json system prompt, no prefill, tolerant parse of fenced output, default model", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic" });
-  const a = fakeAnthropic(() => anthropicOk('Here you go:\n```json\n{"a":[1,2]}\n```'));
-  q._test.setAnthropicClient(a);
-  const v = await q.callJson("hello", { task: "t-json", maxOutputTokens: 321, timeoutMs: 5555 });
-  assert.deepEqual(v, { a: [1, 2] });
-  const { params, opts } = a.calls[0];
+test("JSON mode: json system prompt, no prefill, tolerant parse of fenced output, default model, timeout passthrough", async () => {
+  const q = await load();
+  const c = fakeClaude(() => claudeOk('Here you go:\n```json\n{"a":[1,2]}\n```'));
+  q._test.setAnthropicClient(c);
+  assert.deepEqual(await q.callJson("hello", { task: "t-json", maxOutputTokens: 321, timeoutMs: 5555 }), { a: [1, 2] });
+  const { params, opts } = c.calls[0];
   assert.equal(params.model, "claude-haiku-5-5");
   assert.equal(params.max_tokens, 321);
   assert.match(params.system, /valid JSON only/);
@@ -159,340 +108,346 @@ test("anthropic JSON mode: json system prompt, no prefill, tolerant parse of fen
   assert.equal(opts.timeout, 5555);
 });
 
-test("anthropic structured output: schema is sent as output_config.format json_schema", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic" });
-  const a = fakeAnthropic(() => anthropicOk('{"n":1}'));
-  q._test.setAnthropicClient(a);
+test("schema → output_config.format json_schema", async () => {
+  const q = await load();
+  const c = fakeClaude(() => claudeOk('{"n":1}'));
+  q._test.setAnthropicClient(c);
   const schema = { type: "object", properties: { n: { type: "integer" } }, required: ["n"], additionalProperties: false };
   assert.deepEqual(await q.callJson("p", { task: "t-schema", schema }), { n: 1 });
-  assert.deepEqual(a.calls[0].params.output_config, { format: { type: "json_schema", schema } });
+  assert.deepEqual(c.calls[0].params.output_config, { format: { type: "json_schema", schema } });
 });
 
-test("anthropic ANTHROPIC_MODEL env overrides the default model", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic", ANTHROPIC_MODEL: "claude-test-9" });
-  const a = fakeAnthropic(() => anthropicOk("{}"));
-  q._test.setAnthropicClient(a);
+test("model: ANTHROPIC_MODEL env sets the default; a per-call `model` overrides it", async () => {
+  const q = await load({ ANTHROPIC_MODEL: "claude-test-9" });
+  const c = fakeClaude(() => claudeOk("{}"));
+  q._test.setAnthropicClient(c);
   await q.callJson("p", { task: "t-model" });
-  assert.equal(a.calls[0].params.model, "claude-test-9");
+  await q.callJson("p", { task: "t-model", model: "claude-sonnet-5-5" });
+  assert.deepEqual(c.calls.map(x => x.params.model), ["claude-test-9", "claude-sonnet-5-5"]);
 });
 
-test("anthropic: a 400 rejecting temperature flips the flag and retries once without it", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic" });
-  const a = fakeAnthropic((i) => {
-    if (i === 1) throw httpErr(400, "temperature is not supported for this model");
-    return anthropicOk('{"ok":1}');
-  });
-  q._test.setAnthropicClient(a);
-  assert.deepEqual(await q.callJson("p", { task: "t-temp" }), { ok: 1 });
-  assert.equal(a.calls.length, 2);
-  assert.equal("temperature" in a.calls[0].params, true);
-  assert.equal("temperature" in a.calls[1].params, false);
+test("text mode: no JSON system prompt, no schema, raw string back", async () => {
+  const q = await load();
+  const c = fakeClaude(() => claudeOk("  A caption.  "));
+  q._test.setAnthropicClient(c);
+  assert.equal(await q.callJson("p", { task: "t-text", text: true, schema: { type: "object" } }), "  A caption.  ");
+  assert.equal(c.calls[0].params.system, undefined);
+  assert.equal(c.calls[0].params.output_config, undefined);
 });
 
-test("anthropic stop_reason max_tokens maps to finishReason MAX_TOKENS + truncated (the callers' existing log vocabulary)", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic" });
-  q._test.setAnthropicClient(fakeAnthropic(() => anthropicOk('{"cut":', { input_tokens: 10, output_tokens: 20 }, "max_tokens")));
+test("images: sent as base64 image blocks BEFORE the prompt text (Buffer and string inputs)", async () => {
+  const q = await load();
+  const c = fakeClaude(() => claudeOk('{"frames":[]}'));
+  q._test.setAnthropicClient(c);
+  await q.callJson("which frame?", { task: "t-img", images: [Buffer.from("abc"), "ZGVm"], withMeta: true });
+  const content = c.calls[0].params.messages[0].content;
+  assert.equal(content.length, 3);
+  assert.deepEqual(content[0], { type: "image", source: { type: "base64", media_type: "image/jpeg", data: Buffer.from("abc").toString("base64") } });
+  assert.deepEqual(content[1].source.data, "ZGVm");
+  assert.deepEqual(content[2], { type: "text", text: "which frame?" });
+});
+
+test("a 400 rejecting temperature flips the flag and retries once without it (a free retry, even with retryDelaysMs=[])", async () => {
+  const q = await load();
+  const c = fakeClaude((i) => { if (i === 1) throw httpErr(400, "temperature is not supported for this model"); return claudeOk('{"ok":1}'); });
+  q._test.setAnthropicClient(c);
+  assert.deepEqual(await q.callJson("p", { task: "t-temp", retryDelaysMs: [] }), { ok: 1 });
+  assert.equal("temperature" in c.calls[0].params, true);
+  assert.equal("temperature" in c.calls[1].params, false);
+});
+
+test("stop_reason max_tokens → finishReason MAX_TOKENS + truncated + textLength (the callers' log vocabulary)", async () => {
+  const q = await load();
+  q._test.setAnthropicClient(fakeClaude(() => claudeOk('{"cut":', { input_tokens: 10, output_tokens: 20 }, "max_tokens")));
   const r = await q.callJson("p", { task: "t-trunc", withMeta: true });
   assert.equal(r.ok, true);
   assert.equal(r.truncated, true);
   assert.equal(r.finishReason, "MAX_TOKENS");
-  assert.equal(r.provider, "anthropic");
+  assert.equal(r.textLength, 7);
   assert.deepEqual(r.rawUsage, { promptTokenCount: 10, candidatesTokenCount: 20, thoughtsTokenCount: 0 });
 });
 
-test("strictJson turns non-JSON output into null; without it the {_rawText} contract is unchanged", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic" });
-  q._test.setAnthropicClient(fakeAnthropic(() => anthropicOk("sorry, I cannot produce JSON")));
-  assert.deepEqual(await q.callJson("p", { task: "t-strict" }), { _rawText: "sorry, I cannot produce JSON" });
-  assert.equal(await q.callJson("p", { task: "t-strict", strictJson: true }), null);
-});
-
-test("anthropic RPM defaults to 50 and is overridable", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic" });
-  assert.equal(q.getQueueStatus().rpm.anthropic, 50);
-});
-
-// ─── text mode ─────────────────────────────────────────────────────────────
-
-test("text mode (gemini): no responseMimeType, raw string returned", async () => {
+test("strictJson: non-JSON → null; without it the {_rawText} contract is preserved", async () => {
   const q = await load();
-  const g = stubGemini(() => geminiOk("  Two plain sentences.  "));
+  q._test.setAnthropicClient(fakeClaude(() => claudeOk("sorry, no JSON")));
+  const w = capture();
   try {
-    assert.equal(await q.callJson("p", { task: "ig-summary", text: true, temperature: 0.65, maxOutputTokens: 512, timeoutMs: 18000 }), "  Two plain sentences.  ");
-    const { body, cfg } = g.calls[0];
-    assert.equal("responseMimeType" in body.generationConfig, false);
-    assert.equal(body.generationConfig.temperature, 0.65);
-    assert.equal(body.generationConfig.maxOutputTokens, 512);
-    assert.equal(cfg.timeout, 18000);
-  } finally { g.restore(); }
+    assert.deepEqual(await q.callJson("p", { task: "t-strict" }), { _rawText: "sorry, no JSON" });
+    assert.equal(await q.callJson("p", { task: "t-strict", strictJson: true }), null);
+  } finally { w.restore(); }
 });
 
-test("text mode (gemini): JSON mode still sets responseMimeType", async () => {
-  const q = await load();
-  const g = stubGemini(() => geminiOk('{"a":1}'));
+test("empty text and refusals are non-hard failures: null to callers, no ping, no breaker", async () => {
+  const q = await load({ LLM_HEALTH_PING_URL: "https://hc.test/abc" });
+  const ax = stubAxios();
+  q._test.setAnthropicClient(fakeClaude((i) => i === 1 ? { content: [], usage: {}, stop_reason: "end_turn" } : { content: [{ type: "text", text: "no" }], usage: {}, stop_reason: "refusal" }));
+  const w = capture();
   try {
-    await q.callJson("p", { task: "t-j" });
-    assert.equal(g.calls[0].body.generationConfig.responseMimeType, "application/json");
-  } finally { g.restore(); }
+    const a = await q.callJson("p", { task: "t-empty", withMeta: true });
+    const b = await q.callJson("p", { task: "t-empty", withMeta: true });
+    assert.deepEqual([a.ok, a.errClass, b.ok, b.errClass], [false, "empty", false, "refusal"]);
+    await settle();
+    assert.equal(ax.posts.length + ax.gets.length, 0);
+    assert.equal(q._test.breaker.isOpen("anthropic"), false);
+  } finally { ax.restore(); w.restore(); }
 });
 
-test("text mode (anthropic): no JSON system prompt, no schema, raw string returned", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic" });
-  const a = fakeAnthropic(() => anthropicOk("A caption."));
-  q._test.setAnthropicClient(a);
-  assert.equal(await q.callJson("p", { task: "t-text", text: true, schema: { type: "object" } }), "A caption.");
-  assert.equal(a.calls[0].params.system, undefined);
-  assert.equal(a.calls[0].params.output_config, undefined);
+test("RPM defaults to 50 and ANTHROPIC_RPM overrides it", async () => {
+  assert.equal((await load()).getQueueStatus().rpm.anthropic, 50);
+  assert.equal((await load({ ANTHROPIC_RPM: "7" })).getQueueStatus().rpm.anthropic, 7);
 });
 
-test("text mode (openai-compat providers): no json response_format, raw string returned", async () => {
-  const q = await load({ LLM_PROVIDER: "groq", GROQ_API_KEY: "q" });
-  const g = stubGemini(() => ({ data: { choices: [{ message: { content: "plain words" } }] } }));
+// ─── transient errors ──────────────────────────────────────────────────────
+
+test("transient 529/503: retried on the same call with backoff, then succeeds; nothing escalates", async () => {
+  const q = await load({ LLM_HEALTH_PING_URL: "https://hc.test/abc" });
+  const ax = stubAxios();
+  const c = fakeClaude((i) => { if (i < 3) throw httpErr(i === 1 ? 529 : 503, "overloaded"); return claudeOk('{"ok":1}'); });
+  q._test.setAnthropicClient(c);
+  const w = capture();
   try {
-    assert.equal(await q.callJson("p", { task: "t-groq-text", text: true }), "plain words");
-    assert.equal(g.calls[0].body.response_format, undefined);
-    assert.equal(g.calls[0].body.messages.length, 1);
-  } finally { g.restore(); }
+    assert.deepEqual(await q.callJson("p", { task: "t-transient" }), { ok: 1 });
+    assert.equal(c.calls.length, 3);
+    await settle();
+    assert.equal(ax.posts.length + ax.gets.length, 0);
+    assert.equal(w.errors.length, 0);
+  } finally { ax.restore(); w.restore(); }
 });
 
-// ─── fallback ──────────────────────────────────────────────────────────────
+test("exhausted transient retries → null, classified 'transient' in llm_usage, NOT hard (no error, no ping, breaker untouched)", async () => {
+  const q = await load({ LLM_HEALTH_PING_URL: "https://hc.test/abc" });
+  const ax = stubAxios();
+  const c = fakeClaude(() => { throw httpErr(503, "unavailable"); });
+  q._test.setAnthropicClient(c);
+  const w = capture();
+  try {
+    assert.equal(await q.callJson("p", { task: "t-exhaust" }), null);
+    assert.equal(c.calls.length, 4); // 1 + 3 retry delays
+    assert.equal(usageRows("t-exhaust").at(-1).error_class, "transient");
+    await settle();
+    assert.equal(ax.posts.length, 0);
+    assert.equal(w.errors.length, 0);
+    assert.equal(q._test.breaker.isOpen("anthropic"), false);
+  } finally { ax.restore(); w.restore(); }
+});
 
-for (const [label, err] of [
-  ["401", httpErr(401, "invalid x-api-key")],
-  ["402", httpErr(402, "payment required")],
-  ["403", httpErr(403, "forbidden")],
-  ["credit balance too low (400)", httpErr(400, "Your credit balance is too low to access the Anthropic API")],
-  ["model 404", httpErr(404, "model: claude-haiku-5-5")],
+// ─── hard errors: loud error + ping + breaker ──────────────────────────────
+
+for (const [label, err, errClass] of [
+  ["401 auth", httpErr(401, "invalid x-api-key"), "auth"],
+  ["402 billing", httpErr(402, "payment required"), "billing"],
+  ["403 permission", httpErr(403, "forbidden"), "permission"],
+  ["credit balance too low (400)", httpErr(400, "Your credit balance is too low to access the Anthropic API"), "billing"],
+  ["model 404", httpErr(404, "model: claude-haiku-5-5"), "model_gone"],
 ]) {
-  test(`fallback: anthropic ${label} → retried ONCE on gemini; caller sees gemini's answer`, async () => {
-    const q2 = await load({ LLM_TASK_PROVIDER: "fb-task=anthropic" });
-    q2._test.breaker.recordSuccess("anthropic");
-    const a2 = fakeAnthropic(() => { throw err; });
-    q2._test.setAnthropicClient(a2);
-    const g2 = stubGemini(() => geminiOk('{"from":"gemini"}'));
+  test(`hard error ${label}: not retried, null to caller, ONE loud error, a /fail ping with a reason, a usage row`, async () => {
+    const q = await load({ LLM_HEALTH_PING_URL: "https://hc.test/SECRET-UUID" });
+    const ax = stubAxios();
+    const c = fakeClaude(() => { throw err; });
+    q._test.setAnthropicClient(c);
+    const w = capture();
+    const task = `hard-${errClass}`;
     try {
-      assert.deepEqual(await q2.callJson("p", { task: "fb-task" }), { from: "gemini" });
-      assert.equal(a2.calls.length, 1, "anthropic tried exactly once (hard errors are not retried)");
-      assert.equal(g2.calls.length, 1, "gemini tried exactly once");
-      const rows = usageRows("fb-task");
-      const mine = rows.slice(-2);
-      assert.deepEqual(mine.map(r => [r.provider, r.ok]), [["anthropic", 0], ["gemini", 1]]);
-      assert.ok(mine[0].error_class && mine[0].error_class !== "unknown");
-    } finally { g2.restore(); }
+      assert.equal(await q.callJson("p", { task }), null);
+      assert.equal(c.calls.length, 1, "hard errors are never retried");
+      assert.equal(w.errors.length, 1);
+      assert.match(w.errors[0], /LLM HARD FAILURE/);
+      assert.match(w.errors[0], new RegExp(errClass));
+      await settle();
+      assert.equal(ax.posts.length, 1);
+      assert.equal(ax.posts[0].url, "https://hc.test/SECRET-UUID/fail");
+      assert.match(ax.posts[0].body, new RegExp(`llm ${errClass}`));
+      const row = usageRows(task).at(-1);
+      assert.deepEqual([row.ok, row.error_class], [0, errClass]);
+    } finally { ax.restore(); w.restore(); }
   });
 }
 
-test("fallback: gemini PERMISSION_DENIED (403) → retried once on anthropic", async () => {
+test("ping token safety: the ping URL never appears in logs or in the ping body; key material is redacted", async () => {
+  const q = await load({ LLM_HEALTH_PING_URL: "https://hc.test/SECRET-UUID" });
+  const ax = stubAxios();
+  q._test.setAnthropicClient(fakeClaude(() => { throw httpErr(401, "invalid x-api-key sk-ant-api03-LEAKY-KEY-1234 see https://hc.test/SECRET-UUID"); }));
+  const w = capture();
+  try {
+    await q.callJson("p", { task: "t-redact" });
+    await settle();
+    assert.ok(!/sk-ant-api03-LEAKY/.test(ax.posts[0].body), "key redacted from the ping body");
+    assert.ok(!/SECRET-UUID/.test(ax.posts[0].body), "ping URL redacted from the ping body");
+    assert.ok(![...w.warns, ...w.errors].some(l => /SECRET-UUID/.test(l)), "ping URL never logged");
+  } finally { ax.restore(); w.restore(); }
+});
+
+test("no LLM_HEALTH_PING_URL → hard errors still log loudly, the ping is a silent no-op", async () => {
   const q = await load();
-  q._test.setAnthropicClient(fakeAnthropic(() => anthropicOk('{"from":"claude"}')));
-  const g = stubGemini(() => { throw httpErr(403, "x", { error: { status: "PERMISSION_DENIED" } }); });
+  const ax = stubAxios();
+  q._test.setAnthropicClient(fakeClaude(() => { throw httpErr(402, "payment required"); }));
+  const w = capture();
   try {
-    assert.deepEqual(await q.callJson("p", { task: "fb-gem-403" }), { from: "claude" });
-    assert.equal(g.calls.length, 1);
-  } finally { g.restore(); }
+    assert.equal(await q.callJson("p", { task: "t-noping" }), null);
+    await settle();
+    assert.equal(w.errors.length, 1);
+    assert.equal(ax.posts.length + ax.gets.length, 0);
+  } finally { ax.restore(); w.restore(); }
 });
 
-test("fallback: gemini model 404 (dead pin) → anthropic; caller-supplied `model` is not forwarded across providers", async () => {
-  const q = await load();
-  const a = fakeAnthropic(() => anthropicOk('{"ok":1}'));
-  q._test.setAnthropicClient(a);
-  const g = stubGemini(() => { throw httpErr(404, "models/x is not found"); });
-  const w = captureWarnings();
+test("breaker: 3 consecutive hard failures open it; calls then return null WITHOUT touching the API or the daily budget; one OPEN warning", async () => {
+  const q = await load({ LLM_HEALTH_PING_URL: "https://hc.test/abc" });
+  const ax = stubAxios();
+  const c = fakeClaude(() => { throw httpErr(402, "Your credit balance is too low"); });
+  q._test.setAnthropicClient(c);
+  const w = capture();
   try {
-    assert.deepEqual(await q.callJson("p", { task: "fb-gem-404", model: "gemini-special" }), { ok: 1 });
-    assert.match(g.calls[0].url, /gemini-special/);
-    assert.equal(a.calls[0].params.model, "claude-haiku-5-5");
-  } finally { g.restore(); w.restore(); }
-});
-
-test("fallback: transient errors retry on the SAME provider and never fall back", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic" });
-  const a = fakeAnthropic((i) => { if (i < 3) throw httpErr(529, "overloaded"); return anthropicOk('{"ok":1}'); });
-  q._test.setAnthropicClient(a);
-  const g = stubGemini(() => { throw new Error("gemini must not be called"); });
-  try {
-    assert.deepEqual(await q.callJson("p", { task: "t-transient" }), { ok: 1 });
-    assert.equal(a.calls.length, 3);
-    assert.equal(g.calls.length, 0);
-  } finally { g.restore(); }
-});
-
-test("fallback: exhausted transient retries → null, and still NO fallback (retries never stack with a fallback)", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic" });
-  const a = fakeAnthropic(() => { throw httpErr(503, "unavailable"); });
-  q._test.setAnthropicClient(a);
-  const g = stubGemini(() => { throw new Error("gemini must not be called"); });
-  const w = captureWarnings();
-  try {
-    assert.equal(await q.callJson("p", { task: "t-exhaust" }), null);
-    assert.equal(a.calls.length, 4); // 1 + 3 retry delays
-    assert.equal(g.calls.length, 0);
-    assert.equal(usageRows("t-exhaust").at(-1).error_class, "transient");
-  } finally { g.restore(); w.restore(); }
-});
-
-test("fallback: providers outside the anthropic/gemini pair keep today's behaviour (null, no fallback)", async () => {
-  const q = await load({ LLM_PROVIDER: "groq", GROQ_API_KEY: "q" });
-  q._test.setAnthropicClient(fakeAnthropic(() => { throw new Error("anthropic must not be called"); }));
-  const urls = [];
-  const orig = axios.post;
-  axios.post = async (url) => { urls.push(url); throw httpErr(401, "bad key"); };
-  const w = captureWarnings();
-  try {
-    assert.equal(await q.callJson("p", { task: "t-groq" }), null);
-    assert.equal(urls.length, 1);
-    assert.match(urls[0], /groq\.com/);
-  } finally { axios.post = orig; w.restore(); }
-});
-
-test("fallback: both providers hard-failing returns null after exactly one attempt each", async () => {
-  const q = await load();
-  const a = fakeAnthropic(() => { throw httpErr(401, "bad"); });
-  q._test.setAnthropicClient(a);
-  const g = stubGemini(() => { throw httpErr(403, "bad"); });
-  const w = captureWarnings();
-  try {
-    assert.equal(await q.callJson("p", { task: "t-both-dead" }), null);
-    assert.equal(g.calls.length, 1);
-    assert.equal(a.calls.length, 1);
-  } finally { g.restore(); w.restore(); }
-});
-
-test("fallback: LLM_FALLBACK_DISABLED=1 turns it off", async () => {
-  const q = await load({ LLM_FALLBACK_DISABLED: "1" });
-  const a = fakeAnthropic(() => anthropicOk("{}"));
-  q._test.setAnthropicClient(a);
-  const g = stubGemini(() => { throw httpErr(403, "bad"); });
-  const w = captureWarnings();
-  try {
-    assert.equal(await q.callJson("p", { task: "t-nofb" }), null);
-    assert.equal(a.calls.length, 0);
-  } finally { g.restore(); w.restore(); }
-});
-
-test("fallback: the daily budget is consumed ONCE per callJson, even when it falls back", async () => {
-  const q = await load({ LLM_TASK_PROVIDER: "budget-task=anthropic" });
-  q._test.setAnthropicClient(fakeAnthropic(() => { throw httpErr(401, "bad"); }));
-  const g = stubGemini(() => geminiOk('{"ok":1}'));
-  const w = captureWarnings();
-  try {
-    const before = budgetCalls("budget-task");
-    await q.callJson("p", { task: "budget-task" });
-    assert.equal(budgetCalls("budget-task") - before, 1);
-  } finally { g.restore(); w.restore(); }
-});
-
-// ─── circuit breaker (wired into callJson) ─────────────────────────────────
-
-test("breaker: 3 consecutive hard failures open it; the 4th call skips the dead provider; exactly one OPEN warning", async () => {
-  const q = await load({ LLM_TASK_PROVIDER: "brk-task=anthropic" });
-  const a = fakeAnthropic(() => { throw httpErr(402, "Your credit balance is too low"); });
-  q._test.setAnthropicClient(a);
-  const g = stubGemini(() => geminiOk('{"from":"gemini"}'));
-  const w = captureWarnings();
-  try {
-    for (let i = 0; i < 3; i++) assert.deepEqual(await q.callJson("p", { task: "brk-task" }), { from: "gemini" });
-    assert.equal(a.calls.length, 3);
+    for (let i = 0; i < 3; i++) assert.equal(await q.callJson("p", { task: "brk" }), null);
     assert.equal(q._test.breaker.isOpen("anthropic"), true);
-
-    assert.deepEqual(await q.callJson("p", { task: "brk-task" }), { from: "gemini" });
-    assert.equal(a.calls.length, 3, "open breaker: anthropic not hit again");
-    assert.equal(g.calls.length, 4);
-
-    const opens = w.lines.filter(l => /breaker OPEN for anthropic/.test(l));
+    const budgetBefore = budgetCalls("brk");
+    assert.equal(await q.callJson("p", { task: "brk" }), null);
+    assert.equal(c.calls.length, 3, "open breaker: the API is not hit again");
+    assert.equal(budgetCalls("brk"), budgetBefore, "and no budget is spent");
+    const opens = w.warns.filter(l => /breaker OPEN for anthropic/.test(l));
     assert.equal(opens.length, 1);
-    assert.match(opens[0], /credit balance is too low|billing/);
-  } finally { g.restore(); w.restore(); }
+    assert.match(opens[0], /billing|credit balance/);
+    assert.equal(q.getQueueStatus().breaker.anthropic.open, true);
+  } finally { ax.restore(); w.restore(); }
 });
 
-test("breaker: an open breaker does not strand a task when there is no fallback configured (it still tries)", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic", GEMINI_API_KEY: null, LLM_BREAKER_THRESHOLD: "1" });
-  const a = fakeAnthropic((i) => { if (i === 1) throw httpErr(401, "bad"); return anthropicOk('{"ok":1}'); });
-  q._test.setAnthropicClient(a);
-  const w = captureWarnings();
+test("breaker: after the cooldown ONE probe goes through; success closes it, logs CLOSED, sends the recovery ping", async () => {
+  const q = await load({ LLM_HEALTH_PING_URL: "https://hc.test/abc", LLM_BREAKER_THRESHOLD: "1", LLM_BREAKER_COOLDOWN_MS: "40" });
+  const ax = stubAxios();
+  let healthy = false;
+  const c = fakeClaude(() => { if (!healthy) throw httpErr(401, "bad key"); return claudeOk('{"ok":1}'); });
+  q._test.setAnthropicClient(c);
+  const w = capture();
   try {
-    assert.equal(await q.callJson("p", { task: "brk-solo" }), null);
+    assert.equal(await q.callJson("p", { task: "probe" }), null);
     assert.equal(q._test.breaker.isOpen("anthropic"), true);
-    assert.deepEqual(await q.callJson("p", { task: "brk-solo" }), { ok: 1 });
-    assert.equal(a.calls.length, 2);
+    assert.equal(await q.callJson("p", { task: "probe" }), null);       // still open
+    assert.equal(c.calls.length, 1);
+    await new Promise(r => setTimeout(r, 60));                           // cooldown elapses
+    healthy = true;
+    assert.deepEqual(await q.callJson("p", { task: "probe" }), { ok: 1 }); // the probe
+    assert.equal(q._test.breaker.isOpen("anthropic"), false);
+    assert.equal(w.warns.filter(l => /breaker CLOSED for anthropic/.test(l)).length, 1);
+    await settle();
+    assert.equal(ax.posts[0].url, "https://hc.test/abc/fail");
+    assert.equal(ax.gets.at(-1).url, "https://hc.test/abc", "success ping clears the Healthchecks fail state");
+    assert.equal(q.getQueueStatus().unhealthy, false);
+  } finally { ax.restore(); w.restore(); }
+});
+
+test("breaker: a failed probe re-opens it for another cooldown", async () => {
+  const q = await load({ LLM_BREAKER_THRESHOLD: "1", LLM_BREAKER_COOLDOWN_MS: "40" });
+  const c = fakeClaude(() => { throw httpErr(401, "bad key"); });
+  q._test.setAnthropicClient(c);
+  const w = capture();
+  try {
+    await q.callJson("p", { task: "reopen" });
+    await new Promise(r => setTimeout(r, 60));
+    assert.equal(await q.callJson("p", { task: "reopen" }), null);       // the probe, fails
+    assert.equal(c.calls.length, 2);
+    assert.equal(q._test.breaker.isOpen("anthropic"), true);
+    assert.equal(w.warns.filter(l => /RE-OPENED/.test(l)).length, 1);
   } finally { w.restore(); }
+});
+
+test("the daily budget is consumed ONCE per callJson, including transient retries", async () => {
+  const q = await load();
+  q._test.setAnthropicClient(fakeClaude((i) => { if (i < 3) throw httpErr(503, "x"); return claudeOk("{}"); }));
+  const before = budgetCalls("budget-once");
+  await q.callJson("p", { task: "budget-once" });
+  assert.equal(budgetCalls("budget-once") - before, 1);
 });
 
 // ─── usage logging ─────────────────────────────────────────────────────────
 
-test("usage: one llm_usage row per attempt with tokens, model and estimated cost", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic" });
-  q._test.setAnthropicClient(fakeAnthropic(() => anthropicOk('{"ok":1}', { input_tokens: 1000, output_tokens: 500 })));
+test("usage: one llm_usage row per call with tokens, model and estimated cost (haiku and sonnet prices)", async () => {
+  const q = await load();
+  q._test.setAnthropicClient(fakeClaude(() => claudeOk('{"ok":1}', { input_tokens: 1000, output_tokens: 500 })));
   const t0 = Date.now();
   await q.callJson("p", { task: "usage-ok" });
-  const [row] = usageRows("usage-ok");
-  assert.equal(row.provider, "anthropic");
-  assert.equal(row.model, "claude-haiku-5-5");
-  assert.equal(row.input_tokens, 1000);
-  assert.equal(row.output_tokens, 500);
-  assert.ok(Math.abs(row.est_cost_usd - (0.001 * 0.10 + 0.0005 * 0.50)) < 1e-9, `cost ${row.est_cost_usd}`);
-  assert.equal(row.ok, 1);
-  assert.equal(row.error_class, null);
-  assert.ok(row.ts >= t0 && row.ts <= Date.now());
-});
-
-test("usage: Gemini thinking tokens are counted as output; failures are logged with an error_class", async () => {
-  const q = await load({ GEMINI_GENERATION_MODEL: "gemini-3.1-flash-lite", ANTHROPIC_API_KEY: null });
-  const g = stubGemini((i) => i === 1
-    ? geminiOk('{"ok":1}', { promptTokenCount: 2000, candidatesTokenCount: 100, thoughtsTokenCount: 400 })
-    : (() => { throw httpErr(400, "bad request"); })());
-  const w = captureWarnings();
-  try {
-    await q.callJson("p", { task: "usage-gem" });
-    assert.equal(await q.callJson("p", { task: "usage-gem" }), null);
-    const [ok, bad] = usageRows("usage-gem");
-    assert.equal(ok.output_tokens, 500);
-    assert.ok(Math.abs(ok.est_cost_usd - (0.002 * 0.25 + 0.0005 * 1.5)) < 1e-9);
-    assert.equal(bad.ok, 0);
-    assert.equal(bad.error_class, "http_400");
-    assert.equal(bad.est_cost_usd, null);
-  } finally { g.restore(); w.restore(); }
+  await q.callJson("p", { task: "usage-ok", model: "claude-sonnet-5-5" });
+  const [h, s] = usageRows("usage-ok");
+  assert.deepEqual([h.provider, h.model, h.input_tokens, h.output_tokens, h.ok, h.error_class], ["anthropic", "claude-haiku-5-5", 1000, 500, 1, null]);
+  assert.ok(Math.abs(h.est_cost_usd - (0.001 * 0.10 + 0.0005 * 0.50)) < 1e-9);
+  assert.equal(s.model, "claude-sonnet-5-5");
+  assert.ok(Math.abs(s.est_cost_usd - (0.001 * 2 + 0.0005 * 10)) < 1e-9);
+  assert.ok(h.ts >= t0 && h.ts <= Date.now());
 });
 
 test("usage: a model missing from the price table records cost NULL and warns once per model", async () => {
-  const q = await load({ LLM_PROVIDER: "anthropic", ANTHROPIC_MODEL: "claude-unpriced-1" });
-  q._test.setAnthropicClient(fakeAnthropic(() => anthropicOk("{}")));
-  const w = captureWarnings();
+  const q = await load({ ANTHROPIC_MODEL: "claude-unpriced-1" });
+  q._test.setAnthropicClient(fakeClaude(() => claudeOk("{}")));
+  const w = capture();
   try {
     await q.callJson("p", { task: "usage-unpriced" });
     await q.callJson("p", { task: "usage-unpriced" });
     const rows = usageRows("usage-unpriced");
-    assert.equal(rows.length, 2);
     assert.ok(rows.every(r => r.est_cost_usd === null && r.input_tokens === 1000));
-    assert.equal(w.lines.filter(l => /no entry for anthropic:claude-unpriced-1/.test(l)).length, 1);
+    assert.equal(w.warns.filter(l => /no entry for anthropic:claude-unpriced-1/.test(l)).length, 1);
   } finally { w.restore(); }
 });
 
 test("usage: summary groups by task/provider/model for the metrics endpoint", async () => {
   const { getLlmUsageSummary } = await import("./llmUsage.js");
   const s = getLlmUsageSummary(getDb());
-  assert.ok(s.by_task_provider.length > 0);
-  const row = s.by_task_provider.find(r => r.task === "usage-ok");
+  const row = s.by_task_provider.find(r => r.task === "usage-ok" && r.model === "claude-haiku-5-5");
   assert.equal(row.calls, 1);
-  assert.equal(row.provider, "anthropic");
-  assert.ok(s.total.calls >= row.calls);
-  assert.ok(Array.isArray(s.last_7_days) && Array.isArray(s.errors));
+  assert.ok(s.total.calls >= 2 && Array.isArray(s.last_7_days) && Array.isArray(s.errors));
 });
 
-// ─── guard rails that must NOT change ──────────────────────────────────────
+// ─── embeddings: Ollama default, no Gemini ─────────────────────────────────
 
-test("LLM_DISABLED still short-circuits to null; EMBED_PROVIDER routing untouched", async () => {
-  const q = await load({ LLM_DISABLED: "1" });
-  assert.equal(await q.callJson("p", { task: "x" }), null);
-  // An explicit EMBED_PROVIDER is honoured verbatim; a derived one never lands on a provider with no embed model.
-  const q2 = await load({ LLM_PROVIDER: "anthropic", EMBED_PROVIDER: "cloudflare" });
-  assert.equal(q2.getQueueStatus().embedProvider, "cloudflare");
-  delete process.env.EMBED_PROVIDER;
-  const q3 = await load({ LLM_PROVIDER: "anthropic" });
-  assert.equal(q3.getQueueStatus().embedProvider, "gemini");
-});
-
-test("the Gemini code default is no longer the retired model", async () => {
+test("embeddings: EMBED_PROVIDER defaults to ollama / nomic-embed-text and applies the documented task prefixes", async () => {
   const q = await load();
-  assert.equal(q.getQueueStatus().genModel, "gemini-3.1-flash-lite");
+  assert.equal(q.getQueueStatus().embedProvider, "ollama");
+  assert.equal(q.getQueueStatus().embedModel, "nomic-embed-text");
+  const ax = stubAxios(() => ({ data: { embedding: new Array(768).fill(0.1) } }));
+  try {
+    const d = await q.embed("breaking news", { taskType: "RETRIEVAL_DOCUMENT" });
+    const k = await q.embed("breaking news", { taskType: "RETRIEVAL_QUERY" });
+    assert.equal(d.length, 768);
+    assert.equal(k.length, 768);
+    assert.match(ax.posts[0].url, /\/api\/embeddings$/);
+    assert.equal(ax.posts[0].body.model, "nomic-embed-text");
+    assert.equal(ax.posts[0].body.prompt, "search_document: breaking news");
+    assert.equal(ax.posts[1].body.prompt, "search_query: breaking news");
+  } finally { ax.restore(); }
+});
+
+test("embeddings: OLLAMA_EMBED_PREFIX=0 sends text verbatim; OLLAMA_BASE_URL is honoured", async () => {
+  const q = await load({ OLLAMA_EMBED_PREFIX: "0", OLLAMA_BASE_URL: "http://ollama:11434/" });
+  const ax = stubAxios(() => ({ data: { embedding: new Array(768).fill(0) } }));
+  try {
+    await q.embed("plain");
+    assert.equal(ax.posts[0].url, "http://ollama:11434/api/embeddings");
+    assert.equal(ax.posts[0].body.prompt, "plain");
+  } finally { ax.restore(); }
+});
+
+test("embeddings: a wrong-width vector is refused (the vec0 table is FLOAT[768]); an unreachable Ollama yields null", async () => {
+  const q = await load();
+  let ax = stubAxios(() => ({ data: { embedding: new Array(384).fill(0) } }));
+  const w = capture();
+  try { assert.equal(await q.embed("x"), null); } finally { ax.restore(); }
+  ax = stubAxios(() => { throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" }); });
+  try { assert.equal(await q.embed("x"), null); } finally { ax.restore(); w.restore(); }
+});
+
+test("embeddings: cloudflare stays selectable; an unknown provider (e.g. the removed 'gemini') yields null with a warning", async () => {
+  const q = await load({ EMBED_PROVIDER: "cloudflare", CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "acct" });
+  const ax = stubAxios(() => ({ data: { result: { data: [new Array(768).fill(0.2)] } } }));
+  try {
+    assert.equal((await q.embed("x")).length, 768);
+    assert.match(ax.posts[0].url, /cloudflare\.com.*acct/);
+  } finally { ax.restore(); }
+  const g = await load({ EMBED_PROVIDER: "gemini" });
+  const w = capture();
+  try {
+    assert.equal(await g.embed("x"), null);
+    assert.ok(w.warns.some(l => /Unknown EMBED_PROVIDER "gemini"/.test(l)));
+  } finally { w.restore(); }
+});
+
+test("the module carries no Gemini code or env", async () => {
+  const src = fs.readFileSync(new URL("./llmQueue.js", import.meta.url), "utf8");
+  assert.ok(!/generativelanguage|GEMINI_|buildGeminiGenerationConfig|thinkingBudget|FALLBACK_OF|LLM_TASK_PROVIDER/.test(src));
 });

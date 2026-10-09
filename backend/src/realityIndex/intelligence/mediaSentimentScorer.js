@@ -3,7 +3,7 @@
  * an event's Reality Index.
  *
  * Pulls articles linked to the event, joins to article_analysis_cache.tone
- * (the existing Gemini-classified tone), maps categorical tone → numeric
+ * (the existing LLM-classified tone), maps categorical tone → numeric
  * polarity, and weights by recency + credibility.
  *
  * Output:

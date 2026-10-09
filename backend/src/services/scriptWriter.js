@@ -27,25 +27,23 @@
  *
  * Required env:
  *   SCRIPT_LLM_ENABLED=1        — master switch (default off)
- *   GEMINI_API_KEY              — (or ANTHROPIC_API_KEY + LLM_TASK_PROVIDER=script-writer=anthropic)
+ *   ANTHROPIC_API_KEY           — Claude, via llmQueue (task "script-writer")
  *
  * Optional env:
- *   GEMINI_GENERATION_MODEL     — model pin, shared with the other direct
- *                                 callers (default gemini-3.1-flash-lite)
+ *   ANTHROPIC_MODEL             — model (default claude-haiku-5-5)
  *   SCRIPT_LLM_MAX_OUTPUT_TOKENS — output cap (default 4096)
  *   SCRIPT_LLM_WPM              — words-per-minute for duration budget (default 150)
  */
 
 import { logger } from "./logger.js";
-import { callJson, isTaskRoutable } from "../realityIndex/llmQueue.js";
+import { callJson, isLlmAvailable } from "../realityIndex/llmQueue.js";
 
-// Task "script-writer". The model pin, thinkingBudget:0 with graceful degrade,
-// dead-pin (404) handling, the daily call cap and usage logging all live in
-// llmQueue now; the task is pinned to Gemini unless LLM_TASK_PROVIDER routes it
-// elsewhere. MODEL below is the Gemini pin (same env var llmQueue reads) and is
-// only the default for log lines — the model that actually answered is on the
-// llmQueue result and wins in meta.model.
-const MODEL = process.env.GEMINI_GENERATION_MODEL || "gemini-3.1-flash-lite";
+// Task "script-writer". Model selection, the transient-retry loop, hard-error
+// handling (loud error + health ping + circuit breaker), the daily call cap and
+// usage logging all live in llmQueue. MODEL is only the default for log lines —
+// the model that actually answered is on the llmQueue result and wins in
+// meta.model.
+const MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-5-5";
 
 // 4096, NOT the original 1024. Two reasons, and the second is the load-bearing
 // one. (1) A full script is not a caption: the `dossier` format targets 3-6
@@ -59,16 +57,8 @@ const MAX_OUTPUT_TOKENS = Number.parseInt(process.env.SCRIPT_LLM_MAX_OUTPUT_TOKE
 const WPM = Number.parseInt(process.env.SCRIPT_LLM_WPM || "150", 10);
 const TIMEOUT_MS = 25000;
 
-// Gemini 2.5 Flash rates, matching the figures pinned in analysisService.
-// Left unchanged with the pin move to gemini-3.1-flash-lite deliberately:
-// flash-lite is the cheaper tier, so meta.costUsd is now an UPPER BOUND rather
-// than an exact figure. Guessing at flash-lite's published rates to make the
-// number look precise would be worse than a documented over-estimate.
-const RATE_IN_PER_M = 0.30;
-const RATE_OUT_PER_M = 2.50;
-
 export function isScriptWriterEnabled() {
-  return process.env.SCRIPT_LLM_ENABLED === "1" && isTaskRoutable("script-writer");
+  return process.env.SCRIPT_LLM_ENABLED === "1" && isLlmAvailable();
 }
 
 // ─── Prompt ─────────────────────────────────────────────────────────────────
@@ -157,7 +147,7 @@ function logRejection(articleId, reason, len, finishReason, usage, model = MODEL
 }
 
 async function callModel(prompt, articleId) {
-  if (!isTaskRoutable("script-writer")) return null;
+  if (!isLlmAvailable()) return null;
 
   // temperature 0.4: low but not zero — scripts need some variation in phrasing
   // or every video opens the same way, which reads as automated.
@@ -193,8 +183,8 @@ async function callModel(prompt, articleId) {
   // truncated script that happens to parse is the worst outcome available:
   // a video narrated to the point the model ran out of budget, mid-arc,
   // with nothing downstream able to tell it apart from a finished one.
-  // llmQueue maps Anthropic stop_reason "max_tokens" to the same MAX_TOKENS
-  // flag, so this guard covers every provider.
+  // llmQueue maps Anthropic stop_reason "max_tokens" to the MAX_TOKENS finish
+  // reason these log lines have always used.
   if (res.truncated) {
     logRejection(articleId, "truncated_max_tokens", res.textLength ?? 0, finishReason, usage, res.model);
     return null;
@@ -209,12 +199,8 @@ async function callModel(prompt, articleId) {
     return null;
   }
 
-  // Gemini keeps the original (documented upper-bound) flash rates so a
-  // Gemini-routed script's meta.costUsd is unchanged; other providers use the
-  // llmPricing.js estimate.
-  const cost = res.provider === "gemini"
-    ? ((usage.promptTokenCount || 0) / 1e6) * RATE_IN_PER_M + ((usage.candidatesTokenCount || 0) / 1e6) * RATE_OUT_PER_M
-    : (res.estCostUsd ?? 0);
+  // Priced from llmPricing.js; 0 (not a guess) when the model is not in the table.
+  const cost = res.estCostUsd ?? 0;
 
   return { parsed, usage, cost, finishReason, model: res.model, provider: res.provider };
 }

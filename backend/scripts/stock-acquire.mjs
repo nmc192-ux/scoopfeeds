@@ -21,7 +21,7 @@
  * MAC ONLY (§2e). Downloaded media is foreign content that ffmpeg parses. There
  * is deliberately no VPS path, no cron and no container service for any of this,
  * and the API keys are Mac-local (§2d) — they must never reach the server, where
- * a leak would sit next to the ElevenLabs, Gemini, Meta and YouTube credentials.
+ * a leak would sit next to the ElevenLabs, Anthropic, Meta and YouTube credentials.
  *
  * USAGE
  *   node scripts/stock-acquire.mjs --classes ports,ships --per-class 12 --dry-run

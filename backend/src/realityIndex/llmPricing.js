@@ -3,7 +3,7 @@
  *
  * USD per 1M tokens. A (provider, model) NOT in this table records cost as
  * null and warns once per model per process: a guessed price is worse than a
- * visible gap. Verified against the providers' pricing pages 2026-10-09.
+ * visible gap. Verified against Anthropic's pricing page 2026-10-09.
  *
  * Anthropic bills a higher rate when the prompt exceeds `longThreshold`
  * tokens (applies to the whole request). Batch (-50%) and cache-read rates
@@ -17,10 +17,10 @@ export const LLM_PRICES = {
       longThreshold: 100_000, longIn: 0.50, longOut: 2.50,
       cacheRead: 0.01, // reference only
     },
-  },
-  gemini: {
-    "gemini-3.1-flash-lite": { in: 0.25, out: 1.50 },
-    "gemini-3.5-flash":      { in: 1.50, out: 9.00 },
+    "claude-sonnet-5-5": {
+      in: 2.00, out: 10.00,
+      cacheRead: 0.20, // reference only
+    },
   },
 };
 
