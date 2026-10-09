@@ -63,7 +63,7 @@ const LEGACY_MODEL = "gemini-flash-latest";
 const modelFlagIdx = process.argv.indexOf("--model");
 const PINNED_MODEL = modelFlagIdx > -1
   ? process.argv[modelFlagIdx + 1]
-  : (process.env.GEMINI_GENERATION_MODEL || "gemini-2.5-flash");
+  : (process.env.GEMINI_GENERATION_MODEL || "gemini-3.1-flash-lite");
 
 const DB_PATH = process.env.SCOOP_PERSISTENT_DATA_DIR
   ? path.join(process.env.SCOOP_PERSISTENT_DATA_DIR, "news.db")

@@ -135,7 +135,7 @@ export async function judgeItems(items, callJson) {
   };
   let res;
   try {
-    res = await callJson(JUDGE_PROMPT(needs));
+    res = await callJson(JUDGE_PROMPT(needs), { task: "radio-judge" });
   } catch (err) {
     return failAll(`judge error: ${String(err?.message || err).slice(0, 120)}`);
   }

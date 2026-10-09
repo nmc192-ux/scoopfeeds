@@ -16,7 +16,6 @@
  * Sequential calls with 4s sleep between them keep us safely below the cap.
  */
 
-import axios from "axios";
 import crypto from "crypto";
 import {
   getDb,
@@ -32,21 +31,11 @@ import { logger } from "./logger.js";
 import { clusterWindow } from "../realityIndex/clustering/semanticClusterer.js";
 import { detectTemplates } from "../realityIndex/clustering/templateFilter.js";
 import { runEventPromoter } from "../realityIndex/intelligence/eventPromoter.js";
-import {
-  buildGeminiGenerationConfig,
-  isGeminiThinkingRejection,
-  markGeminiThinkingRejected,
-  isGeminiModelGone,
-  markGeminiModelGone,
-  consumeLlmBudget,
-} from "../realityIndex/llmQueue.js";
+import { callJson, isTaskRoutable } from "../realityIndex/llmQueue.js";
 
-// PINNED (2026-07-15 cost incident): "gemini-flash-latest" silently became a
-// thinking model whose reasoning tokens bill as output. Same pin + rates as
-// llmQueue: gemini-2.5-flash, $0.30/1M input, $2.50/1M output.
-const GEMINI_MODEL    = process.env.GEMINI_GENERATION_MODEL || "gemini-2.5-flash";
-const GEMINI_ENDPOINT = (key) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+// Model pin, thinking-budget degrade, dead-model handling, the daily call cap
+// and usage logging all live in llmQueue now. Tasks here are pinned to Gemini
+// unless LLM_TASK_PROVIDER routes them elsewhere.
 // Briefs/perspectives/explainers had NO output cap — with thinking billing
 // as output, per-call spend was unbounded.
 const GEMINI_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.ANALYSIS_MAX_OUTPUT_TOKENS || "1024", 10);
@@ -56,57 +45,22 @@ const GEMINI_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.ANALYSIS_MAX_OUTPUT
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // Free-tier Gemini intermittently returns 503 UNAVAILABLE (overload) and
-// 429 RESOURCE_EXHAUSTED (rate limit). Both are transient — back off and
-// retry. Permanent errors (4xx other than 429) are returned as null on
-// the first failure.
-async function callGemini(prompt, task = "analysis") {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return null;
-  if (!consumeLlmBudget(task)) return null; // global daily rail (gate a)
-  const RETRY_DELAYS_MS = [4000, 9000, 18000]; // up to 3 retries
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    try {
-      const { data } = await axios.post(
-        GEMINI_ENDPOINT(key),
-        {
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: buildGeminiGenerationConfig({
-            temperature: 0.2,
-            responseMimeType: "application/json",
-            maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
-          }),
-        },
-        { timeout: 25000 }
-      );
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) {
-        const fr = data?.candidates?.[0]?.finishReason;
-        const thought = data?.usageMetadata?.thoughtsTokenCount;
-        logger.warn(`📊 Gemini empty text (finishReason=${fr ?? "?"}, thoughtsTokenCount=${thought ?? "?"})`);
-        return null;
-      }
-      return JSON.parse(text);
-    } catch (err) {
-      if (isGeminiThinkingRejection(err)) {
-        markGeminiThinkingRejected(logger);
-        continue;
-      }
-      if (isGeminiModelGone(err)) {
-        markGeminiModelGone(GEMINI_MODEL, logger);
-        return null; // pin is dead — deterministic fallbacks take over
-      }
-      const status = err.response?.status;
-      const transient = status === 503 || status === 429 || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
-      if (transient && attempt < RETRY_DELAYS_MS.length) {
-        logger.warn(`📊 Gemini ${status || err.code} — retrying in ${RETRY_DELAYS_MS[attempt]}ms (attempt ${attempt + 1})`);
-        await sleep(RETRY_DELAYS_MS[attempt]);
-        continue;
-      }
-      logger.warn("📊 Gemini call failed", { status, error: err.message });
-      return null;
-    }
+// 429 RESOURCE_EXHAUSTED (rate limit); llmQueue backs off and retries those
+// (up to 3 retries). Permanent errors come back as null on the first failure.
+async function callAnalysisLlm(prompt, task = "analysis") {
+  if (!isTaskRoutable(task)) return null;
+  try {
+    return await callJson(prompt, {
+      task,
+      temperature: 0.2,
+      maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+      timeoutMs: 25000,
+      strictJson: true,
+    });
+  } catch (err) {
+    logger.warn("📊 LLM call failed", { error: err.message });
+    return null;
   }
-  return null;
 }
 
 // ─── Heuristic story clustering ───────────────────────────────────────────
@@ -344,7 +298,7 @@ Article:
 ${text}`;
 }
 
-// ─── Deterministic fallback (no GEMINI_API_KEY) ───────────────────────────
+// ─── Deterministic fallback (no LLM provider configured) ───────────────────────────
 
 function fallbackBrief(cluster) {
   return {
@@ -363,10 +317,10 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
   const now   = Date.now();
   const TTL_CLUSTER   = 24 * 60 * 60 * 1000; // 24h
   const TTL_EXPLAINED = 12 * 60 * 60 * 1000; // 12h
-  const hasGemini = Boolean(process.env.GEMINI_API_KEY);
+  const hasGemini = isTaskRoutable("analysis-brief");
 
   if (!hasGemini) {
-    logger.info("📊 Analysis: GEMINI_API_KEY not set — clusters saved with deterministic briefs only");
+    logger.info("📊 Analysis: no LLM provider configured for analysis — clusters saved with deterministic briefs only");
   }
 
   logger.info("📊 Analysis refresh starting");
@@ -415,7 +369,7 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
 
       if (!reused && hasGemini) {
         briefsCalled++;
-        const result = await callGemini(buildBriefingPrompt(cluster), "analysis-brief");
+        const result = await callAnalysisLlm(buildBriefingPrompt(cluster), "analysis-brief");
         if (result?.brief) {
           briefData = {
             summary: result.summary || briefData.summary,
@@ -431,7 +385,7 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
         }
         await sleep(4000); // rate limit: 4s between calls
         if (perspCount < 3) { // perspectives only for the top-3 briefed
-          const perspResult = await callGemini(buildPerspectivesPrompt(cluster), "analysis-persp");
+          const perspResult = await callAnalysisLlm(buildPerspectivesPrompt(cluster), "analysis-persp");
           if (Array.isArray(perspResult)) perspectives = perspResult;
           perspCount++;
           await sleep(4000);
@@ -479,7 +433,7 @@ export async function refreshAnalysis({ windowStart, windowEnd } = {}) {
 
     if (hasGemini) {
       const topicName = category.charAt(0).toUpperCase() + category.slice(1);
-      const result = await callGemini(buildExplainedPrompt(topicName, catArticles), "analysis-explained");
+      const result = await callAnalysisLlm(buildExplainedPrompt(topicName, catArticles), "analysis-explained");
       await sleep(4000);
 
       if (!result) continue;
@@ -578,13 +532,13 @@ export async function getOrCreateDeepDive(articleId, { allowGenerate = false } =
     return { article_id: articleId, takeaways: [], tone: "neutral", tone_reason: "Sign in for AI analysis", related_ids, pending: true };
   }
 
-  if (!process.env.GEMINI_API_KEY) {
+  if (!isTaskRoutable("deep-dive")) {
     const result = { article_id: articleId, takeaways: [], tone: "neutral", tone_reason: "AI analysis not configured", related_ids };
     upsertArticleAnalysisCache(result);
     return result;
   }
 
-  const parsed = await callGemini(buildDeepDivePrompt(article), "deep-dive");
+  const parsed = await callAnalysisLlm(buildDeepDivePrompt(article), "deep-dive");
   const result = {
     article_id:  articleId,
     takeaways:   parsed?.takeaways || [],

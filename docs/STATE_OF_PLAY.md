@@ -317,5 +317,6 @@ by splitting the signature path onto its own `EVENT_SIGNATURE_MAX_CATSPAN`.
 - **`GEMINI_GENERATION_MODEL` has two different code defaults** across six call sites —
 `gemini-2.5-flash` in `llmQueue.js:183`/`analysisService.js:47`/`liveEvents.js:42`,
 `gemini-3.1-flash-lite` in `videoSpecWriter.js:82`/`igSummaryService.js:35`/`scriptWriter.js:62`.
+  **Resolved on `feat/anthropic-provider`:** `llmQueue` now defaults to `gemini-3.1-flash-lite` and `liveEvents`/`analysisService`/`igSummaryService`/`scriptWriter` call through `llmQueue` (tasks `live-events`, `analysis-*`, `deep-dive`, `ig-summary`, `script-writer`), so the only remaining direct Gemini callers are `videoSpecWriter.js` and `shots/vision.js`.
 Prod's single line masks it; without it the platform runs two generation models at once.
 Same bug class as the catspan hazard.

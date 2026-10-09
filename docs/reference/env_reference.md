@@ -110,10 +110,18 @@ conclude no floor is the honest answer.
 
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
-| `GEMINI_GENERATION_MODEL` | `gemini-2.5-flash` | **`gemini-3.1-flash-lite`** | yes | Pinned generation model. A dead pin returns 404 and falls back deterministically — see `--list-models`. |
+| `GEMINI_GENERATION_MODEL` | `gemini-3.1-flash-lite` | **`gemini-3.1-flash-lite`** | yes | Pinned generation model, one default for `llmQueue` and the four callers that now go through it. A dead pin returns 404 (a hard error: falls back to Claude when `ANTHROPIC_API_KEY` is set, else deterministically) — see `--list-models`. |
 | `GEMINI_API_KEY` | — | set | yes | Credential. |
 | `LLM_DAILY_CALL_CAP` | `2000` | default | yes | Hard daily ceiling on LLM calls. Part of the cost rails after the gate-(a) incident. |
 | `LLM_DISABLED` / `GEMINI_DISABLED` | unset | default | yes | Kill switches; deterministic fallbacks take over. |
+| `ANTHROPIC_API_KEY` | — | **unset (dark)** | yes | Enables the `anthropic` provider in `llmQueue` (Messages API via `@anthropic-ai/sdk`). With it unset nothing changes. Once set it also arms the Gemini→Claude fallback for every Gemini-routed task (kill switch: `LLM_FALLBACK_DISABLED=1`). |
+| `ANTHROPIC_MODEL` | `claude-haiku-5-5` | default | yes | Model for the `anthropic` provider. A model absent from `llmPricing.js` still works; its `llm_usage.est_cost_usd` is NULL and it warns once. |
+| `ANTHROPIC_RPM` | `50` | default | yes | Per-provider requests/minute window for `anthropic`. |
+| `LLM_TASK_PROVIDER` | unset | **unset (dark)** | no (read at start) | Per-task routing, `"ig-summary=anthropic,actors=anthropic"`. Listed tasks go to that provider (ignored with one warning if it has no credentials); unlisted tasks keep today's routing. Empty/unset = zero behaviour change. Task names: `actors`, `analyst-brief`, `event-carousel`, `market-match`, `outcome-resolve`, `synth-question`, `radio-gate`, `radio-headline`, `radio-judge`, `longform-*`, plus the migrated `live-events`, `analysis-brief`, `analysis-persp`, `analysis-explained`, `deep-dive`, `ig-summary`, `script-writer`. |
+| `LLM_FALLBACK_DISABLED` | unset | default | no | `1` turns off the anthropic↔gemini hard-error fallback. Fallback exists ONLY between those two providers, fires once per call on a hard error (401/402/403, billing/"credit balance is too low", `PERMISSION_DENIED`, model 404) and never on transient errors (503/429/529/resets retry on the same provider first). |
+| `LLM_BREAKER_THRESHOLD` | `3` | default | no | Consecutive hard failures that open a provider's circuit breaker. |
+| `LLM_BREAKER_COOLDOWN_MS` | `900000` | default | no | How long an open breaker routes around the provider (15 min), then one probe. One warn line on open/re-open/close. Breaker state is per process (web/worker/scheduler each keep their own). |
+| `LLM_RETRY_DELAYS_MS` | `4000,9000,18000` | default | no | Transient-error backoff for every generation provider. Test seam; leave unset in prod. |
 | `ANALYSIS_MAX_OUTPUT_TOKENS` | see code | default | yes | Output cap (cost rail). `thinkingBudget` is pinned to 0 in `llmQueue.js`. |
 | `ENTITY_EXTRACTION_ENABLED` | `false` | **set** | yes | LLM/NER entity extraction feeding the affinity measure. |
 | `ENTITY_EXTRACTION_BATCH` | `100` | **set** | yes | Articles per extraction batch. |

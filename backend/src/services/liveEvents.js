@@ -27,21 +27,12 @@ import {
 import { rankByAuthenticity, scoreFor } from "../config/mediaAuthenticity.js";
 import { fetchEventSocialSignals } from "./socialSignals.js";
 import { logger } from "./logger.js";
-import {
-  buildGeminiGenerationConfig,
-  isGeminiThinkingRejection,
-  markGeminiThinkingRejected,
-  isGeminiModelGone,
-  markGeminiModelGone,
-  consumeLlmBudget,
-} from "../realityIndex/llmQueue.js";
+import { callJson, isTaskRoutable } from "../realityIndex/llmQueue.js";
 
-// PINNED (2026-07-15 cost incident) — same pin + rates as llmQueue:
-// gemini-2.5-flash, $0.30/1M input, $2.50/1M output. This site also had no
-// output cap while thinking billed as output.
-const GEMINI_MODEL = process.env.GEMINI_GENERATION_MODEL || "gemini-2.5-flash";
-const GEMINI_ENDPOINT = (key) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
+// Model pin, thinking-budget degrade, dead-model handling, the daily call cap
+// and usage logging all live in llmQueue now (task "live-events", pinned to
+// Gemini unless LLM_TASK_PROVIDER says otherwise). This site once had no
+// output cap while thinking billed as output (2026-07-15 cost incident).
 const GEMINI_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.LIVE_EVENTS_MAX_OUTPUT_TOKENS || "1536", 10);
 
 // ─── Metric fetchers ───────────────────────────────────────────────────────
@@ -149,73 +140,39 @@ ${items}${socialBlock}`;
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // Free-tier Gemini intermittently returns 503 UNAVAILABLE / 429 RESOURCE_EXHAUSTED
-// for prompts of this size. Retry transient errors with exponential backoff so
-// we don't silently fall back to deterministic briefs every cycle.
+// for prompts of this size; llmQueue retries transient errors with exponential
+// backoff so we don't silently fall back to deterministic briefs every cycle.
 async function synthesizeWithGemini(event, articles, socialPosts = []) {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return null;
+  if (!isTaskRoutable("live-events")) return null;
   if (articles.length === 0 && socialPosts.length === 0) return null;
   const prompt = buildPrompt(event, articles, socialPosts);
-  if (!consumeLlmBudget("live-events")) return null; // global daily rail (gate a)
-  const RETRY_DELAYS_MS = [4000, 9000, 18000];
-
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    try {
-      const { data } = await axios.post(
-        GEMINI_ENDPOINT(key),
-        {
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: buildGeminiGenerationConfig({
-            temperature: 0.2,
-            responseMimeType: "application/json",
-            maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
-          }),
-        },
-        { timeout: 25000 }
-      );
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) {
-        const fr = data?.candidates?.[0]?.finishReason;
-        const thought = data?.usageMetadata?.thoughtsTokenCount;
-        logger.warn(`🛰️  Gemini empty text for event ${event.id} (finishReason=${fr ?? "?"}, thoughtsTokenCount=${thought ?? "?"})`);
-        return null;
-      }
-      const parsed = JSON.parse(text);
-      // Attach source objects using the indices Gemini returned.
-      const brief = (parsed.brief || []).map((p) => ({
-        ts: p.ts,
-        text: p.text,
-        sources: (p.sourceIndices || [])
-          .map((i) => articles[i - 1])
-          .filter(Boolean)
-          .map((a) => ({ name: a.source_name, url: a.url })),
-      }));
-      return {
-        summary: parsed.summary || null,
-        brief,
-        metrics: parsed.metrics || {},
-      };
-    } catch (err) {
-      if (isGeminiThinkingRejection(err)) {
-        markGeminiThinkingRejected(logger);
-        continue;
-      }
-      if (isGeminiModelGone(err)) {
-        markGeminiModelGone(GEMINI_MODEL, logger);
-        return null; // pin is dead — deterministic brief takes over
-      }
-      const status = err.response?.status;
-      const transient = status === 503 || status === 429 || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
-      if (transient && attempt < RETRY_DELAYS_MS.length) {
-        logger.warn(`🛰️  Gemini ${status || err.code} for event ${event.id} — retrying in ${RETRY_DELAYS_MS[attempt]}ms`);
-        await sleep(RETRY_DELAYS_MS[attempt]);
-        continue;
-      }
-      logger.warn("Gemini synthesis failed", { event: event.id, status, error: err.message });
-      return null;
-    }
+  try {
+    const parsed = await callJson(prompt, {
+      task: "live-events",
+      temperature: 0.2,
+      maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+      timeoutMs: 25000,
+      strictJson: true,
+    });
+    if (!parsed) return null;
+    // Attach source objects using the indices Gemini returned.
+    const brief = (parsed.brief || []).map((p) => ({
+      ts: p.ts,
+      text: p.text,
+      sources: (p.sourceIndices || [])
+        .map((i) => articles[i - 1])
+        .filter(Boolean)
+        .map((a) => ({ name: a.source_name, url: a.url })),
+    }));
+    return {
+      summary: parsed.summary || null,
+      brief,
+      metrics: parsed.metrics || {},
+    };
+  } catch (err) {
+    logger.warn("Gemini synthesis failed", { event: event.id, error: err.message });
+    return null;
   }
-  return null;
 }
 
 // Deterministic fallback — no LLM, no hallucination. Just the most recent
@@ -297,7 +254,7 @@ export async function refreshEvent(eventConfig) {
     })),
     socialEnabled: social.enabled,
     socialPosts: social.posts.length,
-    llmUsed: Boolean(process.env.GEMINI_API_KEY),
+    llmUsed: isTaskRoutable("live-events"),
   };
 
   upsertLiveEvent({
