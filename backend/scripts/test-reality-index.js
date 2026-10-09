@@ -7,7 +7,7 @@
  *   3. Polymarket Gamma API is reachable + returns parseable rows
  *   4. upsertMarket + insertSnapshot path works
  *   5. listMarkets returns the just-inserted markets
- *   6. (when the embedding lane is up) embedding lane (Ollama) + sqlite-vec round-trip
+ *   6. (when GEMINI_API_KEY is set) embedding API + sqlite-vec round-trip
  *   7. (when ANTHROPIC_API_KEY + a story_cluster exists) market matcher
  *
  * Run with: `node backend/scripts/test-reality-index.js`

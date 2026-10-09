@@ -32,9 +32,15 @@
  * llmPricing.js). The global daily call cap (llm_daily_calls) is consumed once
  * per callJson.
  *
- * EMBEDDINGS (EMBED_PROVIDER, default ollama / nomic-embed-text, 768-dim):
- *   ollama      — self-hosted (docker-compose `ollama` service)
- *   cloudflare  — `@cf/baai/bge-base-en-v1.5` (768-dim)
+ * EMBEDDINGS (EMBED_PROVIDER, default gemini / gemini-embedding-001, 768-dim).
+ * Gemini is used for embeddings ONLY — there is no Gemini generation path.
+ *   gemini      — Gemini Embedding API, 768-dim via outputDimensionality
+ *   cloudflare  — `@cf/baai/bge-base-en-v1.5` (768-dim)          [dormant]
+ *   ollama      — nomic-embed-text, self-hosted (768-dim)         [dormant]
+ * Embed calls are logged to llm_usage (task "embed"; the embedContent API returns
+ * no token usage, so tokens and cost are NULL) and watched by EMBED_HEALTH_PING_URL
+ * (/fail on a hard billing/auth/permission error; a success ping at most once per
+ * 10 min per process). Ping URLs are bearer tokens and are never logged.
  */
 
 import axios from "axios";
@@ -52,7 +58,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const ANTHROPIC_MODEL   = process.env.ANTHROPIC_MODEL   || "claude-haiku-5-5";
 const ANTHROPIC_RPM     = Number.parseInt(process.env.ANTHROPIC_RPM || "", 10) || 50;
 
-const EMBED_PROVIDER = (process.env.EMBED_PROVIDER || "").toLowerCase() || "ollama";
+const EMBED_PROVIDER = (process.env.EMBED_PROVIDER || "").toLowerCase() || "gemini";
 
 const DISABLED = String(process.env.LLM_DISABLED || "").toLowerCase() === "1";
 const RETRY_DELAYS_MS = (process.env.LLM_RETRY_DELAYS_MS || "")
@@ -69,12 +75,16 @@ const CLOUDFLARE_EMBED_ENDPOINT = CLOUDFLARE_ACCOUNT_ID
   ? `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${CLOUDFLARE_EMBED_MODEL}`
   : "";
 
-// Ollama (embeddings only)
+// Gemini (EMBEDDINGS ONLY). Pinned model; never a floating alias.
+const GEMINI_KEY         = process.env.GEMINI_API_KEY || "";
+const GEMINI_EMBED_MODEL = process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-001";
+
+// Ollama (embeddings only, dormant)
 const OLLAMA_BASE        = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/$/, "");
 const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || "nomic-embed-text";
 
 // Embedding dimensions — must match the vec0 schema in schema.js (FLOAT[768])
-const EMBED_DIMS = Number.parseInt(process.env.LLM_EMBED_DIMS || "768", 10);
+const EMBED_DIMS = Number.parseInt(process.env.LLM_EMBED_DIMS || process.env.GEMINI_EMBED_DIMS || "768", 10);
 
 // ─── Daily generation-call budget (2026-07-15 cost incident) ──────────────
 // A hard global ceiling on generation calls per UTC day, across every task.
@@ -483,6 +493,57 @@ async function rawEmbedCloudflare({ text }) {
   return null;
 }
 
+// ─── Embeddings: Gemini ────────────────────────────────────────────────────
+
+const EMBED = "__embedOutcome";
+const embedOk   = (vec) => ({ [EMBED]: true, vec, errClass: null, hard: false });
+const embedFail = (errClass, extra = {}) => ({ [EMBED]: true, vec: null, errClass, hard: false, ...extra });
+
+/** Hard for embeddings: billing / auth / permission / dead model (Gemini reports a bad key as a 400). */
+function classifyEmbedHardError(err) {
+  const hard = classifyHardError(err);
+  if (hard) return hard;
+  if (/API key not valid|API_KEY_INVALID/i.test(errText(err))) return { errClass: "auth", status: err?.response?.status };
+  return null;
+}
+
+const _GEMINI_EMBED_URL = (model) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${GEMINI_KEY}`;
+
+async function rawEmbedGemini({ text, taskType = "RETRIEVAL_DOCUMENT" }) {
+  if (!GEMINI_KEY) return embedFail("unconfigured");
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const { data } = await axios.post(
+        _GEMINI_EMBED_URL(GEMINI_EMBED_MODEL),
+        {
+          model:   `models/${GEMINI_EMBED_MODEL}`,
+          content: { parts: [{ text }] },
+          taskType,
+          outputDimensionality: EMBED_DIMS,
+        },
+        { timeout: 20_000 }
+      );
+      const vec = data?.embedding?.values;
+      if (!Array.isArray(vec) || !vec.length) return embedFail("empty");
+      return embedOk(vec);
+    } catch (err) {
+      const hard = classifyEmbedHardError(err);
+      if (hard) return embedFail(hard.errClass, { hard: true, status: hard.status, message: errText(err).slice(0, 200) });
+      const status    = err.response?.status;
+      const transient = isTransientError(err);
+      if (transient && attempt < RETRY_DELAYS_MS.length) {
+        logger.warn(`🧮 Gemini embed ${status || err.code} — retry ${attempt + 1}`);
+        await sleep(RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      logger.warn(`🧮 Gemini embed failed: ${status || err.code} ${err.message}`);
+      return embedFail(transient ? "transient" : `http_${status || err.code || "error"}`, { status });
+    }
+  }
+  return embedFail("exhausted");
+}
+
 // ─── Embeddings: Ollama ────────────────────────────────────────────────────
 
 // nomic-embed-text is trained with task prefixes; unprefixed input measurably
@@ -529,9 +590,62 @@ async function rawEmbedOllama({ text, taskType = "RETRIEVAL_DOCUMENT" }) {
 }
 
 const EMBED_HANDLERS = {
-  ollama:     rawEmbedOllama,
-  cloudflare: rawEmbedCloudflare,
+  gemini:     rawEmbedGemini,
+  cloudflare: rawEmbedCloudflare, // dormant
+  ollama:     rawEmbedOllama,     // dormant
 };
+
+// ─── Embedding health + usage ──────────────────────────────────────────────
+// Same pattern as the generation path, minus the breaker: a hard error (billing /
+// auth / permission) logs ONE loud line and pings /fail on EMBED_HEALTH_PING_URL —
+// rate-limited, because embeds run at ingest rate and a dead key would otherwise
+// fire per article. A success ping goes out at most once per interval per process;
+// the first success after a failure pings at once (recovery).
+let embedUnhealthy = false;
+let lastEmbedOkPingAt = 0;
+let lastEmbedFailAt = 0;
+let embedCostWarned = false;
+
+function onEmbedHardFailure(o) {
+  embedUnhealthy = true;
+  const now = Date.now();
+  if (now - lastEmbedFailAt < HEALTH_PING_INTERVAL_MS) return;
+  lastEmbedFailAt = now;
+  logger.error(
+    `🚨 EMBEDDING HARD FAILURE (${o.errClass}${o.status ? ` ${o.status}` : ""}) on ${EMBED_PROVIDER}/${EMBED_MODEL_BY_PROVIDER[EMBED_PROVIDER]} — ` +
+    `new articles are NOT being embedded until this is fixed (billing / API key / model access). ${scrub(o.message).slice(0, 160)}`
+  );
+  pingFail(HEARTBEAT_PING_URLS.embed, scrub(`embed ${o.errClass}${o.status ? ` ${o.status}` : ""} (${EMBED_PROVIDER}): ${o.message || ""}`).slice(0, 400));
+}
+
+function onEmbedSuccess() {
+  const now = Date.now();
+  if (embedUnhealthy) {
+    embedUnhealthy = false;
+    logger.warn("✅ Embeddings recovered — an embed succeeded after a hard failure");
+    lastEmbedOkPingAt = now;
+    pingSuccess(HEARTBEAT_PING_URLS.embed);
+  } else if (now - lastEmbedOkPingAt >= HEALTH_PING_INTERVAL_MS) {
+    lastEmbedOkPingAt = now;
+    pingSuccess(HEARTBEAT_PING_URLS.embed); // never awaited, never throws, URL never logged
+  }
+}
+
+function noteEmbed(o) {
+  if (o.errClass === "unconfigured") return;
+  // embedContent returns no token usage and the price table has no embedding
+  // rate, so tokens and cost are recorded as NULL — not guessed.
+  if (!embedCostWarned) {
+    embedCostWarned = true;
+    logger.warn(`💲 embed usage: ${EMBED_MODEL_BY_PROVIDER[EMBED_PROVIDER]} returns no token usage and has no entry in llmPricing.js — llm_usage rows for task "embed" carry NULL tokens and est_cost_usd (calls and failures are still counted)`);
+  }
+  recordLlmUsage({
+    task: "embed", provider: EMBED_PROVIDER, model: EMBED_MODEL_BY_PROVIDER[EMBED_PROVIDER],
+    inputTokens: null, outputTokens: null, estCostUsd: null, ok: Boolean(o.vec), errorClass: o.errClass,
+  });
+  if (o.vec) onEmbedSuccess();
+  else if (o.hard) onEmbedHardFailure(o);
+}
 
 let embedInflight = 0;
 const EMBED_CONCURRENCY = Number.parseInt(process.env.LLM_EMBED_CONCURRENCY || "4", 10);
@@ -540,13 +654,17 @@ export async function embed(text, opts = {}) {
   if (DISABLED || !text) return null;
   const handler = EMBED_HANDLERS[EMBED_PROVIDER];
   if (!handler) {
-    logger.warn(`🧮 Unknown EMBED_PROVIDER "${EMBED_PROVIDER}" (want ollama | cloudflare)`);
+    logger.warn(`🧮 Unknown EMBED_PROVIDER "${EMBED_PROVIDER}" (want gemini | cloudflare | ollama)`);
     return null;
   }
   while (embedInflight >= EMBED_CONCURRENCY) await sleep(40);
   embedInflight++;
   try {
-    return await handler({ text: text.slice(0, 8000), ...opts });
+    const raw = await handler({ text: text.slice(0, 8000), ...opts });
+    // Gemini returns an outcome; the dormant handlers return a bare vector / null.
+    const o = raw && raw[EMBED] ? raw : (raw ? embedOk(raw) : embedFail("no_result"));
+    noteEmbed(o);
+    return o.vec;
   } finally {
     embedInflight--;
   }
@@ -555,6 +673,7 @@ export async function embed(text, opts = {}) {
 // ─── Status helpers ────────────────────────────────────────────────────────
 
 const EMBED_MODEL_BY_PROVIDER = {
+  gemini:     GEMINI_EMBED_MODEL,
   ollama:     OLLAMA_EMBED_MODEL,
   cloudflare: CLOUDFLARE_EMBED_MODEL,
 };
@@ -576,6 +695,7 @@ export function getQueueStatus() {
     embedModel:      EMBED_MODEL_BY_PROVIDER[EMBED_PROVIDER] || EMBED_PROVIDER,
     breaker:         breaker.snapshot(),
     unhealthy:       llmUnhealthy,
+    embedUnhealthy,
   };
 }
 

@@ -62,6 +62,10 @@ export const HEARTBEAT_PING_URLS = {
   // permission, dead model — and a success ping when a call works again, so
   // the check goes red the moment Claude stops answering and green on recovery.
   llm:          "LLM_HEALTH_PING_URL",
+  // Embedding lane health (llmQueue.embed): /fail on a hard billing/auth/permission
+  // error, a success ping at most once per 10 min per process. Independent of the
+  // generation check: a dead embedding key must not hide behind a healthy Claude.
+  embed:        "EMBED_HEALTH_PING_URL",
 };
 
 // An unset switch is silent BY DESIGN, which makes "not configured" and

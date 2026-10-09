@@ -56,9 +56,10 @@ For each dependency:
 > provider**: every LLM path goes through `llmQueue.js` to the Messages API
 > (`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, default `claude-haiku-5-5`), with hard cost rails
 > (`LLM_DAILY_CALL_CAP`, output caps, the `llm_usage` ledger, actor-attempts ledger) and a
-> hard-error circuit breaker + Healthchecks ping (`LLM_HEALTH_PING_URL`). **Embeddings are
-> self-hosted Ollama** (`nomic-embed-text`, 768-dim; the compose `ollama` service). Google
-> Gemini, Cerebras, Groq, NVIDIA NIM, DeepSeek and Ollama-for-generation were removed.
+> hard-error circuit breaker + Healthchecks ping (`LLM_HEALTH_PING_URL`). **Embeddings stay on
+> Google Gemini** (`gemini-embedding-001`, 768-dim — embeddings only, watched by
+> `EMBED_HEALTH_PING_URL`). Gemini generation, Cerebras, Groq, NVIDIA NIM, DeepSeek and
+> Ollama-for-generation were removed.
 > Every LLM path keeps a deterministic non-LLM fallback. See
 > [`reference/env_reference.md`](reference/env_reference.md).
 
@@ -89,7 +90,7 @@ For each dependency:
 - **Cost:** Free tier — 10k neurons/day
 - **Phase introduced:** Pre-Phase-A
 - **Criticality:** Important (semantic search backbone)
-- **Replacement options:** Ollama (self-hosted, `nomic-embed-text`) — now the default embedding lane
+- **Replacement options:** Ollama (`nomic-embed-text`) — dormant code path; Gemini Embedding API is the active lane
 - **Code references:** [backend/src/realityIndex/llmQueue.js](../backend/src/realityIndex/llmQueue.js); env: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_GEN_MODEL`, `CLOUDFLARE_EMBED_MODEL`
 
 ### NVIDIA NIM (build.nvidia.com)
@@ -108,8 +109,13 @@ For each dependency:
 - **Criticality:** Optional
 - **Code references:** [backend/src/realityIndex/llmQueue.js](../backend/src/realityIndex/llmQueue.js); env: `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_EMBED_MODEL`
 
-### Gemini — *removed 2026-10-09*
-- Generation moved to Claude and embeddings to self-hosted Ollama; no Gemini code or env remains. Decision 32's interim paid-tier embeddings are superseded by `scripts/reembed.mjs` (clear-first cutover).
+### Gemini — *embeddings only*
+- **Purpose:** the Gemini Embedding API (`gemini-embedding-001`, 768-dim) is the active embedding lane. Gemini **generation** was removed 2026-10-09 (Claude took over).
+- **Account owner:** DrJ
+- **Cost:** paid tier (see decisions log Decision 32). Embed calls are logged to `llm_usage` (task `embed`) with NULL tokens/cost — `embedContent` returns no usage and `llmPricing.js` has no embedding rate.
+- **Criticality:** Important (the event graph, clustering and market matching read these vectors)
+- **Health:** `EMBED_HEALTH_PING_URL` (Healthchecks): `/fail` on a hard billing/auth/permission error, success ping ≤ once per 10 min per process
+- **Code references:** [backend/src/realityIndex/llmQueue.js](../backend/src/realityIndex/llmQueue.js); env: `GEMINI_API_KEY`, `GEMINI_EMBEDDING_MODEL`, `EMBED_HEALTH_PING_URL`
 
 ### Anthropic (Claude API) — *the generation provider*
 - **Purpose:** All LLM generation: matching, briefs, scripts, video specs, vision checks, live-event synthesis, IG summaries

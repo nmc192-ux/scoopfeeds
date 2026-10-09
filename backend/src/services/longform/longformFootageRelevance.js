@@ -28,7 +28,7 @@ import { logger } from "../logger.js";
  * The floor is RELATIVE to the best hit, with an absolute backstop.
  *
  * Calibrated live (2026-08-27, the published film's own queries against real
- * DVIDS/NASA results): the old gemini-embedding-001 cosines compressed into 0.45-0.65 (RE-CALIBRATE on nomic-embed-text — see scripts/reembed.mjs) — the on-story
+ * DVIDS/NASA results): Gemini cosines compress into 0.45-0.65 — the on-story
  * hits ("AFOTEC AI Tech Showcase" 0.649, "Exercise Wolverine Cyber Warfare"
  * 0.626) and the junk that actually shipped ("Bring Your Lion Cub to Work
  * Day" 0.501, a birthday motion graphic 0.526) are separated by margin, not

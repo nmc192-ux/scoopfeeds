@@ -230,7 +230,7 @@ test("every check has its own INDEPENDENT var — including the outcome switch",
   const vars = Object.values(HEARTBEAT_PING_URLS);
   assert.equal(new Set(vars).size, vars.length, "no two checks may share a var");
   assert.deepEqual([...vars].sort(), [
-    "INGESTION_HEARTBEAT_PING_URL", "LLM_HEALTH_PING_URL", "RADIO_PING_URL", "SOCIAL_HEARTBEAT_PING_URL",
+    "EMBED_HEALTH_PING_URL", "INGESTION_HEARTBEAT_PING_URL", "LLM_HEALTH_PING_URL", "RADIO_PING_URL", "SOCIAL_HEARTBEAT_PING_URL",
     "VIDEO_HEARTBEAT_PING_URL", "VIDEO_OUTCOME_PING_URL",
   ]);
 });

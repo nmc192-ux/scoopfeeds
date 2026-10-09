@@ -9,13 +9,14 @@
  *   • embedQuery(text) — returns an in-memory vector for searching, NOT stored.
  *     Use this on the matcher's "lookup" side.
  *
- * Both call out to llmQueue.embed(): self-hosted Ollama (nomic-embed-text,
- * 768-dim) by default, EMBED_PROVIDER=cloudflare (bge-base, 768-dim) as the
- * alternative. 768 is fixed by the vec0 schema in schema.js (FLOAT[768]) — a
- * model with a different width needs a new table, not just an env change.
- * Every stored vector records its model in embedding_meta.model; vectors from
- * different models must never be compared (see searchNearest's `model` filter
- * and scripts/reembed.mjs).
+ * Both call out to llmQueue.embed(): the Gemini Embedding API
+ * (gemini-embedding-001, pinned via GEMINI_EMBEDDING_MODEL) by default, 768-dim
+ * via outputDimensionality. Dormant alternatives: EMBED_PROVIDER=cloudflare
+ * (bge-base) and =ollama (nomic-embed-text), both 768-dim. 768 is fixed by the
+ * vec0 schema in schema.js (FLOAT[768]) — a model with a different width needs
+ * a new table, not just an env change. Every stored vector records its model in
+ * embedding_meta.model; vectors from different models must never be compared
+ * (see searchNearest's `model` filter and scripts/reembed.mjs).
  */
 
 import { embed as llmEmbed, getQueueStatus } from "../llmQueue.js";
@@ -23,7 +24,7 @@ import { upsertEmbedding } from "../dal/embeddingsDao.js";
 import { isVecAvailable } from "../schema.js";
 import { logger } from "../../services/logger.js";
 
-const DIMS = Number.parseInt(process.env.LLM_EMBED_DIMS || "768", 10);
+const DIMS = Number.parseInt(process.env.LLM_EMBED_DIMS || process.env.GEMINI_EMBED_DIMS || "768", 10);
 
 export function embeddingsConfig() {
   const { embedModel, embedProvider } = getQueueStatus();

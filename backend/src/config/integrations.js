@@ -58,8 +58,9 @@ export function collectIntegrationStatus({ schedulerEnabled }) {
     },
     ai: {
       anthropic:  Boolean(process.env.ANTHROPIC_API_KEY),   // generation
-      ollama:     Boolean(process.env.OLLAMA_BASE_URL),     // embeddings (default)
-      cloudflare: Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN), // embeddings (alt)
+      gemini:     Boolean(process.env.GEMINI_API_KEY),      // embeddings only
+      ollama:     Boolean(process.env.OLLAMA_BASE_URL),     // embeddings (dormant)
+      cloudflare: Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN), // embeddings (dormant)
     },
     external: {
       openweather: Boolean(process.env.OPENWEATHER_API_KEY),

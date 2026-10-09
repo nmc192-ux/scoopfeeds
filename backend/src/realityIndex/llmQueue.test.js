@@ -27,6 +27,7 @@ const CONFIG_ENV = [
   "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_RPM", "LLM_DISABLED", "LLM_BREAKER_THRESHOLD",
   "LLM_BREAKER_COOLDOWN_MS", "LLM_HEALTH_PING_URL", "EMBED_PROVIDER", "OLLAMA_EMBED_MODEL",
   "LLM_HEALTH_PING_INTERVAL_MS", "OLLAMA_EMBED_PREFIX", "OLLAMA_BASE_URL", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
+  "GEMINI_API_KEY", "GEMINI_EMBEDDING_MODEL", "GEMINI_EMBED_DIMS", "EMBED_HEALTH_PING_URL", "LLM_EMBED_DIMS",
 ];
 
 let n = 0;
@@ -34,7 +35,7 @@ async function load(env = {}) {
   for (const k of CONFIG_ENV) delete process.env[k];
   process.env.LLM_DAILY_CALL_CAP = "100000";
   process.env.LLM_RETRY_DELAYS_MS = "1,1,1";
-  Object.assign(process.env, { ANTHROPIC_API_KEY: "a-key" }, env);
+  Object.assign(process.env, { ANTHROPIC_API_KEY: "a-key", GEMINI_API_KEY: "g-key" }, env);
   for (const [k, v] of Object.entries(env)) if (v === null) delete process.env[k];
   return import(`./llmQueue.js?t=${++n}`);
 }
@@ -470,60 +471,231 @@ test("usage: summary groups by task/provider/model for the metrics endpoint", as
   assert.ok(s.total.calls >= 2 && Array.isArray(s.last_7_days) && Array.isArray(s.errors));
 });
 
-// ─── embeddings: Ollama default, no Gemini ─────────────────────────────────
+// ─── embeddings: Gemini (embeddings only) ──────────────────────────────────
 
-test("embeddings: EMBED_PROVIDER defaults to ollama / nomic-embed-text and applies the documented task prefixes", async () => {
+const VEC = () => new Array(768).fill(0.1);
+const GEM = /generativelanguage\.googleapis\.com/;
+/** axios stub: Gemini embedContent answers `embedAnswer`, every other URL (pings) answers 200. */
+function stubEmbed(embedAnswer = () => ({ data: { embedding: { values: VEC() } } })) {
+  return stubAxios((kind, url, body) => (GEM.test(url) ? embedAnswer(url, body) : { status: 200, data: {} }));
+}
+const pingsTo = (ax, base) => [...ax.posts, ...ax.gets].filter(r => r.url.startsWith(base));
+
+test("embeddings default to Gemini gemini-embedding-001: pinned model, task type, 768 dims, text verbatim", async () => {
   const q = await load();
-  assert.equal(q.getQueueStatus().embedProvider, "ollama");
-  assert.equal(q.getQueueStatus().embedModel, "nomic-embed-text");
-  const ax = stubAxios(() => ({ data: { embedding: new Array(768).fill(0.1) } }));
+  assert.equal(q.getQueueStatus().embedProvider, "gemini");
+  assert.equal(q.getQueueStatus().embedModel, "gemini-embedding-001");
+  const ax = stubEmbed();
   try {
-    const d = await q.embed("breaking news", { taskType: "RETRIEVAL_DOCUMENT" });
-    const k = await q.embed("breaking news", { taskType: "RETRIEVAL_QUERY" });
-    assert.equal(d.length, 768);
-    assert.equal(k.length, 768);
-    assert.match(ax.posts[0].url, /\/api\/embeddings$/);
-    assert.equal(ax.posts[0].body.model, "nomic-embed-text");
+    const v = await q.embed("breaking news", { taskType: "RETRIEVAL_QUERY" });
+    assert.equal(v.length, 768);
+    const { url, body } = ax.posts[0];
+    assert.match(url, /models\/gemini-embedding-001:embedContent\?key=g-key$/);
+    assert.deepEqual(body, { model: "models/gemini-embedding-001", content: { parts: [{ text: "breaking news" }] }, taskType: "RETRIEVAL_QUERY", outputDimensionality: 768 });
+    await q.embed("doc");
+    assert.equal(ax.posts[1].body.taskType, "RETRIEVAL_DOCUMENT");
+  } finally { ax.restore(); }
+});
+
+test("GEMINI_EMBEDDING_MODEL pins a different model; GEMINI_EMBED_DIMS sets the width", async () => {
+  const q = await load({ GEMINI_EMBEDDING_MODEL: "gemini-embedding-002", GEMINI_EMBED_DIMS: "768" });
+  const ax = stubEmbed();
+  try {
+    await q.embed("x");
+    assert.match(ax.posts[0].url, /gemini-embedding-002:embedContent/);
+    assert.equal(q.getQueueStatus().embedModel, "gemini-embedding-002");
+  } finally { ax.restore(); }
+});
+
+test("embeddings: unconfigured (no GEMINI_API_KEY) → null, no request, no usage row, no ping", async () => {
+  const q = await load({ GEMINI_API_KEY: null, EMBED_HEALTH_PING_URL: "https://hc.test/emb" });
+  const ax = stubEmbed();
+  const before = usageRows("embed").length;
+  try {
+    assert.equal(await q.embed("x"), null);
+    await settle();
+    assert.equal(ax.posts.length + ax.gets.length, 0);
+    assert.equal(usageRows("embed").length, before);
+  } finally { ax.restore(); }
+});
+
+test("embed usage: task 'embed', provider gemini, tokens and cost NULL (no usage from the API, no rate in the table), ONE warning", async () => {
+  const q = await load();
+  const ax = stubEmbed();
+  const w = capture();
+  const before = usageRows("embed").length;
+  try {
+    await q.embed("a"); await q.embed("b");
+    const rows = usageRows("embed").slice(before);
+    assert.equal(rows.length, 2);
+    for (const r of rows) assert.deepEqual([r.provider, r.model, r.input_tokens, r.output_tokens, r.est_cost_usd, r.ok, r.error_class], ["gemini", "gemini-embedding-001", null, null, null, 1, null]);
+    assert.equal(w.warns.filter(l => /embed usage: gemini-embedding-001 returns no token usage/.test(l)).length, 1);
+  } finally { ax.restore(); w.restore(); }
+});
+
+test("embed usage: failures are rows too, with their error_class", async () => {
+  const q = await load();
+  const ax = stubEmbed(() => { throw Object.assign(new Error("boom"), { response: { status: 400, data: "bad" } }); });
+  const w = capture();
+  const before = usageRows("embed").length;
+  try {
+    assert.equal(await q.embed("a"), null);
+    const r = usageRows("embed").slice(before)[0];
+    assert.deepEqual([r.ok, r.error_class], [0, "http_400"]);
+  } finally { ax.restore(); w.restore(); }
+});
+
+for (const [label, make, errClass] of [
+  ["401", () => Object.assign(new Error("unauth"), { response: { status: 401, data: "x" } }), "auth"],
+  ["403 PERMISSION_DENIED", () => Object.assign(new Error("denied"), { response: { status: 403, data: { error: { status: "PERMISSION_DENIED" } } } }), "permission"],
+  ["402 billing", () => Object.assign(new Error("pay"), { response: { status: 402, data: "x" } }), "billing"],
+  ["400 API key not valid", () => Object.assign(new Error("bad"), { response: { status: 400, data: { error: { message: "API key not valid. Please pass a valid API key." } } } }), "auth"],
+]) {
+  test(`embed hard error ${label}: not retried, null, ONE loud error, /fail ping to EMBED_HEALTH_PING_URL, usage row`, async () => {
+    const q = await load({ EMBED_HEALTH_PING_URL: "https://hc.test/SECRET-EMB", LLM_HEALTH_PING_URL: "https://hc.test/LLM-ONLY" });
+    let calls = 0;
+    const ax = stubEmbed(() => { calls++; throw make(); });
+    const w = capture();
+    const before = usageRows("embed").length;
+    try {
+      assert.equal(await q.embed("x"), null);
+      assert.equal(calls, 1, "hard errors are never retried");
+      assert.equal(w.errors.length, 1);
+      assert.match(w.errors[0], /EMBEDDING HARD FAILURE/);
+      assert.match(w.errors[0], new RegExp(errClass));
+      await settle();
+      const fail = pingsTo(ax, "https://hc.test/SECRET-EMB");
+      assert.equal(fail.length, 1);
+      assert.equal(fail[0].url, "https://hc.test/SECRET-EMB/fail");
+      assert.match(fail[0].body, new RegExp(`embed ${errClass}`));
+      assert.equal(pingsTo(ax, "https://hc.test/LLM-ONLY").length, 0, "independent of the generation check");
+      assert.ok(![...w.warns, ...w.errors].some(l => /SECRET-EMB/.test(l)), "ping URL never logged");
+      assert.equal(usageRows("embed").slice(before)[0].error_class, errClass);
+    } finally { ax.restore(); w.restore(); }
+  });
+}
+
+test("embed hard errors are rate-limited: a dead key does not fire a ping and a loud line per article", async () => {
+  const q = await load({ EMBED_HEALTH_PING_URL: "https://hc.test/emb" });
+  const ax = stubEmbed(() => { throw Object.assign(new Error("d"), { response: { status: 403, data: "x" } }); });
+  const w = capture();
+  try {
+    for (let i = 0; i < 6; i++) await q.embed(`x${i}`);
+    await settle();
+    assert.equal(pingsTo(ax, "https://hc.test/emb").length, 1);
+    assert.equal(w.errors.length, 1);
+  } finally { ax.restore(); w.restore(); }
+});
+
+test("embed transient errors (503/429) retry and are never 'hard': no /fail ping, no loud error", async () => {
+  const q = await load({ EMBED_HEALTH_PING_URL: "https://hc.test/emb" });
+  let n = 0;
+  const ax = stubEmbed(() => { n++; if (n <= 2) throw Object.assign(new Error("busy"), { response: { status: n === 1 ? 503 : 429, data: "x" } }); return { data: { embedding: { values: VEC() } } }; });
+  const w = capture();
+  try {
+    assert.equal((await q.embed("x")).length, 768);
+    assert.equal(n, 3);
+    await settle();
+    assert.equal(ax.posts.filter(p => /\/fail$/.test(p.url)).length, 0);
+    assert.equal(w.errors.length, 0);
+  } finally { ax.restore(); w.restore(); }
+  const q2 = await load({ EMBED_HEALTH_PING_URL: "https://hc.test/emb" });
+  const ax2 = stubEmbed(() => { throw Object.assign(new Error("busy"), { response: { status: 429, data: "x" } }); });
+  const w2 = capture();
+  try {
+    assert.equal(await q2.embed("x"), null);
+    await settle();
+    assert.equal(ax2.posts.filter(p => /\/fail$/.test(p.url)).length, 0);
+    assert.equal(w2.errors.length, 0);
+  } finally { ax2.restore(); w2.restore(); }
+});
+
+test("embed success ping: bare URL after a good embed, at most once per interval; the first success after a failure pings at once", async () => {
+  const q = await load({ EMBED_HEALTH_PING_URL: "https://hc.test/SECRET-EMB" });
+  let bad = false;
+  const ax = stubEmbed(() => { if (bad) throw Object.assign(new Error("d"), { response: { status: 403, data: "x" } }); return { data: { embedding: { values: VEC() } } }; });
+  const w = capture();
+  try {
+    for (let i = 0; i < 4; i++) await q.embed(`a${i}`);        // one success ping
+    bad = true;  await q.embed("b");                            // /fail
+    bad = false; await q.embed("c");                            // recovery ping, inside the interval
+    await settle();
+    assert.deepEqual(ax.gets.map(g => g.url), ["https://hc.test/SECRET-EMB", "https://hc.test/SECRET-EMB"]);
+    assert.deepEqual(ax.posts.filter(p => !GEM.test(p.url)).map(p => p.url), ["https://hc.test/SECRET-EMB/fail"]);
+    assert.ok(![...w.warns, ...w.errors].some(l => /SECRET-EMB/.test(l)));
+  } finally { ax.restore(); w.restore(); }
+});
+
+test("embed success ping: pings again after the interval; no EMBED_HEALTH_PING_URL → no ping request at all", async () => {
+  const q = await load({ EMBED_HEALTH_PING_URL: "https://hc.test/emb", LLM_HEALTH_PING_INTERVAL_MS: "40" });
+  const ax = stubEmbed();
+  try {
+    await q.embed("a"); await q.embed("b");
+    await new Promise(r => setTimeout(r, 60));
+    await q.embed("c");
+    await settle();
+    assert.equal(ax.gets.length, 2);
+  } finally { ax.restore(); }
+  const q2 = await load();
+  const ax2 = stubEmbed();
+  try {
+    await q2.embed("a");
+    await settle();
+    assert.equal(ax2.gets.length, 0);
+    assert.equal(ax2.posts.length, 1, "only the embed call itself");
+  } finally { ax2.restore(); }
+});
+
+test("a successful GENERATION call does not ping the embed check, and vice versa", async () => {
+  const q = await load({ EMBED_HEALTH_PING_URL: "https://hc.test/emb", LLM_HEALTH_PING_URL: "https://hc.test/llm" });
+  const ax = stubEmbed();
+  q._test.setAnthropicClient(fakeClaude(() => claudeOk("{}")));
+  try {
+    await q.callJson("p", { task: "t-indep" });
+    await q.embed("x");
+    await settle();
+    assert.deepEqual(ax.gets.map(g => g.url).sort(), ["https://hc.test/emb", "https://hc.test/llm"]);
+  } finally { ax.restore(); }
+});
+
+// ─── dormant embedding lanes still work when selected ──────────────────────
+
+test("dormant ollama lane (EMBED_PROVIDER=ollama): documented task prefixes, OLLAMA_BASE_URL honoured, prefix switch, dims guard", async () => {
+  const q = await load({ EMBED_PROVIDER: "ollama", OLLAMA_BASE_URL: "http://ollama:11434/" });
+  assert.equal(q.getQueueStatus().embedModel, "nomic-embed-text");
+  let ax = stubAxios(() => ({ data: { embedding: new Array(768).fill(0.1) } }));
+  try {
+    await q.embed("breaking news", { taskType: "RETRIEVAL_DOCUMENT" });
+    await q.embed("breaking news", { taskType: "RETRIEVAL_QUERY" });
+    assert.equal(ax.posts[0].url, "http://ollama:11434/api/embeddings");
     assert.equal(ax.posts[0].body.prompt, "search_document: breaking news");
     assert.equal(ax.posts[1].body.prompt, "search_query: breaking news");
   } finally { ax.restore(); }
-});
-
-test("embeddings: OLLAMA_EMBED_PREFIX=0 sends text verbatim; OLLAMA_BASE_URL is honoured", async () => {
-  const q = await load({ OLLAMA_EMBED_PREFIX: "0", OLLAMA_BASE_URL: "http://ollama:11434/" });
-  const ax = stubAxios(() => ({ data: { embedding: new Array(768).fill(0) } }));
-  try {
-    await q.embed("plain");
-    assert.equal(ax.posts[0].url, "http://ollama:11434/api/embeddings");
-    assert.equal(ax.posts[0].body.prompt, "plain");
-  } finally { ax.restore(); }
-});
-
-test("embeddings: a wrong-width vector is refused (the vec0 table is FLOAT[768]); an unreachable Ollama yields null", async () => {
-  const q = await load();
-  let ax = stubAxios(() => ({ data: { embedding: new Array(384).fill(0) } }));
+  const q2 = await load({ EMBED_PROVIDER: "ollama", OLLAMA_EMBED_PREFIX: "0" });
+  ax = stubAxios(() => ({ data: { embedding: new Array(768).fill(0) } }));
+  try { await q2.embed("plain"); assert.equal(ax.posts[0].body.prompt, "plain"); } finally { ax.restore(); }
   const w = capture();
-  try { assert.equal(await q.embed("x"), null); } finally { ax.restore(); }
-  ax = stubAxios(() => { throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" }); });
-  try { assert.equal(await q.embed("x"), null); } finally { ax.restore(); w.restore(); }
+  ax = stubAxios(() => ({ data: { embedding: new Array(384).fill(0) } }));
+  try { assert.equal(await q2.embed("x"), null); } finally { ax.restore(); w.restore(); }
 });
 
-test("embeddings: cloudflare stays selectable; an unknown provider (e.g. the removed 'gemini') yields null with a warning", async () => {
+test("dormant cloudflare lane stays selectable; an unknown EMBED_PROVIDER embeds nothing and warns", async () => {
   const q = await load({ EMBED_PROVIDER: "cloudflare", CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "acct" });
   const ax = stubAxios(() => ({ data: { result: { data: [new Array(768).fill(0.2)] } } }));
   try {
     assert.equal((await q.embed("x")).length, 768);
     assert.match(ax.posts[0].url, /cloudflare\.com.*acct/);
   } finally { ax.restore(); }
-  const g = await load({ EMBED_PROVIDER: "gemini" });
+  const g = await load({ EMBED_PROVIDER: "nonsense" });
   const w = capture();
   try {
     assert.equal(await g.embed("x"), null);
-    assert.ok(w.warns.some(l => /Unknown EMBED_PROVIDER "gemini"/.test(l)));
+    assert.ok(w.warns.some(l => /Unknown EMBED_PROVIDER "nonsense"/.test(l)));
   } finally { w.restore(); }
 });
 
-test("the module carries no Gemini code or env", async () => {
+test("Gemini is EMBEDDINGS-ONLY: no generation path, no thinking helpers, no Gemini generation env", async () => {
   const src = fs.readFileSync(new URL("./llmQueue.js", import.meta.url), "utf8");
-  assert.ok(!/generativelanguage|GEMINI_|buildGeminiGenerationConfig|thinkingBudget|FALLBACK_OF|LLM_TASK_PROVIDER/.test(src));
+  assert.ok(!/generateContent|GEMINI_GENERATION|GEMINI_DISABLED|buildGeminiGenerationConfig|thinkingBudget|thinkingConfig|isGeminiModelGone|markGemini|FALLBACK_OF|LLM_TASK_PROVIDER/.test(src));
+  assert.match(src, /:embedContent\?key=/);
 });

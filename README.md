@@ -47,7 +47,7 @@ Key entry points:
 - **Frontend:** React + Vite
 - **Deployment:** VPS (`/opt/scoopfeeds`), Docker Compose — `web` / `worker` / `scheduler`
   containers split by `SCOOP_PROCESS_ROLE`
-- **AI:** Claude (Anthropic), via `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`, with deterministic
+- **AI:** Claude (Anthropic) for generation, via `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`; Gemini for embeddings only; with deterministic
   (non-LLM) fallbacks on every path and hard cost rails (`LLM_DAILY_CALL_CAP`,
   output caps, a per-call `llm_usage` ledger)
 - **Event graph:** embedding clustering + a single entity-affinity measure shared by the

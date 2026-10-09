@@ -317,6 +317,6 @@ by splitting the signature path onto its own `EVENT_SIGNATURE_MAX_CATSPAN`.
 - **`GEMINI_GENERATION_MODEL` has two different code defaults** across six call sites —
 `gemini-2.5-flash` in `llmQueue.js:183`/`analysisService.js:47`/`liveEvents.js:42`,
 `gemini-3.1-flash-lite` in `videoSpecWriter.js:82`/`igSummaryService.js:35`/`scriptWriter.js:62`.
-  **Resolved on `feat/anthropic-provider` (2026-10-09):** Gemini is gone from the codebase. Claude is the only generation provider; every caller (incl. `liveEvents`, `analysisService`, `igSummaryService`, `scriptWriter`, `videoSpecWriter`, `shots/vision`) goes through `llmQueue`. Embeddings are self-hosted Ollama (nomic-embed-text) and **every Gemini-era similarity threshold is uncalibrated on the new vectors** — see the PR for the list; run `scripts/reembed.mjs` at cutover.
+  **Resolved on `feat/anthropic-provider` (2026-10-09):** Gemini is now **embeddings-only** (`gemini-embedding-001`, 768-dim). Claude is the only generation provider; every caller (incl. `liveEvents`, `analysisService`, `igSummaryService`, `scriptWriter`, `videoSpecWriter`, `shots/vision`) goes through `llmQueue`. The embedding vectors and every similarity threshold are unchanged. Embed calls are logged to `llm_usage` (task `embed`) and watched by `EMBED_HEALTH_PING_URL`.
 Prod's single line masks it; without it the platform runs two generation models at once.
 Same bug class as the catspan hazard.

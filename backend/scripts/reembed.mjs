@@ -2,23 +2,28 @@
  * reembed — re-embed the live corpus on the CURRENT embedding model, in
  * rate-capped batches, resumable from a checkpoint.
  *
- * WHY. Embeddings moved from gemini-embedding-001 to self-hosted
- * nomic-embed-text (both 768-dim, so the vec0 table is unchanged). Vectors from
- * different models live in different spaces: a cosine between an old and a new
- * vector is noise, and the pipeline compares stored vectors with each other
- * (clustering, event matching/merging, market shortlist). The two must never
- * coexist in one index.
+ * NO CUTOVER IS NEEDED TODAY. Embeddings stay on gemini-embedding-001 (768-dim),
+ * so the vectors already in the index are the current model's and nothing has to
+ * be rebuilt. This script is kept as a TOOL for the day the embedding model (or
+ * EMBED_PROVIDER) changes, and as a gap-filler: without --clear it only embeds
+ * targets that have no vector from the current model, which is a backfill of
+ * whatever the live embedder missed (e.g. after an outage like the 2026-10-07
+ * embedder stall) — safe to run at any time.
+ *
+ * WHY IT EXISTS. Vectors from different models live in different spaces: a
+ * cosine between an old and a new vector is noise, and the pipeline compares
+ * stored vectors with each other (clustering, event matching/merging, market
+ * shortlist). If the model ever changes, the two must never coexist in one index.
  *
  * HOW MIXING IS PREVENTED (both layers):
- *   1. CLEAR-FIRST  — `--clear --yes` deletes EVERY stored vector once, then this
- *      script refills the corpus that matters. After it, the index holds a single
- *      model. (Articles older than the window lose their vectors; the 7-day
- *      article prune removes those rows anyway.)
+ *   1. CLEAR-FIRST  — on a model change, `--clear --yes` deletes EVERY stored
+ *      vector once, then this script refills the corpus that matters. After it,
+ *      the index holds a single model.
  *   2. MODEL FILTER — embedding_meta.model records the writer; searchNearest()
  *      takes a `model` filter and marketMatcher passes the current one, so a
- *      straggler old-image container writing the old model cannot pollute
- *      results. `countEmbeddingsByModel()` (also on /scoop-ops/ri-ops/dashboard
- *      as embeddings_by_model) shows whether the index is mixed.
+ *      straggler writing another model cannot pollute results.
+ *      `countEmbeddingsByModel()` (also on /scoop-ops/ri-ops/dashboard as
+ *      embeddings_by_model) shows whether the index is mixed.
  *
  * TARGETS (in this order):
  *   1. articles that belong to ACTIVE / DORMANT events (event centroids are
@@ -36,17 +41,17 @@
  * USAGE
  *   node scripts/reembed.mjs                    # plan only (counts, nothing written)  == --dry
  *   node scripts/reembed.mjs --run              # embed whatever is missing for the current model
- *   node scripts/reembed.mjs --clear --yes --run   # THE CUTOVER: wipe, then refill
+ *   node scripts/reembed.mjs --clear --yes --run   # ONLY on a model change: wipe, then refill
  *   node scripts/reembed.mjs --status           # vectors per scope/model + checkpoint
  *   options: --days 7  --rate 8 (embeds/second cap)  --batch 100  --checkpoint PATH
  *            --force-clear (allow a second --clear)
  *
- * Run it where Ollama is reachable (OLLAMA_BASE_URL) and the scoop_data volume is
- * mounted, e.g.:
+ * Run it where the embedding lane is reachable (GEMINI_API_KEY) and the scoop_data
+ * volume is mounted, e.g.:
  *   docker compose -f docker-compose.production.yml exec -T worker \
- *     node scripts/reembed.mjs --clear --yes --run
+ *     node scripts/reembed.mjs --run     # (backfill; add --clear --yes only on a model change)
  * Stop the writers' embed work first or accept that new articles embed on the
- * new model in parallel (harmless: same model, upsert by (scope, scope_id)).
+ * same model in parallel (harmless: same model, upsert by (scope, scope_id)).
  */
 
 import "../src/config/env.js";
@@ -134,12 +139,12 @@ console.log(`      distinct targets ${jobs.length} · already on ${cfg.model} ${
 console.log(`      ~${Math.ceil(todo.length / RATE / 60)} min at ${RATE}/s (batch ${BATCH})`);
 
 if (CLEAR && !YES) { console.error("\n--clear is destructive (deletes every stored vector). Re-run with --clear --yes."); process.exit(2); }
-if (!RUN && !CLEAR) { console.log("\nplan only — nothing written. Add --run to embed, or --clear --yes --run for the cutover."); process.exit(0); }
+if (!RUN && !CLEAR) { console.log("\nplan only — nothing written. Add --run to backfill what is missing (add --clear --yes only after a model change)."); process.exit(0); }
 
 // ── preflight: the lane must work before anything is deleted ───────────────
 const probe = await embedDocument({ scope: "reembed-probe", scope_id: "probe", text: "reembed preflight" });
 if (!probe) {
-  console.error(`\npreflight FAILED: the embedding lane (${cfg.provider}) returned nothing. Is Ollama up and the model pulled (OLLAMA_BASE_URL)? Nothing was deleted.`);
+  console.error(`\npreflight FAILED: the embedding lane (${cfg.provider}) returned nothing. Is the embedding lane up (GEMINI_API_KEY / EMBED_PROVIDER)? Nothing was deleted.`);
   process.exit(3);
 }
 db.prepare("DELETE FROM embedding_meta WHERE scope = 'reembed-probe'").run();

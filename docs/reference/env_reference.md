@@ -123,7 +123,7 @@ own deterministic paths. Every attempt writes an `llm_usage` row (migration 040)
 | `VIDEO_SPEC_MODEL` | `claude-haiku-5-5` | default | yes | Model for the video **spec** call only (the hard one). Candidate: `claude-sonnet-5-5` — measure with `scripts/llm-ab.mjs`. |
 | `VIDEO_VISION_MODEL` | `claude-haiku-5-5` | default | yes | Model for shot-resolver vision checks (frames sent as image blocks; fails closed). |
 | `LLM_HEALTH_PING_URL` | unset | **set (Healthchecks check: period 1h, grace 1h)** | yes | Optional. A plain success ping after a successful Claude call, at most once per 10 min per process (so the check alerts if no call succeeds anywhere for ~2h); `/fail` with a redacted reason on a hard LLM error (red immediately); the first success after a failure pings at once. The URL is a bearer token — never logged. Same helper and rules as the other heartbeats. |
-| `LLM_HEALTH_PING_INTERVAL_MS` | `600000` | default | no | Minimum gap between success pings, per process. Test seam; leave unset. |
+| `LLM_HEALTH_PING_INTERVAL_MS` | `600000` | default | no | Minimum gap between success pings, per process (shared by the LLM and embed checks). Test seam; leave unset. |
 | `LLM_BREAKER_THRESHOLD` | `3` | default | no | Consecutive hard failures that open the breaker. |
 | `LLM_BREAKER_COOLDOWN_MS` | `900000` | default | no | How long an open breaker returns null without calling the API (15 min), then one probe. One warn line on open / re-open / close. State is per process (web / worker / scheduler each keep their own). |
 | `LLM_DAILY_CALL_CAP` | `2000` | default | yes | Hard daily ceiling on LLM calls (consumed once per call, not per retry). Includes `ig-summary`, `script-writer`, `video-spec`, `video-vision`. |
@@ -136,26 +136,39 @@ Task names in `llm_usage` / `/scoop-ops/metrics-ops` (`metrics.llm_usage`): `act
 `analyst-brief`, `event-carousel`, `market-match`, `outcome-resolve`, `synth-question`,
 `radio-gate`, `radio-headline`, `radio-judge`, `longform-*`, `live-events`,
 `analysis-brief|persp|explained`, `deep-dive`, `ig-summary`, `script-writer`,
-`video-spec`, `video-packaging`, `video-vision`.
+`video-spec`, `video-packaging`, `video-vision`, and `embed` (the embedding lane).
 
-### Embeddings — self-hosted Ollama (nomic-embed-text, 768-dim)
+### Embeddings — Gemini (embeddings ONLY; generation is Claude)
+
+`llmQueue.embed()` calls the Gemini Embedding API (`gemini-embedding-001`, 768-dim via
+`outputDimensionality`). Gemini has no generation path anywhere in the code. Each embed is one
+`llm_usage` row (task `embed`; `embedContent` returns no token usage and the price table has no
+embedding rate, so tokens and `est_cost_usd` are NULL — calls and failures are still counted).
+A **hard error** (billing / auth / permission / dead model) logs one loud line (rate-limited) and
+pings `/fail` on `EMBED_HEALTH_PING_URL`; a success ping goes out at most once per 10 min per
+process; the first success after a failure pings at once.
 
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
-| `EMBED_PROVIDER` | `ollama` | `ollama` (set in compose) | no | `ollama` or `cloudflare` (bge-base, 768-dim). The Gemini embedding lane is gone; an unknown value embeds nothing and warns. |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | `http://ollama:11434` (set in compose for web/scheduler/worker/worker-graph) | no | The compose `ollama` service. |
-| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | default | no | Must emit 768 dims (the `vec0` table is `FLOAT[768]`). Changing the model means `scripts/reembed.mjs --clear --yes --run`. |
-| `OLLAMA_EMBED_PREFIX` | `1` | default | no | nomic task prefixes (`search_document:` for stored vectors, `search_query:` for lookups). `0` sends text verbatim. |
-| `LLM_EMBED_DIMS` | `768` | default | no | Expected width; a mismatching vector is refused. |
+| `GEMINI_API_KEY` | — | set | yes | Credential (embeddings only). |
+| `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | default | no | The pinned embedding model. Recorded per vector in `embedding_meta.model`; changing it means a re-embed (`scripts/reembed.mjs --clear --yes --run`). |
+| `EMBED_PROVIDER` | `gemini` | default | no | `gemini` \| `cloudflare` (bge-base, 768-dim) \| `ollama` (nomic-embed-text, 768-dim). The last two are dormant code — nothing deploys Ollama. |
+| `LLM_EMBED_DIMS` / `GEMINI_EMBED_DIMS` | `768` | default | no | Must match the `vec0` table (`FLOAT[768]`). |
 | `LLM_EMBED_CONCURRENCY` | `4` | default | no | Concurrent embed calls. |
+| `EMBED_HEALTH_PING_URL` | unset | **set (Healthchecks check: period 1h, grace 1h)** | yes | Optional. `/fail` with a redacted reason on a hard embed error; a plain success ping after a successful embed (≤ once per 10 min per process, `LLM_HEALTH_PING_INTERVAL_MS`). The URL is a bearer token — never logged. Independent of `LLM_HEALTH_PING_URL`. |
+| `OLLAMA_BASE_URL` / `OLLAMA_EMBED_MODEL` / `OLLAMA_EMBED_PREFIX` | `http://localhost:11434` / `nomic-embed-text` / `1` | unset | no | Only if `EMBED_PROVIDER=ollama` (dormant). |
+| `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_EMBED_MODEL` | — | unset | no | Only if `EMBED_PROVIDER=cloudflare` (dormant). |
+
+**One model per index.** Vectors from different models must never mix: `searchNearest({ model })`
+filters by `embedding_meta.model` and `embeddings_by_model` on `/scoop-ops/ri-ops/dashboard` shows
+whether the index is mixed. `scripts/reembed.mjs` needs no cutover today — embeddings stay on
+`gemini-embedding-001`; it is a tool for a future model change and a gap-filler.
 
 ### Removed in this change (setting any of these now does nothing)
 
-`GEMINI_API_KEY`, `GEMINI_GENERATION_MODEL`, `GEMINI_EMBEDDING_MODEL`, `GEMINI_EMBED_DIMS`,
-`GEMINI_DISABLED`, `GEMINI_RPM`, `LLM_PROVIDER`, `LLM_PREMIUM_PROVIDER`, `LLM_RPM`,
-`CEREBRAS_*`, `GROQ_*`, `DEEPSEEK_*`, `NVIDIA_API_KEY`, `NIM_*`, `CLOUDFLARE_GEN_MODEL`,
-`OLLAMA_MODEL` (generation). `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` /
-`CLOUDFLARE_EMBED_MODEL` still apply to `EMBED_PROVIDER=cloudflare`.
+`GEMINI_GENERATION_MODEL`, `GEMINI_DISABLED`, `GEMINI_RPM`, `LLM_PROVIDER`, `LLM_PREMIUM_PROVIDER`,
+`LLM_RPM`, `CEREBRAS_*`, `GROQ_*`, `DEEPSEEK_*`, `NVIDIA_API_KEY`, `NIM_*`, `CLOUDFLARE_GEN_MODEL`,
+`OLLAMA_MODEL` (generation).
 
 | `ENTITY_EXTRACTION_ENABLED` | `false` | **set** | yes | LLM/NER entity extraction feeding the affinity measure. |
 | `ENTITY_EXTRACTION_BATCH` | `100` | **set** | yes | Articles per extraction batch. |
@@ -754,7 +767,7 @@ respect: its own table (`longform_posts`), its own cadence, its own gates.
 | `QUEUE_CONCURRENCY_LONGFORM` | `1` | unset | restart | **STRICTLY 1.** The rolling weekly cap is a global count — two concurrent cycles would both read "under cap" and both publish a film. |
 | `QUEUE_LOCK_MS_LONGFORM` | `30 min` | unset | restart | ~3× the **measured** 10.3 min bundle render (#75), because that figure was taken on an idle box. Too short is not a slow job, it is a DUPLICATE FILM: BullMQ re-runs a job whose lock lapses. |
 | `LONGFORM_MIN_SOURCE_CHARS` | `8000` | unset | yes | Source-corpus floor for the per-candidate source gate. Full text is fetched (fetch-extract-discard, via the videoFullText discipline) in widening tranches until met. **Costs the candidate, never the cycle** — the selector walks the ranked list, and a thin topic stays eligible for later cycles. |
-| `LONGFORM_FOOTAGE_RELEVANCE` | `0.45` | unset | yes | Absolute backstop for the footage relevance screen (embedding cosine of candidate title vs topic). A candidate below the **cut** is refused before download; the cut is `max(this, best − margin)`. Calibrated 2026-08-27 on gemini-embedding-001 (cosines compressed into 0.45–0.65, so the margin does the separating and this is the backstop). **Embeddings are now nomic-embed-text — RE-CALIBRATE before trusting it.** |
+| `LONGFORM_FOOTAGE_RELEVANCE` | `0.45` | unset | yes | Absolute backstop for the footage relevance screen (embedding cosine of candidate title vs topic). A candidate below the **cut** is refused before download; the cut is `max(this, best − margin)`. Calibrated 2026-08-27: real Gemini cosines compress into 0.45–0.65, so the margin does the separating and this is the backstop. 
 | `LONGFORM_FOOTAGE_RELEVANCE_MARGIN` | `0.10` | unset | yes | How far below the best-scoring candidate a clip may fall and still be downloaded. The relative half of the relevance cut — what actually separates on-story hits from "Bring Your Lion Cub to Work Day" b-roll in a compressed score range. |
 | `PEXELS_API_KEY` | unset | **unset — needs a key** | yes | Enables the Pexels source in footage-search (`platform` provenance tier, approved for unattended use by DrJ 2026-08-27; the media gate refuses Pexels' AIGC bundle host outright). Free self-signup at pexels.com/api. Without it the tier contributes nothing and films draw only on the federal PD sources. |
 | `LONGFORM_RETAIN_REJECTED` | `3` | unset | yes | How many QC-rejected film directories to keep for diagnosis. Bounded so a run of failures cannot silently fill the volume. |
