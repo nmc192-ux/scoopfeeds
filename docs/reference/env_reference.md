@@ -132,6 +132,14 @@ own deterministic paths. Every attempt writes an `llm_usage` row (migration 040)
 | `ANALYSIS_MAX_OUTPUT_TOKENS` | `1024` | default | yes | Output cap (cost rail) for analysis briefs / deep dives. |
 | `LIVE_EVENTS_MAX_OUTPUT_TOKENS` | `1536` | default | yes | Output cap for the live-event dossier synthesis. |
 
+**Thinking is OFF on every Claude call by default** (`thinking: {type:"disabled"}`). `claude-haiku-5-5`
+emits a thinking block unless told not to, and thinking tokens count against `max_tokens`: on
+2026-10-09 the first production `live-events` call (cap 1536) returned no text at all. A call can opt in
+with the `thinking` option (`true` = model default; an object is sent verbatim). If a model ever rejects
+`disabled` with a 400, `llmQueue` drops it for the rest of the process and warns loudly. An empty answer
+at `stop_reason=max_tokens` is logged as `EMPTY TEXT at stop_reason=max_tokens for task "<name>"` and
+recorded as `llm_usage.error_class = empty_max_tokens` — watch for it.
+
 Task names in `llm_usage` / `/scoop-ops/metrics-ops` (`metrics.llm_usage`): `actors`,
 `analyst-brief`, `event-carousel`, `market-match`, `outcome-resolve`, `synth-question`,
 `radio-gate`, `radio-headline`, `radio-judge`, `longform-*`, `live-events`,

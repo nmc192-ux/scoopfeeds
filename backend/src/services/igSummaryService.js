@@ -68,7 +68,7 @@ async function generateSummary(article) {
   // was invisible from 2026-05 to the Jul snapshot. Record WHY it was
   // rejected and the actual length, plus the response shape that signals a
   // thinking/truncation blowout (empty text + thoughtsTokenCount).
-  if (!res.ok && res.errClass !== "empty") {
+  if (!res.ok && !String(res.errClass).startsWith("empty")) {
     logger.warn(`igSummary: LLM call failed (${res.errClass}) for article ${article.id}`);
     return null;
   }

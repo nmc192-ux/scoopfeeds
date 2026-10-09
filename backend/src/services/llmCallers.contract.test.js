@@ -69,6 +69,7 @@ test("scriptWriter: request shape and the full output contract", async () => {
     assert.equal(params.max_tokens, 4096);
     assert.equal(params.temperature, 0.4);
     assert.match(params.system, /valid JSON only/);
+    assert.deepEqual(params.thinking, { type: "disabled" });
     assert.equal(opts.timeout, 25000);
     assert.deepEqual(Object.keys(script).sort(), ["description", "disclosure", "hashtags", "meta", "narration", "slides", "titles"]);
     assert.equal(script.disclosure, true);
@@ -101,6 +102,16 @@ test("scriptWriter: stop_reason max_tokens is a hard rejection, logged with the 
     assert.match(line, /finishReason=MAX_TOKENS/);
     assert.match(line, /model=claude-haiku-5-5/);
     assert.match(line, new RegExp(`len=${SCRIPT_JSON.length}`));
+  } finally { s.restore(); w.restore(); }
+});
+
+test("scriptWriter: empty text at stop_reason=max_tokens (the cap eaten before any text) is logged as the 'empty' rejection", async () => {
+  const s = stub(() => ({ content: [{ type: "thinking", thinking: "..." }], usage: { input_tokens: 900, output_tokens: 4096 }, stop_reason: "max_tokens" }));
+  const w = warnings();
+  try {
+    assert.equal(await writeScript(ARTICLE), null);
+    assert.ok(w.lines.some(l => /EMPTY TEXT at stop_reason=max_tokens for task "script-writer"/.test(l)), w.lines.join("\n"));
+    assert.ok(w.lines.some(l => /rejected article a-script-1 — empty/.test(l) && /finishReason=MAX_TOKENS/.test(l)));
   } finally { s.restore(); w.restore(); }
 });
 

@@ -130,3 +130,14 @@ test("empty body → 'empty' rejection naming the model", async () => {
     assert.ok(w.lines.some(l => /videoPackaging: rejected article art-1 — empty/.test(l) && /model=claude-haiku-5-5/.test(l)));
   } finally { w.restore(); }
 });
+
+test("empty text at max_tokens (thinking ate the cap) is the 'empty' rejection too, and the model is sent thinking:disabled", async () => {
+  const calls = claude(() => ({ content: [{ type: "thinking", thinking: "..." }], usage: { input_tokens: 9000, output_tokens: 8192 }, stop_reason: "max_tokens" }));
+  const w = warnings();
+  try {
+    assert.equal(await callModel("PROMPT", OPTS), null);
+    assert.deepEqual(calls[0].params.thinking, { type: "disabled" });
+    assert.ok(w.lines.some(l => /EMPTY TEXT at stop_reason=max_tokens for task "video-spec"/.test(l)));
+    assert.ok(w.lines.some(l => /videoSpec: rejected article art-1 — empty/.test(l)));
+  } finally { w.restore(); }
+});

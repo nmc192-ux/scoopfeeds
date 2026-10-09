@@ -235,7 +235,7 @@ async function callModel(prompt, { articleId, tag, model, maxOutputTokens }) {
     const usage = res.rawUsage || {};
 
     if (!res.ok) {
-      if (res.errClass === "empty") {
+      if (String(res.errClass).startsWith("empty")) {
         logRejection({ tag, articleId, reason: "empty", len: 0, finishReason, usage, model });
       } else {
         // Transport / auth / billing failures were logged by llmQueue with their

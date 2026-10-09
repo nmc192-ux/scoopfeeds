@@ -143,6 +143,9 @@ export function getLlmBudgetStatus() {
 let _anthropicClient = null;
 let _anthropicInjected = false; // tests only
 let anthropicTemperatureRejected = false;
+// Thinking is sent as {type:"disabled"} on every call by default (see rawCallAnthropic).
+// If a model ever rejects that with a 400, this flips for the process.
+let anthropicThinkingDisabledRejected = false;
 
 function getAnthropicClient() {
   if (!_anthropicClient) _anthropicClient = new Anthropic({ apiKey: ANTHROPIC_API_KEY, maxRetries: 0 });
@@ -260,15 +263,35 @@ function imageBlock(img, mediaType) {
   return { type: "image", source: { type: "base64", media_type: mediaType, data } };
 }
 
+/**
+ * THINKING IS OFF BY DEFAULT. claude-haiku-5-5 emits a `thinking` block unless told
+ * not to, and thinking tokens count against max_tokens: on 2026-10-09 the first
+ * production live-events call returned stop_reason=max_tokens, output_tokens=1536
+ * and NO text — the whole cap spent thinking. These are structured-JSON tasks with
+ * tight caps, so every call sends thinking:{type:"disabled"} unless the caller opts
+ * in with `thinking`:
+ *   undefined / false → {type:"disabled"}
+ *   true              → send nothing (the model's own default, i.e. thinking on —
+ *                       size maxOutputTokens for it)
+ *   object            → sent verbatim (e.g. {type:"adaptive"})
+ * A model that rejects {type:"disabled"} with a 400 degrades once per process.
+ */
+function thinkingParam(thinking) {
+  if (thinking === true) return undefined;
+  if (thinking && typeof thinking === "object") return thinking;
+  return anthropicThinkingDisabledRejected ? undefined : { type: "disabled" };
+}
+
 async function rawCallAnthropic({
   prompt, temperature = 0.2, maxOutputTokens = 2048, model, timeoutMs, text: textMode = false,
-  schema, retryDelaysMs, images, imageMediaType = "image/jpeg",
+  schema, retryDelaysMs, images, imageMediaType = "image/jpeg", thinking, task = "untagged",
 }) {
   if (!ANTHROPIC_API_KEY && !_anthropicInjected) return failOutcome("unconfigured");
   const m = model || ANTHROPIC_MODEL;
   const delays = retryDelaysMs || RETRY_DELAYS_MS;
-  let freeRetryUsed = false;
+  let freeTempRetryUsed = false, freeThinkingRetryUsed = false;
   for (let attempt = 0; attempt <= delays.length; attempt++) {
+    let sentThinking;
     try {
       // Images first, then the text that refers to them.
       const content = images?.length
@@ -282,6 +305,8 @@ async function rawCallAnthropic({
         if (schema) params.output_config = { format: { type: "json_schema", schema } };
       }
       if (!anthropicTemperatureRejected) params.temperature = temperature;
+      sentThinking = thinkingParam(thinking);
+      if (sentThinking) params.thinking = sentThinking;
       const msg = await getAnthropicClient().messages.create(params, { timeout: timeoutMs ?? 30_000 });
 
       const u = msg?.usage || {};
@@ -299,7 +324,20 @@ async function rawCallAnthropic({
       }
       const out = (msg?.content || []).filter(b => b.type === "text").map(b => b.text).join("");
       if (!out) {
-        logger.warn(`🧠 Anthropic empty text (stop_reason=${msg?.stop_reason ?? "?"}, output_tokens=${u.output_tokens ?? "?"})`);
+        if (msg?.stop_reason === "max_tokens") {
+          // A DISTINCT class: the output cap was spent before any text appeared
+          // (thinking tokens, or a cap far too small). It must never hide behind a
+          // generic "empty" — it is what silently emptied every call on 2026-10-09.
+          const kinds = (msg?.content || []).map(b => b.type).join(",") || "none";
+          logger.warn(
+            `🧠 Anthropic EMPTY TEXT at stop_reason=max_tokens for task "${task}" (model=${m}, ` +
+            `output_tokens=${u.output_tokens ?? "?"} of max_tokens=${maxOutputTokens}, blocks=${kinds}, ` +
+            `thinking=${sentThinking ? sentThinking.type : "model-default"}) — the cap was consumed before any text. ` +
+            `Raise this task's maxOutputTokens or keep thinking disabled.`
+          );
+          return failOutcome("empty_max_tokens", meta);
+        }
+        logger.warn(`🧠 Anthropic empty text (stop_reason=${msg?.stop_reason ?? "?"}, output_tokens=${u.output_tokens ?? "?"}, task "${task}")`);
         return failOutcome("empty", meta);
       }
       meta.textLength = out.length;
@@ -313,7 +351,21 @@ async function rawCallAnthropic({
       if (status === 400 && !anthropicTemperatureRejected && /temperature|top_p|top_k|sampling/i.test(errText(err))) {
         anthropicTemperatureRejected = true;
         logger.warn(`🧠 Anthropic model ${m} rejected the temperature parameter — continuing WITHOUT it for all calls in this process`);
-        if (!freeRetryUsed) { freeRetryUsed = true; attempt--; }
+        if (!freeTempRetryUsed) { freeTempRetryUsed = true; attempt--; }
+        continue;
+      }
+      // The same degrade for the default thinking:{type:"disabled"}: a model that
+      // rejects it gets one immediate retry without it, for the rest of the process.
+      // LOUD, because it silently re-exposes the max_tokens-consumed-by-thinking
+      // failure for every task with a tight cap.
+      if (status === 400 && sentThinking?.type === "disabled" && !anthropicThinkingDisabledRejected && /thinking/i.test(errText(err))) {
+        anthropicThinkingDisabledRejected = true;
+        logger.warn(
+          `⚠️ Anthropic model ${m} REJECTED thinking:{type:"disabled"} — continuing WITHOUT it for ALL calls in this process. ` +
+          `Thinking tokens now count against max_tokens again; tasks with small caps may return empty text ` +
+          `(watch for "EMPTY TEXT at stop_reason=max_tokens"). Pick a model that accepts it, or raise the caps.`
+        );
+        if (!freeThinkingRetryUsed) { freeThinkingRetryUsed = true; attempt--; }
         continue;
       }
       const hard = classifyHardError(err);
@@ -438,6 +490,8 @@ function finalize(r, { task, text, strictJson, withMeta }) {
  *   withMeta   resolve to { ok, value, finishReason, truncated, rawUsage,
  *              model, estCostUsd, errClass, ... } — also on failure
  *   images     [Buffer | base64 string] sent as image blocks before the prompt
+ *   thinking   undefined/false → thinking DISABLED (default); true → model default
+ *              (thinking on); object → sent verbatim, e.g. {type:"adaptive"}
  *   retryDelaysMs  override the transient-retry backoff for this call
  */
 export function callJson(prompt, opts = {}) {
@@ -449,7 +503,7 @@ export function callJson(prompt, opts = {}) {
   // the queue; the cooldown elapsing turns the next call into the probe.
   if (breaker.isOpen("anthropic")) return Promise.resolve(null);
   if (!consumeLlmBudget(task)) return Promise.resolve(null);
-  const handlerOpts = { ...rest, text };
+  const handlerOpts = { ...rest, text, task };
   return enqueue(
     async () => finalize(await runGeneration({ task, prompt, handlerOpts }), { task, text, strictJson, withMeta }),
     priority

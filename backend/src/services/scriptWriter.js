@@ -172,7 +172,7 @@ async function callModel(prompt, articleId) {
   if (!res.ok) {
     // Transport/auth failures were already logged by llmQueue with their
     // status. An empty body is the content failure this log line exists for.
-    if (res.errClass === "empty") logRejection(articleId, "empty", 0, finishReason, usage, res.model);
+    if (String(res.errClass).startsWith("empty")) logRejection(articleId, "empty", 0, finishReason, usage, res.model);
     return null;
   }
 

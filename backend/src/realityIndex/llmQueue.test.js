@@ -198,6 +198,111 @@ test("RPM defaults to 50 and ANTHROPIC_RPM overrides it", async () => {
   assert.equal((await load({ ANTHROPIC_RPM: "7" })).getQueueStatus().rpm.anthropic, 7);
 });
 
+// ─── thinking: OFF by default ──────────────────────────────────────────────
+// 2026-10-09: haiku-5-5 thinks unless told not to, and thinking tokens count against
+// max_tokens, so the first production live-events call (cap 1536) returned no text.
+
+test("thinking: every call sends {type:'disabled'} by default — JSON, schema, text and image calls alike", async () => {
+  const q = await load();
+  const c = fakeClaude(() => claudeOk('{"ok":1}'));
+  q._test.setAnthropicClient(c);
+  await q.callJson("p", { task: "think-json" });
+  await q.callJson("p", { task: "think-schema", schema: { type: "object" } });
+  await q.callJson("p", { task: "think-text", text: true });
+  await q.callJson("p", { task: "think-img", images: [Buffer.from("x")] });
+  await q.callJson("p", { task: "think-false", thinking: false });
+  assert.equal(c.calls.length, 5);
+  for (const { params } of c.calls) assert.deepEqual(params.thinking, { type: "disabled" });
+});
+
+test("thinking: opt-in per call — true sends nothing (model default), an object is sent verbatim", async () => {
+  const q = await load();
+  const c = fakeClaude(() => claudeOk('{"ok":1}'));
+  q._test.setAnthropicClient(c);
+  await q.callJson("p", { task: "think-on", thinking: true });
+  await q.callJson("p", { task: "think-adaptive", thinking: { type: "adaptive" } });
+  assert.equal("thinking" in c.calls[0].params, false);
+  assert.deepEqual(c.calls[1].params.thinking, { type: "adaptive" });
+});
+
+test("thinking: a model that rejects thinking:disabled gets ONE free retry without it, a LOUD warning, and no thinking param for the rest of the process", async () => {
+  const q = await load();
+  const c = fakeClaude((i) => { if (i === 1) throw httpErr(400, '"thinking.type.disabled" is not supported for this model'); return claudeOk('{"ok":1}'); });
+  q._test.setAnthropicClient(c);
+  const w = capture();
+  try {
+    assert.deepEqual(await q.callJson("p", { task: "think-rej", retryDelaysMs: [] }), { ok: 1 }); // free retry even with no backoff budget
+    assert.equal(c.calls.length, 2);
+    assert.deepEqual(c.calls[0].params.thinking, { type: "disabled" });
+    assert.equal("thinking" in c.calls[1].params, false);
+    await q.callJson("p", { task: "think-rej" });
+    assert.equal("thinking" in c.calls[2].params, false, "persisted for the process");
+    const loud = w.warns.filter(l => /REJECTED thinking:\{type:"disabled"\}/.test(l));
+    assert.equal(loud.length, 1, "warned exactly once");
+    assert.match(loud[0], /EMPTY TEXT at stop_reason=max_tokens/, "tells the reader which symptom to watch for");
+    assert.equal(q._test.breaker.isOpen("anthropic"), false, "a degrade is not a hard failure");
+  } finally { w.restore(); }
+});
+
+test("thinking + temperature rejections degrade independently, in either order, each with its own free retry", async () => {
+  const q = await load();
+  const c = fakeClaude((i) => {
+    if (i === 1) throw httpErr(400, "temperature is not supported for this model");
+    if (i === 2) throw httpErr(400, "thinking.type.disabled is not supported for this model");
+    return claudeOk('{"ok":1}');
+  });
+  q._test.setAnthropicClient(c);
+  const w = capture();
+  try {
+    assert.deepEqual(await q.callJson("p", { task: "think-both", retryDelaysMs: [] }), { ok: 1 });
+    assert.equal(c.calls.length, 3);
+    assert.deepEqual(["temperature" in c.calls[2].params, "thinking" in c.calls[2].params], [false, false]);
+  } finally { w.restore(); }
+});
+
+test("thinking: an unrelated 400 does NOT flip the thinking flag", async () => {
+  const q = await load();
+  const c = fakeClaude((i) => { if (i === 1) throw httpErr(400, "messages: text content blocks must be non-empty"); return claudeOk("{}"); });
+  q._test.setAnthropicClient(c);
+  const w = capture();
+  try {
+    assert.equal(await q.callJson("p", { task: "think-unrelated" }), null);
+    await q.callJson("p", { task: "think-unrelated" });
+    assert.deepEqual(c.calls[1].params.thinking, { type: "disabled" });
+    assert.equal(w.warns.filter(l => /REJECTED thinking/.test(l)).length, 0);
+  } finally { w.restore(); }
+});
+
+test("empty text at stop_reason=max_tokens is its OWN class: a warn naming the task, cap and block types; ledger class empty_max_tokens; not hard", async () => {
+  const q = await load({ LLM_HEALTH_PING_URL: "https://hc.test/abc" });
+  const ax = stubAxios();
+  // what the 2026-10-09 production call looked like: the whole cap spent, no text block
+  q._test.setAnthropicClient(fakeClaude(() => ({ content: [{ type: "thinking", thinking: "..." }], usage: { input_tokens: 4000, output_tokens: 1536 }, stop_reason: "max_tokens" })));
+  const w = capture();
+  try {
+    const r = await q.callJson("p", { task: "live-events", maxOutputTokens: 1536, withMeta: true });
+    assert.deepEqual([r.ok, r.errClass, r.truncated], [false, "empty_max_tokens", true]);
+    const line = w.warns.find(l => /EMPTY TEXT at stop_reason=max_tokens/.test(l));
+    assert.ok(line, w.warns.join("\n"));
+    assert.match(line, /task "live-events"/);
+    assert.match(line, /output_tokens=1536 of max_tokens=1536/);
+    assert.match(line, /blocks=thinking/);
+    assert.match(line, /thinking=disabled/);
+    assert.equal(usageRows("live-events").at(-1).error_class, "empty_max_tokens");
+    await settle();
+    assert.equal(ax.posts.length + ax.gets.length, 0, "not a hard error: no ping");
+    assert.equal(q._test.breaker.isOpen("anthropic"), false);
+  } finally { ax.restore(); w.restore(); }
+  // a plain empty (end_turn) stays 'empty' and does not use the loud line
+  q._test.setAnthropicClient(fakeClaude(() => ({ content: [], usage: {}, stop_reason: "end_turn" })));
+  const w2 = capture();
+  try {
+    const r2 = await q.callJson("p", { task: "plain-empty", withMeta: true });
+    assert.equal(r2.errClass, "empty");
+    assert.ok(!w2.warns.some(l => /EMPTY TEXT at stop_reason=max_tokens/.test(l)));
+  } finally { w2.restore(); }
+});
+
 // ─── transient errors ──────────────────────────────────────────────────────
 
 test("transient 529/503: retried on the same call with backoff, then succeeds; nothing escalates", async () => {

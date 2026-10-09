@@ -41,6 +41,7 @@ test("pickInPoints sends every frame as a base64 image block ahead of the prompt
   const { params, opts } = calls[0];
   assert.equal(params.model, "claude-haiku-5-5");
   assert.equal(params.temperature, 0);
+  assert.deepEqual(params.thinking, { type: "disabled" }, "vision calls run with thinking off too");
   assert.equal(opts.timeout, 90000);
   const content = params.messages[0].content;
   assert.equal(content.length, 3);

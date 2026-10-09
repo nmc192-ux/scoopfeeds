@@ -110,15 +110,20 @@ async function directCall(prompt, { model, temperature, maxOutputTokens, timeout
   const params = {
     model, max_tokens: maxOutputTokens, temperature,
     system: "You are a helpful assistant. Respond with valid JSON only — no prose, no markdown fences.",
+    // Same as llmQueue: thinking OFF by default (its tokens would eat max_tokens).
+    thinking: { type: "disabled" },
     messages: [{ role: "user", content }],
   };
   let msg;
-  try { msg = await _client.messages.create(params, { timeout: timeoutMs }); }
-  catch (err) {
-    if (err?.status === 400 && /temperature|sampling/i.test(String(err.message))) { // llmQueue's same degrade
-      const { temperature: _t, ...rest } = params;
-      msg = await _client.messages.create(rest, { timeout: timeoutMs });
-    } else throw err;
+  // llmQueue's same degrades: drop temperature / thinking if the model rejects them.
+  for (let tries = 0; ; tries++) {
+    try { msg = await _client.messages.create(params, { timeout: timeoutMs }); break; }
+    catch (err) {
+      const m = String(err?.message || "");
+      if (tries < 2 && err?.status === 400 && params.temperature !== undefined && /temperature|sampling/i.test(m)) { delete params.temperature; continue; }
+      if (tries < 2 && err?.status === 400 && params.thinking && /thinking/i.test(m)) { delete params.thinking; continue; }
+      throw err;
+    }
   }
   const out = (msg.content || []).filter(b => b.type === "text").map(b => b.text).join("");
   const parsed = parseJsonLoose(out);
