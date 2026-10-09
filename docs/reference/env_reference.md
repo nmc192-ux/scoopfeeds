@@ -122,7 +122,8 @@ own deterministic paths. Every attempt writes an `llm_usage` row (migration 040)
 | `ANTHROPIC_RPM` | `50` | default | yes | Requests/minute window for the serial queue. |
 | `VIDEO_SPEC_MODEL` | `claude-haiku-5-5` | default | yes | Model for the video **spec** call only (the hard one). Candidate: `claude-sonnet-5-5` — measure with `scripts/llm-ab.mjs`. |
 | `VIDEO_VISION_MODEL` | `claude-haiku-5-5` | default | yes | Model for shot-resolver vision checks (frames sent as image blocks; fails closed). |
-| `LLM_HEALTH_PING_URL` | unset | **set (Healthchecks check)** | yes | Optional. `/fail` ping with a redacted reason on a hard LLM error; success ping when a call works again. The URL is a bearer token — never logged. Same helper and rules as the other heartbeats. |
+| `LLM_HEALTH_PING_URL` | unset | **set (Healthchecks check: period 1h, grace 1h)** | yes | Optional. A plain success ping after a successful Claude call, at most once per 10 min per process (so the check alerts if no call succeeds anywhere for ~2h); `/fail` with a redacted reason on a hard LLM error (red immediately); the first success after a failure pings at once. The URL is a bearer token — never logged. Same helper and rules as the other heartbeats. |
+| `LLM_HEALTH_PING_INTERVAL_MS` | `600000` | default | no | Minimum gap between success pings, per process. Test seam; leave unset. |
 | `LLM_BREAKER_THRESHOLD` | `3` | default | no | Consecutive hard failures that open the breaker. |
 | `LLM_BREAKER_COOLDOWN_MS` | `900000` | default | no | How long an open breaker returns null without calling the API (15 min), then one probe. One warn line on open / re-open / close. State is per process (web / worker / scheduler each keep their own). |
 | `LLM_DAILY_CALL_CAP` | `2000` | default | yes | Hard daily ceiling on LLM calls (consumed once per call, not per retry). Includes `ig-summary`, `script-writer`, `video-spec`, `video-vision`. |

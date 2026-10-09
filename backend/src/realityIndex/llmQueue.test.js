@@ -26,7 +26,7 @@ const { getDb } = await import("../models/database.js");
 const CONFIG_ENV = [
   "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_RPM", "LLM_DISABLED", "LLM_BREAKER_THRESHOLD",
   "LLM_BREAKER_COOLDOWN_MS", "LLM_HEALTH_PING_URL", "EMBED_PROVIDER", "OLLAMA_EMBED_MODEL",
-  "OLLAMA_EMBED_PREFIX", "OLLAMA_BASE_URL", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
+  "LLM_HEALTH_PING_INTERVAL_MS", "OLLAMA_EMBED_PREFIX", "OLLAMA_BASE_URL", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
 ];
 
 let n = 0;
@@ -209,7 +209,8 @@ test("transient 529/503: retried on the same call with backoff, then succeeds; n
     assert.deepEqual(await q.callJson("p", { task: "t-transient" }), { ok: 1 });
     assert.equal(c.calls.length, 3);
     await settle();
-    assert.equal(ax.posts.length + ax.gets.length, 0);
+    assert.equal(ax.posts.length, 0, "no /fail ping");
+    assert.deepEqual(ax.gets.map(g => g.url), ["https://hc.test/abc"], "just the periodic success ping");
     assert.equal(w.errors.length, 0);
   } finally { ax.restore(); w.restore(); }
 });
@@ -229,6 +230,81 @@ test("exhausted transient retries → null, classified 'transient' in llm_usage,
     assert.equal(w.errors.length, 0);
     assert.equal(q._test.breaker.isOpen("anthropic"), false);
   } finally { ax.restore(); w.restore(); }
+});
+
+// ─── periodic success ping ─────────────────────────────────────────────────
+
+test("success ping: a successful call pings the bare URL; further successes within the interval do not", async () => {
+  const q = await load({ LLM_HEALTH_PING_URL: "https://hc.test/SECRET-UUID" });
+  const ax = stubAxios();
+  q._test.setAnthropicClient(fakeClaude(() => claudeOk('{"ok":1}')));
+  const w = capture();
+  try {
+    for (let i = 0; i < 5; i++) await q.callJson("p", { task: "t-okping" });
+    await settle();
+    assert.deepEqual(ax.gets.map(g => g.url), ["https://hc.test/SECRET-UUID"]);
+    assert.equal(ax.posts.length, 0);
+    assert.ok(![...w.warns, ...w.errors].some(l => /SECRET-UUID/.test(l)), "URL never logged");
+  } finally { ax.restore(); w.restore(); }
+});
+
+test("success ping: pings again once the interval has elapsed (LLM_HEALTH_PING_INTERVAL_MS)", async () => {
+  const q = await load({ LLM_HEALTH_PING_URL: "https://hc.test/abc", LLM_HEALTH_PING_INTERVAL_MS: "40" });
+  const ax = stubAxios();
+  q._test.setAnthropicClient(fakeClaude(() => claudeOk('{"ok":1}')));
+  try {
+    await q.callJson("p", { task: "t-okping2" });
+    await q.callJson("p", { task: "t-okping2" });
+    await new Promise(r => setTimeout(r, 60));
+    await q.callJson("p", { task: "t-okping2" });
+    await settle();
+    assert.equal(ax.gets.length, 2, "first success + one after the interval; the middle call was rate-limited");
+  } finally { ax.restore(); }
+});
+
+test("success ping: the default interval is 10 minutes", async () => {
+  const q = await load({ LLM_HEALTH_PING_URL: "https://hc.test/abc", LLM_HEALTH_PING_INTERVAL_MS: null });
+  const ax = stubAxios();
+  q._test.setAnthropicClient(fakeClaude(() => claudeOk("{}")));
+  const realNow = Date.now;
+  try {
+    await q.callJson("p", { task: "t-okping3" });
+    Date.now = () => realNow() + 9 * 60_000;   // 9 min later: still rate-limited
+    await q.callJson("p", { task: "t-okping3" });
+    Date.now = () => realNow() + 10 * 60_000 + 1000; // past 10 min: pings
+    await q.callJson("p", { task: "t-okping3" });
+    await settle();
+    assert.equal(ax.gets.length, 2);
+  } finally { Date.now = realNow; ax.restore(); }
+});
+
+test("success ping: failures never send a success ping; a hard failure sends /fail and the next success pings immediately (recovery)", async () => {
+  const q = await load({ LLM_HEALTH_PING_URL: "https://hc.test/abc", LLM_BREAKER_THRESHOLD: "9" });
+  const ax = stubAxios();
+  let mode = "ok";
+  q._test.setAnthropicClient(fakeClaude(() => { if (mode === "ok") return claudeOk("{}"); throw httpErr(402, "Your credit balance is too low"); }));
+  const w = capture();
+  try {
+    await q.callJson("p", { task: "t-cycle" });           // success ping #1
+    mode = "bad";
+    await q.callJson("p", { task: "t-cycle" });           // /fail
+    mode = "ok";
+    await q.callJson("p", { task: "t-cycle" });           // recovery: immediate, inside the 10-min interval
+    await settle();
+    assert.deepEqual(ax.gets.map(g => g.url), ["https://hc.test/abc", "https://hc.test/abc"]);
+    assert.deepEqual(ax.posts.map(p => p.url), ["https://hc.test/abc/fail"]);
+  } finally { ax.restore(); w.restore(); }
+});
+
+test("success ping: no LLM_HEALTH_PING_URL → a successful call makes no HTTP request at all", async () => {
+  const q = await load();
+  const ax = stubAxios();
+  q._test.setAnthropicClient(fakeClaude(() => claudeOk("{}")));
+  try {
+    await q.callJson("p", { task: "t-nourl" });
+    await settle();
+    assert.equal(ax.gets.length + ax.posts.length, 0);
+  } finally { ax.restore(); }
 });
 
 // ─── hard errors: loud error + ping + breaker ──────────────────────────────

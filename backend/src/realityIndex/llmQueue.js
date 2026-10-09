@@ -24,6 +24,9 @@
  *               instead of hammering a dead account. After the cooldown one
  *               probe is allowed; its success closes the breaker and sends the
  *               recovery ping. There is no fallback provider.
+ *   A plain success ping also goes out after a good call, at most once per 10 min
+ *   per process, so the check (period 1h / grace 1h) alerts if no call succeeds
+ *   for ~2h. Ping URLs are bearer tokens and are never logged.
  *
  * Every provider attempt writes one llm_usage row (llmUsage.js, prices in
  * llmPricing.js). The global daily call cap (llm_daily_calls) is consumed once
@@ -352,12 +355,25 @@ function onHardFailure(o, task) {
   breaker.recordHardFailure("anthropic", `${o.errClass}${o.status ? ` ${o.status}` : ""} ${scrub(o.message).slice(0, 120)}`.trim());
 }
 
+// Success ping: at most once per interval per PROCESS (web / worker / scheduler
+// each ping on their own clock). The Healthchecks check is period 1h / grace 1h,
+// so it alerts when no call has succeeded anywhere for ~2h, and the /fail ping
+// above turns it red immediately on a hard error. The first success after a
+// hard failure pings at once (recovery), regardless of the interval.
+const HEALTH_PING_INTERVAL_MS = Number.parseInt(process.env.LLM_HEALTH_PING_INTERVAL_MS || "", 10) || 10 * 60_000;
+let lastOkPingAt = 0;
+
 function onSuccess() {
   breaker.recordSuccess("anthropic");
+  const now = Date.now();
   if (llmUnhealthy) {
     llmUnhealthy = false;
     logger.warn("✅ LLM recovered — a call succeeded after a hard failure");
+    lastOkPingAt = now;
     pingSuccess(HEARTBEAT_PING_URLS.llm); // clears the Healthchecks fail state
+  } else if (now - lastOkPingAt >= HEALTH_PING_INTERVAL_MS) {
+    lastOkPingAt = now;
+    pingSuccess(HEARTBEAT_PING_URLS.llm); // never awaited, never throws, URL never logged
   }
 }
 
