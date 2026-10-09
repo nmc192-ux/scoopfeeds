@@ -172,3 +172,53 @@ test("ATOMIC WRITE: a reader looping on the file never sees a partial or unparsa
 
 // The screen itself (sample:false never shows the template's sample numbers) is covered by
 // frontend/tests/e2e/radio-screen.spec.js (Playwright), which loads the template from disk.
+
+test("CLAUDE SCREEN: drops opinion/soft, raises sensitive (never lowers it), and its failure falls back to rules only", async () => {
+  const keepAll = async (p) => ({ verdicts: [...p.matchAll(/id=(\S+)/g)].map((m) => ({ id: m[1], verdict: "keep" })) });
+  const rows = [
+    { title: "Senate passes stopgap bill to avert shutdown", source: "AP News", category: "politics" },
+    { title: "Lawmakers trade blame as the deadline nears and voters lose patience", source: "The Hill", category: "politics" },
+    { title: "Governor signs order on prison policy after court ruling", source: "Reuters", category: "politics" },
+    { title: "Oil prices climb as supply talks stall", source: "CNBC", category: "business" },
+    { title: "WHO approves malaria vaccine for wider use in Africa", source: "WHO News", category: "health" },
+    { title: "NASA delays crewed moon lander test to 2027", source: "NASA News", category: "science" },
+  ];
+
+  // 1 · the screen judges; "voters lose patience" = opinion, prison order = sensitive.
+  {
+    const { db, cleanup } = makeTestDb({ prefix: "radio-screen-" });
+    seed(db, rows);
+    const screenLlm = async (p) => ({
+      items: [...p.matchAll(/id=(\S+) \| (.*)/g)].map(([, id, t]) => ({
+        id, opinion: /voters lose patience/.test(t), soft: false, sensitive: /prison/.test(t),
+      })),
+    });
+    const { state, stats } = await buildRadioState({ db, now: NOW, gateLlm: keepAll, wordLlm: async () => null, screenLlm });
+    const text = JSON.stringify(state);
+    assert.equal(/voters lose patience/.test(text), false, "an opinion item aired");
+    assert.equal(state.music.some((m) => /prison/.test(m.h)), false, "a screen-sensitive item reached music");
+    assert.match(stats.screen, /^llm:/);
+    assert.ok(db.prepare(`SELECT 1 FROM radio_dropped WHERE rule = 'radio:screen-opinion'`).get(), "screen drop not logged");
+    cleanup();
+  }
+
+  // 2 · the screen can never LOWER a rules verdict.
+  {
+    const { db, cleanup } = makeTestDb({ prefix: "radio-screen2-" });
+    seed(db, [...rows, { title: "Suicide is up among Black Americans, a new report finds", source: "NPR News", category: "health" }]);
+    const screenLlm = async (p) => ({ items: [...p.matchAll(/id=(\S+)/g)].map((m) => ({ id: m[1], opinion: false, soft: false, sensitive: false })) });
+    const { state } = await buildRadioState({ db, now: NOW, gateLlm: keepAll, wordLlm: async () => null, screenLlm });
+    assert.equal(state.music.some((m) => /Suicide/.test(m.h)), false, "screen un-marked a rules-sensitive item");
+    cleanup();
+  }
+
+  // 3 · screen down: the build still completes on the rules layer alone.
+  {
+    const { db, cleanup } = makeTestDb({ prefix: "radio-screen3-" });
+    seed(db, rows);
+    const { state, stats } = await buildRadioState({ db, now: NOW, gateLlm: keepAll, wordLlm: async () => null, screenLlm: async () => { throw new Error("529 overloaded"); } });
+    assert.ok(state.headline, "no headline when the screen failed");
+    assert.match(stats.screen, /^fallback:error/);
+    cleanup();
+  }
+});
