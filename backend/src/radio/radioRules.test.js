@@ -134,6 +134,11 @@ test("LIVE LEAKS 10 Oct 2026: opinion and roundups are dropped by rule; executio
     "Vance says he will not watch a live-streamed execution under a Hegseth plan",
     "Texas carries out execution by lethal injection",
     "Man on death row granted last-minute stay",
+    "Iran carries out 10 executions in a week",
+    "Court upholds death sentence for bomber",
+    "Man sentenced to death in murder case",
+    "States debate capital punishment",
+    "Prisoner executed in Alabama",
   ]) assert.equal(isRadioSensitive(title), true, title);
   // Hard news that shares a word stays.
   for (const title of ["Firm improves trade execution speed", "Executive order on tariffs signed", "Analysts expect the Fed to hold rates", "Opinion polls show a tight Senate race"]) {

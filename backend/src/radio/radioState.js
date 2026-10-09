@@ -106,10 +106,16 @@ export function loadCandidates(db, now = Date.now()) {
 // ─── wording ────────────────────────────────────────────────────────────────
 
 const WORDING_PROMPT = (items) => [
-  "Rewrite each news headline for a calm, factual US news radio screen (ScoopFeeds).",
-  `Each must be at most ${HEADLINE_MAX} characters, plain English, present tense, no clickbait, no emoji,`,
-  "no outlet names, and must not add any fact that is not in the original.",
-  'Reply ONLY with JSON: {"items":[{"id":"<id>","h":"<headline>"}]}',
+  "You prepare headlines for a calm, factual 24/7 US news radio screen (ScoopFeeds). For EVERY item return:",
+  `- h: the headline rewritten in at most ${HEADLINE_MAX} characters, plain English, present tense, no clickbait,`,
+  "  no emoji, no outlet names, adding no fact that is not in the original.",
+  "- opinion: true if it is an opinion piece, op-ed, editorial, column, commentary or an argument, not reporting.",
+  "- soft: true if it is not hard news: shopping/deals, product reviews, how-to/advice, listicles, quizzes,",
+  "  celebrity gossip, horoscopes, recipes, podcasts/newsletters/roundups, or first-person lifestyle pieces.",
+  "- sensitive: true if light background music under it would be inappropriate: death, killing, executions,",
+  "  death sentences or capital punishment, suicide or self-harm, sexual violence or abuse, child harm,",
+  "  terrorism, mass casualties, war atrocities, or graphic violence. When unsure, answer true.",
+  'Reply ONLY with JSON: {"items":[{"id":"<id>","h":"<headline>","opinion":false,"soft":false,"sensitive":false}]}',
   "",
   ...items.map((s) => `id=${s.lead.id} | ${String(s.lead.title || "").slice(0, 220)}`),
 ].join("\n");
@@ -132,65 +138,40 @@ export function chooseFittingLeads(stories) {
   return { fit, unfit };
 }
 
-async function wordLines(stories, llm) {
-  const fallback = (s) => fitOf(s.lead);
-  const lines = new Map(stories.map((s) => [s.lead.id, fallback(s)]));
-  if (!stories.length) return { lines, source: "none" };
+/**
+ * ONE Claude call (task "radio-headline") over the top of the ranking returns, per story,
+ * the on-air headline AND an editorial verdict {opinion, soft, sensitive}.
+ *
+ * The verdict only ever ADDS to the keyword rules, which stay the floor. A story with no
+ * verdict — the call failed, returned null, was malformed, or skipped that id — gets
+ * `verdict: null`, which the builder treats as SENSITIVE (kept out of music). Never "safe".
+ */
+export const HEADLINE_TOP = 30;
+
+async function headlineCall(stories, llm) {
+  const lines = new Map(stories.map((s) => [String(s.lead.id), fitOf(s.lead)]));
+  const verdicts = new Map();
+  if (!stories.length) return { lines, verdicts, source: "none" };
   try {
     const res = await llm(WORDING_PROMPT(stories));
-    if (res == null) return { lines, source: "fallback:no answer" };   // llmQueue returns null when disabled / over budget
+    if (res == null) return { lines, verdicts, source: "fallback:no answer" };   // llmQueue returns null when disabled / over budget / breaker open
     const got = Array.isArray(res?.items) ? res.items : null;
-    if (!got) return { lines, source: "fallback:malformed" };
+    if (!got) return { lines, verdicts, source: "fallback:malformed" };
     let used = 0;
     for (const it of got) {
+      const id = String(it?.id);
+      if (!lines.has(id)) continue;
+      // A verdict counts only when all three flags are real booleans; anything else = no verdict.
+      if ([it.opinion, it.soft, it.sensitive].every((x) => typeof x === "boolean")) {
+        verdicts.set(id, { opinion: it.opinion, soft: it.soft, sensitive: it.sensitive });
+      }
       const raw = String(it?.h || "").replace(/\s+/g, " ").trim();
       const h = raw.length <= HEADLINE_MAX && !/…|\.\.\.$/.test(raw) ? raw : "";   // over-long LLM lines are rejected, not cut
-      if (h && lines.has(String(it?.id)) && h.length >= 12) { lines.set(String(it.id), h); used++; }
+      if (h && h.length >= 12) { lines.set(id, h); used++; }
     }
-    return { lines, source: used ? `llm:${used}/${stories.length}` : "fallback:empty" };
+    return { lines, verdicts, source: used ? `llm:${used}/${stories.length}` : "fallback:empty", verdictCount: verdicts.size };
   } catch (err) {
-    return { lines, source: `fallback:error ${String(err?.message || err).slice(0, 80)}` };
-  }
-}
-
-// ─── screen (one Claude call; may only make the feed STRICTER) ───────────────
-// Keyword rules miss phrasing ("an opinion piece argues", "live-streamed execution").
-// One call classifies the top of the ranking. It can DROP opinion/soft items and MARK
-// items sensitive; it can never un-mark a rules verdict. If it is unavailable the
-// rules layer still stands and the build carries on (reported in stats.screen).
-export const SCREEN_TOP = 40;
-
-const SCREEN_PROMPT = (stories) => [
-  "You screen headlines for a 24/7 US news radio screen (ScoopFeeds). For each item decide:",
-  "- opinion: true if it is an opinion piece, op-ed, editorial, column, commentary or an argument, not reporting.",
-  "- soft: true if it is not hard news: shopping/deals, product reviews, how-to/advice, listicles, quizzes,",
-  "  celebrity gossip, horoscopes, recipes, podcasts/newsletters/roundups, or first-person lifestyle pieces.",
-  "- sensitive: true if light background music under it would be inappropriate: death, killing, executions or",
-  "  the death penalty, suicide or self-harm, sexual violence or abuse, child harm, terrorism, mass casualties,",
-  "  war atrocities, or graphic violence.",
-  "When unsure about sensitive, answer true.",
-  'Reply ONLY with JSON: {"items":[{"id":"<id>","opinion":false,"soft":false,"sensitive":false}]}',
-  "",
-  ...stories.map((s) => `id=${s.lead.id} | ${String(s.lead.title || "").slice(0, 220)}`),
-].join("\n");
-
-async function screenStories(stories, llm) {
-  const verdicts = new Map();
-  if (!stories.length) return { verdicts, source: "none" };
-  try {
-    const res = await llm(SCREEN_PROMPT(stories));
-    if (res == null) return { verdicts, source: "fallback:no answer" };
-    const got = Array.isArray(res?.items) ? res.items : null;
-    if (!got) return { verdicts, source: "fallback:malformed" };
-    const ids = new Set(stories.map((s) => String(s.lead.id)));
-    for (const it of got) {
-      const id = String(it?.id);
-      if (!ids.has(id)) continue;
-      verdicts.set(id, { opinion: it.opinion === true, soft: it.soft === true, sensitive: it.sensitive === true });
-    }
-    return { verdicts, source: `llm:${verdicts.size}/${stories.length}` };
-  } catch (err) {
-    return { verdicts, source: `fallback:error ${String(err?.message || err).slice(0, 80)}` };
+    return { lines, verdicts, source: `fallback:error ${String(err?.message || err).slice(0, 80)}` };
   }
 }
 
@@ -198,14 +179,13 @@ async function screenStories(stories, llm) {
 
 /**
  * Build the state object. Pure apart from DB reads, drop logging and the injected LLM.
- * @param {{ db?, now?, gateLlm?, wordLlm?, screenLlm? }} deps
+ * @param {{ db?, now?, gateLlm?, wordLlm? }} deps
  */
 export async function buildRadioState({
   db = getDb(),
   now = Date.now(),
   gateLlm = (p, o = {}) => callJson(p, { task: "radio-gate", priority: "normal", ...o }),
   wordLlm = (p) => callJson(p, { task: "radio-headline", priority: "normal" }),
-  screenLlm = (p) => callJson(p, { task: "radio-screen", priority: "normal" }),
 } = {}) {
   const drops = {};
   const drop = (a, rule, reason) => {
@@ -231,16 +211,19 @@ export async function buildRadioState({
   // Every title in the group plus the lead's description: one tragic outlet's framing is enough.
   for (const s of ranked) s.sensitive = isRadioSensitive(s.articles.map((a) => a.title));
 
-  // 2b · Claude screen over the top of the ranking: drop opinion/soft, raise sensitive.
-  const { verdicts: screened, source: screen } = await screenStories(ranked.slice(0, SCREEN_TOP), screenLlm);
+  // 2b · the headline call (task "radio-headline") over the top of the ranking: headline + verdict.
+  // Keyword rules are the floor; the verdict only adds. No verdict = sensitive (fail safe).
+  const top = ranked.slice(0, HEADLINE_TOP);
+  const { lines, verdicts, source: wording } = await headlineCall(top, wordLlm);
   ranked = ranked.filter((s) => {
-    const v = screened.get(String(s.lead.id));
-    if (!v) return true;
+    const v = verdicts.get(String(s.lead.id));
+    if (!v) { s.sensitive = true; return true; }                       // no verdict → never under music
     if (v.sensitive) s.sensitive = true;                                // may raise, never lower
-    if (v.opinion) { drop(s.lead, "radio:screen-opinion", "Claude screen: opinion"); return false; }
-    if (v.soft) { drop(s.lead, "radio:screen-soft", "Claude screen: not hard news"); return false; }
+    if (v.opinion) { drop(s.lead, "radio:llm-opinion", "headline call verdict: opinion"); return false; }
+    if (v.soft) { drop(s.lead, "radio:llm-soft", "headline call verdict: not hard news"); return false; }
     return true;
   });
+  const noVerdict = top.filter((s) => !verdicts.has(String(s.lead.id))).length;
 
   // 3 · pick, judge the picks, replace any the judge drops
   const judged = new Map();
@@ -269,10 +252,9 @@ export async function buildRadioState({
     }
   }
 
-  // 4 · wording (one call; never blocks the build)
+  // 4 · lines come from the headline call; stories ranked below HEADLINE_TOP keep their cleaned title
   const airing = [slots.headline, ...slots.also, ...slots.music].filter(Boolean);
-  const { lines, source: wording } = await wordLines(airing, wordLlm);
-  const line = (s) => lines.get(s.lead.id);
+  const line = (s) => lines.get(String(s.lead.id)) || fitOf(s.lead);
 
   const state = {
     sample: false,
@@ -283,7 +265,7 @@ export async function buildRadioState({
   };
   const stats = {
     candidates: candidates.length, kept: kept.length, stories: ranked.length, multiOutlet,
-    airing: airing.length, music: state.music.length, drops, wording, screen,
+    airing: airing.length, music: state.music.length, drops, wording, noVerdict,
   };
   return { state, stats };
 }
@@ -308,7 +290,7 @@ export async function runRadioStateCycle(deps = {}) {
     const meta = { phase: "complete", startedAt, ms: Date.now() - startedAt, pruned, ...stats };
     recordHeartbeat("radio_state", meta);
     pingHeartbeat(HEARTBEAT_PING_URLS.radio);            // completion only
-    logger.info(`📻 radio state: ${stats.airing} item(s) from ${stats.stories} stories (${stats.multiOutlet} with ≥2 outlets); drops ${JSON.stringify(stats.drops)}; screen ${stats.screen}; wording ${stats.wording}`);
+    logger.info(`📻 radio state: ${stats.airing} item(s) from ${stats.stories} stories (${stats.multiOutlet} with ≥2 outlets); drops ${JSON.stringify(stats.drops)}; headline ${stats.wording} (no verdict: ${stats.noVerdict}, treated sensitive)`);
     return meta;
   } catch (err) {
     const meta = { phase: "error", startedAt, ms: Date.now() - startedAt, error: String(err?.message || err).slice(0, 300) };

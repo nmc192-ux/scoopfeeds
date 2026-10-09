@@ -111,10 +111,13 @@ export const SENSITIVE_TOPICS = new RegExp(
     "mass (?:shooting|shootings|killing|killings|casualty)", "school shooting\\w*", "shooting spree", "gunman",
     "terror(?:ist)? attacks?", "terrorist", "terrorists", "suicide (?:bomb\\w*|attack\\w*)", "bombing",
     // Capital punishment — live leak 10 Oct 2026 ("…live-streamed execution…" under music).
-    // "execution" alone is too broad (trade execution, strategy execution), so it needs a qualifier.
-    "(?:live[- ]?stream(?:ed)?|public|televised|state|firing[- ]squad|botched|scheduled|planned) executions?",
-    "executions? (?:of|by|under|plan)", "executed (?:by|for|in prison)", "death row", "death penalty",
-    "lethal injection", "firing squad", "hanged", "beheaded\\w*", "beheading\\w*",
+    // Explicit per DrJ: executions, death sentences, capital punishment. The bare singular
+    // "execution" needs a qualifier (trade/strategy execution is business news).
+    "capital punishment", "death sentences?", "sentenced to death", "death row", "death penalty",
+    "executions", "executed",
+    "(?:live[- ]?stream(?:ed)?|public|televised|state|firing[- ]squad|botched|scheduled|planned|stay of) executions?",
+    "executions? (?:of|by|under|plan|date|order|warrant|chamber)",
+    "lethal injection", "firing squad", "hanged", "gallows", "beheaded\\w*", "beheading\\w*",
   ].join("|") + ")\\b",
   "i"
 );
