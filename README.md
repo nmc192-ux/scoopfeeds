@@ -47,9 +47,9 @@ Key entry points:
 - **Frontend:** React + Vite
 - **Deployment:** VPS (`/opt/scoopfeeds`), Docker Compose — `web` / `worker` / `scheduler`
   containers split by `SCOOP_PROCESS_ROLE`
-- **AI:** Google Gemini, pinned via `GEMINI_GENERATION_MODEL`, with deterministic
+- **AI:** Claude (Anthropic) for generation, via `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`; Gemini for embeddings only; with deterministic
   (non-LLM) fallbacks on every path and hard cost rails (`LLM_DAILY_CALL_CAP`,
-  `thinkingBudget: 0`, output caps)
+  output caps, a per-call `llm_usage` ledger)
 - **Event graph:** embedding clustering + a single entity-affinity measure shared by the
   promoter, merge and breaker — see [dossier & event graph](docs/architecture/dossier_and_event_graph.md)
 - **Search backbone (planned):** Brave Search API + Exa.ai

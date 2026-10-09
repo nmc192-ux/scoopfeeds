@@ -106,15 +106,70 @@ conclude no floor is the honest answer.
 | `EVENT_TL_MIN_DEDUP` | `4` | default | yes | Below this article count, dedup is a no-op so thin events never over-collapse. |
 | `EVENT_TIMELINE_MAX_EVENTS` | `2000` | default | yes | Selection window for the `event_timeline` writer (was a hardcoded 500). See the starvation failure mode in the architecture doc. |
 
-## LLM (gate (a) cost rails — incident closed)
+## LLM — Claude is the only generation provider (cost rails from gate (a))
+
+All generation goes through `realityIndex/llmQueue.js` to Anthropic's Messages API
+(`@anthropic-ai/sdk`). Transient errors (503/429/529, resets) retry with backoff. **Hard
+errors** (401/402/403, "credit balance is too low", model 404) are not retried: one loud
+`logger.error`, a Healthchecks `/fail` ping, and a circuit breaker that stops calling for
+~15 min, then probes once. There is **no fallback provider** — callers fall back to their
+own deterministic paths. Every attempt writes an `llm_usage` row (migration 040).
 
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
-| `GEMINI_GENERATION_MODEL` | `gemini-2.5-flash` | **`gemini-3.1-flash-lite`** | yes | Pinned generation model. A dead pin returns 404 and falls back deterministically — see `--list-models`. |
-| `GEMINI_API_KEY` | — | set | yes | Credential. |
-| `LLM_DAILY_CALL_CAP` | `2000` | default | yes | Hard daily ceiling on LLM calls. Part of the cost rails after the gate-(a) incident. |
-| `LLM_DISABLED` / `GEMINI_DISABLED` | unset | default | yes | Kill switches; deterministic fallbacks take over. |
-| `ANALYSIS_MAX_OUTPUT_TOKENS` | see code | default | yes | Output cap (cost rail). `thinkingBudget` is pinned to 0 in `llmQueue.js`. |
+| `ANTHROPIC_API_KEY` | — | **set before deploy** | yes | The credential. Unset = every LLM caller takes its deterministic path (and `VIDEO_SPEC_ENABLED` aborts the video cycle). |
+| `ANTHROPIC_MODEL` | `claude-haiku-5-5` | default | yes | Default model for every task (and video packaging). A model absent from `llmPricing.js` still works; its `llm_usage.est_cost_usd` is NULL and it warns once. |
+| `ANTHROPIC_RPM` | `50` | default | yes | Requests/minute window for the serial queue. |
+| `VIDEO_SPEC_MODEL` | `claude-haiku-5-5` | default | yes | Model for the video **spec** call only (the hard one). Candidate: `claude-sonnet-5-5` — measure with `scripts/llm-ab.mjs`. |
+| `VIDEO_VISION_MODEL` | `claude-haiku-5-5` | default | yes | Model for shot-resolver vision checks (frames sent as image blocks; fails closed). |
+| `LLM_HEALTH_PING_URL` | unset | **set (Healthchecks check: period 1h, grace 1h)** | yes | Optional. A plain success ping after a successful Claude call, at most once per 10 min per process (so the check alerts if no call succeeds anywhere for ~2h); `/fail` with a redacted reason on a hard LLM error (red immediately); the first success after a failure pings at once. The URL is a bearer token — never logged. Same helper and rules as the other heartbeats. |
+| `LLM_HEALTH_PING_INTERVAL_MS` | `600000` | default | no | Minimum gap between success pings, per process (shared by the LLM and embed checks). Test seam; leave unset. |
+| `LLM_BREAKER_THRESHOLD` | `3` | default | no | Consecutive hard failures that open the breaker. |
+| `LLM_BREAKER_COOLDOWN_MS` | `900000` | default | no | How long an open breaker returns null without calling the API (15 min), then one probe. One warn line on open / re-open / close. State is per process (web / worker / scheduler each keep their own). |
+| `LLM_DAILY_CALL_CAP` | `2000` | default | yes | Hard daily ceiling on LLM calls (consumed once per call, not per retry). Includes `ig-summary`, `script-writer`, `video-spec`, `video-vision`. |
+| `LLM_DISABLED` | unset | default | yes | Kill switch; deterministic fallbacks take over. |
+| `LLM_RETRY_DELAYS_MS` | `4000,9000,18000` | default | no | Transient-error backoff. Test seam; leave unset. |
+| `ANALYSIS_MAX_OUTPUT_TOKENS` | `1024` | default | yes | Output cap (cost rail) for analysis briefs / deep dives. |
+| `LIVE_EVENTS_MAX_OUTPUT_TOKENS` | `1536` | default | yes | Output cap for the live-event dossier synthesis. |
+
+Task names in `llm_usage` / `/scoop-ops/metrics-ops` (`metrics.llm_usage`): `actors`,
+`analyst-brief`, `event-carousel`, `market-match`, `outcome-resolve`, `synth-question`,
+`radio-gate`, `radio-headline`, `radio-judge`, `longform-*`, `live-events`,
+`analysis-brief|persp|explained`, `deep-dive`, `ig-summary`, `script-writer`,
+`video-spec`, `video-packaging`, `video-vision`, and `embed` (the embedding lane).
+
+### Embeddings — Gemini (embeddings ONLY; generation is Claude)
+
+`llmQueue.embed()` calls the Gemini Embedding API (`gemini-embedding-001`, 768-dim via
+`outputDimensionality`). Gemini has no generation path anywhere in the code. Each embed is one
+`llm_usage` row (task `embed`; `embedContent` returns no token usage and the price table has no
+embedding rate, so tokens and `est_cost_usd` are NULL — calls and failures are still counted).
+A **hard error** (billing / auth / permission / dead model) logs one loud line (rate-limited) and
+pings `/fail` on `EMBED_HEALTH_PING_URL`; a success ping goes out at most once per 10 min per
+process; the first success after a failure pings at once.
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `GEMINI_API_KEY` | — | set | yes | Credential (embeddings only). |
+| `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | default | no | The pinned embedding model. Recorded per vector in `embedding_meta.model`; changing it means a re-embed (`scripts/reembed.mjs --clear --yes --run`). |
+| `EMBED_PROVIDER` | `gemini` | default | no | `gemini` \| `cloudflare` (bge-base, 768-dim) \| `ollama` (nomic-embed-text, 768-dim). The last two are dormant code — nothing deploys Ollama. |
+| `LLM_EMBED_DIMS` / `GEMINI_EMBED_DIMS` | `768` | default | no | Must match the `vec0` table (`FLOAT[768]`). |
+| `LLM_EMBED_CONCURRENCY` | `4` | default | no | Concurrent embed calls. |
+| `EMBED_HEALTH_PING_URL` | unset | **set (Healthchecks check: period 1h, grace 1h)** | yes | Optional. `/fail` with a redacted reason on a hard embed error; a plain success ping after a successful embed (≤ once per 10 min per process, `LLM_HEALTH_PING_INTERVAL_MS`). The URL is a bearer token — never logged. Independent of `LLM_HEALTH_PING_URL`. |
+| `OLLAMA_BASE_URL` / `OLLAMA_EMBED_MODEL` / `OLLAMA_EMBED_PREFIX` | `http://localhost:11434` / `nomic-embed-text` / `1` | unset | no | Only if `EMBED_PROVIDER=ollama` (dormant). |
+| `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_EMBED_MODEL` | — | unset | no | Only if `EMBED_PROVIDER=cloudflare` (dormant). |
+
+**One model per index.** Vectors from different models must never mix: `searchNearest({ model })`
+filters by `embedding_meta.model` and `embeddings_by_model` on `/scoop-ops/ri-ops/dashboard` shows
+whether the index is mixed. `scripts/reembed.mjs` needs no cutover today — embeddings stay on
+`gemini-embedding-001`; it is a tool for a future model change and a gap-filler.
+
+### Removed in this change (setting any of these now does nothing)
+
+`GEMINI_GENERATION_MODEL`, `GEMINI_DISABLED`, `GEMINI_RPM`, `LLM_PROVIDER`, `LLM_PREMIUM_PROVIDER`,
+`LLM_RPM`, `CEREBRAS_*`, `GROQ_*`, `DEEPSEEK_*`, `NVIDIA_API_KEY`, `NIM_*`, `CLOUDFLARE_GEN_MODEL`,
+`OLLAMA_MODEL` (generation).
+
 | `ENTITY_EXTRACTION_ENABLED` | `false` | **set** | yes | LLM/NER entity extraction feeding the affinity measure. |
 | `ENTITY_EXTRACTION_BATCH` | `100` | **set** | yes | Articles per extraction batch. |
 | `ENTITY_IDF_ENABLED` | `false` | default | yes | Maintain the rolling entity-IDF window that all rarity weighting depends on. |
@@ -147,10 +202,10 @@ and run in the **worker**. See `docs/video-pipeline.md` for why the rules are wh
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
 | `VIDEO_AUTOPOST_ENABLED` | unset (**off**) | `1` | yes | Master switch. The only thing between built and live. Literal `"1"`. |
-| `VIDEO_SPEC_ENABLED` | unset (**off**) | `1` | yes | Required, *and* `GEMINI_API_KEY` must be set, or the cycle aborts loudly rather than skipping every candidate. |
+| `VIDEO_SPEC_ENABLED` | unset (**off**) | `1` | yes | Required, *and* `ANTHROPIC_API_KEY` must be set, or the cycle aborts loudly rather than skipping every candidate. |
 | `VIDEO_MAX_PER_DAY` | `4` | **`12`** | yes | Rolling-24h publish cap. Not a calendar day — a calendar reset lets a quiet day burst. |
 | `VIDEO_MIN_INTERVAL_MS` | `24h / max × 0.8` (≈1.6h at 12/day) | default | yes | Spacing gate. The 0.8 slack gives more opportunities than videos, so a failure costs time rather than a video. |
-| `VIDEO_MAX_SPEC_CALLS_PER_CYCLE` | `8` | default | yes | **The money.** Gemini spec calls per cycle. Only incremented at the model call, so a gate that refuses an article before it costs nothing and consumes nothing. |
+| `VIDEO_MAX_SPEC_CALLS_PER_CYCLE` | `8` | default | yes | **The money.** Spec calls per cycle. Only incremented at the model call, so a gate that refuses an article before it costs nothing and consumes nothing. |
 | `VIDEO_MAX_ATTEMPTS_PER_CYCLE` | `8` | default | yes | **Deprecated name for the above**, still honoured; `VIDEO_MAX_SPEC_CALLS_PER_CYCLE` wins if both are set. It used to count *candidates examined*, which is how a cycle logged `tried 8, produced 0 · spec spend $0.00000` — the whole spend budget consumed without one model call. |
 | `VIDEO_MAX_SCAN_PER_CYCLE` | `200` | default | yes | **The work.** Candidates examined per cycle — a backstop, not a policy, since uncounted free refusals otherwise have no bound. Sits at the pool size so it cannot silently cap selection; logs loudly if it ever fires. |
 | `VIDEO_CANDIDATE_POOL` | `200` | default | yes | **The sample.** `LIMIT` on the candidate query. Was `VIDEO_MAX_ATTEMPTS_PER_CYCLE × 6` = 48, so the spend budget silently sized the editorial pool. Ordering is `LENGTH(content) DESC`, so the limit takes the longest-bodied articles rather than sampling: measured on one 12h prod window, `LIMIT 48` returned 11 publishers out of the 45 present, `LIMIT 200` returned 31. |
@@ -262,7 +317,7 @@ carries measured multi-second blocks. It did not: prod logged *"could not renew 
 
 The damage was subtler than it looks. Duplicate renders were already prevented by
 `videoAutopost`'s process-local `cycleInFlight` guard — **unless the worker restarted**, which
-removes the guard and gives a genuine duplicate render and duplicate Gemini + ElevenLabs
+removes the guard and gives a genuine duplicate render and duplicate LLM + ElevenLabs
 spend. Routinely it corrupted bookkeeping: the job DID publish, then failed `moveToFinished`,
 so BullMQ recorded a failure for a cycle that succeeded. And a job stuck `active` with a dead
 lock makes the next dispatch log *"already active — dedup held"* and **not run** — the shape of
@@ -315,7 +370,6 @@ they are **unverified against real platform chrome** as of 2026-08-12.
 | `VIDEO_MUSIC_BED_VOICE_RATIO` | `6` | default | restart | Compression ratio in the voice leveller. Range 1…20. |
 | `VIDEO_MUSIC_BED_ENCODE_HEADROOM_DB` | `1.5` | default | restart | How far **below** the −2.0 dBTP delivery target the mix is encoded, to leave the AAC encoder room for inter-sample overshoot. Measured: a mix leaving loudnorm at exactly −1.99 dBTP came back from the encoder at **+0.67** — 2.66 dB of overshoot. Because overshoot is content-dependent, `scoreShort` also **measures the encoded file** and re-encodes once with the excess removed if it is still over; if it is over after that it logs loudly rather than shipping silently. Range 0…12. |
 | `VIDEO_SHOT_ENGINE_ENABLED` | unset (**off**) | unset | restart | Master switch for the shot engine (`docs/briefs/shot-engine-shorts.md`): every phase of it ships dark behind this flag and it flips only after DrJ rules on the three offline samples (Phase 6). Today it implies `VIDEO_WORD_CAPTIONS_ENABLED`, and it makes the spec writer emit a **shot list** on every card (`shots: [{anchor, kind, subject, source_intent}]`, `videoShotList.js`) which the schema then REQUIRES: every anchor verbatim in its caption and in order, the first on the caption's opening words, at most three shots a card, at most two `punch` shots a video, kind/intent pairs from a closed table, and an estimated average shot length of 3.0 s or less (caption words at `VIDEO_SPEC_WPM`). Failures are spec-level and take the normal single retry. Off, the prompt is byte-identical. It also gates the **resolver ladder** (`services/shots/`, Phase 3): reuse (`shot_assets`, migration 038) → incident candidates → Commons video (transcodes, vision-picked in-points, banner crops) → open-web news photos → Commons/Wikidata photos → Esri satellite → Natural Earth map → stock (abstract only) → card. It also switches `produceVideo` to the **shot renderer** (Phase 4, `shots/shotVideo.js` + `backend/shotengine/`) and turns on **pre-resolve**: a rate-gated render cycle writes the NEXT short's spec and resolves its shots into a plan (`<data>/shot-plans/`, 6 h TTL); when the slot opens the cycle takes the plan — no second spec call, no resolution. Later phases add to what it gates. Gated on the literal string `"1"`. |
-| `VIDEO_VISION_MODEL` | `gemini-3.5-flash` | unset | restart | The Gemini model the shot resolver uses to pick clip in-points and screen frames and photos (sensitivity, social screenshots, private individuals). Only read when the shot engine runs. Fails CLOSED: no key, a failed call or unparseable JSON means the picture is refused. Needs `GEMINI_API_KEY`. |
 | `VIDEO_SHOT_RESOLVE_BUDGET_S` | `300` | unset | restart | Per-video time budget for the shot resolver. A Commons clip costs 20–190 s (polite seeks + a vision call; measured 24 Sep 2026) and the render job holds a 10-minute lock, so past the budget the Commons-video rung is skipped and the cheaper rungs still run. Floor 30. |
 | `SHOT_ENGINE_PYTHON` | `python3` | set by the image: `/opt/shotengine/bin/python` | recreate | The interpreter for the shot engine's Python render step (`backend/shotengine/render.py`). The Dockerfile builds a venv with pinned numpy / Pillow / headless OpenCV and sets this; only read when `VIDEO_SHOT_ENGINE_ENABLED=1`. |
 | `SHOT_METRICS_RETENTION_DAYS` | `14` | unset | restart | How long the shot engine's per-short metrics records and contact sheets (`<data>/shot-metrics/<day>/`) are kept; swept at worker startup. Floor 2. |
@@ -713,7 +767,7 @@ respect: its own table (`longform_posts`), its own cadence, its own gates.
 | `QUEUE_CONCURRENCY_LONGFORM` | `1` | unset | restart | **STRICTLY 1.** The rolling weekly cap is a global count — two concurrent cycles would both read "under cap" and both publish a film. |
 | `QUEUE_LOCK_MS_LONGFORM` | `30 min` | unset | restart | ~3× the **measured** 10.3 min bundle render (#75), because that figure was taken on an idle box. Too short is not a slow job, it is a DUPLICATE FILM: BullMQ re-runs a job whose lock lapses. |
 | `LONGFORM_MIN_SOURCE_CHARS` | `8000` | unset | yes | Source-corpus floor for the per-candidate source gate. Full text is fetched (fetch-extract-discard, via the videoFullText discipline) in widening tranches until met. **Costs the candidate, never the cycle** — the selector walks the ranked list, and a thin topic stays eligible for later cycles. |
-| `LONGFORM_FOOTAGE_RELEVANCE` | `0.45` | unset | yes | Absolute backstop for the footage relevance screen (embedding cosine of candidate title vs topic). A candidate below the **cut** is refused before download; the cut is `max(this, best − margin)`. Calibrated 2026-08-27: real Gemini cosines compress into 0.45–0.65, so the margin does the separating and this is the backstop. |
+| `LONGFORM_FOOTAGE_RELEVANCE` | `0.45` | unset | yes | Absolute backstop for the footage relevance screen (embedding cosine of candidate title vs topic). A candidate below the **cut** is refused before download; the cut is `max(this, best − margin)`. Calibrated 2026-08-27: real Gemini cosines compress into 0.45–0.65, so the margin does the separating and this is the backstop. 
 | `LONGFORM_FOOTAGE_RELEVANCE_MARGIN` | `0.10` | unset | yes | How far below the best-scoring candidate a clip may fall and still be downloaded. The relative half of the relevance cut — what actually separates on-story hits from "Bring Your Lion Cub to Work Day" b-roll in a compressed score range. |
 | `PEXELS_API_KEY` | unset | **unset — needs a key** | yes | Enables the Pexels source in footage-search (`platform` provenance tier, approved for unattended use by DrJ 2026-08-27; the media gate refuses Pexels' AIGC bundle host outright). Free self-signup at pexels.com/api. Without it the tier contributes nothing and films draw only on the federal PD sources. |
 | `LONGFORM_RETAIN_REJECTED` | `3` | unset | yes | How many QC-rejected film directories to keep for diagnosis. Bounded so a run of failures cannot silently fill the volume. |

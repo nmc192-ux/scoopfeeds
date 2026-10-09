@@ -287,8 +287,8 @@ const SITE_ORIGIN = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").r
  *
  * These were one constant — `MAX_ATTEMPTS`, default 8 — doing three jobs at
  * three different altitudes, which is what produced `tried 8, produced 0 · spec
- * spend $0.00000`: the cycle exhausted a budget that exists to cap Gemini spend
- * without making a single Gemini call.
+ * spend $0.00000`: the cycle exhausted a budget that exists to cap LLM spend
+ * without making a single LLM call.
  *
  *   MAX_SPEC_CALLS   THE MONEY. Incremented immediately before _writeVideoSpec
  *                    and nowhere else, so what it counts is what it is named
@@ -495,7 +495,7 @@ export async function choosePhotoUnderlay({
 /**
  * The OUTCOME switch (VIDEO_OUTCOME_PING_URL) — decided by video_posts, not by
  * the cycle's shape, because the shape has lied twice. On 2026-08-30 the
- * Gemini balance died after the daily cap was full, so every subsequent cycle
+ * LLM balance died after the daily cap was full, so every subsequent cycle
  * short-circuited at the cap check and pinged success WITHOUT ATTEMPTING A
  * SPEC: no attempt, no uniform failure, nothing for the cycle dead-man to see.
  * Green checks, zero videos — the 2026-08-12 outage wore the same face.
@@ -1939,11 +1939,11 @@ export async function runVideoRenderCycle({ dryRun = false, now = Date.now(), de
     // yield report's clothes. One error line, one exit.
     if (!_isVideoSpecEnabled()) {
       logger.error(
-        "🚨 video cycle ABORTED — VIDEO_SPEC_ENABLED is not 1, or GEMINI_API_KEY is unset. " +
+        "🚨 video cycle ABORTED — VIDEO_SPEC_ENABLED is not 1, or ANTHROPIC_API_KEY is unset. " +
         "No candidate can produce a spec in this configuration; skipping every article one at a " +
         "time would report this as a yield problem instead of a config problem."
       );
-      return finish({ skipped: "no-spec", reason: "VIDEO_SPEC_ENABLED or GEMINI_API_KEY unset" });
+      return finish({ skipped: "no-spec", reason: "VIDEO_SPEC_ENABLED or ANTHROPIC_API_KEY unset" });
     }
     if (!_isVoiceConfigured()) {
       const why = voiceConfigProblem() || "voice not configured";

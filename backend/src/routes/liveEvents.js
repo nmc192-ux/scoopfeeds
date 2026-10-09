@@ -17,6 +17,7 @@ import { refreshEvent } from "../services/liveEvents.js";
 import { discoverCandidates } from "../services/eventDiscovery.js";
 import { isRsshubEnabled } from "../services/socialSignals.js";
 import { logger } from "../services/logger.js";
+import { isLlmAvailable } from "../realityIndex/llmQueue.js";
 
 const router = express.Router();
 
@@ -95,7 +96,7 @@ router.get("/_/candidates", (req, res) => {
       meta: {
         windowHours,
         rsshubEnabled: isRsshubEnabled(),
-        geminiEnabled: Boolean(process.env.GEMINI_API_KEY),
+        llmEnabled: isLlmAvailable(),
       },
     });
   } catch (err) {

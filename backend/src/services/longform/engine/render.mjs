@@ -57,7 +57,7 @@ export const HAS_PAYOFF = new Set(["stat", "statement", "equation", "bars", "led
  * it had already drifted: `recededText` was missing here entirely until ledger
  * rows started rendering `undefined`. Two copies of one number set is the
  * failure this repo has had with the tragedy keywords and with
- * GEMINI_GENERATION_MODEL's two defaults — and it is what let the shorts and
+ * the old split LLM-model defaults — and it is what let the shorts and
  * the films need two separate contrast fixes.
  *
  * `videoSlideChrome.js` imports nothing, so this costs the engine no

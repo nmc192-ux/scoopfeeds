@@ -101,7 +101,7 @@ export const defaultJobOptions = {
  * WHAT IT COST, which is worth knowing because it is not what it looks like:
  * duplicate renders were already prevented by videoAutopost's process-local
  * cycleInFlight guard, so the retry no-ops — UNLESS the worker restarted, which
- * removes the guard and gives a genuine duplicate render and duplicate Gemini +
+ * removes the guard and gives a genuine duplicate render and duplicate LLM +
  * ElevenLabs spend. The routine damage was bookkeeping: the original job DID
  * publish, then failed moveToFinished, so BullMQ recorded a failure for a cycle
  * that succeeded, poisoning the heartbeat and the yield log. And a job stuck

@@ -38,7 +38,7 @@ cp backend/.env.production.example backend/.env.production
 Edit `backend/.env.production` and set any keys you want:
 
 - `OPENWEATHER_API_KEY` for weather
-- `GEMINI_API_KEY` for AI summaries
+- `ANTHROPIC_API_KEY` for AI summaries (and an Ollama endpoint for embeddings)
 - `PORT=4000` is fine by default
 
 ## 4. Test locally on the Mac mini

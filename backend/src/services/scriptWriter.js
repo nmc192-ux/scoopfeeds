@@ -27,41 +27,23 @@
  *
  * Required env:
  *   SCRIPT_LLM_ENABLED=1        — master switch (default off)
- *   GEMINI_API_KEY              — reuses the key analysisService already uses
+ *   ANTHROPIC_API_KEY           — Claude, via llmQueue (task "script-writer")
  *
  * Optional env:
- *   GEMINI_GENERATION_MODEL     — model pin, shared with the other direct
- *                                 callers (default gemini-3.1-flash-lite)
+ *   ANTHROPIC_MODEL             — model (default claude-haiku-5-5)
  *   SCRIPT_LLM_MAX_OUTPUT_TOKENS — output cap (default 4096)
  *   SCRIPT_LLM_WPM              — words-per-minute for duration budget (default 150)
  */
 
-import axios from "axios";
 import { logger } from "./logger.js";
-import {
-  buildGeminiGenerationConfig,
-  isGeminiThinkingRejection,
-  markGeminiThinkingRejected,
-  isGeminiModelGone,
-  markGeminiModelGone,
-} from "../realityIndex/llmQueue.js";
+import { callJson, isLlmAvailable } from "../realityIndex/llmQueue.js";
 
-// PINNED model, never a "-latest" floating alias. On 2026-07-15 a floating
-// alias elsewhere silently resolved to a THINKING model whose reasoning
-// tokens bill as output — $23.33 of output SKU in a day with zero rows
-// persisted. This service bypasses llmQueue, so it must carry the same two
-// protections itself: an explicit pin + thinkingBudget:0 with graceful
-// degrade (see callModel below).
-//
-// Default is gemini-3.1-flash-lite, NOT the gemini-2.5-flash this file used
-// to carry — the 2026-07-16 pre-test found 2.5-flash returns 404 ("no longer
-// available to new users"), so the old default 404s on every call. Reads
-// GEMINI_GENERATION_MODEL so prod's pin flows in, same as igSummaryService.
-// The former SCRIPT_LLM_MODEL knob is retired: a second, service-local model
-// var is exactly how a pin drifts out of sync with the rest of the callers.
-const MODEL = process.env.GEMINI_GENERATION_MODEL || "gemini-3.1-flash-lite";
-const ENDPOINT = (key) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
+// Task "script-writer". Model selection, the transient-retry loop, hard-error
+// handling (loud error + health ping + circuit breaker), the daily call cap and
+// usage logging all live in llmQueue. MODEL is only the default for log lines —
+// the model that actually answered is on the llmQueue result and wins in
+// meta.model.
+const MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-5-5";
 
 // 4096, NOT the original 1024. Two reasons, and the second is the load-bearing
 // one. (1) A full script is not a caption: the `dossier` format targets 3-6
@@ -75,16 +57,8 @@ const MAX_OUTPUT_TOKENS = Number.parseInt(process.env.SCRIPT_LLM_MAX_OUTPUT_TOKE
 const WPM = Number.parseInt(process.env.SCRIPT_LLM_WPM || "150", 10);
 const TIMEOUT_MS = 25000;
 
-// Gemini 2.5 Flash rates, matching the figures pinned in analysisService.
-// Left unchanged with the pin move to gemini-3.1-flash-lite deliberately:
-// flash-lite is the cheaper tier, so meta.costUsd is now an UPPER BOUND rather
-// than an exact figure. Guessing at flash-lite's published rates to make the
-// number look precise would be worse than a documented over-estimate.
-const RATE_IN_PER_M = 0.30;
-const RATE_OUT_PER_M = 2.50;
-
 export function isScriptWriterEnabled() {
-  return process.env.SCRIPT_LLM_ENABLED === "1" && !!process.env.GEMINI_API_KEY;
+  return process.env.SCRIPT_LLM_ENABLED === "1" && isLlmAvailable();
 }
 
 // ─── Prompt ─────────────────────────────────────────────────────────────────
@@ -155,8 +129,6 @@ Provide one slide per narration beat (4-5 for short, 6-8 for dossier). Slide tex
 
 // ─── Model call ─────────────────────────────────────────────────────────────
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
 /**
  * Every rejection path logs the same four fields. A script can be dropped for
  * five different reasons and, until now, four of them logged something
@@ -166,113 +138,71 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
  * from "reasoning tokens ate the output budget", and they are the difference
  * between a real diagnosis and a shrug.
  */
-function logRejection(articleId, reason, len, finishReason, usage) {
+function logRejection(articleId, reason, len, finishReason, usage, model = MODEL) {
   logger.warn(
     `🎬 scriptWriter: rejected article ${articleId} — ${reason} (len=${len}, ` +
-    `model=${MODEL}, finishReason=${finishReason ?? "?"}, ` +
+    `model=${model}, finishReason=${finishReason ?? "?"}, ` +
     `thoughtsTokenCount=${usage?.thoughtsTokenCount ?? "?"})`
   );
 }
 
 async function callModel(prompt, articleId) {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return null;
+  if (!isLlmAvailable()) return null;
+
+  // temperature 0.4: low but not zero — scripts need some variation in phrasing
+  // or every video opens the same way, which reads as automated.
+  // retryDelaysMs [4000, 9000]: this caller's own transient-retry schedule.
+  const res = await callJson(prompt, {
+    task: "script-writer",
+    temperature: 0.4,
+    maxOutputTokens: MAX_OUTPUT_TOKENS,
+    timeoutMs: TIMEOUT_MS,
+    retryDelaysMs: [4000, 9000],
+    withMeta: true,
+  });
+  if (!res) return null;
 
   // Log the resolved model on every call so a silent repoint (via env) or a
   // dead pin is visible in the logs rather than invisible drift.
-  logger.info(`🎬 scriptWriter: Gemini model=${MODEL} for article ${articleId}`);
+  logger.info(`🎬 scriptWriter: ${res.provider || "llm"} model=${res.model} for article ${articleId}`);
 
-  // thinkingBudget:0 disables reasoning: this is a structured-JSON writing
-  // task, thinking tokens bill as output and can eat maxOutputTokens so the
-  // visible JSON comes back empty. Models with a mandatory minimum budget
-  // reject thinkingBudget:0 with a 400 — flip the shared llmQueue degrade flag
-  // and retry once WITHOUT thinkingConfig instead of failing. Mirrors
-  // igSummaryService and llmQueue.
-  const RETRY_DELAYS_MS = [4000, 9000];
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    try {
-      const { data } = await axios.post(
-        ENDPOINT(key),
-        {
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: buildGeminiGenerationConfig({
-            // Low but not zero: scripts need some variation in phrasing or
-            // every video opens the same way, which reads as automated.
-            temperature: 0.4,
-            responseMimeType: "application/json",
-            maxOutputTokens: MAX_OUTPUT_TOKENS,
-          }),
-        },
-        { timeout: TIMEOUT_MS }
-      );
+  const finishReason = res.finishReason ?? undefined;
+  const usage        = res.rawUsage || {};
 
-      const candidate    = data?.candidates?.[0];
-      const finishReason = candidate?.finishReason;
-      const usage        = data?.usageMetadata || {};
-      const text         = candidate?.content?.parts?.[0]?.text;
-
-      if (!text) {
-        logRejection(articleId, "empty", 0, finishReason, usage);
-        return null;
-      }
-
-      // MAX_TOKENS is a HARD rejection, never a salvage attempt. The 2026-08-02
-      // live verification only exercised format=short (414-445 output tokens);
-      // the production format is 5-8x that, so the 4096 cap is UNTESTED at the
-      // size that matters and truncation is the failure it will produce. A
-      // truncated script that happens to parse is the worst outcome available:
-      // a video narrated to the point the model ran out of budget, mid-arc,
-      // with nothing downstream able to tell it apart from a finished one.
-      if (finishReason === "MAX_TOKENS") {
-        logRejection(articleId, "truncated_max_tokens", text.length, finishReason, usage);
-        return null;
-      }
-
-      // Parse OUTSIDE the generic catch below: a truncated or fenced response
-      // is a content failure with a diagnosable shape, not a transport error,
-      // and swallowing it as "call failed" loses finishReason — the one field
-      // that says whether the budget was the cause.
-      let parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        logRejection(articleId, "unparseable_json", text.length, finishReason, usage);
-        return null;
-      }
-
-      const cost =
-        ((usage.promptTokenCount || 0) / 1e6) * RATE_IN_PER_M +
-        ((usage.candidatesTokenCount || 0) / 1e6) * RATE_OUT_PER_M;
-
-      return { parsed, usage, cost, finishReason };
-    } catch (err) {
-      // Degrade path 1 — the pin needs a thinking budget. Flip the shared flag
-      // and retry immediately (no backoff: nothing is rate-limiting us, the
-      // request shape was simply wrong).
-      if (isGeminiThinkingRejection(err)) {
-        markGeminiThinkingRejected(logger);
-        continue;
-      }
-      // Degrade path 2 — the pin is dead for this key. STOP. No retry helps,
-      // and silently falling back to another model is the floating-alias bug
-      // wearing a different hat.
-      if (isGeminiModelGone(err)) {
-        markGeminiModelGone(MODEL, logger);
-        return null;
-      }
-      const status = err.response?.status;
-      const transient = status === 503 || status === 429 ||
-                        err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
-      if (transient && attempt < RETRY_DELAYS_MS.length) {
-        logger.warn(`🎬 scriptWriter: ${status || err.code} — retry in ${RETRY_DELAYS_MS[attempt]}ms`);
-        await sleep(RETRY_DELAYS_MS[attempt]);
-        continue;
-      }
-      logger.warn("🎬 scriptWriter: call failed", { status, model: MODEL, error: err.message });
-      return null;
-    }
+  if (!res.ok) {
+    // Transport/auth failures were already logged by llmQueue with their
+    // status. An empty body is the content failure this log line exists for.
+    if (res.errClass === "empty") logRejection(articleId, "empty", 0, finishReason, usage, res.model);
+    return null;
   }
-  return null;
+
+  // MAX_TOKENS is a HARD rejection, never a salvage attempt. The 2026-08-02
+  // live verification only exercised format=short (414-445 output tokens);
+  // the production format is 5-8x that, so the 4096 cap is UNTESTED at the
+  // size that matters and truncation is the failure it will produce. A
+  // truncated script that happens to parse is the worst outcome available:
+  // a video narrated to the point the model ran out of budget, mid-arc,
+  // with nothing downstream able to tell it apart from a finished one.
+  // llmQueue maps Anthropic stop_reason "max_tokens" to the MAX_TOKENS finish
+  // reason these log lines have always used.
+  if (res.truncated) {
+    logRejection(articleId, "truncated_max_tokens", res.textLength ?? 0, finishReason, usage, res.model);
+    return null;
+  }
+
+  // A truncated or fenced response is a content failure with a diagnosable
+  // shape, not a transport error — keep finishReason, the one field that says
+  // whether the budget was the cause.
+  const parsed = res.value;
+  if (!parsed || typeof parsed !== "object" || "_rawText" in parsed) {
+    logRejection(articleId, "unparseable_json", res.textLength ?? 0, finishReason, usage, res.model);
+    return null;
+  }
+
+  // Priced from llmPricing.js; 0 (not a guess) when the model is not in the table.
+  const cost = res.estCostUsd ?? 0;
+
+  return { parsed, usage, cost, finishReason, model: res.model, provider: res.provider };
 }
 
 // ─── Output validation ──────────────────────────────────────────────────────
@@ -366,7 +296,7 @@ export async function writeScript(article, { format = "short", targetSeconds = 4
     // reason — a well-formed response that simply has no narration field.
     if (!result) return null;
     if (!result?.parsed?.narration) {
-      logRejection(article.id, "no_narration_field", 0, result.finishReason, result.usage);
+      logRejection(article.id, "no_narration_field", 0, result.finishReason, result.usage, result.model);
       return null;
     }
 
@@ -377,7 +307,7 @@ export async function writeScript(article, { format = "short", targetSeconds = 4
 
     const words = narration.split(/\s+/).length;
     if (words < Math.max(20, wordBudget * 0.4)) {
-      logRejection(article.id, `too_short (${words}w/${wordBudget}w)`, narration.length, finishReason, usage);
+      logRejection(article.id, `too_short (${words}w/${wordBudget}w)`, narration.length, finishReason, usage, result.model);
       return null;
     }
 
@@ -385,12 +315,12 @@ export async function writeScript(article, { format = "short", targetSeconds = 4
     if (!grounding.ok) {
       // Fail closed. A templated-but-true script beats a fluent-but-invented
       // one every time for a credibility product.
-      logRejection(article.id, `ungrounded — ${grounding.note}`, narration.length, finishReason, usage);
+      logRejection(article.id, `ungrounded — ${grounding.note}`, narration.length, finishReason, usage, result.model);
       return null;
     }
 
     if (parsed.confidence === "low") {
-      logRejection(article.id, "low_confidence", narration.length, finishReason, usage);
+      logRejection(article.id, "low_confidence", narration.length, finishReason, usage, result.model);
       return null;
     }
 
@@ -406,7 +336,7 @@ export async function writeScript(article, { format = "short", targetSeconds = 4
       // Spec §7.4.
       disclosure: true,
       meta: {
-        model: MODEL,
+        model: result.model || MODEL,
         format,
         words: narration.split(/\s+/).length,
         wordBudget,

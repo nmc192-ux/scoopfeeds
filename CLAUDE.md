@@ -132,7 +132,7 @@ for days. Don't remove that removal.
 `backend/src/realityIndex/` is the pipeline:
 
 - `ingest/` — RSS, aggregators, markets, trends, geo, sports
-- `embeddings/` — Gemini embeddings, stored via `sqlite-vec`
+- `embeddings/` — Gemini embeddings (gemini-embedding-001, 768-dim; embeddings only — generation is Claude), stored via `sqlite-vec`; every vector records its model
 - `clustering/semanticClusterer.js` — greedy centroid-cosine
 - `intelligence/` — the judges: `eventPromoter` (create/match/merge/absorb), `eventBreaker`
   (curative split + facets), `storyAffinity` (**the single affinity measure all judges

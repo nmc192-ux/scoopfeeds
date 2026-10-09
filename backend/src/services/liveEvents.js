@@ -4,18 +4,16 @@
  * For each seeded event:
  *   1. Pull related articles from the DB (keyword OR-match, preferred-
  *      source boost). See findArticlesForEvent.
- *   2. Ask Gemini 1.5 Flash (free tier, 15 RPM) to collapse them into a
+ *   2. Ask Claude (llmQueue task "live-events") to collapse them into a
  *      timestamped point-wise brief + extract metric estimates. If no
- *      GEMINI_API_KEY is configured, fall back to a deterministic brief
+ *      ANTHROPIC_API_KEY is configured, fall back to a deterministic brief
  *      built straight from article headlines (no hallucination risk).
  *   3. Fetch live metrics (crude oil quote) and overlay them onto the
  *      LLM output.
  *   4. Cache the dossier in live_events (JSON blobs).
  *
- * Why Gemini 1.5 Flash: it's free, fast, and handles 30–50 article
- * excerpts in one prompt without hitting the free-tier rate limits when
- * refreshed hourly. Phase C will route this through a self-hosted model
- * on HF if the free tier is insufficient.
+ * Why a small, fast model: it handles 30–50 article excerpts in one prompt
+ * cheaply when refreshed hourly.
  */
 
 import axios from "axios";
@@ -27,22 +25,13 @@ import {
 import { rankByAuthenticity, scoreFor } from "../config/mediaAuthenticity.js";
 import { fetchEventSocialSignals } from "./socialSignals.js";
 import { logger } from "./logger.js";
-import {
-  buildGeminiGenerationConfig,
-  isGeminiThinkingRejection,
-  markGeminiThinkingRejected,
-  isGeminiModelGone,
-  markGeminiModelGone,
-  consumeLlmBudget,
-} from "../realityIndex/llmQueue.js";
+import { callJson, isLlmAvailable } from "../realityIndex/llmQueue.js";
 
-// PINNED (2026-07-15 cost incident) — same pin + rates as llmQueue:
-// gemini-2.5-flash, $0.30/1M input, $2.50/1M output. This site also had no
-// output cap while thinking billed as output.
-const GEMINI_MODEL = process.env.GEMINI_GENERATION_MODEL || "gemini-2.5-flash";
-const GEMINI_ENDPOINT = (key) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
-const GEMINI_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.LIVE_EVENTS_MAX_OUTPUT_TOKENS || "1536", 10);
+// Model pin, thinking-budget degrade, dead-model handling, the daily call cap
+// and usage logging all live in llmQueue now (task "live-events", pinned to
+// Claude). This site once had no
+// output cap while thinking billed as output (2026-07-15 cost incident).
+const LLM_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.LIVE_EVENTS_MAX_OUTPUT_TOKENS || "1536", 10);
 
 // ─── Metric fetchers ───────────────────────────────────────────────────────
 
@@ -102,7 +91,7 @@ function buildCeasefireTile(ceasefireIso) {
   };
 }
 
-// ─── Gemini synthesizer ────────────────────────────────────────────────────
+// ─── LLM synthesizer ──────────────────────────────────────────────────────
 
 function buildPrompt(event, articles, socialPosts = []) {
   const items = articles.map((a, i) => {
@@ -148,74 +137,39 @@ ${items}${socialBlock}`;
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Free-tier Gemini intermittently returns 503 UNAVAILABLE / 429 RESOURCE_EXHAUSTED
-// for prompts of this size. Retry transient errors with exponential backoff so
-// we don't silently fall back to deterministic briefs every cycle.
-async function synthesizeWithGemini(event, articles, socialPosts = []) {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return null;
+// The API intermittently returns 503/429/529 under load; llmQueue retries transient errors with exponential
+// backoff so we don't silently fall back to deterministic briefs every cycle.
+async function synthesizeBrief(event, articles, socialPosts = []) {
+  if (!isLlmAvailable()) return null;
   if (articles.length === 0 && socialPosts.length === 0) return null;
   const prompt = buildPrompt(event, articles, socialPosts);
-  if (!consumeLlmBudget("live-events")) return null; // global daily rail (gate a)
-  const RETRY_DELAYS_MS = [4000, 9000, 18000];
-
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    try {
-      const { data } = await axios.post(
-        GEMINI_ENDPOINT(key),
-        {
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: buildGeminiGenerationConfig({
-            temperature: 0.2,
-            responseMimeType: "application/json",
-            maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
-          }),
-        },
-        { timeout: 25000 }
-      );
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) {
-        const fr = data?.candidates?.[0]?.finishReason;
-        const thought = data?.usageMetadata?.thoughtsTokenCount;
-        logger.warn(`🛰️  Gemini empty text for event ${event.id} (finishReason=${fr ?? "?"}, thoughtsTokenCount=${thought ?? "?"})`);
-        return null;
-      }
-      const parsed = JSON.parse(text);
-      // Attach source objects using the indices Gemini returned.
-      const brief = (parsed.brief || []).map((p) => ({
-        ts: p.ts,
-        text: p.text,
-        sources: (p.sourceIndices || [])
-          .map((i) => articles[i - 1])
-          .filter(Boolean)
-          .map((a) => ({ name: a.source_name, url: a.url })),
-      }));
-      return {
-        summary: parsed.summary || null,
-        brief,
-        metrics: parsed.metrics || {},
-      };
-    } catch (err) {
-      if (isGeminiThinkingRejection(err)) {
-        markGeminiThinkingRejected(logger);
-        continue;
-      }
-      if (isGeminiModelGone(err)) {
-        markGeminiModelGone(GEMINI_MODEL, logger);
-        return null; // pin is dead — deterministic brief takes over
-      }
-      const status = err.response?.status;
-      const transient = status === 503 || status === 429 || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
-      if (transient && attempt < RETRY_DELAYS_MS.length) {
-        logger.warn(`🛰️  Gemini ${status || err.code} for event ${event.id} — retrying in ${RETRY_DELAYS_MS[attempt]}ms`);
-        await sleep(RETRY_DELAYS_MS[attempt]);
-        continue;
-      }
-      logger.warn("Gemini synthesis failed", { event: event.id, status, error: err.message });
-      return null;
-    }
+  try {
+    const parsed = await callJson(prompt, {
+      task: "live-events",
+      temperature: 0.2,
+      maxOutputTokens: LLM_MAX_OUTPUT_TOKENS,
+      timeoutMs: 25000,
+      strictJson: true,
+    });
+    if (!parsed) return null;
+    // Attach source objects using the indices the model returned.
+    const brief = (parsed.brief || []).map((p) => ({
+      ts: p.ts,
+      text: p.text,
+      sources: (p.sourceIndices || [])
+        .map((i) => articles[i - 1])
+        .filter(Boolean)
+        .map((a) => ({ name: a.source_name, url: a.url })),
+    }));
+    return {
+      summary: parsed.summary || null,
+      brief,
+      metrics: parsed.metrics || {},
+    };
+  } catch (err) {
+    logger.warn("LLM synthesis failed", { event: event.id, error: err.message });
+    return null;
   }
-  return null;
 }
 
 // Deterministic fallback — no LLM, no hallucination. Just the most recent
@@ -268,7 +222,7 @@ export async function refreshEvent(eventConfig) {
   const social = await fetchEventSocialSignals(eventConfig);
 
   // Try LLM first, fall back to deterministic brief.
-  let synth = await synthesizeWithGemini(eventConfig, articles, social.posts);
+  let synth = await synthesizeBrief(eventConfig, articles, social.posts);
   if (!synth) synth = fallbackSynthesize(eventConfig, articles, social.posts);
 
   // Merge LLM metrics with live fetchers.
@@ -297,7 +251,7 @@ export async function refreshEvent(eventConfig) {
     })),
     socialEnabled: social.enabled,
     socialPosts: social.posts.length,
-    llmUsed: Boolean(process.env.GEMINI_API_KEY),
+    llmUsed: isLlmAvailable(),
   };
 
   upsertLiveEvent({
@@ -331,7 +285,7 @@ export async function refreshAllEvents() {
     } catch (err) {
       logger.error("Event refresh failed", { event: evt.id, error: err.message });
     }
-    // Space Gemini calls out — free tier is 15 RPM and these prompts are
+    // Space LLM calls out — these prompts are
     // large enough to hit transient 503/429. 5s gap keeps us safely under
     // the limit without dragging the cycle out.
     if (i < LIVE_EVENTS.length - 1) await sleep(5000);

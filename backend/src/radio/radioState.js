@@ -134,7 +134,7 @@ async function wordLines(stories, llm) {
 export async function buildRadioState({
   db = getDb(),
   now = Date.now(),
-  gateLlm = (p) => callJson(p, { task: "radio-gate", priority: "normal" }),
+  gateLlm = (p, o = {}) => callJson(p, { task: "radio-gate", priority: "normal", ...o }),
   wordLlm = (p) => callJson(p, { task: "radio-headline", priority: "normal" }),
 } = {}) {
   const drops = {};

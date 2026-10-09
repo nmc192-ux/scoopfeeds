@@ -52,19 +52,16 @@ For each dependency:
 
 ## 2. AI and ML services
 
-> **Note on the AI stack — updated 2026-07-20.** The Strategic Plan describes a *planned*
-> multi-model routing pattern (DeepSeek routine / Claude-GPT complex) for the Phase-C
-> generative-answers feature; that is still a plan, not the current wiring. **What is
-> actually wired and paid for today is Google Gemini**, pinned via
-> `GEMINI_GENERATION_MODEL` (prod: `gemini-3.1-flash-lite`) with hard cost rails
-> (`thinkingBudget: 0`, output caps, `LLM_DAILY_CALL_CAP`, actor-attempts ledger) added
-> after the gate-(a) cost incident. Cerebras / Groq / Cloudflare Workers AI / NVIDIA NIM /
-> Ollama remain configurable alternatives in `llmQueue.js` but are not the live path.
-> Anthropic, OpenAI and DeepSeek are not paid API integrations. Every LLM path has a
-> deterministic non-LLM fallback. See [`reference/env_reference.md`](reference/env_reference.md).
->
-> *(This note previously described Cerebras+Groq as the live stack — accurate in May 2026,
-> superseded by the Gemini pin in July.)*
+> **Note on the AI stack — updated 2026-10-09.** **Claude (Anthropic) is the only generation
+> provider**: every LLM path goes through `llmQueue.js` to the Messages API
+> (`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, default `claude-haiku-5-5`), with hard cost rails
+> (`LLM_DAILY_CALL_CAP`, output caps, the `llm_usage` ledger, actor-attempts ledger) and a
+> hard-error circuit breaker + Healthchecks ping (`LLM_HEALTH_PING_URL`). **Embeddings stay on
+> Google Gemini** (`gemini-embedding-001`, 768-dim — embeddings only, watched by
+> `EMBED_HEALTH_PING_URL`). Gemini generation, Cerebras, Groq, NVIDIA NIM, DeepSeek and
+> Ollama-for-generation were removed.
+> Every LLM path keeps a deterministic non-LLM fallback. See
+> [`reference/env_reference.md`](reference/env_reference.md).
 
 ### Cerebras Cloud
 - **Purpose:** STANDARD-tier LLM (matching, sentiment, reranking, default `LLM_PROVIDER`)
@@ -93,7 +90,7 @@ For each dependency:
 - **Cost:** Free tier — 10k neurons/day
 - **Phase introduced:** Pre-Phase-A
 - **Criticality:** Important (semantic search backbone)
-- **Replacement options:** Ollama (local, `nomic-embed-text`), Gemini Embedding API
+- **Replacement options:** Ollama (`nomic-embed-text`) — dormant code path; Gemini Embedding API is the active lane
 - **Code references:** [backend/src/realityIndex/llmQueue.js](../backend/src/realityIndex/llmQueue.js); env: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_GEN_MODEL`, `CLOUDFLARE_EMBED_MODEL`
 
 ### NVIDIA NIM (build.nvidia.com)
@@ -112,23 +109,22 @@ For each dependency:
 - **Criticality:** Optional
 - **Code references:** [backend/src/realityIndex/llmQueue.js](../backend/src/realityIndex/llmQueue.js); env: `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_EMBED_MODEL`
 
-### Gemini (legacy)
-- **Purpose:** Legacy LLM / embedding provider, retained for compatibility
+### Gemini — *embeddings only*
+- **Purpose:** the Gemini Embedding API (`gemini-embedding-001`, 768-dim) is the active embedding lane. Gemini **generation** was removed 2026-10-09 (Claude took over).
 - **Account owner:** DrJ
-- **Cost:** Free tier — 15 RPM
-- **2026-07-09:** prod currently runs Gemini embeddings on **PAID tier** as an interim measure (see decisions log Decision 32); permanent provider decision scheduled Phase C.
-- **Phase introduced:** Pre-Phase-A
-- **Criticality:** Optional
-- **Code references:** [backend/src/realityIndex/llmQueue.js](../backend/src/realityIndex/llmQueue.js); env: `GEMINI_API_KEY`, `GEMINI_GENERATION_MODEL`, `GEMINI_EMBEDDING_MODEL`
+- **Cost:** paid tier (see decisions log Decision 32). Embed calls are logged to `llm_usage` (task `embed`) with NULL tokens/cost — `embedContent` returns no usage and `llmPricing.js` has no embedding rate.
+- **Criticality:** Important (the event graph, clustering and market matching read these vectors)
+- **Health:** `EMBED_HEALTH_PING_URL` (Healthchecks): `/fail` on a hard billing/auth/permission error, success ping ≤ once per 10 min per process
+- **Code references:** [backend/src/realityIndex/llmQueue.js](../backend/src/realityIndex/llmQueue.js); env: `GEMINI_API_KEY`, `GEMINI_EMBEDDING_MODEL`, `EMBED_HEALTH_PING_URL`
 
-### Anthropic (Claude API) — *not currently integrated*
-- **Purpose (planned):** Complex query AI answers, brief generation, sensitive content review (per Strategic Plan)
-- **Account owner:** DrJ (planned)
-- **Cost:** [TBD — varies with usage]
-- **Phase introduced:** Planned (referenced in README and Strategic Plan; not yet wired)
-- **Criticality:** Important (when adopted)
-- **Replacement options:** Currently filled by Groq + Cerebras; could be added alongside as a quality tier
-- **Code references:** Not found as an API integration. Anthropic appears in [backend/src/config/sources.js](../backend/src/config/sources.js) only as an RSS news source (`anthropic.com/news/rss.xml`).
+### Anthropic (Claude API) — *the generation provider*
+- **Purpose:** All LLM generation: matching, briefs, scripts, video specs, vision checks, live-event synthesis, IG summaries
+- **Account owner:** DrJ
+- **Cost:** Pay-per-token. `claude-haiku-5-5` $0.10 in / $0.50 out per MTok (≤100k-token prompts; $0.50 / $2.50 above); `claude-sonnet-5-5` $2 / $10. Estimated per call into `llm_usage`; summary on `/scoop-ops/metrics-ops`. Prices live in `backend/src/realityIndex/llmPricing.js`.
+- **Phase introduced:** 2026-10 (replaced Gemini)
+- **Criticality:** Critical for LLM features (each has a deterministic fallback; a billing/auth failure pages via `LLM_HEALTH_PING_URL`)
+- **Replacement options:** none wired — there is deliberately no fallback provider
+- **Code references:** [backend/src/realityIndex/llmQueue.js](../backend/src/realityIndex/llmQueue.js); env: `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `VIDEO_SPEC_MODEL`, `VIDEO_VISION_MODEL`, `LLM_HEALTH_PING_URL`
 
 ### OpenAI (GPT API) — *not currently integrated*
 - **Purpose (planned):** Backup model for complex queries, document classification (per Strategic Plan)

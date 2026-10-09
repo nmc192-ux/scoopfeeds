@@ -7,7 +7,7 @@
  *      min ago". Clicking opens the dossier.
  *   2. Dossier — the full briefing: metric tiles (casualties, economic
  *      losses, Brent crude, ceasefire countdown) + a timestamped point-
- *      wise timeline synthesized from recent articles (Gemini 1.5 Flash
+ *      wise timeline synthesized from recent articles (an LLM
  *      where configured; deterministic headlines otherwise).
  *
  * The design borrows from Apple News' event pages: big hero, metric
@@ -266,7 +266,7 @@ function EventDossier({ id, onBack }) {
           </div>
           <p className="text-[10px] text-[var(--color-text-tertiary)] mt-2">
             {provenance.llmUsed
-              ? "AI synthesis: Gemini 1.5 Flash"
+              ? "AI synthesis"
               : "AI synthesis: off (deterministic headline timeline)"}
             {provenance.socialEnabled
               ? ` · ${provenance.socialPosts} social posts considered (X + Truth Social via RSSHub)`

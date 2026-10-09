@@ -148,8 +148,8 @@ open item.
 
 ### Gate (a) — LLM cost incident, CLOSED
 
-Model pinned via `GEMINI_GENERATION_MODEL` (prod: `gemini-3.1-flash-lite`), `thinkingBudget: 0`,
-output token caps, an actor-attempts ledger (migration 016) so retries can't loop, and
+Model named via `ANTHROPIC_MODEL` (default `claude-haiku-5-5`; Claude is the only provider),
+output token caps, a per-call `llm_usage` ledger (migration 040), an actor-attempts ledger (migration 016) so retries can't loop, and
 `LLM_DAILY_CALL_CAP`. A dead model pin now returns a clear 404 diagnostic and falls back
 deterministically rather than failing silently.
 

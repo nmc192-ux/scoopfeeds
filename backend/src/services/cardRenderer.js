@@ -145,7 +145,7 @@ export const IMAGE_FETCH_ACCEPT = "image/jpeg,image/png,image/*;q=0.8";
 // Try fetching one URL — returns { buf, mime } or null. Uses axios because
 // the native fetch shipped with Node 18 on Hostinger's container wasn't
 // reliably reaching external CDNs (axios works through the same routing as
-// Gemini calls, which we know are reachable).
+// LLM calls, which we know are reachable).
 export async function tryFetchImage(urlToFetch, refererHint) {
   try {
     const referer = refererHint || "https://www.google.com/";

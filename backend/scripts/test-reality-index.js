@@ -8,7 +8,7 @@
  *   4. upsertMarket + insertSnapshot path works
  *   5. listMarkets returns the just-inserted markets
  *   6. (when GEMINI_API_KEY is set) embedding API + sqlite-vec round-trip
- *   7. (when GEMINI_API_KEY + a story_cluster exists) market matcher
+ *   7. (when ANTHROPIC_API_KEY + a story_cluster exists) market matcher
  *
  * Run with: `node backend/scripts/test-reality-index.js`
  * Add `--no-network` to skip Polymarket calls (offline / CI).
@@ -104,8 +104,8 @@ async function run() {
   if ((counts.hot || 0) > 0) ok("hot-tier snapshots present");
   else bad("no snapshots written");
 
-  if (SKIP_LLM || !process.env.GEMINI_API_KEY) {
-    info("LLM tests skipped (no GEMINI_API_KEY or --no-llm).");
+  if (SKIP_LLM || !process.env.ANTHROPIC_API_KEY) {
+    info("LLM tests skipped (no ANTHROPIC_API_KEY or --no-llm).");
     finalSummary();
     return;
   }

@@ -21,6 +21,7 @@
     "signal:mcp": "node src/signal/mcpServer.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "^0.6.0",

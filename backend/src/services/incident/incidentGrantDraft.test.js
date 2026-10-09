@@ -161,7 +161,7 @@ test("the draft is deterministic — the same inputs give byte-identical text", 
 test("the module imports nothing that could send or generate anything", async () => {
   const { readFileSync } = await import("fs");
   const src = readFileSync(new URL("./incidentGrantDraft.js", import.meta.url), "utf8");
-  for (const forbidden of [/\bfetch\s*\(/, /require\s*\(\s*["']https?/, /gemini/i, /openai/i, /llmQueue/, /axios/]) {
+  for (const forbidden of [/\bfetch\s*\(/, /require\s*\(\s*["']https?/, /anthropic/i, /claude/i, /llmQueue/, /axios/]) {
     assert.equal(forbidden.test(src), false, `incidentGrantDraft.js matches ${forbidden} — it must neither send nor generate`);
   }
 });

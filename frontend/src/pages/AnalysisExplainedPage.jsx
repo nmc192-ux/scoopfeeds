@@ -5,7 +5,7 @@
  *   • Hero image + title + summary
  *   • Key Numbers (FactTile grid)
  *   • Timeline (vertical with dots)
- *   • Article body HTML (Gemini-generated, rendered in reader-body prose)
+ *   • Article body HTML (LLM-generated, rendered in reader-body prose)
  *   • Source list
  */
 import { useEffect } from "react";

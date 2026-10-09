@@ -9,10 +9,14 @@
  *   • embedQuery(text) — returns an in-memory vector for searching, NOT stored.
  *     Use this on the matcher's "lookup" side.
  *
- * Both call out to llmQueue.embed() which talks to the Gemini Embedding API
- * (gemini-embedding-001 by default; configurable via env). Defaults to 768
- * dims to keep storage tight; bump via GEMINI_EMBED_DIMS if matcher quality
- * needs it (must also update vec0 schema in schema.js — they have to match).
+ * Both call out to llmQueue.embed(): the Gemini Embedding API
+ * (gemini-embedding-001, pinned via GEMINI_EMBEDDING_MODEL) by default, 768-dim
+ * via outputDimensionality. Dormant alternatives: EMBED_PROVIDER=cloudflare
+ * (bge-base) and =ollama (nomic-embed-text), both 768-dim. 768 is fixed by the
+ * vec0 schema in schema.js (FLOAT[768]) — a model with a different width needs
+ * a new table, not just an env change. Every stored vector records its model in
+ * embedding_meta.model; vectors from different models must never be compared
+ * (see searchNearest's `model` filter and scripts/reembed.mjs).
  */
 
 import { embed as llmEmbed, getQueueStatus } from "../llmQueue.js";
@@ -37,7 +41,6 @@ export async function embedDocument({ scope, scope_id, text }) {
 
   const vec = await llmEmbed(text.slice(0, 8000), {
     taskType: "RETRIEVAL_DOCUMENT",
-    outputDimensionality: DIMS,
   });
   if (!vec) return null;
 
@@ -56,5 +59,5 @@ export async function embedDocument({ scope, scope_id, text }) {
  */
 export async function embedQuery(text) {
   if (!text || !text.trim()) return null;
-  return llmEmbed(text.slice(0, 8000), { taskType: "RETRIEVAL_QUERY", outputDimensionality: DIMS });
+  return llmEmbed(text.slice(0, 8000), { taskType: "RETRIEVAL_QUERY" });
 }

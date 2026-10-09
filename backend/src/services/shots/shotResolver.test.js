@@ -78,13 +78,13 @@ test("frames are sampled 1 per 3–12 s, and a long clip's coverage is stated, n
 });
 
 test("vision fails CLOSED with no key — unverified is a refusal", async () => {
-  const saved = process.env.GEMINI_API_KEY; delete process.env.GEMINI_API_KEY;
+  const saved = process.env.ANTHROPIC_API_KEY; delete process.env.ANTHROPIC_API_KEY;
   try {
     const v = await pickInPoints({ frames: [{ t: 1, jpeg: Buffer.alloc(4) }], subject: "x", caption: "y", clipTitle: "z" });
     assert.equal(v.ok, false); assert.equal(v.sensitive, true); assert.deepEqual(v.picks, []);
     const p = await judgePhoto({ jpeg: Buffer.alloc(4), subject: "x" });
     assert.equal(p.ok, false); assert.equal(p.usable, false);
-  } finally { if (saved !== undefined) process.env.GEMINI_API_KEY = saved; }
+  } finally { if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved; }
 });
 
 test("the ladder: type kinds never search; maps and satellite skip the photo rungs", () => {
@@ -315,20 +315,20 @@ import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-const geminiSays = (obj) => ({ fetchImpl: async () => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] } }], usageMetadata: {} }) }) });
-const withKey = async (fn) => { const s = process.env.GEMINI_API_KEY; process.env.GEMINI_API_KEY = "test"; try { return await fn(); } finally { if (s === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = s; } };
+const claudeSays = (obj) => ({ callJson: async () => ({ ok: true, value: obj, finishReason: "STOP", rawUsage: {}, model: "claude-haiku-5-5" }) });
+const withKey = async (fn) => fn(); // the vision call is injected via deps.callJson, no key needed
 
 test(`vision refuses weak subject matches (below ${MIN_MATCH}/10) — the Dehradun-for-Himalayas case`, async () => {
   await withKey(async () => {
     const frames = [{ t: 0, jpeg: Buffer.alloc(4) }, { t: 5, jpeg: Buffer.alloc(4) }];
     const weak = await pickInPoints({ frames, subject: "Himalayas", caption: "c", clipTitle: "Chaktonwala Grant, Dehradun",
-      deps: geminiSays({ frames: [{ i: 0, shows_subject: true, match: 4, score: 9, sensitive: false }, { i: 1, shows_subject: true, match: 5, score: 8 }] }) });
+      deps: claudeSays({ frames: [{ i: 0, shows_subject: true, match: 4, score: 9, sensitive: false }, { i: 1, shows_subject: true, match: 5, score: 8 }] }) });
     assert.deepEqual(weak.picks, [], "a town with hills is not the Himalayas");
     const strong = await pickInPoints({ frames, subject: "Himalayas", caption: "c", clipTitle: "t",
-      deps: geminiSays({ frames: [{ i: 0, shows_subject: true, match: 4, score: 9 }, { i: 1, shows_subject: true, match: 9, score: 6 }] }) });
+      deps: claudeSays({ frames: [{ i: 0, shows_subject: true, match: 4, score: 9 }, { i: 1, shows_subject: true, match: 9, score: 6 }] }) });
     assert.deepEqual(strong.picks.map((p) => p.t), [5]);
     const photo = await judgePhoto({ jpeg: Buffer.alloc(4), subject: "Joint Base Andrews",
-      deps: geminiSays({ matches: true, match: 5, sensitive: false, screenshot: false, private_person: false }) });
+      deps: claudeSays({ matches: true, match: 5, sensitive: false, screenshot: false, private_person: false }) });
     assert.equal(photo.usable, false);
   });
 });

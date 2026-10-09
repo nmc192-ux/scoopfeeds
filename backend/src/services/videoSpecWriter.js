@@ -17,11 +17,11 @@
  * checked for "asserts a figure the video never pays off" until the figures
  * are settled.
  *
- * MODEL PLUMBING IS A DELIBERATE COPY, not shared code. llmQueue, igSummary
- * and scriptWriter each carry their own pin + degrade block; 1ba73f0 chose
- * per-service duplication explicitly ("no refactor onto llmQueue"). A fourth
- * copy follows the house pattern rather than introducing a fifth shape. If
- * that call is ever revisited, all four move together — not this one alone.
+ * MODEL PLUMBING lives in llmQueue (tasks "videoSpec" / "videoPackaging"):
+ * the transient-retry loop, hard-error handling (loud error + health ping +
+ * circuit breaker), the daily call cap and llm_usage rows. This module keeps
+ * what is specific to a spec: the JSON-only reminder retry, the MAX_TOKENS
+ * hard rejection, and the rejection log lines.
  *
  * §3 / §6.2 TENSION, resolved and flagged. §3 says an untraceable numeric card
  * is DROPPED. §6.2 says an article with such a card is SKIPPED. Both are
@@ -31,24 +31,17 @@
  *
  * Required env:
  *   VIDEO_SPEC_ENABLED=1        — master switch (default off, dark-ship posture)
- *   GEMINI_API_KEY
+ *   ANTHROPIC_API_KEY
  *
  * Optional env:
- *   VIDEO_SPEC_MODEL            — SPEC call pin (default gemini-3.5-flash)
- *   GEMINI_GENERATION_MODEL     — PACKAGING pin (default gemini-3.1-flash-lite)
+ *   VIDEO_SPEC_MODEL            — SPEC call model (default claude-haiku-5-5)
+ *   ANTHROPIC_MODEL             — PACKAGING model (default claude-haiku-5-5)
  *   VIDEO_SPEC_MAX_OUTPUT_TOKENS — output cap (default 8192, see below)
  *   VIDEO_FULLTEXT_MAX_CHARS / VIDEO_FULLTEXT_TIMEOUT_MS — see videoFullText.js
  */
 
-import axios from "axios";
 import { logger, logSpecCorpus } from "./logger.js";
-import {
-  buildGeminiGenerationConfig,
-  isGeminiThinkingRejection,
-  markGeminiThinkingRejected,
-  isGeminiModelGone,
-  markGeminiModelGone,
-} from "../realityIndex/llmQueue.js";
+import { callJson, isLlmAvailable } from "../realityIndex/llmQueue.js";
 import {
   MODEL_EMITTABLE, SUBJECT_VISUAL_TYPES, THUMBNAIL_ANGLES, MIN_SLIDES, MAX_SLIDES,
   CAPTION_MAX_CHARS, CAPTION_MIN_CHARS,
@@ -60,34 +53,21 @@ import { beatImageryEnabled } from "./videoBeatImagery.js";
 import { shotEngineEnabled } from "./videoShotList.js";
 import { resolveAttribution } from "./videoAttribution.js";
 
-// TWO PINS, deliberately different tiers for two different jobs.
+// TWO MODEL KNOBS for two different jobs.
 //
-// SPEC_MODEL — gemini-3.5-flash, pinned for RELIABILITY, not for beat count.
-// Measured 2026-08-02 on identical articles and an identical prompt:
-//   flash-lite      0/3 successful specs · beats 5.0
-//   3.5-flash       2/3 · beats 5.5 · thoughts 0 · 5-8s
-//   3.1-pro-preview 2/3 · beats 6.5 · thoughts 4-6k billed as output · 38-55s,
-//                   and one article lost outright to truncation
-// Tier is NOT the variable behind flat beat counts — 5 → 5.5 → 6.5 across three
-// tiers is noise next to the 12-20 the rubric asks for. What 3.5-flash buys is
-// a spec that comes back at all, with no thinking tokens and inside a sane
-// latency budget. Pro is rejected on cost and latency, not on quality.
-//
-// This is a SERVICE-LOCAL var, unlike the SCRIPT_LLM_MODEL knob retired from
-// scriptWriter — and for the opposite reason. That one was a second name for
-// the same intent, which is how pins drift apart. This one encodes a measured
-// divergence: the spec call genuinely needs a different tier from every other
-// Gemini caller, and folding it into GEMINI_GENERATION_MODEL would drag the
-// whole codebase onto 3.5-flash as a side effect.
-const SPEC_MODEL = process.env.VIDEO_SPEC_MODEL || "gemini-3.5-flash";
+// SPEC_MODEL — the spec call is the hard one (a 12-20 beat structured artifact
+// with hard field constraints), so it has its OWN knob, VIDEO_SPEC_MODEL, and
+// can be moved to a larger model (e.g. claude-sonnet-5-5) without dragging every
+// other caller along. scripts/llm-ab.mjs compares models on this exact prompt.
+// Model tier was NOT the variable behind flat beat counts when this was measured
+// on the previous provider (5 -> 5.5 -> 6.5 across three tiers) — what mattered
+// was a spec that comes back at all, inside a sane latency budget. Re-measure
+// before changing the default.
+const SPEC_MODEL = process.env.VIDEO_SPEC_MODEL || "claude-haiku-5-5";
 
-// PACKAGING_MODEL stays on the shared pin. Packaging is a few hundred tokens of
-// hook-writing against a finished script — the cheap tier does it well, and the
-// comparison gave no reason to move it.
-const PACKAGING_MODEL = process.env.GEMINI_GENERATION_MODEL || "gemini-3.1-flash-lite";
-
-const ENDPOINT = (model, key) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+// PACKAGING_MODEL follows the shared ANTHROPIC_MODEL. Packaging is a few hundred
+// tokens of hook-writing against a finished script — the cheap tier does it well.
+const PACKAGING_MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-5-5";
 
 // 8192, not scriptWriter's 4096. A 25-slide spec is a structurally larger
 // artifact than a narration blob: every slide carries a type, an eyebrow, its
@@ -99,11 +79,6 @@ const ENDPOINT = (model, key) =>
 const MAX_OUTPUT_TOKENS = Number.parseInt(process.env.VIDEO_SPEC_MAX_OUTPUT_TOKENS || "8192", 10);
 const PACKAGING_MAX_OUTPUT_TOKENS = Number.parseInt(process.env.VIDEO_PACKAGING_MAX_OUTPUT_TOKENS || "2048", 10);
 const TIMEOUT_MS = 60000;   // a 25-slide spec is a longer generation than a caption
-
-// Gemini 2.5 Flash rates (analysisService's pinned figures). flash-lite is the
-// cheaper tier, so costUsd is an UPPER BOUND — same note as scriptWriter.
-const RATE_IN_PER_M  = 0.30;
-const RATE_OUT_PER_M = 2.50;
 
 // Prompt-side ceiling on body text. Above videoFullText's 24,000-char cap so
 // it never binds first; present so a caller passing text from elsewhere cannot
@@ -124,7 +99,7 @@ const WPM = Number.parseInt(process.env.VIDEO_SPEC_WPM || "150", 10);
 export const subjectVisualsEnabled = () => process.env.VIDEO_SUBJECT_VISUALS_ENABLED === "1";
 
 export function isVideoSpecEnabled() {
-  return process.env.VIDEO_SPEC_ENABLED === "1" && !!process.env.GEMINI_API_KEY;
+  return process.env.VIDEO_SPEC_ENABLED === "1" && isLlmAvailable();
 }
 
 // ─── Rejection logging (same four fields as scriptWriter) ───────────────────
@@ -143,24 +118,6 @@ function logRejection({ tag, articleId, reason, len, finishReason, usage, model 
   );
 }
 
-/**
- * A bare 400 INVALID_ARGUMENT. Deliberately NOT added to llmQueue's shared
- * isGeminiThinkingRejection: a 400 can mean a dozen things, and treating every
- * one as a thinking rejection would flip a process-wide flag on evidence that
- * does not support it. This predicate only opens the probe above; the retry's
- * outcome is what decides.
- */
-function isInvalidArgument(err) {
-  if (err?.response?.status !== 400) return false;
-  const body = JSON.stringify(err?.response?.data ?? "");
-  return /INVALID_ARGUMENT|invalid argument/i.test(body);
-}
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-// One retry when the payload is not JSON. The API is stateless — the reminder
-// rides on a fresh call of the same prompt, appended so the article context is
-// identical both times.
 const JSON_ONLY_REMINDER = `
 
 STRICT OUTPUT REMINDER: a previous attempt returned something other than a single JSON object. Return ONLY the JSON object — no markdown fence, no commentary, no text of any kind before the opening { or after the closing }.`;
@@ -247,148 +204,77 @@ function extractJsonPayload(text) {
 }
 
 async function callModel(prompt, { articleId, tag, model, maxOutputTokens }) {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return null;
+  if (!isLlmAvailable()) return null;
 
-  logger.info(`🎬 ${tag}: Gemini model=${model} for article ${articleId} (cap=${maxOutputTokens})`);
+  logger.info(`🎬 ${tag}: Claude model=${model} for article ${articleId} (cap=${maxOutputTokens})`);
 
-  // Each retry class has its own single-use (or bounded) budget so no
-  // combination can loop: transient 5xx/429 gets two backoff retries,
-  // thinking-rejection and non-JSON get one immediate retry each.
-  const RETRY_DELAYS_MS = [4000, 9000];
-  let transientUsed = 0;
-  let thinkingRetryUsed = false;
+  // Transient 503/429/529 backoff (two retries) is llmQueue's. What stays here
+  // is the one retry that only this caller can judge: a non-JSON payload gets
+  // ONE immediate retry with a JSON-only reminder.
   let jsonRetryUsed = false;
   let promptText = prompt;
-  // Set only by the evidence-gated INVALID_ARGUMENT probe below.
-  let forceNoThinking = false;
-  let thinkingConfirmed = false;
+  const task = tag === "videoPackaging" ? "video-packaging" : "video-spec";
 
   while (true) {
-    const baseConfig = {
+    const res = await callJson(promptText, {
+      task,
+      model,
       // Lower than scriptWriter's 0.4: this is a structured artifact with
       // hard field constraints, not prose that needs phrasing variety.
       temperature: 0.3,
-      responseMimeType: "application/json",
       maxOutputTokens,
-    };
-    const generationConfig = forceNoThinking ? baseConfig : buildGeminiGenerationConfig(baseConfig);
-    const sentThinkingConfig = "thinkingConfig" in generationConfig;
+      timeoutMs: TIMEOUT_MS,
+      retryDelaysMs: [4000, 9000],
+      withMeta: true,
+    });
+    // null: kill switch, daily cap, or the circuit breaker is open. llmQueue
+    // has already said why.
+    if (!res) return null;
 
-    try {
-      const { data } = await axios.post(
-        ENDPOINT(model, key),
-        { contents: [{ role: "user", parts: [{ text: promptText }] }], generationConfig },
-        { timeout: TIMEOUT_MS }
-      );
+    const finishReason = res.finishReason ?? undefined;
+    const usage = res.rawUsage || {};
 
-      // The probe succeeded without thinkingConfig — that IS the proof. Flip the
-      // shared flag so every later Gemini call in this process skips it too.
-      if (forceNoThinking && !thinkingConfirmed) {
-        thinkingConfirmed = true;
-        markGeminiThinkingRejected(logger, model);
-        logger.warn(`🧠 ${tag}: confirmed — ${model} rejects thinkingBudget:0; the 400 was thinkingConfig`);
-      }
-
-      const candidate    = data?.candidates?.[0];
-      const finishReason = candidate?.finishReason;
-      const usage        = data?.usageMetadata || {};
-      const text         = candidate?.content?.parts?.[0]?.text;
-
-      if (!text) {
+    if (!res.ok) {
+      if (res.errClass === "empty") {
         logRejection({ tag, articleId, reason: "empty", len: 0, finishReason, usage, model });
-        return null;
+      } else {
+        // Transport / auth / billing failures were logged by llmQueue with their
+        // status; this line keeps the caller-side context.
+        logger.warn(`🎬 ${tag}: call failed — model=${model} error=${res.errClass}`);
       }
-      // HARD rejection. A truncated 25-slide spec that happens to parse is a
-      // video that stops mid-argument with narration that references slides
-      // which were never emitted.
-      if (finishReason === "MAX_TOKENS") {
-        logRejection({ tag, articleId, reason: "truncated_max_tokens", len: text.length, finishReason, usage, model });
-        return null;
-      }
-
-      const parsed = extractJsonPayload(text);
-      if (parsed === null || typeof parsed !== "object") {
-        // The cause must be legible from the log alone: head and tail of the
-        // raw payload, JSON-escaped so newlines survive the log line.
-        const head = JSON.stringify(text.slice(0, 200));
-        const tail = JSON.stringify(text.slice(-200));
-        if (!jsonRetryUsed) {
-          jsonRetryUsed = true;
-          logger.warn(`🎬 ${tag}: non-JSON payload for article ${articleId} — one retry with JSON-only reminder. head=${head} tail=${tail}`);
-          promptText = prompt + JSON_ONLY_REMINDER;
-          continue;
-        }
-        logger.warn(`🎬 ${tag}: non-JSON payload persisted after reminder retry. head=${head} tail=${tail}`);
-        logRejection({ tag, articleId, reason: "unparseable_json", len: text.length, finishReason, usage, model });
-        return null;
-      }
-
-      const cost =
-        ((usage.promptTokenCount || 0) / 1e6) * RATE_IN_PER_M +
-        ((usage.candidatesTokenCount || 0) / 1e6) * RATE_OUT_PER_M;
-
-      return { parsed, usage, cost, finishReason };
-    } catch (err) {
-      if (isGeminiThinkingRejection(err) && !thinkingRetryUsed) {
-        thinkingRetryUsed = true;
-        markGeminiThinkingRejected(logger, model);
-        continue;
-      }
-      if (isGeminiModelGone(err)) { markGeminiModelGone(model, logger); return null; }
-
-      // EVIDENCE-GATED THINKING DEGRADE. Some models reject thinkingBudget:0
-      // with a bare 400 INVALID_ARGUMENT whose body says only "Request contains
-      // an invalid argument" — no mention of thinking, so
-      // isGeminiThinkingRejection cannot match it and the call died as a hard
-      // transport failure. Measured 2026-08-02: gemini-3.5-flash-lite, 0/3.
-      //
-      // Rather than widen the SHARED classifier to "any 400 is a thinking
-      // rejection" — which would let an unrelated malformed request flip the
-      // process-wide flag for igSummary, scriptWriter and llmQueue too — this
-      // binary-searches the request in place: retry ONCE with thinkingConfig
-      // removed and nothing else changed. Success proves thinkingConfig was the
-      // invalid argument, and only THEN is the shared flag flipped. Failure
-      // proves it was not, and the error falls through to be reported honestly.
-      if (isInvalidArgument(err) && sentThinkingConfig && !thinkingRetryUsed) {
-        thinkingRetryUsed = true;
-        forceNoThinking = true;
-        logger.warn(
-          `🧠 ${tag}: ${model} returned 400 INVALID_ARGUMENT with thinkingConfig present — ` +
-          `retrying once WITHOUT it to identify the offending argument`
-        );
-        continue;
-      }
-      // The probe came back and still failed: thinkingConfig was NOT the cause.
-      // Say so explicitly, so the next reader does not re-run the same test.
-      if (isInvalidArgument(err) && forceNoThinking) {
-        logger.warn(`🧠 ${tag}: ${model} still 400s WITHOUT thinkingConfig — thinkingConfig is NOT the invalid argument`);
-      }
-
-      const status = err.response?.status;
-      const transient = status === 503 || status === 429 ||
-                        err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
-      if (transient && transientUsed < RETRY_DELAYS_MS.length) {
-        logger.warn(`🎬 ${tag}: ${status || err.code} — retry in ${RETRY_DELAYS_MS[transientUsed]}ms`);
-        await sleep(RETRY_DELAYS_MS[transientUsed]);
-        transientUsed++;
-        continue;
-      }
-      // FULL response body, not just err.message. A 400 from Gemini carries
-      // its reason only in the body — err.message is the useless "Request
-      // failed with status code 400". Measured 2026-08-02: gemini-3.5-flash-lite
-      // failed on TRANSPORT, not on output, so the cheap-generation-bump
-      // question stays open and the body is the only thing that can settle it.
-      const body = (() => {
-        try { return JSON.stringify(err.response?.data ?? null); }
-        catch { return String(err.response?.data); }
-      })();
-      logger.warn(
-        `🎬 ${tag}: call failed — model=${model} status=${status ?? err.code ?? "?"} ` +
-        `error=${err.message} body=${String(body).slice(0, 3000)}`
-      );
       return null;
     }
+
+    // HARD rejection. A truncated 25-slide spec that happens to parse is a
+    // video that stops mid-argument with narration that references slides
+    // which were never emitted.
+    if (res.truncated) {
+      logRejection({ tag, articleId, reason: "truncated_max_tokens", len: res.textLength ?? 0, finishReason, usage, model });
+      return null;
+    }
+
+    // llmQueue parses strictly; this module's tolerant extractor (trailing
+    // commas, a stray "Hope this helps!") gets the raw text when that failed.
+    const rawText = res.value && typeof res.value === "object" && "_rawText" in res.value ? String(res.value._rawText) : null;
+    const parsed = rawText === null ? res.value : extractJsonPayload(rawText);
+    if (parsed === null || typeof parsed !== "object") {
+      // The cause must be legible from the log alone: head and tail of the
+      // raw payload, JSON-escaped so newlines survive the log line.
+      const text = rawText ?? "";
+      const head = JSON.stringify(text.slice(0, 200));
+      const tail = JSON.stringify(text.slice(-200));
+      if (!jsonRetryUsed) {
+        jsonRetryUsed = true;
+        logger.warn(`🎬 ${tag}: non-JSON payload for article ${articleId} — one retry with JSON-only reminder. head=${head} tail=${tail}`);
+        promptText = prompt + JSON_ONLY_REMINDER;
+        continue;
+      }
+      logger.warn(`🎬 ${tag}: non-JSON payload persisted after reminder retry. head=${head} tail=${tail}`);
+      logRejection({ tag, articleId, reason: "unparseable_json", len: text.length, finishReason, usage, model });
+      return null;
+    }
+
+    return { parsed, usage, cost: res.estCostUsd ?? 0, finishReason };
   }
 }
 
@@ -1048,7 +934,7 @@ function decorateParsedSpec(parsed, article, attribution) {
  * Article → validated slide spec.
  *
  * RETURNS A RESULT OBJECT, NOT null-or-spec. A rejected attempt still SPENT —
- * one Gemini call, two when the regeneration retry fires — and returning null
+ * one model call, two when the regeneration retry fires — and returning null
  * threw that number away, so a published video could not be billed including
  * the articles discarded before it. `{ ok, spec, costUsd, reason, attempts }`
  * makes the loop able to say "this video cost $X across 4 attempts".
@@ -1386,7 +1272,7 @@ export async function writePackaging(spec, article) {
   }
 }
 
-export const _internals = { decorateParsedSpec,
+export const _internals = { decorateParsedSpec, callModel,
   buildSpecPrompt, buildPackagingPrompt, cardGrammar,
-  extractJsonPayload, stripCounts, isThinnessError, isInvalidArgument,
+  extractJsonPayload, stripCounts, isThinnessError,
 };

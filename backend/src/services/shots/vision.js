@@ -17,37 +17,47 @@
  */
 
 import { logger } from "../logger.js";
+import { callJson, isLlmAvailable } from "../../realityIndex/llmQueue.js";
 
 // A frame or photo must show the NAMED subject specifically, not something like
 // it. Measured 24 Sep: "Himalayas" accepted a hazy town view in Dehradun, and
 // "Joint Base Andrews" accepted a close-up of the President speaking there.
 export const MIN_MATCH = 7;
 
-export const VISION_MODEL = () => process.env.VIDEO_VISION_MODEL || "gemini-3.5-flash";
-const ENDPOINT = (model, key) => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+export const VISION_MODEL = () => process.env.VIDEO_VISION_MODEL || "claude-haiku-5-5";
 
+/**
+ * One vision call: the frames go to Claude as image content blocks (ahead of
+ * the prompt text), through llmQueue — so it gets the retry loop, the daily
+ * call cap, the circuit breaker and an llm_usage row (task "video-vision").
+ * `deps.callJson` is the test seam.
+ */
 async function ask({ prompt, images, deps = {} }) {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return { ok: false, reason: "GEMINI_API_KEY unset" };
-  const fetchImpl = deps.fetchImpl || fetch;
+  const call = deps.callJson || callJson;
+  if (!deps.callJson && !isLlmAvailable()) return { ok: false, reason: "ANTHROPIC_API_KEY unset" };
   const model = VISION_MODEL();
-  const parts = [{ text: prompt }];
-  for (const img of images) parts.push({ inline_data: { mime_type: "image/jpeg", data: Buffer.from(img).toString("base64") } });
   try {
-    const res = await fetchImpl(ENDPOINT(model, key), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0, responseMimeType: "application/json" } }),
-      signal: AbortSignal.timeout(90000),
+    const res = await call(prompt, {
+      task: "video-vision",
+      model,
+      temperature: 0,
+      // 4096: a contact sheet is up to ~20 frames at ~50 tokens of JSON each.
+      maxOutputTokens: 4096,
+      timeoutMs: 90000,
+      images,
+      imageMediaType: "image/jpeg",
+      withMeta: true,
     });
-    if (!res.ok) return { ok: false, reason: `vision HTTP ${res.status}` };
-    const j = await res.json();
-    const text = j?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
-    const usage = j?.usageMetadata || {};
-    let parsed;
-    try { parsed = JSON.parse(text.replace(/^```(?:json)?|```$/g, "").trim()); }
-    catch { return { ok: false, reason: "vision answer was not JSON", usage }; }
-    return { ok: true, parsed, usage, model };
+    if (!res) return { ok: false, reason: "vision call failed: LLM unavailable (disabled, capped or breaker open)" };
+    const usage = res.rawUsage || {};
+    if (!res.ok) {
+      const http = /^http_(\d+)$/.exec(res.errClass || "");
+      return { ok: false, reason: http ? `vision HTTP ${http[1]}` : `vision call failed: ${res.errClass}`, usage };
+    }
+    if (!res.value || typeof res.value !== "object" || "_rawText" in res.value) {
+      return { ok: false, reason: "vision answer was not JSON", usage };
+    }
+    return { ok: true, parsed: res.value, usage, model: res.model || model };
   } catch (err) {
     return { ok: false, reason: `vision call failed: ${String(err.message).slice(0, 80)}` };
   }

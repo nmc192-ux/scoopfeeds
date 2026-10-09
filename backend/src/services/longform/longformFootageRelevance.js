@@ -8,7 +8,7 @@
  * screens rights and resolution, and nothing in between asks whether a clip
  * about a graduation ceremony belongs in a film about facial recognition.
  *
- * The measure is embedding cosine against the STORY, using the same Gemini
+ * The measure is embedding cosine against the STORY, using the same
  * embeddings the event graph runs on — not keyword overlap, which is what
  * produced the b-roll in the first place ("cyber tests" matches an Air Force
  * exercise title perfectly).

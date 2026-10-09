@@ -43,11 +43,12 @@ import * as migration036 from "./migrations/036_media_candidate_revocation.js";
 import * as migration037 from "./migrations/037_media_candidates_no_delete.js";
 import * as migration038 from "./migrations/038_shot_assets.js";
 import * as migration039 from "./migrations/039_radio_dropped.js";
+import * as migration040 from "./migrations/040_llm_usage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "migrations");
 
-const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021, migration022, migration023, migration024, migration025, migration026, migration027, migration028, migration029, migration030, migration031, migration032, migration033, migration034, migration035, migration036, migration037, migration038, migration039];
+const MIGRATIONS = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010, migration011, migration012, migration013, migration014, migration015, migration016, migration017, migration018, migration019, migration020, migration021, migration022, migration023, migration024, migration025, migration026, migration027, migration028, migration029, migration030, migration031, migration032, migration033, migration034, migration035, migration036, migration037, migration038, migration039, migration040];
 
 function ensureSchemaMigrationsTable(db) {
   db.exec(`

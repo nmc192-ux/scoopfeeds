@@ -4,7 +4,7 @@
  * event and print it. Nothing is posted and no card is rendered.
  *
  * This is the single live run the build plan calls for: it exercises the real
- * Gemini path through llmQueue, the real grounding validator, and the real
+ * Claude path through llmQueue, the real grounding validator, and the real
  * event_carousel_copy cache, so the copy can be read by a human before any of
  * it reaches Instagram.
  *

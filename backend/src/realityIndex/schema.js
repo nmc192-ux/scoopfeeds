@@ -158,7 +158,7 @@ export function initRealityIndex(db) {
 
   // ── 3. Vector table (only when sqlite-vec is loaded).
   //
-  // We embed at 768 dims (Gemini Embedding default). The vec0 virtual table
+  // We embed at 768 dims (nomic-embed-text / bge-base both emit 768). The vec0 virtual table
   // requires a fixed dimensionality — change here AND in embeddingService.js
   // if you ever bump the model.
   if (vecAvailable) {

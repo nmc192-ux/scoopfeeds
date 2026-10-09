@@ -3,7 +3,7 @@
  *
  * All read endpoints serve pre-computed data from SQLite (fast, sync).
  * The scheduler populates the tables every 2h via analysisService.refreshAnalysis().
- * The article deep-dive endpoint is the only async one (on-demand Gemini call,
+ * The article deep-dive endpoint is the only async one (on-demand LLM call,
  * cached 6h per article).
  *
  * Routes:
@@ -70,7 +70,7 @@ router.get("/trends", (req, res) => {
 });
 
 // GET /api/analysis/article/:articleId  — async, cached 6h.
-// Anonymous/bot requests are cache-only: a fresh Gemini call is only
+// Anonymous/bot requests are cache-only: a fresh LLM call is only
 // triggered for authenticated users (2026-07-15 cost incident, gate a).
 router.get("/article/:articleId", async (req, res) => {
   try {

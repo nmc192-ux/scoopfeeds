@@ -31,6 +31,7 @@
 
 import { Router } from "express";
 import { getDb } from "../models/database.js";
+import { getLlmUsageSummary } from "../realityIndex/llmUsage.js";
 import { getSchedulerStatus } from "../services/scheduler.js";
 import { getSocialCycleHealth } from "../services/socialPublisher.js";
 
@@ -104,6 +105,16 @@ router.get("/", (_req, res) => {
       FROM sources
     `).get();
 
+    // LLM usage (llm_usage, migration 040): today's per-task / per-provider
+    // calls, tokens and estimated cost. Best-effort — a missing table (migration
+    // not yet applied) must not take the whole dashboard down.
+    let llmUsage;
+    try {
+      llmUsage = { label: "LLM usage (UTC day, per task / provider)", ...getLlmUsageSummary(db) };
+    } catch (e) {
+      llmUsage = { label: "LLM usage (UTC day, per task / provider)", error: e.message };
+    }
+
     res.json({
       ok: true,
       computed_at: new Date(now).toISOString(),
@@ -141,6 +152,7 @@ router.get("/", (_req, res) => {
           bridged_to: "Phase B Track 1 Distribution (Layer 1 analytics infrastructure)",
           note: "Anonymous-visitor return rate requires analytics instrumentation (GA/Plausible/equivalent) not currently in the repo. Per session 28-extension DEC1, bridged rather than backfilled in Phase A.",
         },
+        llm_usage: llmUsage,
         source_diversity_index: {
           label: "Source diversity index (distinct category × region cells)",
           value: diversity.cells,
