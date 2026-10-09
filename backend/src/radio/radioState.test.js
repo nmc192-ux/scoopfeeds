@@ -251,3 +251,11 @@ test("the headline call is logged under task radio-headline", async () => {
   assert.match(src, /callJson\(p, \{ task: "radio-headline"/);
   assert.equal(/radio-screen/.test(src), false, "a separate radio-screen task crept back in");
 });
+
+test("the radio-headline call is given room for 30 headlines + verdicts (2,048 truncated it in prod)", async () => {
+  const src = fs.readFileSync(new URL("./radioState.js", import.meta.url), "utf8");
+  assert.match(src, /task: "radio-headline"[^)]*maxOutputTokens: HEADLINE_MAX_TOKENS/);
+  const { HEADLINE_MAX_TOKENS, HEADLINE_TOP } = await import("./radioState.js");
+  // ~80 output tokens per item (id, ≤90-char headline, three booleans, JSON) — keep 3× headroom.
+  assert.ok(HEADLINE_MAX_TOKENS >= HEADLINE_TOP * 80 * 3, `cap ${HEADLINE_MAX_TOKENS} too small for ${HEADLINE_TOP} items`);
+});
