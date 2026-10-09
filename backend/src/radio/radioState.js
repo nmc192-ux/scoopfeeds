@@ -147,6 +147,7 @@ export function chooseFittingLeads(stories) {
  * `verdict: null`, which the builder treats as SENSITIVE (kept out of music). Never "safe".
  */
 export const HEADLINE_TOP = 30;
+export const HEADLINE_MAX_TOKENS = 8000;   // ~4× the measured need; output is billed per token used, not per cap
 
 async function headlineCall(stories, llm) {
   const lines = new Map(stories.map((s) => [String(s.lead.id), fitOf(s.lead)]));
@@ -185,7 +186,9 @@ export async function buildRadioState({
   db = getDb(),
   now = Date.now(),
   gateLlm = (p, o = {}) => callJson(p, { task: "radio-gate", priority: "normal", ...o }),
-  wordLlm = (p) => callJson(p, { task: "radio-headline", priority: "normal" }),
+  // 30 stories × (headline + three flags) is ~2,400+ output tokens; the 2,048 default cut the
+  // JSON mid-array on 10 Oct 2026, every story lost its verdict and music emptied (fail safe).
+  wordLlm = (p) => callJson(p, { task: "radio-headline", priority: "normal", maxOutputTokens: HEADLINE_MAX_TOKENS }),
 } = {}) {
   const drops = {};
   const drop = (a, rule, reason) => {
