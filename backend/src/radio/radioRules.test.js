@@ -72,3 +72,44 @@ test("JUDGE: unsure, missing or non-'keep' verdicts drop; only an explicit keep 
   const ok = await judgeItems([pkItem], async () => ({ verdicts: [{ id: pkItem.id, verdict: "keep", reason: "neutral trade news" }] }));
   assert.equal(ok.get(pkItem.id).allowed, true);
 });
+
+// ─── hard news only ─────────────────────────────────────────────────────────
+import { softNewsVerdict, isRadioSensitive } from "./radioRules.js";
+
+test("SOFT news is dropped, each by its own named rule", () => {
+  const cases = [
+    ["I only bought one thing on Amazon this year and it was worth it", "radio:soft-first-person"],
+    ["Prime Day 2026: the best early deals on laptops", "radio:soft-shopping"],
+    ["Smart TV on sale for half price at Walmart", "radio:soft-shopping"],
+    ["5 things to know before you buy a house", "radio:soft-listicle"],
+    ["10 ways to save on groceries", "radio:soft-listicle"],
+    ["How a new tax rule changes what you owe", "radio:soft-howto"],
+    ["How to fix a leaky faucet", "radio:soft-howto"],
+    ["Samsung Galaxy S27 review: a small step forward", "radio:soft-review"],
+  ];
+  for (const [title, rule] of cases) assert.equal(softNewsVerdict({ title }).rule, rule, title);
+});
+
+test("hard news that shares a soft word is kept", () => {
+  for (const title of [
+    "Supreme Court to review ruling on voting maps",
+    "Pentagon review of the strike finds no violations",
+    "Iran bans fuel exports as sanctions bite",
+    "Senate passes five-year farm bill",
+  ]) assert.equal(softNewsVerdict({ title }).allowed, true, title);
+});
+
+test("SENSITIVE: the exact headlines that must never sit under music", () => {
+  for (const t of [
+    "Suicide is up among Black Americans",
+    "Teen self-harm cases rise sharply, hospitals report",
+    "Overdose deaths fall for the first time in years",
+    "Fatal overdoses climb in three states",
+    "Sexual abuse claims widen at youth program",
+    "Child abuse investigators open new probe",
+    "Mass shooting at a shopping centre leaves several hurt",
+    "Terror attack foiled in European capital, police say",
+  ]) assert.equal(isRadioSensitive(t), true, t);
+  for (const t of ["Fed holds interest rates steady as inflation cools", "NASA delays crewed moon lander test to 2027"]) assert.equal(isRadioSensitive(t), false, t);
+  assert.equal(isRadioSensitive(""), true, "empty fails closed");
+});

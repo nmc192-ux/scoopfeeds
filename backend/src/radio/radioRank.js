@@ -15,7 +15,7 @@
  * items it files, so a wire flooding one story cannot buy rank.
  *
  * CAPS, across headline + alsoThisHour + music together: at most 2 items whose
- * lead is from one publisher, at most 1 sport item. The IG account ran 85% BBC /
+ * lead is from one publisher, at most 1 sport item, at most 1 item per TOPICS entry. The IG account ran 85% BBC /
  * 55% sport under a credibility sort; these caps are the fix, not a preference.
  */
 import { cleanHeadline } from "../services/socialComposer.js";
@@ -26,6 +26,20 @@ export const GROUP_WINDOW_MS = 90 * 60_000;
 export const SCORE_WINDOW_MS = 60 * 60_000;
 export const MAX_PER_PUBLISHER = 2;
 export const MAX_SPORT = 1;
+export const MAX_PER_TOPIC = 1;
+
+// One topic may not fill the rotator (crypto crowded out a whole hour). Deliberately a
+// short list of the topics that actually flood: add to it when a new one does.
+export const TOPICS = [
+  ["crypto", /\b(bitcoin|btc|ethereum|ether|crypto\w*|stablecoin\w*|solana|dogecoin|xrp|binance|coinbase|altcoin\w*|token(?:s|ized)?)\b/i],
+  ["markets", /\b(stocks?|wall street|dow jones|s&p 500|nasdaq|shares (?:fall|rise|slip|jump)|sell-?off|futures)\b/i],
+  ["ai", /\b(ai|artificial intelligence|chatbots?|openai|chatgpt|anthropic|gemini|llms?)\b/i],
+];
+export function topicOf(story) {
+  const t = String(story?.lead?.title || "");
+  for (const [name, re] of TOPICS) if (re.test(t)) return name;
+  return null;
+}
 
 const STOP = new Set(("a an the and or but of in on at to for from by with as is are was were be been being it its " +
   "this that these those after before over under into out up down off about than then so not no new says say said " +
@@ -129,9 +143,12 @@ export const ALSO_THIS_HOUR = 5;   // DrJ, 8 Oct 2026 (was 3)
 export function pickSlots(ranked, { alsoCount = ALSO_THIS_HOUR, musicMin = 4, musicMax = 6 } = {}) {
   const perPublisher = new Map();
   let sportUsed = 0;
+  const perTopic = new Map();
   const taken = new Set();
   const fits = (s) => {
     if (taken.has(s)) return false;
+    const topic = topicOf(s);
+    if (topic && (perTopic.get(topic) || 0) >= MAX_PER_TOPIC) return false;
     const pub = s.lead?.source_name || "?";
     if ((perPublisher.get(pub) || 0) >= MAX_PER_PUBLISHER) return false;
     if (s.sport && sportUsed >= MAX_SPORT) return false;
@@ -142,6 +159,8 @@ export function pickSlots(ranked, { alsoCount = ALSO_THIS_HOUR, musicMin = 4, mu
     const pub = s.lead?.source_name || "?";
     perPublisher.set(pub, (perPublisher.get(pub) || 0) + 1);
     if (s.sport) sportUsed++;
+    const topic = topicOf(s);
+    if (topic) perTopic.set(topic, (perTopic.get(topic) || 0) + 1);
     return s;
   };
 
