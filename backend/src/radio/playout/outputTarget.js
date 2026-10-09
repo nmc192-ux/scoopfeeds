@@ -1,0 +1,46 @@
+/**
+ * outputTarget.js - where the playout's encoded stream goes.
+ *
+ * DEFAULT IS A FILE. The RTMP path exists but is unreachable unless BOTH
+ * RADIO_PLAYOUT_ENABLED=true (literally) AND a non-empty RADIO_STREAM_KEY are set.
+ * With only one of them, or neither, resolveTarget() throws before anything is spawned.
+ * The stream key is never logged: use redact() on anything that may contain it.
+ */
+import path from "node:path";
+
+export const RTMP_BASE = "rtmp://a.rtmp.youtube.com/live2";
+
+export function playoutEnabled(env = process.env) {
+  return String(env.RADIO_PLAYOUT_ENABLED || "").trim().toLowerCase() === "true";
+}
+
+export function streamKey(env = process.env) {
+  return String(env.RADIO_STREAM_KEY || "").trim();
+}
+
+/** True only when both gates are open. */
+export function rtmpAllowed(env = process.env) {
+  return playoutEnabled(env) && streamKey(env) !== "";
+}
+
+/**
+ * @param {{ out?: string|null, env?: object }} opts
+ * @returns {{ kind: "file", path: string } | { kind: "rtmp", url: string }}
+ */
+export function resolveTarget({ out = null, env = process.env } = {}) {
+  if (out) return { kind: "file", path: path.resolve(out) };
+  if (!rtmpAllowed(env)) {
+    throw new Error(
+      "no output target: pass --out <file>, or set BOTH RADIO_PLAYOUT_ENABLED=true and RADIO_STREAM_KEY to enable the RTMP path",
+    );
+  }
+  return { kind: "rtmp", url: `${RTMP_BASE}/${streamKey(env)}` };
+}
+
+/** Strip the stream key (and anything after the RTMP base) from a string before it is logged. */
+export function redact(text, env = process.env) {
+  let s = String(text);
+  const key = streamKey(env);
+  if (key) s = s.split(key).join("***");
+  return s.replace(new RegExp(`${RTMP_BASE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/\\S+`, "g"), `${RTMP_BASE}/***`);
+}

@@ -1,0 +1,15 @@
+# Dev/test image for the radio playout: Node 20 + Playwright's Chromium + ffmpeg (libx264, aac, ebur128).
+# NOT the production image and nothing here deploys. Build and run (from the repo root):
+#   docker build -t radio-playout-dev -f backend/src/radio/playout/Dockerfile.dev backend/src/radio/playout
+#   docker run --rm --shm-size=1g -v "$PWD":/repo -v ~/radio-music:/music:ro -v ~/out:/out radio-playout-dev \
+#     node /repo/backend/src/radio/playout/cli.js --out /out/test.mp4 --seconds 120 --music-dir /music
+# The Chromium build in the base image (chromium-1243) belongs to playwright-core 1.63.0 - keep them paired.
+FROM node:20-bookworm-slim AS node
+FROM mcr.microsoft.com/playwright/python:v1.63.0-noble
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+ && apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-liberation \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm install -g playwright-core@1.63.0
+ENV NODE_PATH=/usr/local/lib/node_modules PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
