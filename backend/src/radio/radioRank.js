@@ -126,15 +126,28 @@ function sameKeys(a, b) {
   return false;
 }
 
-/** Same story as seen from two articles: embedding cosine when both carry a vector, or the title rule. */
-function sameArticleStory(x, y) {
+/**
+ * The entity rule is the loosest same-story test (two different stories about the same people
+ * can share most key terms), so it has its own off switch, independent of RADIO_GROUP_MODE:
+ * RADIO_ENTITY_RULE=off disables it in grouping AND in the on-air duplicate check, leaving
+ * cosine / title-Jaccard only. Read per call, so an .env change + `up -d` takes effect without code.
+ */
+export function entityRuleEnabled(raw = process.env.RADIO_ENTITY_RULE) {
+  return String(raw ?? "").trim().toLowerCase() !== "off";
+}
+
+/** Same story as seen from two articles: embedding cosine when both carry a vector, else title Jaccard; plus the entity rule when enabled. */
+function sameArticleStory(x, y, entityRule = entityRuleEnabled()) {
   if (x._vec && y._vec && cosine(x._vec, y._vec) >= COSINE_MIN) return true;
-  return sameKeys(x._keys || keyTerms(x.title), y._keys || keyTerms(y.title));
+  if (!x._vec || !y._vec) {
+    if (jaccard(x._tok || titleTokens(x.title), y._tok || titleTokens(y.title)) >= JACCARD_MIN) return true;
+  }
+  return entityRule && sameKeys(x._keys || keyTerms(x.title), y._keys || keyTerms(y.title));
 }
 const articlesOf = (s) => (s?.articles?.length ? s.articles : s?.lead ? [s.lead] : []);
 /** Two ranked stories are the same story if ANY pair of their articles is. Used to keep duplicates off the air. */
-export function sameStory(a, b) {
-  for (const x of articlesOf(a)) for (const y of articlesOf(b)) if (sameArticleStory(x, y)) return true;
+export function sameStory(a, b, entityRule = entityRuleEnabled()) {
+  for (const x of articlesOf(a)) for (const y of articlesOf(b)) if (sameArticleStory(x, y, entityRule)) return true;
   return false;
 }
 
@@ -165,12 +178,12 @@ export function chooseGroupMode(total, embedded, setting = groupModeSetting()) {
  *   • mode "cosine": both have a vector and cosine ≥ COSINE_MIN (a pair with an unembedded
  *     member uses title Jaccard ≥ JACCARD_MIN instead), or
  *   • mode "jaccard": title Jaccard ≥ JACCARD_MIN, or
- *   • in either mode: sameStoryTitles() (the entity rule).
+ *   • in either mode, unless RADIO_ENTITY_RULE=off: sameStoryTitles() (the entity rule).
  * @param {object[]} articles
  * @param {{ mode?: "cosine"|"jaccard", vectors?: Map<string, ArrayLike<number>> }} opts
  * @returns {object[][]} groups of articles
  */
-export function groupArticles(articles, { mode = "jaccard", vectors = null } = {}) {
+export function groupArticles(articles, { mode = "jaccard", vectors = null, entityRule = entityRuleEnabled() } = {}) {
   const useVec = mode === "cosine" && vectors;
   const items = articles.map((a) => ({ ...a, _tok: titleTokens(a.title), _keys: keyTerms(a.title), _vec: useVec ? vectors.get(a.id) || null : null }));
   const parent = items.map((_, i) => i);
@@ -183,7 +196,7 @@ export function groupArticles(articles, { mode = "jaccard", vectors = null } = {
       const same = a._vec && b._vec
         ? cosine(a._vec, b._vec) >= COSINE_MIN
         : jaccard(a._tok, b._tok) >= JACCARD_MIN;
-      if (same || sameKeys(a._keys, b._keys)) parent[find(i)] = find(j);
+      if (same || (entityRule && sameKeys(a._keys, b._keys))) parent[find(i)] = find(j);
     }
   }
   const groups = new Map();

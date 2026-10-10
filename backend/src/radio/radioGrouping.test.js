@@ -148,3 +148,33 @@ test("MUSIC: stories with ≥ 2 outlets are chosen before single-source ones; a 
   assert.ok(music.every((s) => s.lead.title !== HN_PAPER && s.lead.title !== STARGATE));
   assert.equal(music.length, 5, "2 multi-outlet + 3 eligible single-source; the 2 ineligible are left out, not used as padding");
 });
+
+test("RADIO_ENTITY_RULE=off disables the entity rule in grouping and in the on-air duplicate check", () => {
+  assert.equal(R.entityRuleEnabled(undefined), true, "default must be ON (current behaviour)");
+  assert.equal(R.entityRuleEnabled(""), true);
+  assert.equal(R.entityRuleEnabled("on"), true);
+  assert.equal(R.entityRuleEnabled("off"), false);
+  assert.equal(R.entityRuleEnabled(" OFF "), false);
+
+  // A pair ONLY the entity rule joins (the fixture defeats Jaccard; see the ENTITY RULE test).
+  const a = DIESEL_A;
+  const b = "Trump announces deal with Putin, a landmark diplomatic breakthrough after months of talks, to release Russian diesel exports";
+  assert.ok(R.jaccard(R.titleTokens(a), R.titleTokens(b)) < R.JACCARD_MIN, "fixture must defeat Jaccard");
+  assert.equal(R.sameStoryTitles(a, b), true, "fixture must trigger the entity rule");
+  const x = art(a, "NPR News"), y = art(b, "BBC News");
+
+  assert.equal(R.groupArticles([x, y], { mode: "jaccard", entityRule: true }).length, 1, "rule on: merged");
+  assert.equal(R.groupArticles([x, y], { mode: "jaccard", entityRule: false }).length, 2, "rule off: kept apart");
+  assert.equal(R.sameStory({ articles: [x] }, { articles: [y] }, true), true, "rule on: duplicate on air is caught");
+  assert.equal(R.sameStory({ articles: [x] }, { articles: [y] }, false), false, "rule off: duplicate check no longer uses it");
+
+  // The env var drives the defaults.
+  const prev = process.env.RADIO_ENTITY_RULE;
+  try {
+    process.env.RADIO_ENTITY_RULE = "off";
+    assert.equal(R.groupArticles([x, y], { mode: "jaccard" }).length, 2, "env off not honoured by grouping");
+    assert.equal(R.sameStory({ articles: [x] }, { articles: [y] }), false, "env off not honoured by duplicate check");
+  } finally {
+    if (prev === undefined) delete process.env.RADIO_ENTITY_RULE; else process.env.RADIO_ENTITY_RULE = prev;
+  }
+});
