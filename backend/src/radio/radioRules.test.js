@@ -148,3 +148,18 @@ test("LIVE LEAKS 10 Oct 2026: opinion and roundups are dropped by rule; executio
     assert.equal(isRadioSensitive(title), false, title);
   }
 });
+
+test("EXPLAINERS are not hard news: ', explained' / 'explained:' / 'what to know' hit radio:soft-howto", () => {
+  for (const title of [
+    "The global diesel crisis, explained",
+    "Explained: why diesel prices keep climbing",
+    "Why diesel is so scarce – explained",
+    "Russia's diesel export ban: what to know",
+    "What to know about the new diesel rules",
+  ]) assert.equal(softNewsVerdict({ title }).rule, "radio:soft-howto", title);
+  // an unrelated use of the word is still news
+  for (const title of [
+    "Minister explained the delay to parliament on Tuesday",
+    "Senate passes bill after weeks of debate",
+  ]) assert.equal(softNewsVerdict({ title }).allowed, true, title);
+});
