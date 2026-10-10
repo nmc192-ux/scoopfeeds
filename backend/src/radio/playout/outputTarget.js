@@ -25,10 +25,12 @@ export function rtmpAllowed(env = process.env) {
 
 /**
  * @param {{ out?: string|null, env?: object }} opts
- * @returns {{ kind: "file", path: string } | { kind: "rtmp", url: string }}
+ * @returns {{ kind: "file", path: string } | { kind: "segments", dir: string, segmentSec: number, keep: number } | { kind: "rtmp", url: string }}
  */
-export function resolveTarget({ out = null, env = process.env } = {}) {
+export function resolveTarget({ out = null, segmentsDir = null, segmentSec = 60, segmentKeep = 10, env = process.env } = {}) {
   if (out) return { kind: "file", path: path.resolve(out) };
+  // Always-on dry run: a ring of `segmentKeep` x `segmentSec` s MPEG-TS files (~4.6 Mbps => ~350 MB at 10 x 60 s), so the disk cannot fill.
+  if (segmentsDir) return { kind: "segments", dir: path.resolve(segmentsDir), segmentSec, keep: segmentKeep };
   if (!rtmpAllowed(env)) {
     throw new Error(
       "no output target: pass --out <file>, or set BOTH RADIO_PLAYOUT_ENABLED=true and RADIO_STREAM_KEY to enable the RTMP path",

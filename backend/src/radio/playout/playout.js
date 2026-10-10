@@ -17,7 +17,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { pickBed, daypartAt, listBeds, musicDir, DAYPARTS } from "../musicLibrary.js";
+import { pickBed, daypartAt, easternMinutes, listBeds, musicDir, DAYPARTS } from "../musicLibrary.js";
 import { buildFfmpegArgs, VIDEO } from "./ffmpegArgs.js";
 import { measureIntegrated } from "./loudness.js";
 import { resolveTarget, redact } from "./outputTarget.js";
@@ -72,6 +72,8 @@ export async function startUnit(opts) {
   const stop = async () => {
     clearInterval(timer); clearInterval(stallTimer); clearInterval(demoTimer);
     try { ff.stdin.end(); } catch { /* already closed */ }
+    // The looped bed never ends, so EOF on stdin alone leaves ffmpeg running: ask it to finish (SIGINT = clean trailer), SIGKILL after 5 s.
+    try { if (ff.exitCode === null && !ff.signalCode) ff.kill("SIGINT"); } catch { /* gone */ }
     await new Promise((resolve) => {
       if (ff.exitCode !== null || ff.signalCode) return resolve();
       const kill = setTimeout(() => { try { ff.kill("SIGKILL"); } catch { /* gone */ } }, 5000);
@@ -147,8 +149,11 @@ export async function startUnit(opts) {
 export async function runPlayout(o = {}) {
   const env = o.env || process.env;
   const log = o.log || ((m) => console.log(`📻 playout: ${m}`));
-  const target = resolveTarget({ out: o.out, env });          // throws before anything is spawned
+  const target = resolveTarget({ out: o.out, segmentsDir: o.segmentsDir, env });          // throws before anything is spawned
   if (target.kind === "file" && !o.seconds) throw new Error("--seconds is required with --out");
+  if (target.kind === "segments") fs.mkdirSync(target.dir, { recursive: true });
+  if (o.forceDaypartCycleSec && target.kind === "rtmp") throw new Error("--force-daypart-cycle is a test option and cannot be used with RTMP");
+  const live = target.kind !== "file";
   const stats = { framesCaptured: 0, framesWritten: 0, framesRepeated: 0, slotsSkippedBackpressure: 0, slotsSkippedLate: 0 };
 
   let server = null, origin = o.baseUrl, stateUrl = "/api/radio/state.json";
@@ -159,9 +164,18 @@ export async function runPlayout(o = {}) {
   const pageUrl = screenUrl(origin, new URL(stateUrl, origin).toString());
   const dir = o.musicDir || musicDir();
   let current = { daypart: null };
+  // Test only (--force-daypart-cycle N): step through the four dayparts every N s by shifting the clock into each one.
+  const t0 = Date.now();
+  const DEMO_ET_MINUTES = { morning: 6 * 60, markets: 12 * 60, evening: 20 * 60, overnight: 2 * 60 };
+  const clock = () => {
+    const now = new Date();
+    if (!o.forceDaypartCycleSec) return now;
+    const want = DAYPARTS[Math.floor((Date.now() - t0) / (o.forceDaypartCycleSec * 1000)) % DAYPARTS.length];
+    return new Date(now.getTime() + (DEMO_ET_MINUTES[want] - easternMinutes(now)) * 60_000);
+  };
 
   const start = async () => {
-    const { bed, daypart, fallback } = chooseBed(new Date(), { dir });
+    const { bed, daypart, fallback } = chooseBed(clock(), { dir });
     const bedLufs = await measureIntegrated(bed, { ffmpeg: o.ffmpeg });
     log(`daypart=${daypart}${fallback ? " (EMPTY - fell back to another daypart's bed)" : ""} bed=${path.basename(bed)} bedLufs=${bedLufs ?? "unmeasured (loudnorm fallback)"} target=${target.kind}`);
     current = { daypart };
@@ -171,19 +185,20 @@ export async function runPlayout(o = {}) {
   const ac = new AbortController();
   o.signal?.addEventListener("abort", () => ac.abort(), { once: true });
   // Live mode: the bed is fixed per unit, so a daypart change is a planned restart onto the new bed.
-  const dp = target.kind === "rtmp" ? setInterval(() => {
-    if (daypartAt(new Date()) !== current.daypart) { log("daypart changed; restarting onto the new bed"); current.unit?.stop(); }
+  const dp = live ? setInterval(() => {
+    if (daypartAt(clock()) !== current.daypart) { log("daypart changed; restarting onto the new bed"); current.unit?.stop(); }
   }, DAYPART_CHECK_MS) : null;
+  const statsTimer = live ? setInterval(() => log(`stats ${JSON.stringify(stats)} rssMB=${Math.round(process.memoryUsage().rss / 1048576)}`), 60_000) : null;
   const wrapped = async () => { const u = await start(); current.unit = u; return u; };
 
   try {
     const res = await supervise(wrapped, {
-      maxRestarts: o.maxRestarts ?? (target.kind === "file" ? 0 : Infinity),
+      maxRestarts: o.maxRestarts ?? (live ? Infinity : 0),
       signal: ac.signal, log: (m) => log(m),
     });
-    return { ...res, stats, target: target.kind === "file" ? target.path : "rtmp" };
+    return { ...res, stats, target: target.kind === "file" ? target.path : target.kind === "segments" ? target.dir : "rtmp" };
   } finally {
-    clearInterval(dp);
+    clearInterval(dp); clearInterval(statsTimer);
     await server?.close();
   }
 }

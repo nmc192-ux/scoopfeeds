@@ -196,3 +196,30 @@ test("watchdog stops cleanly on abort without restarting", async () => {
   assert.equal(n, 1);
   assert.ok(stopped >= 1);
 });
+
+// ── always-on dry run: rolling segments ──────────────────────────────────────
+test("--segments-dir resolves to a bounded ring and is never RTMP; --out still wins", () => {
+  const t = resolveTarget({ segmentsDir: "/tmp/ring", env: { RADIO_PLAYOUT_ENABLED: "true", RADIO_STREAM_KEY: "abcd-efgh" } });
+  assert.deepEqual(t, { kind: "segments", dir: "/tmp/ring", segmentSec: 60, keep: 10 });
+  assert.equal(resolveTarget({ out: "/tmp/x.mp4", segmentsDir: "/tmp/ring", env: {} }).kind, "file");
+});
+
+test("segment ffmpeg args wrap a fixed number of files and keep the encode settings", () => {
+  const a = buildFfmpegArgs({ target: { kind: "segments", dir: "/tmp/ring", segmentSec: 60, keep: 10 }, bed: "/m/b.mp3", bedLufs: -18 });
+  const at = (flag) => a[a.indexOf(flag) + 1];
+  assert.equal(at("-f"), "image2pipe");
+  assert.equal(a[a.lastIndexOf("-f") + 1], "segment");
+  assert.equal(at("-segment_wrap"), "10");
+  assert.equal(at("-segment_time"), "60");
+  assert.equal(at("-b:v"), "4500k");
+  assert.equal(a.at(-1), "/tmp/ring/seg-%02d.ts");
+  assert.ok(!a.includes("-t"), "live segments run until stopped");
+  assert.ok(!a.some((x) => /^rtmp/.test(x)));
+});
+
+test("the forced daypart cycle is refused on RTMP", async () => {
+  await assert.rejects(
+    runPlayout({ env: { RADIO_PLAYOUT_ENABLED: "true", RADIO_STREAM_KEY: "abcd-efgh" }, forceDaypartCycleSec: 5 }),
+    /cannot be used with RTMP/,
+  );
+});

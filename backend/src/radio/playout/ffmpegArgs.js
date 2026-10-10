@@ -7,6 +7,8 @@
  * ~4.5 Mbps CBR (nal-hrd=cbr), keyframe every 2 s (GOP 60, no scene-cut keyframes),
  * AAC-LC 128 kbps 44.1 kHz stereo.
  */
+import path from "node:path";
+
 export const VIDEO = Object.freeze({ width: 1920, height: 1080, fps: 30, bitrateK: 4500, gop: 60 });
 export const AUDIO = Object.freeze({ bitrateK: 128, rate: 44100, targetLufs: -16, truePeakDb: -1.5 });
 
@@ -22,7 +24,7 @@ export function loudnessFilter(measuredLufs, { targetLufs = AUDIO.targetLufs, tr
 }
 
 /**
- * @param {{ target: {kind:"file",path:string}|{kind:"rtmp",url:string}, bed: string, bedLufs: number,
+ * @param {{ target: {kind:"file",path:string}|{kind:"segments",dir:string,segmentSec:number,keep:number}|{kind:"rtmp",url:string}, bed: string, bedLufs: number,
  *           seconds?: number|null }} o
  */
 export function buildFfmpegArgs({ target, bed, bedLufs, seconds = null }) {
@@ -45,6 +47,9 @@ export function buildFfmpegArgs({ target, bed, bedLufs, seconds = null }) {
   );
   if (seconds) a.push("-t", String(seconds));
   if (target.kind === "file") a.push("-movflags", "+faststart", target.path);
-  else a.push("-f", "flv", target.url);
+  else if (target.kind === "segments") {
+    a.push("-f", "segment", "-segment_format", "mpegts", "-segment_time", String(target.segmentSec),
+      "-segment_wrap", String(target.keep), "-reset_timestamps", "1", path.join(target.dir, "seg-%02d.ts"));
+  } else a.push("-f", "flv", target.url);
   return a;
 }
