@@ -1,0 +1,7 @@
+{
+  "name": "scoopfeeds-radio-playout",
+  "private": true,
+  "type": "module",
+  "description": "Playout-host-only dependencies. Not part of the production backend install.",
+  "dependencies": { "playwright-core": "1.63.0" }
+}

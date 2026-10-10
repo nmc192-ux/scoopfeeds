@@ -68,7 +68,7 @@ export async function startUnit(opts) {
     finish(`ffmpeg-exited code=${code} signal=${sig}`);
   });
 
-  let browser = null, timer = null, stallTimer = null, demoTimer = null, latest = null, lastFrameAt = Date.now();
+  let lastWritten = null, browser = null, timer = null, stallTimer = null, demoTimer = null, latest = null, lastFrameAt = Date.now();
   const stop = async () => {
     clearInterval(timer); clearInterval(stallTimer); clearInterval(demoTimer);
     try { ff.stdin.end(); } catch { /* already closed */ }
@@ -86,7 +86,12 @@ export async function startUnit(opts) {
     const flags = ["--hide-scrollbars", "--mute-audio", "--disable-background-timer-throttling",
       "--disable-renderer-backgrounding", "--force-device-scale-factor=1"];
     if (process.getuid?.() === 0) flags.push("--no-sandbox");
-    browser = await chromium.launch({ headless: true, args: flags });
+    // RADIO_PLAYOUT_CHROME=system uses the installed Google Chrome; a path uses that executable; unset = Playwright's Chromium.
+    const chromeEnv = env.RADIO_PLAYOUT_CHROME;
+    const browserOpts = { headless: true, args: flags };
+    if (chromeEnv === "system") browserOpts.channel = "chrome";
+    else if (chromeEnv) browserOpts.executablePath = chromeEnv;
+    browser = await chromium.launch(browserOpts);
     browser.on("disconnected", () => finish("browser-disconnected"));
     const page = await browser.newPage({ viewport: { width: VIDEO.width, height: VIDEO.height }, deviceScaleFactor: 1 });
     page.on("crash", () => finish("page-crashed"));
@@ -111,6 +116,8 @@ export async function startUnit(opts) {
       // ffmpeg is behind: skip the repeats instead of queueing them (queued frames would add latency).
       if (ff.stdin.writableLength > latest.length * 3) { if (stats) stats.slotsSkippedBackpressure += due; return; }
       ff.stdin.write(latest);
+      if (stats && latest === lastWritten) stats.framesRepeated++;   // no new Chromium frame since the last slot
+      lastWritten = latest;
       // due > 1 means the event loop itself was late; ffmpeg's fps filter re-fills those slots from wallclock stamps.
       if (stats) { stats.framesWritten++; stats.slotsSkippedLate += due - 1; }
     }, 5);
@@ -142,7 +149,7 @@ export async function runPlayout(o = {}) {
   const log = o.log || ((m) => console.log(`📻 playout: ${m}`));
   const target = resolveTarget({ out: o.out, env });          // throws before anything is spawned
   if (target.kind === "file" && !o.seconds) throw new Error("--seconds is required with --out");
-  const stats = { framesCaptured: 0, framesWritten: 0, slotsSkippedBackpressure: 0, slotsSkippedLate: 0 };
+  const stats = { framesCaptured: 0, framesWritten: 0, framesRepeated: 0, slotsSkippedBackpressure: 0, slotsSkippedLate: 0 };
 
   let server = null, origin = o.baseUrl, stateUrl = "/api/radio/state.json";
   if (!origin) {
