@@ -24,7 +24,7 @@ export async function supervise(start, {
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   now = Date.now, log = () => {},
 } = {}) {
-  let restarts = 0;
+  let restarts = 0, planned = 0;
   let attempt = 0;
   for (;;) {
     if (signal?.aborted) return { restarts, reason: "stopped" };
@@ -41,6 +41,8 @@ export async function supervise(start, {
     signal?.removeEventListener("abort", onAbort);
     await unit.stop().catch(() => {});   // never leave half a unit (browser without ffmpeg, or the reverse) running
     if (reason === "completed") return { restarts, reason };
+    // A planned restart (e.g. a bed change that could not be swapped live) is not a crash: no backoff, no give-up count.
+    if (reason === "planned-restart" && !signal?.aborted) { planned++; log(`watchdog: planned restart #${planned}, no backoff`); continue; }
     if (signal?.aborted) return { restarts, reason: "stopped" };
     if (now() - startedAt >= backoff.healthyMs) attempt = 0;
     if (restarts >= maxRestarts) { log(`watchdog: giving up after ${restarts} restart(s); last: ${reason}`); return { restarts, reason: "gave-up" }; }

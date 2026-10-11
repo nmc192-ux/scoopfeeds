@@ -10,7 +10,7 @@
 import path from "node:path";
 
 export const VIDEO = Object.freeze({ width: 1920, height: 1080, fps: 30, bitrateK: 4500, gop: 60 });
-export const AUDIO = Object.freeze({ bitrateK: 128, rate: 44100, targetLufs: -16, truePeakDb: -1.5 });
+export const AUDIO = Object.freeze({ bitrateK: 128, rate: 44100, targetLufs: -16, truePeakDb: -3.0 });
 
 /** Linear-gain filter that lands a bed measured at `measuredLufs` on the target, with a peak limiter. */
 export function loudnessFilter(measuredLufs, { targetLufs = AUDIO.targetLufs, truePeakDb = AUDIO.truePeakDb } = {}) {
@@ -24,18 +24,25 @@ export function loudnessFilter(measuredLufs, { targetLufs = AUDIO.targetLufs, tr
 }
 
 /**
+ * Live targets take the bed as raw PCM on fd 3 (`audioPipe`), produced by a separate "feeder" ffmpeg (buildFeederArgs),
+ * so the bed can be swapped at a daypart change without restarting this encoder or dropping the RTMP connection.
  * @param {{ target: {kind:"file",path:string}|{kind:"segments",dir:string,segmentSec:number,keep:number}|{kind:"rtmp",url:string}, bed: string, bedLufs: number,
  *           seconds?: number|null }} o
  */
-export function buildFfmpegArgs({ target, bed, bedLufs, seconds = null }) {
+export function buildFfmpegArgs({ target, bed, bedLufs, seconds = null, audioPipe = false }) {
   const a = ["-hide_banner", "-loglevel", "warning", "-y"];
   // input 0: JPEG frames on stdin, stamped by arrival time (the capture writes them at 30 Hz)
   a.push("-use_wallclock_as_timestamps", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-i", "pipe:0");
-  // input 1: the bed, looped forever, read at 1x so audio and wallclock-stamped video stay in step
-  a.push("-re", "-stream_loop", "-1", "-i", bed);
+  if (audioPipe) {
+    // input 1: already gained/limited raw PCM from the feeder, arriving in real time
+    a.push("-thread_queue_size", "512", "-f", "s16le", "-ar", String(AUDIO.rate), "-ac", "2", "-i", "pipe:3");
+  } else {
+    // input 1: the bed, looped forever, read at 1x so audio and wallclock-stamped video stay in step
+    a.push("-re", "-stream_loop", "-1", "-i", bed);
+  }
   a.push("-map", "0:v:0", "-map", "1:a:0");
   a.push("-vf", `fps=${VIDEO.fps},scale=${VIDEO.width}:${VIDEO.height}:flags=bicubic,format=yuv420p`);
-  a.push("-af", loudnessFilter(bedLufs));
+  if (!audioPipe) a.push("-af", loudnessFilter(bedLufs));
   a.push(
     "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-pix_fmt", "yuv420p",
     "-r", String(VIDEO.fps),
@@ -52,4 +59,10 @@ export function buildFfmpegArgs({ target, bed, bedLufs, seconds = null }) {
       "-segment_wrap", String(target.keep), "-reset_timestamps", "1", path.join(target.dir, "seg-%02d.ts"));
   } else a.push("-f", "flv", target.url);
   return a;
+}
+
+/** The feeder: the bed looped at real time, gained to -16 LUFS + limited, as raw s16le stereo PCM on stdout. */
+export function buildFeederArgs({ bed, bedLufs }) {
+  return ["-hide_banner", "-loglevel", "error", "-re", "-stream_loop", "-1", "-i", bed, "-vn",
+    "-af", loudnessFilter(bedLufs), "-f", "s16le", "-ar", String(AUDIO.rate), "-ac", "2", "pipe:1"];
 }

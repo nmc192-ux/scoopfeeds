@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { pickBed, daypartAt, easternMinutes, listBeds, musicDir, DAYPARTS } from "../musicLibrary.js";
-import { buildFfmpegArgs, VIDEO } from "./ffmpegArgs.js";
+import { buildFfmpegArgs, buildFeederArgs, VIDEO } from "./ffmpegArgs.js";
 import { measureIntegrated } from "./loudness.js";
 import { resolveTarget, redact } from "./outputTarget.js";
 import { startScreenServer, screenUrl } from "./screenServer.js";
@@ -51,8 +51,9 @@ export function chooseBed(now = new Date(), { dir = musicDir(), random = Math.ra
 /** Start one Chromium + ffmpeg unit. Resolves once both are running. */
 export async function startUnit(opts) {
   const { target, bed, bedLufs, seconds, pageUrl, log = () => {}, demoCycleSec = 0, env = process.env, stats } = opts;
-  const args = buildFfmpegArgs({ target, bed, bedLufs, seconds });
-  const ff = spawn(opts.ffmpeg || "ffmpeg", args, { stdio: ["pipe", "ignore", "pipe"] });
+  const audioPipe = target.kind !== "file";   // live units take the bed through a swappable feeder (see buildFfmpegArgs)
+  const args = buildFfmpegArgs({ target, bed, bedLufs, seconds, audioPipe });
+  const ff = spawn(opts.ffmpeg || "ffmpeg", args, { stdio: audioPipe ? ["pipe", "ignore", "pipe", "pipe"] : ["pipe", "ignore", "pipe"] });
   let ffErr = "";
   ff.stderr.on("data", (d) => { ffErr = (ffErr + d).slice(-4000); });
   ff.stdin.on("error", () => { /* ffmpeg ended first; the exit handler reports it */ });
@@ -68,8 +69,43 @@ export async function startUnit(opts) {
     finish(`ffmpeg-exited code=${code} signal=${sig}`);
   });
 
+  // ── live audio: feeder ffmpeg -> this process -> encoder fd 3 ──
+  let feeder = null, gateOpen = false, stopping = false;
+  const pcmOut = audioPipe ? ff.stdio[3] : null;
+  pcmOut?.on("error", () => { /* encoder ended first; the exit handler reports it */ });
+  const retire = (f) => { if (!f) return; f.retired = true; try { f.proc.kill("SIGKILL"); } catch { /* gone */ } };
+  const spawnFeeder = (bedPath, lufs) => {
+    const proc = spawn(opts.ffmpeg || "ffmpeg", buildFeederArgs({ bed: bedPath, bedLufs: lufs }), { stdio: ["ignore", "pipe", "pipe"] });
+    const f = { proc, bed: bedPath, retired: false };
+    f.firstData = new Promise((resolve) => { f.onFirst = resolve; });
+    proc.stderr.on("data", () => {});
+    proc.stdout.on("data", (chunk) => {
+      f.onFirst?.(); f.onFirst = null;
+      // only the active feeder is forwarded, and only once video is flowing (so audio and video start together)
+      if (f === feeder && gateOpen && pcmOut?.writable) { pcmOut.write(chunk); if (stats) stats.pcmBytes = (stats.pcmBytes || 0) + chunk.length; }
+    });
+    proc.on("error", (e) => { if (f === feeder) finish(`audio-feeder-spawn-failed: ${e.message}`); });
+    proc.on("exit", (code, sig) => { if (f === feeder && !f.retired && !stopping) finish(`audio-feeder-exited code=${code} signal=${sig}`); });
+    return f;
+  };
+  if (audioPipe) feeder = spawnFeeder(bed, bedLufs);
+  /** Swap the bed under a running encoder. The new feeder warms up (its -re start-up burst is discarded), then takes over at a chunk boundary. */
+  const swapBed = async (bedPath, lufs) => {
+    if (!audioPipe) throw new Error("swapBed needs a live unit");
+    const f = spawnFeeder(bedPath, lufs);
+    try {
+      await Promise.race([f.firstData, new Promise((_, rej) => setTimeout(() => rej(new Error("new bed produced no audio in 10 s")), 10_000))]);
+      await new Promise((r) => setTimeout(r, 1500));
+      if (f.proc.exitCode !== null || f.proc.signalCode) throw new Error("new bed's feeder exited during warm-up");
+      if (done || stopping) throw new Error("unit is stopping");
+    } catch (err) { retire(f); throw err; }
+    const old = feeder; feeder = f; retire(old);
+  };
+
   let lastWritten = null, browser = null, timer = null, stallTimer = null, demoTimer = null, latest = null, lastFrameAt = Date.now();
-  const stop = async () => {
+  const stop = async (reason) => {
+    if (reason) finish(reason);
+    stopping = true; retire(feeder);
     clearInterval(timer); clearInterval(stallTimer); clearInterval(demoTimer);
     try { ff.stdin.end(); } catch { /* already closed */ }
     // The looped bed never ends, so EOF on stdin alone leaves ffmpeg running: ask it to finish (SIGINT = clean trailer), SIGKILL after 5 s.
@@ -118,6 +154,7 @@ export async function startUnit(opts) {
       // ffmpeg is behind: skip the repeats instead of queueing them (queued frames would add latency).
       if (ff.stdin.writableLength > latest.length * 3) { if (stats) stats.slotsSkippedBackpressure += due; return; }
       ff.stdin.write(latest);
+      gateOpen = true;
       if (stats && latest === lastWritten) stats.framesRepeated++;   // no new Chromium frame since the last slot
       lastWritten = latest;
       // due > 1 means the event loop itself was late; ffmpeg's fps filter re-fills those slots from wallclock stamps.
@@ -134,7 +171,7 @@ export async function startUnit(opts) {
         page.evaluate((s) => window.ScoopRadio?.scene(s), DEMO_SCENES[++i % DEMO_SCENES.length]).catch(() => {});
       }, demoCycleSec * 1000);
     }
-    return { exited, stop, page };
+    return { exited, stop, page, swapBed: audioPipe ? swapBed : undefined, get bed() { return feeder?.bed ?? bed; } };
   } catch (err) {
     await stop();
     throw err;
@@ -154,7 +191,7 @@ export async function runPlayout(o = {}) {
   if (target.kind === "segments") fs.mkdirSync(target.dir, { recursive: true });
   if (o.forceDaypartCycleSec && target.kind === "rtmp") throw new Error("--force-daypart-cycle is a test option and cannot be used with RTMP");
   const live = target.kind !== "file";
-  const stats = { framesCaptured: 0, framesWritten: 0, framesRepeated: 0, slotsSkippedBackpressure: 0, slotsSkippedLate: 0 };
+  const stats = { framesCaptured: 0, framesWritten: 0, framesRepeated: 0, pcmBytes: 0, slotsSkippedBackpressure: 0, slotsSkippedLate: 0 };
 
   let server = null, origin = o.baseUrl, stateUrl = "/api/radio/state.json";
   if (!origin) {
@@ -185,8 +222,21 @@ export async function runPlayout(o = {}) {
   const ac = new AbortController();
   o.signal?.addEventListener("abort", () => ac.abort(), { once: true });
   // Live mode: the bed is fixed per unit, so a daypart change is a planned restart onto the new bed.
-  const dp = live ? setInterval(() => {
-    if (daypartAt(clock()) !== current.daypart) { log("daypart changed; restarting onto the new bed"); current.unit?.stop(); }
+  let swapping = false;
+  const dp = live ? setInterval(async () => {
+    if (swapping || daypartAt(clock()) === current.daypart) return;
+    swapping = true;
+    try {
+      const next = chooseBed(clock(), { dir });
+      const bedLufs = await measureIntegrated(next.bed, { ffmpeg: o.ffmpeg });
+      if (!current.unit?.swapBed) throw new Error("unit cannot swap live");
+      await current.unit.swapBed(next.bed, bedLufs);
+      current.daypart = next.daypart;
+      log(`daypart changed to ${next.daypart}${next.fallback ? " (EMPTY - fallback bed)" : ""}: bed swapped to ${path.basename(next.bed)} bedLufs=${bedLufs ?? "unmeasured"} (encoder and connection untouched)`);
+    } catch (err) {
+      log(`daypart changed; live bed swap failed (${redact(err.message, env)}); doing a planned restart`);
+      current.unit?.stop("planned-restart");
+    } finally { swapping = false; }
   }, DAYPART_CHECK_MS) : null;
   const statsTimer = live ? setInterval(() => log(`stats ${JSON.stringify(stats)} rssMB=${Math.round(process.memoryUsage().rss / 1048576)}`), 60_000) : null;
   const wrapped = async () => { const u = await start(); current.unit = u; return u; };

@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { chooseBed, runPlayout } from "./playout.js";
 import { resolveTarget, rtmpAllowed, redact, RTMP_BASE } from "./outputTarget.js";
-import { buildFfmpegArgs, loudnessFilter, VIDEO } from "./ffmpegArgs.js";
+import { buildFfmpegArgs, buildFeederArgs, loudnessFilter, VIDEO, AUDIO } from "./ffmpegArgs.js";
 import { parseIntegrated } from "./loudness.js";
 import { supervise, nextDelay, BACKOFF } from "./watchdog.js";
 
@@ -222,4 +222,39 @@ test("the forced daypart cycle is refused on RTMP", async () => {
     runPlayout({ env: { RADIO_PLAYOUT_ENABLED: "true", RADIO_STREAM_KEY: "abcd-efgh" }, forceDaypartCycleSec: 5 }),
     /cannot be used with RTMP/,
   );
+});
+
+// ── live bed swap, planned restarts, limiter ceiling ─────────────────────────
+test("a planned restart skips the crash backoff and does not count as a give-up", async () => {
+  const clock = fakeClock();
+  let starts = 0;
+  const reasons = ["planned-restart", "planned-restart", "ffmpeg-exited code=1", "completed"];
+  const start = async () => ({ exited: Promise.resolve({ reason: reasons[starts++] }), stop: async () => {} });
+  const res = await supervise(start, { sleep: clock.sleep, now: clock.now, maxRestarts: 1 });
+  assert.equal(res.reason, "completed");
+  assert.deepEqual(clock.sleeps, [1000], "only the real crash waited, and at the first backoff step");
+});
+
+test("live targets read the bed as PCM on fd 3 (no -re/-stream_loop/-af in the encoder), file targets keep the looped bed", () => {
+  const seg = { kind: "segments", dir: "/tmp/ring", segmentSec: 60, keep: 10 };
+  const live = buildFfmpegArgs({ target: seg, bed: "/m/b.mp3", bedLufs: -18, audioPipe: true });
+  assert.ok(live.includes("pipe:3"));
+  for (const flag of ["-re", "-stream_loop", "-af"]) assert.ok(!live.includes(flag), flag);
+  assert.equal(live[live.indexOf("-b:v") + 1], "4500k");
+  assert.ok(!live.includes("/m/b.mp3"));
+  const file = buildFfmpegArgs({ target: { kind: "file", path: "/tmp/t.mp4" }, bed: "/m/b.mp3", bedLufs: -18, seconds: 5 });
+  assert.ok(file.includes("-stream_loop") && file.includes("-af") && !file.includes("pipe:3"));
+});
+
+test("the feeder loops the bed in real time through the loudness filter into s16le PCM", () => {
+  const a = buildFeederArgs({ bed: "/m/b.mp3", bedLufs: -18 });
+  assert.ok(a.includes("-re") && a.includes("-stream_loop"));
+  assert.equal(a[a.indexOf("-af") + 1], loudnessFilter(-18));
+  assert.deepEqual(a.slice(a.indexOf("-f"), a.indexOf("-f") + 2), ["-f", "s16le"]);
+  assert.equal(a.at(-1), "pipe:1");
+});
+
+test("limiter ceiling leaves room for AAC overshoot (measured +1.1 dB on the markets bed)", () => {
+  assert.equal(AUDIO.truePeakDb, -3);
+  assert.match(loudnessFilter(-16.3), /alimiter=limit=0\.7079:/);
 });
