@@ -149,6 +149,30 @@ test("LIVE LEAKS 10 Oct 2026: opinion and roundups are dropped by rule; executio
   }
 });
 
+test("LIVE LEAK 11 Oct 2026: natural disasters and people hurt are sensitive; common metaphors are not", () => {
+  for (const title of [
+    "Flash flood sweeps away buildings in Nepal",          // the leaked headline, verbatim
+    "Floods cut off villages in northern Italy",
+    "Flooding closes schools across Houston",
+    "Magnitude 6.8 earthquake strikes off Chile",
+    "Quake rattles Tokyo, no tsunami warning issued",
+    "Landslide buries homes in Kerala",
+    "Wildfire forces thousands to evacuate in California",
+    "Typhoon makes landfall in the Philippines",
+    "Tornadoes tear through Oklahoma towns",
+    "Dozens injured as bus overturns in Peru",
+    "Rescuers search rubble after building collapse",
+    "Thousands displaced by storm in Bangladesh",
+  ]) assert.equal(isRadioSensitive(title), true, title);
+  for (const title of [
+    "Labour heads for a landslide victory, polls suggest",
+    "Retailers report a flood of holiday orders",
+    "Inbox flooded with applications after hiring spree",
+    "CEO faces an avalanche of criticism over pay",
+    "Fed holds interest rates steady as inflation cools",
+  ]) assert.equal(isRadioSensitive(title), false, title);
+});
+
 test("EXPLAINERS are not hard news: ', explained' / 'explained:' / 'what to know' hit radio:soft-howto", () => {
   for (const title of [
     "The global diesel crisis, explained",

@@ -516,8 +516,40 @@ function stripModes(){
   if (hasWeather()) m.push('weather');
   return m.length ? m : ['headlines'];
 }
-function buildTicker(){
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+/*
+ * The crawl must never restart mid-lap. The playout page polls state every 15 s and the
+ * strip used to rebuild (and restart its animation from zero) on every poll and every
+ * 30 s strip swap, even with identical content — on air the ticker jumped back mid-
+ * sentence every 15 s and never finished a lap (live test, 11 Oct 2026).
+ *   - identical content  → no-op, the crawl runs on;
+ *   - changed content    → swapped at the end of the current lap (animationiteration);
+ *   - strip mode change  → immediate, hidden by the strip's fade.
+ * Speed is 120 px/s = exactly 4 px per frame at 30 fps, so each output frame moves the
+ * text by whole pixels (110 px/s gave 3.67 px steps, which shimmer once encoded).
+ */
+const TICKER_PX_PER_S = 120;
+let tickerKey = '', tickerPending = false;
+function tickerReduced(){ return matchMedia('(prefers-reduced-motion: reduce)').matches; }
+function buildTicker(force){
+  const { items, modeHtml } = tickerContent();
+  const key = stripMode + '\u0000' + items;
+  if (!force && key === tickerKey) return;
+  const track = $('track');
+  if (!force && tickerKey && track.classList.contains('run') && !tickerReduced()){ tickerPending = true; return; }
+  tickerPending = false; tickerKey = key;
+  const reduce = tickerReduced();
+  track.classList.remove('run');
+  track.innerHTML = items + (reduce ? '' : items);
+  $('mode').innerHTML = modeHtml;
+  if (!reduce){
+    requestAnimationFrame(() => {
+      track.style.setProperty('--dur', (track.scrollWidth / 2 / TICKER_PX_PER_S) + 's');
+      void track.offsetWidth; track.classList.add('run');
+    });
+  }
+}
+$('track').addEventListener('animationiteration', () => { if (tickerPending) buildTicker(true); });
+function tickerContent(){
   let items = '', modeHtml = '';
   const modes = stripModes();
   if (!modes.includes(stripMode)) stripMode = modes[0];
@@ -534,20 +566,12 @@ function buildTicker(){
     cities.forEach(c => items += `<span class="ti num"><span class="n">${esc(c.city)}</span><span class="p">${c.f}°F</span><span class="g">${Math.round((c.f-32)*5/9)}°C, ${esc(c.cond)}</span></span>`);
     modeHtml = `<b>Weather</b><span>Updated hourly</span>`;
   }
-  const track = $('track');
-  track.classList.remove('run');
-  track.innerHTML = items + (reduce ? '' : items);
-  $('mode').innerHTML = modeHtml;
-  if (!reduce){
-    requestAnimationFrame(() => {
-      track.style.setProperty('--dur', (track.scrollWidth / 2 / 110) + 's');
-      void track.offsetWidth; track.classList.add('run');
-    });
-  }
+  return { items, modeHtml };
 }
 function swapStrip(){
+  if (stripModes().length < 2) return;   // one mode only: nothing to swap, never fade/restart the crawl
   [$('mode'), $('tickwrap')].forEach(el => el.style.opacity = 0);
-  setTimeout(() => { const modes = stripModes(); stripMode = modes[(modes.indexOf(stripMode) + 1) % modes.length]; buildTicker(); [$('mode'), $('tickwrap')].forEach(el => el.style.opacity = 1); }, 500);
+  setTimeout(() => { const modes = stripModes(); stripMode = modes[(modes.indexOf(stripMode) + 1) % modes.length]; buildTicker(true); [$('mode'), $('tickwrap')].forEach(el => el.style.opacity = 1); }, 500);
 }
 
 /* ---------------- scenes ---------------- */
@@ -650,7 +674,7 @@ setInterval(() => {
   const st = sampleText(); $('sampleTag').textContent = st; $('sampleTag').style.display = st ? '' : 'none';
 }, 30000);
 setInterval(swapStrip, 30000);
-if (document.fonts && document.fonts.ready) document.fonts.ready.then(buildTicker);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => buildTicker(true));   // glyph widths changed: re-measure the lap
 </script>
 </body>
 </html>

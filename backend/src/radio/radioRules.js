@@ -118,6 +118,16 @@ export const SENSITIVE_TOPICS = new RegExp(
     "(?:live[- ]?stream(?:ed)?|public|televised|state|firing[- ]squad|botched|scheduled|planned|stay of) executions?",
     "executions? (?:of|by|under|plan|date|order|warrant|chamber)",
     "lethal injection", "firing squad", "hanged", "gallows", "beheaded\\w*", "beheading\\w*",
+    // Natural disasters and people hurt — live leak 11 Oct 2026 ("Flash flood sweeps away
+    // buildings in Nepal" under music). Metaphors are excluded where they are common:
+    // a landslide victory, a flood of orders, an avalanche of criticism.
+    "flash floods?", "floods?(?!\\s+(?:of|the\\s+(?:market|zone)))", "flooding", "flooded(?!\\s+with)",
+    "landslides?(?!\\s+(?:victory|victories|win|wins|election|defeat|majority|majorities|vote|re-?election))",
+    "mudslides?", "earthquakes?", "quakes?", "tsunamis?", "avalanches?(?!\\s+of)",
+    "wildfires?", "bushfires?", "cyclones?", "typhoons?", "tornado(?:es|s)?",
+    "swept away", "sweeps? away", "buried alive", "trapped under",
+    "injur(?:ed|es|ing|ies)", "wounded", "victims?", "casualt(?:y|ies)", "death tolls?",
+    "evacuat\\w*", "displaced", "homeless after", "rescuers?", "search and rescue",
   ].join("|") + ")\\b",
   "i"
 );
