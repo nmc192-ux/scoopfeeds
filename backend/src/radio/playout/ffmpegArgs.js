@@ -10,6 +10,13 @@
 import path from "node:path";
 
 export const VIDEO = Object.freeze({ width: 1920, height: 1080, fps: 30, bitrateK: 4500, gop: 60 });
+/**
+ * RTMP dead-link detection. rwTimeoutMs: a socket write that makes no progress this long fails the mux. Measured end to end
+ * through a blackholed loopback link: detection 5.2 s at 5 s, 7.2-7.3 s at 7 s. 7 rather than 5 so a ~5.6 s upload stall (seen
+ * in the Phase C test, connection survived) does not force a reconnect. Once the write fails, ffmpeg spends ~10 s more retrying
+ * the trailer and file close against the dead socket, so playout.js reacts to the error line itself (isFatalMuxError).
+ */
+export const RTMP = Object.freeze({ rwTimeoutMs: 7000 });
 export const AUDIO = Object.freeze({ bitrateK: 128, rate: 44100, targetLufs: -16, truePeakDb: -3.0 });
 
 /** Linear-gain filter that lands a bed measured at `measuredLufs` on the target, with a peak limiter. */
@@ -57,7 +64,7 @@ export function buildFfmpegArgs({ target, bed, bedLufs, seconds = null, audioPip
   else if (target.kind === "segments") {
     a.push("-f", "segment", "-segment_format", "mpegts", "-segment_time", String(target.segmentSec),
       "-segment_wrap", String(target.keep), "-reset_timestamps", "1", path.join(target.dir, "seg-%02d.ts"));
-  } else a.push("-f", "flv", target.url);
+  } else a.push("-rw_timeout", String(RTMP.rwTimeoutMs * 1000), "-f", "flv", target.url);
   return a;
 }
 

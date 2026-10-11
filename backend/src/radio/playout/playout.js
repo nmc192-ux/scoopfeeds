@@ -48,6 +48,9 @@ export function chooseBed(now = new Date(), { dir = musicDir(), random = Math.ra
   throw new Error(`no music bed found under ${dir}`);
 }
 
+/** ffmpeg prints this when the output can no longer be written (dead RTMP socket, full disk). */
+export const isFatalMuxError = (text) => /Error (submitting a packet to the muxer|muxing a packet)/.test(String(text));
+
 /** Start one Chromium + ffmpeg unit. Resolves once both are running. */
 export async function startUnit(opts) {
   const { target, bed, bedLufs, seconds, pageUrl, log = () => {}, demoCycleSec = 0, env = process.env, stats } = opts;
@@ -55,7 +58,15 @@ export async function startUnit(opts) {
   const args = buildFfmpegArgs({ target, bed, bedLufs, seconds, audioPipe });
   const ff = spawn(opts.ffmpeg || "ffmpeg", args, { stdio: audioPipe ? ["pipe", "ignore", "pipe", "pipe"] : ["pipe", "ignore", "pipe"] });
   let ffErr = "";
-  ff.stderr.on("data", (d) => { ffErr = (ffErr + d).slice(-4000); });
+  ff.stderr.on("data", (d) => {
+    ffErr = (ffErr + d).slice(-4000);
+    // Do not wait for ffmpeg to exit: against a dead socket it retries the trailer and close for ~10 s more. Kill it now and let the watchdog reconnect.
+    if (!done && isFatalMuxError(d)) {
+      log(`ffmpeg output failed: ${redact(String(d).trim().split("\n")[0], env)}; killing it so the watchdog can reconnect`);
+      try { ff.kill("SIGKILL"); } catch { /* gone */ }
+      finish("ffmpeg-output-error");
+    }
+  });
   ff.stdin.on("error", () => { /* ffmpeg ended first; the exit handler reports it */ });
 
   let settle;
