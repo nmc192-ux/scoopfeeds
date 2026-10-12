@@ -14,6 +14,7 @@ import { Worker } from "node:worker_threads";
 import { makeTestDb } from "../testing/testDb.js";
 import * as m039 from "../db/migrations/039_radio_dropped.js";
 import { buildRadioState, writeJsonAtomic, fitHeadline, logDrop, pruneDrops, DROP_RETENTION_MS } from "./radioState.js";
+import * as RS from "./radioState.js";
 
 const NOW = Date.UTC(2026, 9, 8, 15, 0, 0);
 let seq = 0;
@@ -258,4 +259,70 @@ test("the radio-headline call is given room for 30 headlines + verdicts (2,048 t
   const { HEADLINE_MAX_TOKENS, HEADLINE_TOP } = await import("./radioState.js");
   // ~80 output tokens per item (id, ≤90-char headline, three booleans, JSON) — keep 3× headroom.
   assert.ok(HEADLINE_MAX_TOKENS >= HEADLINE_TOP * 80 * 3, `cap ${HEADLINE_MAX_TOKENS} too small for ${HEADLINE_TOP} items`);
+});
+
+// ─── embedding grouping, end to end ─────────────────────────────────────────
+const FUEL_A = "Kremlin and Washington reach accord on fuel exports";
+const FUEL_B = "Oil products shipments cleared under Moscow-US pact";
+const unitVec = (cos) => { const v = new Float64Array(768); v[0] = cos; v[1] = Math.sqrt(1 - cos * cos); return v; };
+const gateKeep = async (p) => ({ verdicts: [...p.matchAll(/id=(\S+)/g)].map((m) => ({ id: m[1], verdict: "keep" })) });
+const wordEach = async (p) => ({ items: [...p.matchAll(/id=(\S+) \| (.*)/g)].map((m) => ({ id: m[1], h: m[2].slice(0, 80), opinion: false, soft: false, sensitive: false })) });
+
+test("GROUPING end to end: embedded candidates group by cosine, and mode + coverage are reported", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-cos-" });
+  seed(db, [{ title: FUEL_A, source: "NPR News" }, { title: FUEL_B, source: "BBC News" }, { title: "Volcano eruption grounds flights across Iceland", source: "Euronews" }]);
+  const ids = db.prepare(`SELECT id, title FROM articles ORDER BY id`).all();
+  const vecs = new Map(ids.map((r) => [r.id, r.title === FUEL_A ? unitVec(1) : r.title === FUEL_B ? unitVec(0.9) : unitVec(0.1)]));
+  const { state, stats } = await buildRadioState({ db, now: NOW, gateLlm: gateKeep, wordLlm: wordEach, loadVectors: () => vecs, groupSetting: "auto" });
+  assert.equal(stats.groupMode, "cosine");
+  assert.equal(stats.coverage, 1);
+  assert.equal(stats.embedded, 3);
+  assert.equal(stats.multiOutlet, 1, "the two differently-worded fuel stories became one two-outlet story");
+  const aired = [state.headline, ...state.alsoThisHour.map((x) => x.h), ...state.music.map((x) => x.h)];
+  assert.equal(aired.filter((h) => h === FUEL_A || h === FUEL_B).length, 1, aired.join(" | "));
+  assert.match(RS.radioLogLine(stats), /grouping cosine \(setting auto, embedding coverage 100\.0% = 3\/3\)/);
+  cleanup();
+});
+
+test("GROUPING end to end: low coverage → Jaccard for all (the same pair stays two stories); a failed vector read is reported, not hidden", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-jac-" });
+  seed(db, [{ title: FUEL_A, source: "NPR News" }, { title: FUEL_B, source: "BBC News" }, { title: "Volcano eruption grounds flights across Iceland", source: "Euronews" }]);
+  const ids = db.prepare(`SELECT id, title FROM articles ORDER BY id`).all();
+  const some = new Map([[ids[0].id, unitVec(1)]]);                         // 1 of 3 = 33% < 80%
+  const lowCov = await buildRadioState({ db, now: NOW, gateLlm: gateKeep, wordLlm: wordEach, loadVectors: () => some });
+  assert.equal(lowCov.stats.groupMode, "jaccard");
+  assert.equal(lowCov.stats.coverage, 0.333);
+  assert.equal(lowCov.stats.multiOutlet, 0);
+  const forced = await buildRadioState({ db, now: NOW, gateLlm: gateKeep, wordLlm: wordEach, loadVectors: () => some, groupSetting: "cosine" });
+  assert.equal(forced.stats.groupMode, "cosine");
+  assert.equal(forced.stats.groupSetting, "cosine");
+  const broken = await buildRadioState({ db, now: NOW, gateLlm: gateKeep, wordLlm: wordEach, loadVectors: () => { throw new Error("no such table: embeddings"); } });
+  assert.equal(broken.stats.groupMode, "jaccard");
+  assert.equal(broken.stats.coverage, 0);
+  assert.match(broken.stats.vectorError, /no such table/);
+  assert.match(RS.radioLogLine(broken.stats), /vector read failed: no such table/);
+  cleanup();
+});
+
+test("FAIL SAFE is untouched: with embedding grouping on, a story without a verdict still never reaches music", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-fs-" });
+  seed(db, ROWS);
+  const { state } = await buildRadioState({ db, now: NOW, gateLlm: gateKeep, wordLlm: async () => null, loadVectors: () => new Map() });
+  assert.deepEqual(state.music, []);
+  cleanup();
+});
+
+test("DEFAULT WIRING: with no injected loader, stored sqlite-vec article vectors are read and drive the grouping", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-vec-" });
+  seed(db, [{ title: FUEL_A, source: "NPR News" }, { title: FUEL_B, source: "BBC News" }]);
+  for (const r of db.prepare(`SELECT id, title FROM articles ORDER BY id`).all()) {
+    const buf = Buffer.from(Float32Array.from(unitVec(r.title === FUEL_A ? 1 : 0.9)).buffer);
+    const rowid = db.prepare(`INSERT INTO embeddings (embedding) VALUES (?)`).run(buf).lastInsertRowid;
+    db.prepare(`INSERT INTO embedding_meta (rowid, scope, scope_id, model, dims, created_at) VALUES (?, 'article', ?, 'gemini-embedding-001', 768, ?)`).run(rowid, r.id, NOW);
+  }
+  const { stats } = await buildRadioState({ db, now: NOW, gateLlm: gateKeep, wordLlm: wordEach });
+  assert.equal(stats.groupMode, "cosine");
+  assert.equal(stats.coverage, 1);
+  assert.equal(stats.multiOutlet, 1);
+  cleanup();
 });

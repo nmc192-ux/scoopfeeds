@@ -78,7 +78,7 @@ const CRITICAL_TERMS = new RegExp(
 export const SOFT_RULES = [
   ["radio:soft-shopping", /\b(prime day|black friday|cyber monday|on sale|best deals?|deals? (?:of|on|for)|discount(?:ed|s)?|coupons?|promo codes?|gift guide|where to buy|buy now|\d+% off)\b/i],
   ["radio:soft-review", /(?:^review\b|\breview\s*[:|–—-]|\breview\s*$|\b(?:movie|film|album|game|laptop|phone|tv|car|show|book|hands-on) review\b|\b(?:hands-on|first look|we tested|i tested|our review)\b)/i],
-  ["radio:soft-howto", /(?:\bhow to\b|^how (?:do|does|can|should|will|would)\b|^how\b.*\b(?:change[sd]?|changing)\b|\b(?:what you need to know|everything you need to know|a beginner'?s guide|step[- ]by[- ]step|explainer)\b)/i],
+  ["radio:soft-howto", /(?:\bhow to\b|^how (?:do|does|can|should|will|would)\b|^how\b.*\b(?:change[sd]?|changing)\b|\b(?:what you need to know|everything you need to know|what to know|a beginner'?s guide|step[- ]by[- ]step|explainer)\b|[,:–—|-]\s*explained\s*[?!.]?\s*$|\bexplained\s*[:|–—-])/i],
   ["radio:soft-listicle", /(?:^\d{1,2}\s+(?:[a-z'’-]+\s+){0,3}(?:things|ways|reasons|tips|signs|facts|ideas|mistakes|tricks|hacks|best|worst|foods|moves|questions|lessons)\b|\b\d{1,2}\s+(?:things|ways|reasons|tips|signs|facts|ideas|mistakes|tricks|hacks)\b)/i],
   ["radio:soft-first-person", /(?:^(?:i|my|we|our)\s|\bI\s+(?:only |just |never |always |finally )?(?:bought|tried|spent|quit|learned|lost|used|tested|ate|wore|switched|stopped|started|stayed|asked)\b)/],
   // Opinion is not news. Labels ("Opinion:", "Op-Ed") and the rewritten form the headline
@@ -118,6 +118,16 @@ export const SENSITIVE_TOPICS = new RegExp(
     "(?:live[- ]?stream(?:ed)?|public|televised|state|firing[- ]squad|botched|scheduled|planned|stay of) executions?",
     "executions? (?:of|by|under|plan|date|order|warrant|chamber)",
     "lethal injection", "firing squad", "hanged", "gallows", "beheaded\\w*", "beheading\\w*",
+    // Natural disasters and people hurt — live leak 11 Oct 2026 ("Flash flood sweeps away
+    // buildings in Nepal" under music). Metaphors are excluded where they are common:
+    // a landslide victory, a flood of orders, an avalanche of criticism.
+    "flash floods?", "floods?(?!\\s+(?:of|the\\s+(?:market|zone)))", "flooding", "flooded(?!\\s+with)",
+    "landslides?(?!\\s+(?:victory|victories|win|wins|election|defeat|majority|majorities|vote|re-?election))",
+    "mudslides?", "earthquakes?", "quakes?", "tsunamis?", "avalanches?(?!\\s+of)",
+    "wildfires?", "bushfires?", "cyclones?", "typhoons?", "tornado(?:es|s)?",
+    "swept away", "sweeps? away", "buried alive", "trapped under",
+    "injur(?:ed|es|ing|ies)", "wounded", "victims?", "casualt(?:y|ies)", "death tolls?",
+    "evacuat\\w*", "displaced", "homeless after", "rescuers?", "search and rescue",
   ].join("|") + ")\\b",
   "i"
 );

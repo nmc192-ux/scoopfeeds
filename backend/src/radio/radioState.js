@@ -26,8 +26,9 @@ import { cleanHeadline } from "../services/socialComposer.js";
 import { looksLikeProgrammingBlock } from "../services/socialPublisher.js";
 import { HEARTBEAT_PING_URLS, pingHeartbeat } from "../services/heartbeatPing.js";
 import { callJson } from "../realityIndex/llmQueue.js";
+import { loadArticleVectors } from "../realityIndex/intelligence/eventPromoter.js";
 import { radioRulesVerdict, judgeItems, hasPakistanSignal, isRadioSensitive } from "./radioRules.js";
-import { groupArticles, rankStories, pickSlots, attribution, displayCategory, GROUP_WINDOW_MS } from "./radioRank.js";
+import { groupArticles, rankStories, pickSlots, attribution, displayCategory, chooseGroupMode, groupModeSetting, GROUP_WINDOW_MS } from "./radioRank.js";
 
 export const HEADLINE_MAX = 90;
 export const DROP_RETENTION_MS = 14 * 24 * 60 * 60_000;
@@ -108,13 +109,17 @@ export function loadCandidates(db, now = Date.now()) {
 const WORDING_PROMPT = (items) => [
   "You prepare headlines for a calm, factual 24/7 US news radio screen (ScoopFeeds). For EVERY item return:",
   `- h: the headline rewritten in at most ${HEADLINE_MAX} characters, plain English, present tense, no clickbait,`,
-  "  no emoji, no outlet names, adding no fact that is not in the original.",
+  "  no emoji, no outlet names, adding no fact that is not in the original. Never return a bare",
+  "  quotation: say who or what the news is about. Lead with the event itself rather than a third",
+  "  party's reaction to it, as long as the original supports it.",
   "- opinion: true if it is an opinion piece, op-ed, editorial, column, commentary or an argument, not reporting.",
   "- soft: true if it is not hard news: shopping/deals, product reviews, how-to/advice, listicles, quizzes,",
   "  celebrity gossip, horoscopes, recipes, podcasts/newsletters/roundups, or first-person lifestyle pieces.",
   "- sensitive: true if light background music under it would be inappropriate: death, killing, executions,",
   "  death sentences or capital punishment, suicide or self-harm, sexual violence or abuse, child harm,",
-  "  terrorism, mass casualties, war atrocities, or graphic violence. When unsure, answer true.",
+  "  terrorism, mass casualties, war atrocities, or graphic violence; natural disasters or accidents",
+  "  that destroy homes, injure, displace or endanger people (floods, earthquakes, landslides, storms,",
+  "  wildfires); people injured or missing. When unsure, answer true.",
   'Reply ONLY with JSON: {"items":[{"id":"<id>","h":"<headline>","opinion":false,"soft":false,"sensitive":false}]}',
   "",
   ...items.map((s) => `id=${s.lead.id} | ${String(s.lead.title || "").slice(0, 220)}`),
@@ -189,6 +194,8 @@ export async function buildRadioState({
   // 30 stories × (headline + three flags) is ~2,400+ output tokens; the 2,048 default cut the
   // JSON mid-array on 10 Oct 2026, every story lost its verdict and music emptied (fail safe).
   wordLlm = (p) => callJson(p, { task: "radio-headline", priority: "normal", maxOutputTokens: HEADLINE_MAX_TOKENS }),
+  loadVectors = (ids) => loadArticleVectors(db, ids),
+  groupSetting = groupModeSetting(),
 } = {}) {
   const drops = {};
   const drop = (a, rule, reason) => {
@@ -205,7 +212,14 @@ export async function buildRadioState({
   }
 
   // 2 · group + rank; the sensitivity check MARKS (News may carry it, music never does)
-  let ranked = rankStories(groupArticles(kept), { now });
+  // Coverage = share of ALL candidates (pre-rules, the figure DrJ's gate is about) with a stored (always measured, even when forced)
+  // vector. A failed vector read is "no vectors": Jaccard for everyone, said so in the log.
+  let vectors = new Map(), vectorError = null;
+  if (candidates.length) {
+    try { vectors = loadVectors(candidates.map((a) => a.id)); } catch (err) { vectorError = String(err?.message || err).slice(0, 80); }
+  }
+  const grouping = chooseGroupMode(candidates.length, candidates.filter((a) => vectors.has(a.id)).length, groupSetting);
+  let ranked = rankStories(groupArticles(kept, { mode: grouping.mode, vectors }), { now });
   const multiOutlet = ranked.filter((s) => s.outlets.length >= 2).length;
   // A story airs only if some article in it has a title that fits whole (no truncation).
   const { fit, unfit } = chooseFittingLeads(ranked);
@@ -269,6 +283,8 @@ export async function buildRadioState({
   const stats = {
     candidates: candidates.length, kept: kept.length, stories: ranked.length, multiOutlet,
     airing: airing.length, music: state.music.length, drops, wording, noVerdict,
+    groupMode: grouping.mode, groupSetting: grouping.setting, coverage: +grouping.coverage.toFixed(3),
+    embedded: grouping.embedded, ...(vectorError ? { vectorError } : {}),
   };
   return { state, stats };
 }
@@ -276,6 +292,12 @@ export async function buildRadioState({
 // verdictsNeeded is only reached when rounds run out; a pick with a Pakistan
 // signal that was never judged must not air.
 function verdictsNeeded(story) { return hasPakistanSignal(story.lead); }
+
+/** The one 📻 line per build: what aired, what was dropped, and HOW stories were grouped (mode + embedding coverage). */
+export function radioLogLine(stats) {
+  const grouping = `grouping ${stats.groupMode} (setting ${stats.groupSetting}, embedding coverage ${(stats.coverage * 100).toFixed(1)}% = ${stats.embedded}/${stats.candidates}${stats.vectorError ? `, vector read failed: ${stats.vectorError}` : ""})`;
+  return `📻 radio state: ${stats.airing} item(s) from ${stats.stories} stories (${stats.multiOutlet} with ≥2 outlets); drops ${JSON.stringify(stats.drops)}; ${grouping}; headline ${stats.wording} (no verdict: ${stats.noVerdict}, treated sensitive)`;
+}
 
 /**
  * The scheduled cycle: gate on RADIO_ENABLED, build, write atomically, heartbeat.
@@ -293,7 +315,7 @@ export async function runRadioStateCycle(deps = {}) {
     const meta = { phase: "complete", startedAt, ms: Date.now() - startedAt, pruned, ...stats };
     recordHeartbeat("radio_state", meta);
     pingHeartbeat(HEARTBEAT_PING_URLS.radio);            // completion only
-    logger.info(`📻 radio state: ${stats.airing} item(s) from ${stats.stories} stories (${stats.multiOutlet} with ≥2 outlets); drops ${JSON.stringify(stats.drops)}; headline ${stats.wording} (no verdict: ${stats.noVerdict}, treated sensitive)`);
+    logger.info(radioLogLine(stats));
     return meta;
   } catch (err) {
     const meta = { phase: "error", startedAt, ms: Date.now() - startedAt, error: String(err?.message || err).slice(0, 300) };

@@ -218,7 +218,7 @@ function summaryFromCluster(cluster) {
 }
 
 // ── vector helpers (stored article vectors → centroid) ───────────────────────
-function loadArticleVectors(db, ids) {
+export function loadArticleVectors(db, ids) {
   const map = new Map();
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500);
@@ -247,7 +247,7 @@ function meanCentroid(vecs) {
   for (let k = 0; k < DIMS; k++) m[k] /= n;
   return m;
 }
-function cosine(a, b) { if (!a || !b) return -1; let s = 0; for (let k = 0; k < DIMS; k++) s += a[k] * b[k]; return s; }
+export function cosine(a, b) { if (!a || !b) return -1; let s = 0; for (let k = 0; k < DIMS; k++) s += a[k] * b[k]; return s; }
 
 // ── entity helpers (step 3) — aggregated canonical-key sets + rarity-weighted overlap ────────
 // Key = qid where resolved else surface_norm (article_entities). For large sets, keep the top-K

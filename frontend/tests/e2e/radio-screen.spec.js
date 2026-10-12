@@ -166,3 +166,46 @@ test("no photo → the wave bars are restored at the foot of the main column, un
   expect(w.y).toBeGreaterThanOrEqual(last.y + last.height - 1);          // below the last item, no overlap
   expect(Math.abs((w.y + w.height) - (news.y + news.height))).toBeLessThan(2);   // anchored at the column's foot
 });
+
+// ── The crawl never restarts mid-lap (live YouTube test, 11 Oct 2026) ──────────────────
+// The playout polls state every 15 s and the strip swaps every 30 s. Both used to rebuild
+// the track and restart its animation from zero, so on air the ticker jumped back mid-
+// sentence every 15 s and never finished a lap.
+const crawl = (page) => page.evaluate(() => {
+  const t = document.getElementById("track"); const a = t.getAnimations()[0];
+  return { t: a ? a.currentTime : null, text: t.innerText, dur: parseFloat(getComputedStyle(t).getPropertyValue("--dur")), lap: t.scrollWidth / 2 };
+});
+
+test("TICKER: an identical poll and a one-mode strip swap do not restart the crawl", async ({ page }) => {
+  await page.goto(`${SCREEN}?broadcast=1`);
+  await page.evaluate((s) => window.ScoopRadio.set(s), LIVE);
+  await page.waitForTimeout(1500);
+  const a = await crawl(page);
+  await page.evaluate((s) => window.ScoopRadio.set(s), LIVE);   // what every 15 s poll does
+  await page.evaluate(() => swapStrip());                       // what the 30 s timer does
+  await page.waitForTimeout(800);
+  const b = await crawl(page);
+  expect(b.t, "crawl restarted on an identical poll / strip swap").toBeGreaterThan(a.t);
+});
+
+test("TICKER: changed content waits for the end of the lap, then swaps in", async ({ page }) => {
+  await page.goto(`${SCREEN}?broadcast=1`);
+  await page.evaluate((s) => window.ScoopRadio.set(s), LIVE);
+  await page.waitForTimeout(1500);
+  const a = await crawl(page);
+  await page.evaluate((s) => window.ScoopRadio.set({ ...s, music: [{ cat: "World", h: "A new story arrives mid-lap", src: "x" }, ...s.music] }), LIVE);
+  await page.waitForTimeout(300);
+  const b = await crawl(page);
+  expect(b.t, "crawl restarted mid-lap on new content").toBeGreaterThan(a.t);
+  expect(b.text).not.toContain("A new story arrives mid-lap");
+  await page.evaluate(() => { const an = document.getElementById("track").getAnimations()[0]; an.currentTime = an.effect.getComputedTiming().duration - 150; });
+  await expect(page.locator("#track")).toContainText("A new story arrives mid-lap", { timeout: 3000 });
+});
+
+test("TICKER: crawls at 120 px/s — whole-pixel 4 px steps at 30 fps", async ({ page }) => {
+  await page.goto(`${SCREEN}?broadcast=1`);
+  await page.evaluate((s) => window.ScoopRadio.set(s), LIVE);
+  await page.waitForTimeout(500);
+  const c = await crawl(page);
+  expect(Math.abs(c.lap / c.dur - 120)).toBeLessThan(0.5);
+});
