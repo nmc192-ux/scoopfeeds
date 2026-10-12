@@ -24,8 +24,13 @@ These are the source of truth for the radio's identity. Change them here, not in
 
 All three build the symbol in the same order: the red dot appears with a sonar **ping**, the ring
 draws, the disc forms, then the wordmark rises. `idents/signal-idents.html` is the source
-(`?mode=id|top|sting`, `window.renderAt(t)` draws any frame); the MP4s were rendered from it at
+(`?mode=id|top|sting`, `window.renderAt(t)` draws any frame). The MP4s were rendered from it at
 1080p30.
+
+**4K masters:** `idents/4k/signal-{id,top,sting}-4k.mp4` are 3840×2160, 30 fps, H.264 High.
+They come from the same source at 2× pixel density and carry the same audio as the 1080p files.
+Use them for YouTube uploads, trailers and any re-edit. The 1080p files are what the live stream
+plays. `identity-sheet@2x.png` (3680×3400) is the print/press version of the sheet.
 
 **Live use:** the top-of-hour ident in the MP4 shows a sample time (09:00 New York). On air it
 must be drawn by the radio screen with the real clock — port `signal-idents.html` into the
