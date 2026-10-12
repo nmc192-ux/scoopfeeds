@@ -69,7 +69,9 @@ export function buildFfmpegArgs({ target, bed, bedLufs, seconds = null, audioPip
 }
 
 /** The feeder: the bed looped at real time, gained to -16 LUFS + limited, as raw s16le stereo PCM on stdout. */
-export function buildFeederArgs({ bed, bedLufs }) {
-  return ["-hide_banner", "-loglevel", "error", "-re", "-stream_loop", "-1", "-i", bed, "-vn",
+export function buildFeederArgs({ bed, bedLufs, ssSec = null }) {
+  // ssSec: a programme part (produced audio), read ONCE from that position instead of looped
+  const input = ssSec == null ? ["-stream_loop", "-1", "-i", bed] : ["-ss", Math.max(0, ssSec).toFixed(3), "-i", bed];
+  return ["-hide_banner", "-loglevel", "error", "-re", ...input, "-vn",
     "-af", loudnessFilter(bedLufs), "-f", "s16le", "-ar", String(AUDIO.rate), "-ac", "2", "pipe:1"];
 }

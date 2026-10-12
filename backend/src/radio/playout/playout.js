@@ -21,10 +21,11 @@ import { pickBed, daypartAt, easternMinutes, listBeds, musicDir, DAYPARTS } from
 import { buildFfmpegArgs, buildFeederArgs, VIDEO } from "./ffmpegArgs.js";
 import { measureIntegrated } from "./loudness.js";
 import { resolveTarget, redact } from "./outputTarget.js";
-import { startScreenServer, screenUrl } from "./screenServer.js";
+import { startScreenServer, screenUrl, programmeUrl } from "./screenServer.js";
 import { supervise } from "./watchdog.js";
 
-export const STALL_MS = 30_000;          // no new screencast frame for this long => the screen is dead
+export const STALL_MS = 30_000;
+const AUDIO_TARGET = -16;   // produced programme audio is mastered at the target: the feeder applies 0 dB and the limiter          // no new screencast frame for this long => the screen is dead
 export const DAYPART_CHECK_MS = 30_000;
 const DEMO_SCENES = ["news", "markets", "explains", "weather", "next", "music"];
 
@@ -47,6 +48,9 @@ export function chooseBed(now = new Date(), { dir = musicDir(), random = Math.ra
   }
   throw new Error(`no music bed found under ${dir}`);
 }
+
+/** RADIO_PROGRAMME_AV_DELAY_MS: how far programme sound is held back to meet the picture (default 300, measured per host). */
+export const avDelayMs = (env = process.env) => { const n = Number(env.RADIO_PROGRAMME_AV_DELAY_MS); return Number.isFinite(n) && n >= 0 && n <= 5000 ? n : 300; };
 
 /** ffmpeg prints this when the output can no longer be written (dead RTMP socket, full disk). */
 export const isFatalMuxError = (text) => /Error (submitting a packet to the muxer|muxing a packet)/.test(String(text));
@@ -85,8 +89,11 @@ export async function startUnit(opts) {
   const pcmOut = audioPipe ? ff.stdio[3] : null;
   pcmOut?.on("error", () => { /* encoder ended first; the exit handler reports it */ });
   const retire = (f) => { if (!f) return; f.retired = true; try { f.proc.kill("SIGKILL"); } catch { /* gone */ } };
-  const spawnFeeder = (bedPath, lufs) => {
-    const proc = spawn(opts.ffmpeg || "ffmpeg", buildFeederArgs({ bed: bedPath, bedLufs: lufs }), { stdio: ["ignore", "pipe", "pipe"] });
+  // fromMs: a programme part that starts at that instant; the feeder seeks to "now" in it, so wherever it starts it is in step with the clock
+  const spawnFeeder = (bedPath, lufs, fromMs = null) => {
+    // The captured picture reaches the encoder later than the feeder's sound (screencast + pacing); delay the programme sound to match.
+    const ssSec = fromMs == null ? null : (Date.now() - fromMs - avDelayMs(env)) / 1000;
+    const proc = spawn(opts.ffmpeg || "ffmpeg", buildFeederArgs({ bed: bedPath, bedLufs: lufs, ssSec }), { stdio: ["ignore", "pipe", "pipe"] });
     const f = { proc, bed: bedPath, retired: false };
     f.firstData = new Promise((resolve) => { f.onFirst = resolve; });
     proc.stderr.on("data", () => {});
@@ -99,11 +106,11 @@ export async function startUnit(opts) {
     proc.on("exit", (code, sig) => { if (f === feeder && !f.retired && !stopping) finish(`audio-feeder-exited code=${code} signal=${sig}`); });
     return f;
   };
-  if (audioPipe) feeder = spawnFeeder(bed, bedLufs);
+  if (audioPipe) feeder = opts.feed ? spawnFeeder(opts.feed.file, opts.feed.lufs, opts.feed.from) : spawnFeeder(bed, bedLufs);
   /** Swap the bed under a running encoder. The new feeder warms up (its -re start-up burst is discarded), then takes over at a chunk boundary. */
-  const swapBed = async (bedPath, lufs) => {
+  const swapBed = async (bedPath, lufs, fromMs = null) => {
     if (!audioPipe) throw new Error("swapBed needs a live unit");
-    const f = spawnFeeder(bedPath, lufs);
+    const f = spawnFeeder(bedPath, lufs, fromMs);
     try {
       await Promise.race([f.firstData, new Promise((_, rej) => setTimeout(() => rej(new Error("new bed produced no audio in 10 s")), 10_000))]);
       await new Promise((r) => setTimeout(r, 1500));
@@ -197,19 +204,38 @@ export async function startUnit(opts) {
 export async function runPlayout(o = {}) {
   const env = o.env || process.env;
   const log = o.log || ((m) => console.log(`📻 playout: ${m}`));
-  const target = resolveTarget({ out: o.out, segmentsDir: o.segmentsDir, env });          // throws before anything is spawned
+  const target = resolveTarget({ out: o.out, segmentsDir: o.segmentsDir, segmentKeep: o.segmentKeep || 10, env });          // throws before anything is spawned
   if (target.kind === "file" && !o.seconds) throw new Error("--seconds is required with --out");
   if (target.kind === "segments") fs.mkdirSync(target.dir, { recursive: true });
   if (o.forceDaypartCycleSec && target.kind === "rtmp") throw new Error("--force-daypart-cycle is a test option and cannot be used with RTMP");
   const live = target.kind !== "file";
   const stats = { framesCaptured: 0, framesWritten: 0, framesRepeated: 0, pcmBytes: 0, slotsSkippedBackpressure: 0, slotsSkippedLate: 0 };
 
-  let server = null, origin = o.baseUrl, stateUrl = "/api/radio/state.json";
+  const progDir = o.programmeDir ? path.resolve(o.programmeDir) : null;
+  if (progDir && !live) throw new Error("--programme needs a live target (RTMP or --segments-dir): its audio is swapped in through the feeder");
+  let server = null, origin = progDir ? null : o.baseUrl, stateUrl = "/api/radio/state.json";
   if (!origin) {
-    server = await startScreenServer({ stateFile: o.stateFile });
+    server = await startScreenServer({ stateFile: o.stateFile, programmeDir: progDir });
     origin = server.origin;
   }
-  const pageUrl = screenUrl(origin, new URL(stateUrl, origin).toString());
+  const pageUrl = progDir ? programmeUrl(origin) : screenUrl(origin, new URL(stateUrl, origin).toString());
+
+  // ── programme mode: which produced audio part should be on air now ──
+  let progCache = { mtime: 0, prog: null };
+  const readProgramme = () => {
+    try {
+      const f = path.join(progDir, "programme.json");
+      const m = fs.statSync(f).mtimeMs;
+      if (m !== progCache.mtime) progCache = { mtime: m, prog: JSON.parse(fs.readFileSync(f, "utf8")) };
+    } catch { /* not produced yet, or mid-write: keep the last good copy */ }
+    return progCache.prog;
+  };
+  const partNow = (t = Date.now()) => {
+    const p = progDir && readProgramme();
+    if (!p || !Array.isArray(p.audio) || t >= p.endsAt) return null;
+    const part = p.audio.filter((a) => a.from <= t).at(-1);
+    return part ? { file: path.join(progDir, part.file), lufs: AUDIO_TARGET, from: part.from } : null;
+  };
   const dir = o.musicDir || musicDir();
   let current = { daypart: null };
   // Test only (--force-daypart-cycle N): step through the four dayparts every N s by shifting the clock into each one.
@@ -226,15 +252,34 @@ export async function runPlayout(o = {}) {
     const { bed, daypart, fallback } = chooseBed(clock(), { dir });
     const bedLufs = await measureIntegrated(bed, { ffmpeg: o.ffmpeg });
     log(`daypart=${daypart}${fallback ? " (EMPTY - fell back to another daypart's bed)" : ""} bed=${path.basename(bed)} bedLufs=${bedLufs ?? "unmeasured (loudnorm fallback)"} target=${target.kind}`);
-    current = { daypart };
-    return startUnit({ target, bed, bedLufs, seconds: o.seconds, pageUrl, log, demoCycleSec: o.demoCycleSec, env, stats, ffmpeg: o.ffmpeg });
+    const feed = partNow();
+    current = { daypart, feedFile: feed?.file || null };
+    if (feed) log(`programme audio on air: ${path.basename(feed.file)} from ${((Date.now() - feed.from) / 1000).toFixed(1)} s`);
+    return startUnit({ target, bed, bedLufs, feed, seconds: o.seconds, pageUrl, log, demoCycleSec: o.demoCycleSec, env, stats, ffmpeg: o.ffmpeg });
   };
 
   const ac = new AbortController();
   o.signal?.addEventListener("abort", () => ac.abort(), { once: true });
   // Live mode: the bed is fixed per unit, so a daypart change is a planned restart onto the new bed.
   let swapping = false;
+  // Programme: swap the feeder onto each produced part at its start, and end the run when the programme ends.
+  let progSwapping = false;
+  const progTimer = progDir ? setInterval(async () => {
+    const p = readProgramme();
+    if (p && Date.now() >= p.endsAt) { log("programme ended; stopping"); ac.abort(); return; }
+    const feed = partNow();
+    if (!feed || progSwapping || !current.unit?.swapBed || feed.file === current.feedFile) return;
+    progSwapping = true;
+    try {
+      await current.unit.swapBed(feed.file, feed.lufs, feed.from);
+      current.feedFile = feed.file;
+      log(`programme audio switched to ${path.basename(feed.file)} (part started ${((Date.now() - feed.from) / 1000).toFixed(1)} s ago)`);
+    } catch (err) { log(`programme audio swap failed (${redact(err.message, env)}); retrying`); }
+    finally { progSwapping = false; }
+  }, 250) : null;
+
   const dp = live ? setInterval(async () => {
+    if (current.feedFile) return;   // programme audio carries its own beds
     if (swapping || daypartAt(clock()) === current.daypart) return;
     swapping = true;
     try {
@@ -259,7 +304,7 @@ export async function runPlayout(o = {}) {
     });
     return { ...res, stats, target: target.kind === "file" ? target.path : target.kind === "segments" ? target.dir : "rtmp" };
   } finally {
-    clearInterval(dp); clearInterval(statsTimer);
+    clearInterval(dp); clearInterval(statsTimer); clearInterval(progTimer);
     await server?.close();
   }
 }
