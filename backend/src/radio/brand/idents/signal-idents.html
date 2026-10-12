@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ScoopFeeds Radio idents, Signal identity</title>
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..700;1,6..96,400..700&family=Schibsted+Grotesk:wght@300..900&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;background:#000}
+  #stage{width:1920px;height:1080px;position:relative;overflow:hidden;font-family:'Schibsted Grotesk',sans-serif;font-variant-numeric:tabular-nums}
+  .abs{position:absolute}
+  .mask{overflow:hidden}
+  .serif{font-family:'Bodoni Moda',serif}
+  .caps{font-weight:600;letter-spacing:.2em;text-transform:uppercase}
+</style>
+</head>
+<body>
+<div id="stage">
+  <!-- clocks (top of hour) -->
+  <div id="clocks" class="abs" style="left:160px;right:160px;top:430px">
+    <div id="crule" style="height:1px;background:#F4EFE6;opacity:.35;transform-origin:left"></div>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-top:28px">
+      <div><div class="caps" style="font-size:24px;color:#9A9A9A">New York</div><div id="k0" style="font-size:96px;font-weight:300;color:#F4EFE6;margin-top:4px">08:59:56</div></div>
+      <div><div class="caps" style="font-size:24px;color:#9A9A9A">London</div><div id="k1" style="font-size:96px;font-weight:300;color:#F4EFE6;margin-top:4px">13:59:56</div></div>
+      <div><div class="caps" style="font-size:24px;color:#9A9A9A">Dubai</div><div id="k2" style="font-size:96px;font-weight:300;color:#F4EFE6;margin-top:4px">17:59:56</div></div>
+      <div><div class="caps" style="font-size:24px;color:#9A9A9A">Karachi</div><div id="k3" style="font-size:96px;font-weight:300;color:#F4EFE6;margin-top:4px">18:59:56</div></div>
+    </div>
+  </div>
+
+  <!-- the Signal symbol, drawn in SVG so each part animates -->
+  <svg id="sym" class="abs" width="400" height="400" viewBox="-200 -200 400 400" style="left:760px;top:340px;overflow:visible">
+    <circle id="ripple" cx="0" cy="0" r="40" fill="none" stroke-width="3"/>
+    <circle id="disc" cx="0" cy="0" r="92"/>
+    <circle id="ring" cx="0" cy="0" r="52" fill="none" stroke-width="7" transform="rotate(-90)"/>
+    <circle id="dot" cx="0" cy="0" r="21" fill="#D7261E"/>
+  </svg>
+
+  <div class="abs mask" style="left:575px;top:440px;height:170px">
+    <div id="word" style="display:flex;align-items:baseline;gap:22px;white-space:nowrap">
+      <span id="w1" class="serif" style="font-size:124px;font-weight:500;letter-spacing:-.01em">ScoopFeeds</span>
+      <span id="w2" class="serif" style="font-size:124px;font-style:italic">Radio</span>
+    </div>
+  </div>
+  <div id="rule" class="abs" style="left:575px;width:1060px;top:640px;height:1px;transform-origin:left"></div>
+  <div id="tag" class="abs caps" style="left:575px;top:664px;font-size:26px">Every newsroom. One stream.</div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const cl = x => Math.max(0, Math.min(1, x));
+const seg = (t, a, b) => cl((t - a) / (b - a));
+const eo = x => 1 - Math.pow(1 - x, 4);
+const eio = x => x < .5 ? 8*x*x*x*x : 1 - Math.pow(-2*x + 2, 4) / 2;
+const back = x => { const c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const mode = new URLSearchParams(location.search).get('mode') || 'id';
+const fmt = s => [Math.floor(s/3600)%24, Math.floor(s%3600/60), Math.floor(s%60)].map(v => String(v).padStart(2,'0')).join(':');
+
+// palettes per ident
+const P = {
+  id:    { bg:'#0F2238', disc:'#F4EFE6', ring:'#0F2238', ink:'#F4EFE6', italic:'#FF4A3D', rule:'rgba(244,239,230,.35)', ripple:'#F4EFE6' },
+  top:   { bg:'#111111', disc:'#0F2238', ring:'#F4EFE6', ink:'#F4EFE6', italic:'#FF4A3D', rule:'rgba(244,239,230,.35)', ripple:'#F4EFE6' },
+  sting: { bg:'#F4EFE6', disc:'#0F2238', ring:'#F4EFE6', ink:'#111111', italic:'#D7261E', rule:'rgba(17,17,17,.3)',    ripple:'#0F2238' },
+}[mode];
+$('stage').style.background = P.bg;
+$('disc').setAttribute('fill', P.disc); $('ring').setAttribute('stroke', P.ring); $('ripple').setAttribute('stroke', P.ripple);
+$('w1').style.color = P.ink; $('w2').style.color = P.italic; $('rule').style.background = P.rule; $('tag').style.color = P.ink;
+const RC = 2 * Math.PI * 52;
+$('ring').setAttribute('stroke-dasharray', RC);
+
+// timing table: when the symbol starts (S), how fast (k), when it ends (E)
+const T = { id: { S: 0.4, k: 1.0, E: 8.0 }, top: { S: 4.5, k: 0.85, E: 10.0 }, sting: { S: 0.05, k: 0.55, E: 3.0 } }[mode];
+const at = x => T.S + x * T.k;   // scaled time
+
+window.renderAt = (t) => {
+  // clocks (top of hour only)
+  $('clocks').style.display = mode === 'top' ? '' : 'none';
+  if (mode === 'top') {
+    const base = [8*3600+59*60+56, 13*3600+59*60+56, 17*3600+59*60+56, 18*3600+59*60+56];
+    for (let i = 0; i < 4; i++) { $('k' + i).textContent = fmt(base[i] + Math.floor(t)); $('k' + i).style.color = t >= 4 ? '#FF4A3D' : '#F4EFE6'; }
+    $('crule').style.transform = `scaleX(${eo(seg(t, 0, 0.8))})`;
+    $('clocks').style.opacity = Math.min(eo(seg(t, 0, 0.3)), 1 - seg(t, 4.15, 4.45));
+  }
+  // dot: pops with overshoot, ripple expands like a sonar ping
+  const d = seg(t, at(0), at(0.35));
+  $('dot').setAttribute('r', 21 * (d > 0 ? back(d) : 0));
+  const rp = seg(t, at(0), at(1.1));
+  $('ripple').setAttribute('r', 30 + 260 * eo(rp)); $('ripple').style.opacity = rp > 0 && rp < 1 ? 0.55 * (1 - rp) : 0;
+  // ring draws clockwise
+  $('ring').setAttribute('stroke-dashoffset', RC * (1 - eio(seg(t, at(0.6), at(1.25)))));
+  // disc grows behind
+  $('disc').setAttribute('r', 92 * eo(seg(t, at(1.1), at(1.5))));
+  // symbol slides left to make room for the wordmark (final centre x = 455)
+  const slide = eio(seg(t, at(1.7), at(2.3)));
+  const cx = 960 + (455 - 960) * slide;
+  $('sym').style.left = (cx - 200) + 'px';
+  $('sym').style.transform = `scale(${1 - 0.0 * slide})`;
+  // wordmark rises out of a mask; Radio follows a beat later
+  const w1 = eo(seg(t, at(2.0), at(2.5))), w2 = eo(seg(t, at(2.35), at(2.85)));
+  $('w1').style.transform = `translateY(${110 * (1 - w1)}%)`; $('w1').style.display = 'inline-block';
+  $('w2').style.transform = `translateY(${110 * (1 - w2)}%)`; $('w2').style.display = 'inline-block';
+  $('rule').style.transform = `scaleX(${eo(seg(t, at(3.0), at(3.7)))})`;
+  $('tag').style.opacity = mode === 'sting' ? 0 : eo(seg(t, at(3.3), at(3.9)));
+  if (mode === 'top') $('tag').textContent = 'News at the top of the hour';
+  const out = mode === 'sting' ? seg(t, T.E - 0.15, T.E) : seg(t, T.E - 0.7, T.E);
+  $('stage').style.opacity = 1 - out;
+};
+window.renderAt(0);
+</script>
+</body>
+</html>
