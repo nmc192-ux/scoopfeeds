@@ -50,7 +50,11 @@ Write it in `verified_how`. Unverifiable = not used.
 as credited on screen), `url`, `channel_url` (if any), `upload_date`, `window` ("mm:ss–mm:ss"
 used, or "screenshot"), `credit` (on-screen text, e.g. "Video: Al Jazeera" or "Post: @handle on X"),
 `licence` (basis: "US gov public domain", "news excerpt, credited", "public post, credited"),
-`verified_how`, `third_party: true`.
+`verified_how`, `third_party: true`, and `logo`: where the SOURCE's own logo or watermark sits on its
+frame, found on the contact sheet. A corner code `"tl"|"tr"|"bl"|"br"`, or a tight box `[x0,y0,x1,y1]`
+normalised 0-1 in the source frame (the Pentagon bug on DVIDS video: `[0.86,0.86,0.95,0.96]`), or
+`"none"` if you looked at several frames and there is none. Official/public-domain clips have logos
+too, so `third_party: false` does NOT mean no logo. Every video needs this field.
 Verify every download with `ffprobe` (video) or `file` (image): error pages arrive as
 HTML under the media filename. For each video, pick in-points: extract a contact sheet
 (`node $SIXTY_REPO/sixty/tools/frames.mjs <video> <out.jpg>`), LOOK at it with Read, and

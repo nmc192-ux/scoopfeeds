@@ -35,7 +35,9 @@ fact on screen is sourced.
    RULES THAT STILL APPLY:
    a. Short excerpts only (see 4).
    b. Credit every excerpt ON SCREEN with the outlet or account. NEVER remove or crop out the
-      source's logo or watermark (no banner crops on news/social material).
+      source's logo or watermark (no banner crops on news/social material). Say where that logo
+      is (register `logo`, plan shot `logo`): the renderer then shows the footage as a full-width
+      16:9 band whenever the 9:16 crop would cut it.
    c. Verify every clip is genuine and shows THIS event — not old, recycled or AI-generated —
       and record HOW in the register. Unverifiable = not used.
    d. Never log in to any platform, never use a ScoopFeeds account, no paywalled or private

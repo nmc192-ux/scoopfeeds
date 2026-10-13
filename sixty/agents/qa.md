@@ -38,5 +38,9 @@ For every third-party excerpt (news network, newspaper, social post, official ch
 - Does the register's `verified_how` actually show it is THIS event (not old, recycled or
   AI-generated)? If the evidence is thin, that is a `block`.
 - Anything paywalled, private, or obtained via a login? `block`.
+The mechanical gate already checks, from `plan.json` and the renderer's `layout.json`, that every
+footage shot declares its source `logo` and that the crop contains it or the footage is shown as a
+full-width band. You still LOOK at the frames: is the logo really visible and uncovered by our
+chrome (pin, credit, name bar)? A `logo: "none"` claim is yours to confirm on the frames.
 Add to qa-review.json: `"footage": [{ "id": "M1", "short": true, "credited_on_screen": true,
 "logo_visible": true, "verified": true, "note": "..." }]`.

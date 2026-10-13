@@ -16,6 +16,12 @@ and engine.py are imported, never copied). This file adds only:
      calling `make(sp, E)` from the module that exports that kind in `KINDS`.
      The returned object must subclass engine.Shot.
 
+  3. SOURCE LOGO BUGS (DrJ, 13 Oct 2026): a `clip` shot may carry `logo` (a corner code
+     tl|tr|bl|br, or a box [x0,y0,x1,y1] normalised 0-1 in the source frame). If the 9:16
+     crop window would cut that logo off at any moment of the shot, the footage is shown as a
+     full-width 16:9 BAND with the logo intact instead - never a crop that removes it. Each
+     decision is written to layout.json beside the plan, for the QA gate.
+
 The tick is audio and lives in sixty/tools/mix.mjs, not here.
 """
 import sys, os, re, json, math, importlib.util
@@ -25,7 +31,7 @@ sys.path.insert(0, ENGINE)
 import numpy as np, cv2
 import engine as E
 import render as R
-from engine import W, M, LIME, WHITE, INK, blit, tpatch, ANTON, MONO
+from engine import W, H, M, LIME, WHITE, INK, blit, tpatch, ANTON, MONO
 from PIL import Image, ImageDraw
 
 FILM_SECS = 60.0
@@ -140,6 +146,110 @@ def build_shot(sp, plan):
     return _build(sp, plan)
 R.build_shot = build_shot
 
+# ─── 4. Source logo bugs: never crop them out ──────────────────────────────
+# A footage shot says where the SOURCE's own logo sits (`logo`: corner code or normalised box;
+# "none" = the Researcher looked and there is none). The 9:16 crop is a moving window; if it
+# would cut the logo at ANY moment, the whole frame is shown as a full-width 16:9 band instead:
+# the house black ground, a 6 px lime rule above and below (the look DrJ approved on the
+# 2 Oct film), no pan, no zoom, no vignette. This hooks E.Clip.frame itself, so it also covers
+# per-film `x-` shots that inherit it. A subclass with its own frame() keeps its own layout
+# and is recorded as "custom" in layout.json for the QA agent to look at.
+LOGO_CORNERS = {'tl': (0.0, 0.0, 0.22, 0.22), 'tr': (0.78, 0.0, 1.0, 0.22),
+                'bl': (0.0, 0.78, 0.22, 1.0), 'br': (0.78, 0.78, 1.0, 1.0)}
+BAND_Y0 = 490              # top of the band; 608 px tall for 16:9 -> 490-1098, clear of the pin (396) and the captions (1190)
+BAND_RULE = 6
+BAND_MAX_H = 640           # a taller-than-16:9 source is scaled to fit, never cropped
+BAND_LABEL_Y, BAND_LABEL_SIZE = 1165, 40   # lower-thirds drop BELOW the band, so they never cover the logo
+LAYOUT = []                # one entry per footage shot that declared a logo; written to layout.json
+
+def logo_box(v):
+    """-> (x0, y0, x1, y1) normalised, or None for "no logo". Raises on anything unreadable."""
+    if v in (None, False, '', 'none', 'None'): return None
+    err = f'clip logo {v!r}: use tl|tr|bl|br, a box [x0,y0,x1,y1] in 0-1, or "none"'
+    if isinstance(v, str):
+        if v.lower() in LOGO_CORNERS: return LOGO_CORNERS[v.lower()]
+        raise SystemExit(err)
+    try: x0, y0, x1, y1 = [float(a) for a in v]
+    except Exception: raise SystemExit(err)
+    if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1): raise SystemExit(err + ' (need 0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1)')
+    return (x0, y0, x1, y1)
+
+def crop_windows(clip, sw, sh, n=40):
+    """The 9:16 crop window (x0, y0, x1, y1 in source px) at n+1 moments of the shot, using Clip.frame's own maths."""
+    wins = []
+    for i in range(n + 1):
+        cx, cy, z = clip.cam(clip.t0 + clip.T * i / n)
+        hh = sh * clip.ymax / z; ww = hh * W / H
+        if ww > sw: ww = sw; hh = ww * H / W
+        x0 = E.clamp(cx * sw - ww / 2, 0, sw - ww); y0 = E.clamp(cy * sh - hh / 2, 0, sh * clip.ymax - hh)
+        wins.append((x0, y0, x0 + ww, y0 + hh))
+    return wins
+
+def crop_keeps_logo(clip, box, sw, sh, margin_px=2.0):
+    """True only if the whole logo box lies inside the crop window at EVERY sampled moment."""
+    lx0, ly0, lx1, ly1 = box[0] * sw, box[1] * sh, box[2] * sw, box[3] * sh
+    return all(x0 <= lx0 - margin_px and lx1 + margin_px <= x1 and y0 <= ly0 - margin_px and ly1 + margin_px <= y1
+               for (x0, y0, x1, y1) in crop_windows(clip, sw, sh))
+
+def band_frame(s, tl):
+    """The WHOLE source frame, full width, on the house ground between two lime rules."""
+    n = s.sw * s.sh * 3
+    buf = s.proc.stdout.read(n)
+    if len(buf) == n: s.last = np.frombuffer(buf, np.uint8).reshape(s.sh, s.sw, 3)
+    src = s.last if s.last is not None else np.zeros((s.sh, s.sw, 3), np.uint8)
+    k = min(W / s.sw, BAND_MAX_H / s.sh)
+    bw, bh = int(round(s.sw * k)), int(round(s.sh * k))
+    f = E.blank()
+    pic = cv2.resize(src, (bw, bh), interpolation=cv2.INTER_AREA)
+    if s.dark: E.darken(pic, s.dark)
+    x0 = (W - bw) // 2
+    f[BAND_Y0:BAND_Y0 + bh, x0:x0 + bw] = pic
+    f[BAND_Y0 - BAND_RULE:BAND_Y0] = LIME
+    f[BAND_Y0 + bh:BAND_Y0 + bh + BAND_RULE] = LIME
+    if s.overlay: s.overlay(f, tl, s)
+    E.draw_labels(f, tl, s)
+    return f
+
+def _decide_layout(s):
+    """Once per shot, when the source size is known: crop if it keeps the logo, else band."""
+    box = s.logo_box
+    entry = {'t0': s.t0, 'T': s.T, 'path': s.path, 'logo': list(box), 'source': [s.sw, s.sh]}
+    if crop_keeps_logo(s, box, s.sw, s.sh):
+        entry.update(layout='crop', logo_in_crop=True); s._band = False
+    else:
+        entry.update(layout='band', logo_in_crop=False, reason='the 9:16 crop window would cut the source logo'); s._band = True
+        s.vign = False                      # the vignette dims the frame edges, where logo bugs live
+        for L in s.labels:                  # name bars go under the band, never over the footage
+            L['y'] = BAND_LABEL_Y; L['size'] = min(int(L.get('size', 56)), BAND_LABEL_SIZE)
+        print(f"band: footage at {s.t0:.1f}s ({os.path.basename(s.path)}) - logo outside the 9:16 crop, shown as a full-width 16:9 band", flush=True)
+    LAYOUT.append(entry)
+
+_clip_frame = E.Clip.frame
+def clip_frame(s, tl):
+    if getattr(s, 'logo_box', None) is None: return _clip_frame(s, tl)
+    if s.proc is None: s._open()
+    if not hasattr(s, '_band'): _decide_layout(s)
+    return band_frame(s, tl) if s._band else _clip_frame(s, tl)
+E.Clip.frame = clip_frame
+
+_build_prev = build_shot
+def build_shot(sp, plan):
+    s = _build_prev(sp, plan)
+    if 'logo' not in sp or 'path' not in sp or 'cams' not in sp: return s
+    box = logo_box(sp['logo'])
+    if not isinstance(s, E.Clip):                      # not footage we draw ourselves
+        LAYOUT.append({'t0': sp['t0'], 'T': sp['T'], 'path': sp['path'], 'logo': sp['logo'], 'layout': 'custom', 'logo_in_crop': None})
+        return s
+    if type(s).frame is not clip_frame:                # a per-film subclass with its own frame(): its layout, recorded for the QA agent
+        LAYOUT.append({'t0': sp['t0'], 'T': sp['T'], 'path': sp['path'], 'logo': sp['logo'], 'layout': 'custom', 'logo_in_crop': None})
+        return s
+    if box is None:
+        LAYOUT.append({'t0': sp['t0'], 'T': sp['T'], 'path': sp['path'], 'logo': 'none', 'layout': 'crop', 'logo_in_crop': None})
+        return s
+    s.logo_box = box
+    return s
+R.build_shot = build_shot
+
 # ─── 3. Playbook: pinned headline/question card, key-word captions ─────────
 # plan.pin = {"text": "WHO DECIDES: PENTAGON OR CONGRESS?", "from": 2.4, "until": 57.4}
 #   One line, on screen for the whole film (playbook rule 3), under the chrome row.
@@ -196,7 +306,9 @@ if __name__ == '__main__':
         raise SystemExit(f"plan total is {plan.get('total')} — a 60 · film is exactly {FILM_SECS} s")
     load_modules(plan, os.path.dirname(os.path.abspath(plan_path)))
     KEYWORDS.update(_norm(k) for k in plan.get('keywords', []))
-    if mode == 'render': R.render(plan, out)
+    def _write_layout():
+        json.dump({'shots': LAYOUT}, open(os.path.join(os.path.dirname(os.path.abspath(plan_path)), 'layout.json'), 'w'), indent=1)
+    if mode == 'render': R.render(plan, out); _write_layout()
     elif mode == 'preview': R.stills(plan, [float(x) for x in sys.argv[4].split(',')], out)
     elif mode == 'contact':
         T = plan['total']; R.stills(plan, [round(T * (i + 0.5) / 12, 2) for i in range(12)], out)

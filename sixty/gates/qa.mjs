@@ -20,6 +20,7 @@ import "../tools/env.mjs";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import path from "path";
 import { execFileSync, spawnSync } from "child_process";
+import { logoProblems } from "./logo.mjs";
 
 const dir = process.argv[2];
 if (!dir) { console.error("usage: qa.mjs <filmdir>"); process.exit(1); }
@@ -118,6 +119,11 @@ if (plan && reg && fc && script) {
     if (x.kind === "clip" && ms.some((m) => ["news", "social"].includes(m.source_type)) && x.T > 6) fp.push(`shot ${i}: news/social excerpt ${x.T}s — a few seconds only (≤ 6 s)`);
   });
   check("footage ruling: excerpts recorded (source, url, upload date, window, how verified), credited, ≤ 6 s for news/social, logos uncropped, no strike sources", fp.length === 0, fp.slice(0, 20));
+
+  // Source logos (DrJ 13 Oct 2026): every footage shot says where the source's logo is; render60.py keeps it
+  // (crop that contains it, or a full-width band) and records the layout. A cropped-off logo is a hard fail.
+  const lp = logoProblems(plan, load("layout.json"));
+  check("source logos kept: every footage shot declares its logo; crop contains it or it is shown as a full-width band (layout.json)", lp.length === 0, lp.slice(0, 20));
 
   // Originality: our narration runs the film; third-party footage is excerpt, not repost.
   const thirdSecs = plan.shots.filter((s) => (s.media || []).some((id) => media.get(id)?.third_party) && s.kind === "clip").reduce((n, s) => n + s.T, 0);

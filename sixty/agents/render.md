@@ -29,6 +29,15 @@ Input: `script.json`, `register.json`, `media/`. Output: `plan.json`, `final.mp4
 - Average shot ≤ 3 s. Real footage/photos full-bleed. Every shown fact carries `claims`;
   every picture carries `media` and an on-screen credit (`cred`) for third-party material;
   data shots carry `src`.
+- **Source logos (hard gate).** Every footage shot (`path` + `cams`) carries `"logo"`, copied from
+  its register media item (`logo`: corner code, `[x0,y0,x1,y1]` box, or `"none"`). The renderer
+  then decides by itself: if the 9:16 crop window would cut that logo at any moment it shows the
+  whole frame as a full-width 16:9 band (black ground, lime rules, name bars under it) and writes
+  `layout.json`. Do not set `ymax`, do not pre-crop the file, do not hide the logo behind a
+  card, and do not write your own `frame()` for footage: for timed tags over footage use the
+  built-in `clip` (or an `x-` shot that subclasses `E.Clip` WITHOUT overriding `frame`, passing
+  `overlay=fn`). `qa.mjs` fails a missing `logo`, a missing `layout.json`, or a footage shot
+  whose layout it cannot verify.
 - Built-in kinds: clip, photo, satellite, map, headline, punch, count, graphic, end
   (params exactly as `render.py:build_shot` reads them). For anything else — animated
   charts, counters, map moves the engine lacks — WRITE per-film code: a `film_shots.py`
