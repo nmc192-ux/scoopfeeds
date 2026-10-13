@@ -14,8 +14,8 @@ import { storyIndex } from "./factPack.js";
 export const toSpoken = (t) => String(t || "").replace(/\s*%/g, " percent").replace(/\s+/g, " ").trim();
 
 // Sentences about our own sourcing ("only X is in our pack", "we have no second account") never go on air: cut the sentence, keep the line.
-const BACKSTAGE = /\b(fact pack|our pack|the pack|in our sources|our sources list|we have no (other|second)|no second account|our data|the data we have)\b/i;
-const BACKSTAGE_PHRASE = /\b(in|from) the (text|reporting|material|articles) we have,?\s*/gi;
+const BACKSTAGE = /\b(fact pack|our pack|the pack|next update|follow in our|come in our|figures (are|were) not available|no (market )?figures|in our sources|our sources list|we have no (other|second)|no second account|our data|the data we have)\b/i;
+const BACKSTAGE_PHRASE = /,?\s*\b(in|from) (the|its|their) (text|reporting|material|articles?|summary|summaries|excerpts?|copy) (we have|we were given|available( to us)?|on hand)\b,?/gi;
 export function dropBackstage(text) {
   return String(text).replace(BACKSTAGE_PHRASE, "").replace(/(^|[.!?]\s+)([a-z])/g, (m, a, b) => a + b.toUpperCase()).split(/(?<=[.!?])\s+/).filter((sn) => !BACKSTAGE.test(sn)).join(" ").trim();
 }

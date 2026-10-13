@@ -69,6 +69,16 @@ fs.writeFileSync(path.join(out, "pack.json"), JSON.stringify(pack, null, 1));
 log(`fact pack: ${pack.top.length} top stories, desks ${Object.entries(pack.desks).map(([k, l]) => `${k}:${l.length}`).join(" ")}, ${pack.markets.length} market rows, ${pack.weather.length} cities, ${pack.dropped.length} articles dropped by Rule 0`);
 if (pack.top.length < 5) log(`WARNING: only ${pack.top.length} top stories`);
 
+// No market figures, no Markets Now: those slots become headlines and music rather than air an empty segment.
+if (pack.markets.length < 3) {
+  for (const s of slots) if (s.segment === "markets") { s.kind = "music"; s.segment = null; s.title = null; }
+  log(`WARNING: only ${pack.markets.length} market rows; Markets Now slots turned into headlines and music`);
+}
+if (pack.weather.length < 5) {
+  for (const s of slots) if (s.segment === "weather") { s.kind = "music"; s.segment = null; s.title = null; }
+  log(`WARNING: only ${pack.weather.length} cities; the weather slot turned into headlines and music`);
+}
+
 // ── words ──
 const fmt = (ms, tz, opts) => new Intl.DateTimeFormat("en-US", { timeZone: tz, ...opts }).format(new Date(ms));
 const SPOKEN_HOUR = ["midnight", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "noon"];

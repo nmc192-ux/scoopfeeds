@@ -88,7 +88,12 @@ export const MARKET_SYMBOLS = [
 ];
 
 async function yahooQuote(sym, opts) {
-  const d = await getJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`, opts);
+  let d, last;
+  for (const host of ["query1", "query2", "query1"]) {
+    try { d = await getJson(`https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`, { ...opts, timeoutMs: 40_000 }); break; }
+    catch (e) { last = e; }
+  }
+  if (!d) throw last;
   const m = d?.chart?.result?.[0]?.meta;
   if (!m || !Number.isFinite(m.regularMarketPrice)) throw new Error(`no quote for ${sym}`);
   const prev = m.chartPreviousClose ?? m.previousClose;
@@ -131,6 +136,7 @@ export async function buildFactPack({ base = "https://scoopfeeds.com", fetchImpl
     const out = [];
     for (const a of d?.data || []) {
       if (Number(a.is_duplicate) === 1 || a.category === "sports") continue;
+      if (/\/(opinion|opinions|op-ed|oped|commentary|columns?|editorials?|analysis\/opinion)\//i.test(a.url || "")) { dropped.push(a.title); continue; }   // opinion is not news
       if (!airable(a)) { dropped.push(a.title); continue; }
       out.push(slim(a));
     }
