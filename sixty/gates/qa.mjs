@@ -20,7 +20,7 @@ import "../tools/env.mjs";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import path from "path";
 import { execFileSync, spawnSync } from "child_process";
-import { logoProblems } from "./logo.mjs";
+import { logoProblems, isFootage } from "./logo.mjs";
 
 const dir = process.argv[2];
 if (!dir) { console.error("usage: qa.mjs <filmdir>"); process.exit(1); }
@@ -115,8 +115,8 @@ if (plan && reg && fc && script) {
   }
   plan.shots.forEach((x, i) => {
     const ms = (x.media || []).map((id) => media.get(id)).filter(Boolean);
-    if (x.kind === "clip" && ms.some((m) => ["news", "social"].includes(m.source_type)) && (x.ymax ?? 1) < 1) fp.push(`shot ${i}: news/social clip cropped (ymax ${x.ymax}) — logos/watermarks must stay`);
-    if (x.kind === "clip" && ms.some((m) => ["news", "social"].includes(m.source_type)) && x.T > 6) fp.push(`shot ${i}: news/social excerpt ${x.T}s — a few seconds only (≤ 6 s)`);
+    if (isFootage(x) && ms.some((m) => ["news", "social"].includes(m.source_type)) && (x.ymax ?? 1) < 1) fp.push(`shot ${i}: news/social clip cropped (ymax ${x.ymax}) — logos/watermarks must stay`);
+    if (isFootage(x) && ms.some((m) => ["news", "social"].includes(m.source_type)) && x.T > 6) fp.push(`shot ${i}: news/social excerpt ${x.T}s — a few seconds only (≤ 6 s)`);
   });
   check("footage ruling: excerpts recorded (source, url, upload date, window, how verified), credited, ≤ 6 s for news/social, logos uncropped, no strike sources", fp.length === 0, fp.slice(0, 20));
 
@@ -126,8 +126,8 @@ if (plan && reg && fc && script) {
   check("source logos kept: every footage shot declares its logo; crop contains it or it is shown as a full-width band (layout.json)", lp.length === 0, lp.slice(0, 20));
 
   // Originality: our narration runs the film; third-party footage is excerpt, not repost.
-  const thirdSecs = plan.shots.filter((s) => (s.media || []).some((id) => media.get(id)?.third_party) && s.kind === "clip").reduce((n, s) => n + s.T, 0);
-  const longest = Math.max(0, ...plan.shots.filter((s) => s.kind === "clip").map((s) => s.T));
+  const thirdSecs = plan.shots.filter((s) => (s.media || []).some((id) => media.get(id)?.third_party) && isFootage(s)).reduce((n, s) => n + s.T, 0);
+  const longest = Math.max(0, ...plan.shots.filter((s) => isFootage(s)).map((s) => s.T));   // footage = path + cams, whatever the shot kind (per-film x- shots too)
   const voice = load("voice/voice.json") || load("voice.json");
   check("originality: third-party video ≤ 50% of runtime, no single clip > 8 s, narration ≥ 45 s",
     voice ? thirdSecs <= 30 && longest <= 8 && voice.narrationSecs >= 45 : null,
