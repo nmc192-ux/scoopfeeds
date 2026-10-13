@@ -17,6 +17,15 @@ export const VIDEO = Object.freeze({ width: 1920, height: 1080, fps: 30, bitrate
  * the trailer and file close against the dead socket, so playout.js reacts to the error line itself (isFatalMuxError).
  */
 export const RTMP = Object.freeze({ rwTimeoutMs: 7000 });
+/**
+ * RADIO_PLAYOUT_QUALITY=720p: a fallback for a weak uplink, 1280x720 at 2.5 Mbps (YouTube's 720p30 range is 1.5-4 Mbps).
+ * Anything else is the default 1080p30 at 4.5 Mbps. The page is still captured at 1920x1080 and scaled down.
+ */
+export function outputQuality(env = process.env) {
+  return String(env.RADIO_PLAYOUT_QUALITY || "").trim().toLowerCase() === "720p"
+    ? { width: 1280, height: 720, bitrateK: 2500 }
+    : { width: VIDEO.width, height: VIDEO.height, bitrateK: VIDEO.bitrateK };
+}
 export const AUDIO = Object.freeze({ bitrateK: 128, rate: 44100, targetLufs: -16, truePeakDb: -3.0 });
 
 /** Linear-gain filter that lands a bed measured at `measuredLufs` on the target, with a peak limiter. */
@@ -48,13 +57,14 @@ export function buildFfmpegArgs({ target, bed, bedLufs, seconds = null, audioPip
     a.push("-re", "-stream_loop", "-1", "-i", bed);
   }
   a.push("-map", "0:v:0", "-map", "1:a:0");
-  a.push("-vf", `fps=${VIDEO.fps},scale=${VIDEO.width}:${VIDEO.height}:flags=bicubic,format=yuv420p`);
+  const q = outputQuality();
+  a.push("-vf", `fps=${VIDEO.fps},scale=${q.width}:${q.height}:flags=bicubic,format=yuv420p`);
   if (!audioPipe) a.push("-af", loudnessFilter(bedLufs));
   a.push(
     "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-pix_fmt", "yuv420p",
     "-r", String(VIDEO.fps),
-    "-b:v", `${VIDEO.bitrateK}k`, "-minrate", `${VIDEO.bitrateK}k`, "-maxrate", `${VIDEO.bitrateK}k`,
-    "-bufsize", `${VIDEO.bitrateK * 2}k`,
+    "-b:v", `${q.bitrateK}k`, "-minrate", `${q.bitrateK}k`, "-maxrate", `${q.bitrateK}k`,
+    "-bufsize", `${q.bitrateK * 2}k`,
     "-x264-params", `nal-hrd=cbr:force-cfr=1:keyint=${VIDEO.gop}:min-keyint=${VIDEO.gop}:scenecut=0`,
     "-g", String(VIDEO.gop), "-keyint_min", String(VIDEO.gop), "-sc_threshold", "0",
     "-c:a", "aac", "-b:a", `${AUDIO.bitrateK}k`, "-ar", String(AUDIO.rate), "-ac", "2",

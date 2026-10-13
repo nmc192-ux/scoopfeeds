@@ -5,7 +5,7 @@ import { checkSegments, dropBackstage, backed } from "./checks.js";
 import { layoutSlot } from "./assemble.js";
 import { extractJson, buildPrompt } from "./writer.js";
 import { sameStory, keyTerms, clusterStories } from "./factPack.js";
-import { buildFeederArgs } from "../playout/ffmpegArgs.js";
+import { buildFeederArgs, buildFfmpegArgs, outputQuality } from "../playout/ffmpegArgs.js";
 import { avDelayMs } from "../playout/playout.js";
 
 const H = Date.UTC(2026, 9, 13, 16, 0, 0);   // 9 pm PKT
@@ -116,4 +116,13 @@ test("playout: programme audio is read once from a position, the bed is looped",
   assert.equal(avDelayMs({}), 300);
   assert.equal(avDelayMs({ RADIO_PROGRAMME_AV_DELAY_MS: "900" }), 900);
   assert.equal(avDelayMs({ RADIO_PROGRAMME_AV_DELAY_MS: "-5" }), 300);
+});
+
+test("playout: RADIO_PLAYOUT_QUALITY=720p drops to 1280x720 at 2.5 Mbps", () => {
+  assert.deepEqual(outputQuality({ RADIO_PLAYOUT_QUALITY: "720p" }), { width: 1280, height: 720, bitrateK: 2500 });
+  assert.equal(outputQuality({}).bitrateK, 4500);
+  const prev = process.env.RADIO_PLAYOUT_QUALITY; process.env.RADIO_PLAYOUT_QUALITY = "720p";
+  const a = buildFfmpegArgs({ target: { kind: "rtmp", url: "rtmp://127.0.0.1/x" }, bed: "b", bedLufs: -16, audioPipe: true }).join(" ");
+  if (prev === undefined) delete process.env.RADIO_PLAYOUT_QUALITY; else process.env.RADIO_PLAYOUT_QUALITY = prev;
+  assert.match(a, /scale=1280:720/); assert.match(a, /-b:v 2500k/);
 });
