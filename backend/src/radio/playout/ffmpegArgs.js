@@ -85,3 +85,28 @@ export function buildFeederArgs({ bed, bedLufs, ssSec = null }) {
   return ["-hide_banner", "-loglevel", "error", "-re", ...input, "-vn",
     "-af", loudnessFilter(bedLufs), "-f", "s16le", "-ar", String(AUDIO.rate), "-ac", "2", "pipe:1"];
 }
+
+/**
+ * A film or episode played by the ENCODER, not the browser: decoded in real time from `ssSec` and re-encoded as JPEG frames
+ * on stdout, which the playout's pacing writer sends instead of the screen capture. Letter/pillarboxed onto 1920x1080 ink.
+ * (Playing the video inside the captured page stuttered on air on 13 Oct: the page could not decode HD fast enough.)
+ */
+export function buildMediaFrameArgs({ file, ssSec = 0 }) {
+  return ["-hide_banner", "-loglevel", "error", "-re", "-ss", Math.max(0, ssSec).toFixed(3), "-i", file, "-an",
+    "-vf", `fps=${VIDEO.fps},scale=${VIDEO.width}:${VIDEO.height}:force_original_aspect_ratio=decrease,pad=${VIDEO.width}:${VIDEO.height}:(ow-iw)/2:(oh-ih)/2:color=0x111111,format=yuvj420p`,
+    "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "3", "pipe:1"];
+}
+
+/** Split a growing buffer of concatenated JPEGs into whole frames. Returns { frames, rest }. */
+export function splitJpegs(buf) {
+  const frames = [];
+  let i = 0;
+  for (;;) {
+    const soi = buf.indexOf(Buffer.from([0xff, 0xd8]), i);
+    if (soi < 0) return { frames, rest: Buffer.alloc(0) };
+    const eoi = buf.indexOf(Buffer.from([0xff, 0xd9]), soi + 2);
+    if (eoi < 0) return { frames, rest: buf.subarray(soi) };
+    frames.push(buf.subarray(soi, eoi + 2));
+    i = eoi + 2;
+  }
+}

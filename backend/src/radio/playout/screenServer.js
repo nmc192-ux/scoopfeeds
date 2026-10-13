@@ -73,5 +73,5 @@ export function screenUrl(origin, stateUrl) {
 }
 
 export function programmeUrl(origin) {
-  return `${origin}/radio/programme?programme=${encodeURIComponent("/programme/programme.json")}`;
+  return `${origin}/radio/programme?media=encoder&programme=${encodeURIComponent("/programme/programme.json")}`;
 }

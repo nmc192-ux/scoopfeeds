@@ -144,6 +144,7 @@ prog.headlines = [...pack.top.map((s) => ({ h: s.headline, src: s.outlets.slice(
   .filter((x, i, all) => all.findIndex((o) => o.h === x.h) === i).slice(0, 24);
 prog.film = film ? path.basename(film) : null;
 prog.feature = feature ? path.basename(feature) : null;
+prog.featurePath = feature;
 prog.filmPath = film;
 prog.builtAt = Date.now();
 fs.writeFileSync(pf + ".tmp", JSON.stringify(prog, null, 1));

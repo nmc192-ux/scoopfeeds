@@ -18,14 +18,15 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { pickBed, daypartAt, easternMinutes, listBeds, musicDir, DAYPARTS } from "../musicLibrary.js";
-import { buildFfmpegArgs, buildFeederArgs, VIDEO } from "./ffmpegArgs.js";
+import { buildFfmpegArgs, buildFeederArgs, buildMediaFrameArgs, splitJpegs, VIDEO } from "./ffmpegArgs.js";
 import { measureIntegrated } from "./loudness.js";
 import { resolveTarget, redact } from "./outputTarget.js";
 import { startScreenServer, screenUrl, programmeUrl } from "./screenServer.js";
 import { supervise } from "./watchdog.js";
 
 export const STALL_MS = 30_000;
-const AUDIO_TARGET = -16;   // produced programme audio is mastered at the target: the feeder applies 0 dB and the limiter          // no new screencast frame for this long => the screen is dead
+const AUDIO_TARGET = -16;
+const MEDIA_LEAD_MS = 150;  // a file's frames reach the encoder sooner than the screen capture's: start them this much later in the file   // produced programme audio is mastered at the target: the feeder applies 0 dB and the limiter          // no new screencast frame for this long => the screen is dead
 export const DAYPART_CHECK_MS = 30_000;
 const DEMO_SCENES = ["news", "markets", "explains", "weather", "next", "music"];
 
@@ -121,9 +122,23 @@ export async function startUnit(opts) {
   };
 
   let lastWritten = null, browser = null, timer = null, stallTimer = null, demoTimer = null, latest = null, lastFrameAt = Date.now();
+  // ── encoder-played media (films, episodes): its frames replace the screen capture while it runs ──
+  let media = null;   // { proc, tag, frame }
+  const clearMedia = () => { const m = media; media = null; if (m) { try { m.proc.kill("SIGKILL"); } catch { /* gone */ } } };
+  const setMedia = ({ file, ssSec, tag }) => {
+    clearMedia();
+    const proc = spawn(opts.ffmpeg || "ffmpeg", buildMediaFrameArgs({ file, ssSec }), { stdio: ["ignore", "pipe", "pipe"] });
+    const m = { proc, tag, frame: null };
+    let buf = Buffer.alloc(0), err = "";
+    proc.stdout.on("data", (d) => { if (media !== m) return; const r = splitJpegs(Buffer.concat([buf, d])); buf = r.rest; if (r.frames.length) m.frame = Buffer.from(r.frames.at(-1)); });
+    proc.stderr.on("data", (d) => { err = (err + d).slice(-500); });
+    proc.on("exit", (code) => { if (media === m) { media = null; if (code) log(`media ${tag} ended (exit ${code}): ${err.trim().split("\n").pop() || ""}`); } });
+    proc.on("error", (e) => { if (media === m) { media = null; log(`media ${tag} failed: ${e.message}`); } });
+    media = m;
+  };
   const stop = async (reason) => {
     if (reason) finish(reason);
-    stopping = true; retire(feeder);
+    stopping = true; retire(feeder); clearMedia();
     clearInterval(timer); clearInterval(stallTimer); clearInterval(demoTimer);
     try { ff.stdin.end(); } catch { /* already closed */ }
     // The looped bed never ends, so EOF on stdin alone leaves ffmpeg running: ask it to finish (SIGINT = clean trailer), SIGKILL after 5 s.
@@ -165,16 +180,17 @@ export async function startUnit(opts) {
     const period = 1000 / VIDEO.fps;
     let next = Date.now();
     timer = setInterval(() => {
-      if (!latest || ff.stdin.destroyed || !ff.stdin.writable) return;
+      const frame = media?.frame || latest;   // encoder-played media wins while it has frames
+      if (!frame || ff.stdin.destroyed || !ff.stdin.writable) return;
       let due = 0;
       while (next <= Date.now()) { next += period; due++; }
       if (!due) return;
       // ffmpeg is behind: skip the repeats instead of queueing them (queued frames would add latency).
-      if (ff.stdin.writableLength > latest.length * 3) { if (stats) stats.slotsSkippedBackpressure += due; return; }
-      ff.stdin.write(latest);
+      if (ff.stdin.writableLength > frame.length * 3) { if (stats) stats.slotsSkippedBackpressure += due; return; }
+      ff.stdin.write(frame);
       gateOpen = true;
-      if (stats && latest === lastWritten) stats.framesRepeated++;   // no new Chromium frame since the last slot
-      lastWritten = latest;
+      if (stats && frame === lastWritten) stats.framesRepeated++;   // no new frame since the last slot
+      lastWritten = frame;
       // due > 1 means the event loop itself was late; ffmpeg's fps filter re-fills those slots from wallclock stamps.
       if (stats) { stats.framesWritten++; stats.slotsSkippedLate += due - 1; }
     }, 5);
@@ -189,7 +205,7 @@ export async function startUnit(opts) {
         page.evaluate((s) => window.ScoopRadio?.scene(s), DEMO_SCENES[++i % DEMO_SCENES.length]).catch(() => {});
       }, demoCycleSec * 1000);
     }
-    return { exited, stop, page, swapBed: audioPipe ? swapBed : undefined, get bed() { return feeder?.bed ?? bed; } };
+    return { exited, stop, page, swapBed: audioPipe ? swapBed : undefined, setMedia, clearMedia, get mediaTag() { return media?.tag ?? null; }, get bed() { return feeder?.bed ?? bed; } };
   } catch (err) {
     await stop();
     throw err;
@@ -267,6 +283,20 @@ export async function runPlayout(o = {}) {
   const progTimer = progDir ? setInterval(async () => {
     const p = readProgramme();
     if (p && Date.now() >= p.endsAt) { log("programme ended; stopping"); ac.abort(); return; }
+    // films and episodes: played by the encoder from the file, in step with the programme clock
+    if (p && current.unit?.setMedia) {
+      const now = Date.now();
+      let cue = null, nextAt = Infinity;
+      for (const c of p.cues || []) { if (c.overlay) continue; if (c.at <= now) cue = c; else { nextAt = c.at; break; } }
+      const want = cue && (cue.scene === "film" || cue.scene === "feature") && cue.data?.t0 ? cue : null;
+      const tag = want ? `${want.scene}@${want.at}` : null;
+      if (want && current.unit.mediaTag !== tag) {
+        const src = want.scene === "feature" ? (p.featurePath || path.join(progDir, "feature.webm")) : (p.filmPath || path.join(progDir, "film.webm"));
+        const file = fs.existsSync(src) ? src : path.join(progDir, `${want.scene}.webm`);
+        const ssSec = (now - want.data.t0 - avDelayMs(env) + MEDIA_LEAD_MS) / 1000;
+        if (fs.existsSync(file) && now < nextAt - 500) { current.unit.setMedia({ file, ssSec, tag }); log(`media on air: ${path.basename(file)} from ${ssSec.toFixed(1)} s`); }
+      } else if (!want && current.unit.mediaTag) { current.unit.clearMedia(); log("media off air; back to the screen"); }
+    }
     const feed = partNow();
     if (!feed || progSwapping || !current.unit?.swapBed || feed.file === current.feedFile) return;
     progSwapping = true;

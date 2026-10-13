@@ -226,7 +226,8 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 const params = new URLSearchParams(location.search);
-let OFFSET = Number(params.get('offset') || 0);        // rehearsal / test clock shift, ms
+let OFFSET = Number(params.get('offset') || 0);
+const ENCODER_MEDIA = params.get('media') === 'encoder';   // the playout plays films itself: never decode video in this page        // rehearsal / test clock shift, ms
 let FROZEN = null;                                      // renderAt() freezes the clock for screenshots
 const now = () => FROZEN ?? (Date.now() + OFFSET);
 
@@ -291,13 +292,13 @@ const R = {
   known(d){ $('kHead').textContent = d.headline || ''; $('kLab').textContent = d.label || ''; $('kTxt').textContent = d.text || ''; show('known'); },
   music(d){ show('music'); const n = d.next && d.next.at > now();
     $('strap').hidden = !n; if (n) $('strapTxt').textContent = `${hm(d.next.at, 'Asia/Karachi')} PKT · ${d.next.title}`; },
-  film(d){ show('film'); const v = $('film'); if (!v.src.endsWith(d.src)) v.src = d.src;
+  film(d){ show('film'); if (ENCODER_MEDIA) return; const v = $('film'); if (!v.src.endsWith(d.src)) v.src = d.src;
     const pos = Math.max(0, (now() - d.t0) / 1000); try { v.currentTime = pos; } catch (_) {} v.play().catch(() => {}); },
   series(d){ $('serGrid').innerHTML = (d.cards || []).map((c) => `<div><div class="n">${esc(c.series)}</div><div class="d caps">${esc(c.day)}</div></div>`).join(''); show('series'); },
   signoff(){ show('signoff'); },
   endcard(){ show('endcard'); },
   ident(){ /* overlay drawn by drawOverlay */ },
-  feature(d){ show('music'); const v = $('featv'); if (!v.src.endsWith(d.src)) v.src = d.src; $('feat').classList.add('on');
+  feature(d){ show('music'); if (ENCODER_MEDIA) return; const v = $('featv'); if (!v.src.endsWith(d.src)) v.src = d.src; $('feat').classList.add('on');
     try { v.currentTime = Math.max(0, (now() - d.t0) / 1000); } catch (_) {} v.play().catch(() => {}); },
 };
 
@@ -363,7 +364,7 @@ function tick(){
   if (ov){ $('ov').classList.add('on'); drawOverlay(ov.mode, (t - ov.t0) / 1000, ov.t0); } else { $('ov').classList.remove('on'); ovMode = null; }
   if (!cue || cue.scene !== 'feature') $('feat').classList.remove('on');
   // keep a playing film or feature on the clock: re-seek if it drifts more than 0.35 s
-  if (cue && (cue.scene === 'film' || cue.scene === 'feature') && FROZEN == null){
+  if (!ENCODER_MEDIA && cue && (cue.scene === 'film' || cue.scene === 'feature') && FROZEN == null){
     const v = cue.scene === 'film' ? $('film') : $('featv'), want = (t - cue.data.t0) / 1000;
     if (v.readyState >= 2 && Math.abs(v.currentTime - want) > 0.35) { try { v.currentTime = want; } catch (_) {} }
     if (v.paused) v.play().catch(() => {});
