@@ -19,6 +19,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, append
 import { createHash, randomInt } from "crypto";
 import path from "path";
 import { HOME, REPO } from "../tools/env.mjs";
+import { limitAction } from "../gates/limits.mjs";
 
 const SIXTY = path.join(REPO, "sixty");
 const args = process.argv.slice(2);
@@ -181,7 +182,7 @@ async function session({ dir, prompt, variant, tag }) {
   const t0 = Date.now();
   const stopped = await new Promise((resolve) => {
     const ch = spawn("claude", cliArgs, { cwd: dir, env: childEnv, stdio: ["ignore", "pipe", "pipe"] });
-    let buf = "", stop = null;
+    let buf = "", stop = null; const warned = new Set();
     const kill = (why) => { if (stop) return; stop = why; log(`⛔ STOP (${tag}): ${why}`); ch.kill("SIGTERM"); setTimeout(() => ch.kill("SIGKILL"), 10000); };
     const timer = setTimeout(() => kill("timeout: session exceeded 4 h"), 4 * 3600_000);
     ch.stdout.on("data", (d) => {
@@ -193,8 +194,13 @@ async function session({ dir, prompt, variant, tag }) {
         account(L, ev);
         if (ev.type === "rate_limit_event") {
           const r = ev.rate_limit_info || {};
-          if (r.status && r.status !== "allowed") kill(`rate_limit_event status=${r.status} type=${r.rateLimitType} resets=${r.resetsAt}`);
-          if (r.isUsingOverage) kill("session started drawing paid overage (extra usage) — not allowed without DrJ");
+          const act = limitAction(r);
+          if (act.action === "stop") kill(act.why);
+          else if (act.action === "warn") {   // a warning is only a heads-up: log it once per type/status, keep working
+            const key = `${r.rateLimitType}:${r.status}`;
+            if (!warned.has(key)) { warned.add(key); const w = r.unifiedWindows || {};
+              log(`⚠ ${tag}: ${act.why} (5h ${w.five_hour?.utilization ?? "?"}, 7d ${w.seven_day?.utilization ?? "?"}) — continuing`); }
+          }
         }
         if (ev.type === "result" && ev.is_error && LIMIT_TEXT.test(String(ev.result || ""))) kill(`result error: ${String(ev.result).slice(0, 200)}`);
         if (ev.type === "system" && ev.subtype === "api_retry" && LIMIT_TEXT.test(JSON.stringify(ev))) kill(`api retry on a limit: ${JSON.stringify(ev).slice(0, 200)}`);
