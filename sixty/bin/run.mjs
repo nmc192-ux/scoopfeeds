@@ -20,6 +20,7 @@ import { createHash, randomInt } from "crypto";
 import path from "path";
 import { HOME, REPO } from "../tools/env.mjs";
 import { limitAction } from "../gates/limits.mjs";
+import { loadWindows, pauseStatus } from "../gates/pause.mjs";
 
 const SIXTY = path.join(REPO, "sixty");
 const args = process.argv.slice(2);
@@ -251,6 +252,7 @@ function preflight({ needKokoro = false } = {}) {
   const filmsGB = Number(spawnSync("df", ["-k", films + "/"], { encoding: "utf8" }).stdout.trim().split("\n").pop().split(/\s+/)[3]) / 1048576;
   if (!(filmsGB >= 8)) throw new Error(`only ${filmsGB.toFixed(1)} GB free where films are stored — need 8 GB. Not starting.`);
   if (existsSync(path.join(HOME, "STOP"))) throw new Error(`STOP present: ${readFileSync(path.join(HOME, "STOP"), "utf8").trim()}`);
+  const ps = pauseStatus(loadWindows()); if (ps.paused) throw new Error(ps.why + " — not starting.");
   if (process.env.ANTHROPIC_API_KEY) log("ℹ ANTHROPIC_API_KEY is set in the parent shell — removed from the job environment");
   const u = usageSnapshot();
   if (!u.subscription) throw new Error(`not on subscription login — refusing to run. /usage said: ${u.raw}`);
