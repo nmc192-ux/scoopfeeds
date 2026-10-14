@@ -79,7 +79,7 @@ const DESKS = {
   business: { tab: "business", keep: (a) => !/\b(psx|kse|karachi|pakistan)\b/i.test(`${a.title} ${a.description}`) },
 };
 
-// Markets: Yahoo's chart API (works from a residential connection; prod's own /api/market is
+// Markets: CNBC's quote feed, Yahoo's chart API for anything CNBC lacks (prod's own /api/market is
 // blocked by Yahoo from the VPS), crypto from scoopfeeds.com (CoinGecko).
 export const MARKET_SYMBOLS = [
   { key: "S&P 500", sym: "^GSPC", group: "US" }, { key: "Dow", sym: "^DJI", group: "US" }, { key: "Nasdaq", sym: "^IXIC", group: "US" },
@@ -89,8 +89,8 @@ export const MARKET_SYMBOLS = [
 
 async function yahooQuote(sym, opts) {
   let d, last;
-  for (const host of ["query1", "query2", "query1"]) {
-    try { d = await getJson(`https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`, { ...opts, timeoutMs: 40_000 }); break; }
+  for (const host of ["query1", "query2"]) {
+    try { d = await getJson(`https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`, { ...opts, timeoutMs: 20_000 }); break; }
     catch (e) { last = e; }
   }
   if (!d) throw last;
@@ -101,10 +101,38 @@ async function yahooQuote(sym, opts) {
   return { price: m.regularMarketPrice, pct, time: (m.regularMarketTime || 0) * 1000 };
 }
 
+// CNBC's public quote feed: one request for every symbol. Primary since 13 Oct, when Yahoo answered the Mac with
+// HTTP 429 (rate limited) and the markets slots went out as music.
+const CNBC_SYMS = { "^GSPC": ".SPX", "^DJI": ".DJI", "^IXIC": ".IXIC", "^FTSE": ".FTSE", "^GDAXI": ".GDAXI", "BZ=F": "@LCO.1", "GC=F": "@GC.1" };
+const num = (v) => { const n = Number(String(v ?? "").replace(/[,%+\s]/g, "")); return Number.isFinite(n) ? n : null; };
+/** Parse CNBC's restQuote JSON into { [yahooSym]: { price, pct, time } }. "UNCH" is 0 %. */
+export function parseCnbc(d, now = Date.now()) {
+  const back = Object.fromEntries(Object.entries(CNBC_SYMS).map(([y, c]) => [c, y]));
+  const out = {};
+  let list = d?.FormattedQuoteResult?.FormattedQuote ?? d?.QuickQuoteResult?.QuickQuote ?? [];
+  if (!Array.isArray(list)) list = [list];
+  for (const q of list) {
+    const y = back[q?.symbol]; const price = num(q?.last);
+    if (!y || price == null || price <= 0) continue;
+    const pct = /^unch/i.test(String(q.change_pct || "")) ? 0 : num(q.change_pct);
+    const t = Date.parse(q.last_time || ""); out[y] = { price, pct, time: Number.isFinite(t) ? t : now };
+  }
+  return out;
+}
+async function cnbcQuotes(opts) {
+  const syms = Object.values(CNBC_SYMS).join("|");
+  const url = `https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol?symbols=${encodeURIComponent(syms)}&requestMethod=itv&noform=1&partnerId=2&fund=1&exthrs=1&output=json`;
+  return parseCnbc(await getJson(url, { ...opts, timeoutMs: 30_000 }));
+}
+
 export async function fetchMarkets(base, opts = {}) {
   const rows = [];
-  const got = await Promise.allSettled(MARKET_SYMBOLS.map((s) => yahooQuote(s.sym, opts)));
-  got.forEach((r, i) => { if (r.status === "fulfilled") rows.push({ ...MARKET_SYMBOLS[i], ...r.value }); });
+  let cnbc = {};
+  try { cnbc = await cnbcQuotes(opts); } catch (e) { opts.log?.(`markets: CNBC failed (${e.message}); trying Yahoo`); }
+  const missing = MARKET_SYMBOLS.filter((s) => !cnbc[s.sym]);
+  const got = await Promise.allSettled(missing.map((s) => yahooQuote(s.sym, opts)));
+  const yahoo = {}; got.forEach((r, i) => { if (r.status === "fulfilled") yahoo[missing[i].sym] = r.value; });
+  for (const s of MARKET_SYMBOLS) { const q = cnbc[s.sym] || yahoo[s.sym]; if (q) rows.push({ ...s, ...q, src: cnbc[s.sym] ? "cnbc" : "yahoo" }); }
   try {
     const m = await getJson(`${base}/api/market`, { ...opts, timeoutMs: 45_000 });
     const btc = (m?.data?.crypto || []).find((c) => c.symbol === "BTC");
@@ -129,7 +157,7 @@ export async function fetchWeather(base, opts = {}) {
  *   story = { id, headline, outlets: [{source, title, description, published}], count }
  */
 export async function buildFactPack({ base = "https://scoopfeeds.com", fetchImpl = fetch, now = Date.now(), log = () => {} } = {}) {
-  const opts = { fetchImpl };
+  const opts = { fetchImpl, log };
   const dropped = [];
   const news = async (q) => {
     const d = await getJson(`${base}/api/news?${q}`, opts);

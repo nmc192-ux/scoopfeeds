@@ -19,6 +19,18 @@ in the pack, any Pakistan-politics line, and any sentence about our own sourcing
 `checks.json`. On-screen text (headlines, outlet names, ledes) is always taken verbatim from articles, never from
 the model.
 
+## Unattended hours (auto-air)
+
+`autoair.mjs` runs a whole hour with nobody at the desk: produce, air check (`airCheck.js`), YouTube broadcast
+(`../live/youtubeLive.js`), hand-over from the 24/7 radio, playout, stream watch, wrap-up. Fired by launchd:
+```bash
+backend/src/radio/playout/deploy/macos/install-autoair.sh 20:14     # 8:14 pm Mac time -> the 9 pm hour
+tail -f ~/scoopfeeds-radio/air/<hour>/autoair.log                   # each hour has its own folder + status.json
+touch ~/scoopfeeds-radio/PAUSE                                      # skip hours until removed
+```
+Rehearsal unless `RADIO_AUTOAIR_ENABLED=1`. Settings: `docs/reference/env_reference.md` (RADIO_AUTOAIR_*, RADIO_YT_*,
+RADIO_ALERT_EMAIL). Plan and the standing-approval draft: `docs/radio/autonomous-newsroom.md`.
+
 ## Tuesday 13 October 2026 — test hour, 9:00 to 10:00 pm PKT (H = 16:00 UTC)
 
 All on the Mac Mini, in `~/work/scoopfeeds` on branch `feat/radio-test-hour`.

@@ -130,6 +130,8 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 .slate .rule{width:760px; height:1px; background:rgba(244,239,230,.35); margin:40px 0 30px;}
 .slate .l{font-size:26px;}
 .slate .cd{font-size:120px; font-weight:300; margin-top:30px;}
+.slate .unmute{display:inline-flex; align-items:center; gap:14px; margin-top:34px; padding:12px 26px; border:1px solid var(--red2); color:var(--paper); font-size:26px; letter-spacing:.04em;}
+.slate .unmute svg{flex:none;}
 
 /* ── bottom strip ── */
 #strip{position:absolute; left:0; right:0; bottom:0; height:76px; display:grid; grid-template-columns:auto 1fr; background:var(--ink2); border-top:1px solid var(--line); z-index:5;}
@@ -160,7 +162,8 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
       <svg width="220" height="220" viewBox="-100 -100 200 200"><circle r="96" fill="#F4EFE6"/><circle r="54" fill="none" stroke="#0F2238" stroke-width="9"/><circle r="22" fill="#D7261E"/></svg>
       <div class="w">ScoopFeeds <i>Radio</i></div><div class="rule"></div>
       <div class="l caps" id="cdLine">On air at 9 pm Karachi · noon New York</div>
-      <div class="cd num" id="cd">15:00</div></div></section>
+      <div class="cd num" id="cd">15:00</div>
+      <div class="unmute caps"><svg width="30" height="26" viewBox="0 0 30 26"><path d="M2 9h6l8-7v22l-8-7H2z" fill="#FF4A3D"/><path d="M21 8l7 10M28 8l-7 10" stroke="#FF4A3D" stroke-width="2.5"/></svg>No sound? Tap the speaker to unmute</div></div></section>
 
     <section class="scene s-title" data-scene="title"><div class="pad"><div class="kicker caps" id="tKick"></div><h1 id="tTitle"></h1><ol id="tItems"></ol></div></section>
 
