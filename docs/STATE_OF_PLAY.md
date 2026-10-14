@@ -222,6 +222,14 @@ have never run. `VIDEO_IMAGE_ZOOM` (6%) is still un-eyeballed.
 once today at 7.9 GB. That constrains every recovery option, including the COW
 restore point this project's own workflow requires before event-table migrations.
 
+## 2026-10-14 — Plan v7 and the full-throttle engine
+
+DrJ approved **Development Plan v7** and switched the build engine to **full throttle**: build,
+merge and deploy automatically, with only a short stop list waiting for him. Rulebook:
+`docs/engine/full-throttle.md`. Backlog in build order: `docs/plan/plan_v7.md` (Phase 0 is
+filed as GitHub issues labelled `phase:0`). Open items 1–3 below are Phase 0 items and were
+filed as issues the same night. Auto-deploy runbook: `docs/ops/runbooks/autodeploy.md`.
+
 ## Open items — roughly in priority order
 
 <!-- J Loop status markers: [queued] available · [proposed] awaiting DrJ approval ·

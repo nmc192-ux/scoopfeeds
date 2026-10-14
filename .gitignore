@@ -79,3 +79,6 @@ J-LOOP-INBOX.md
 # Python bytecode (shot engine render step)
 __pycache__/
 *.pyc
+
+# Full-throttle engine: local deploy pause switch (docs/engine/full-throttle.md)
+.engine-paused
