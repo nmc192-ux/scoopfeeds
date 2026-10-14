@@ -55,9 +55,6 @@ export function newestVideo(p) {
   return vids.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0] || null;
 }
 
-const isMain = process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) await main();
-
 async function main() {
   const hourStart = v.hour === "next" ? nextHour(Date.now()) : Date.parse(v.hour);
   if (!Number.isFinite(hourStart)) { console.error("--hour must be 'next' or an ISO time"); process.exit(2); }
@@ -224,3 +221,7 @@ function makeAlert({ log, status, saveStatus }) {
     }
   };
 }
+
+// last, so every helper above is initialised before the run starts
+const isMain = process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) await main();
