@@ -4,6 +4,9 @@ description: Run the J Loop review worker. Picks up a built GitHub Issue, review
 disable-model-invocation: true
 ---
 
+> **Full throttle (DrJ, 2026-10-14) — `docs/engine/full-throttle.md` overrides this skill where they differ.** After the quality review, check the PR against the **stop list** (section 3 of that document). A match: add `engine:needs-drj` to the issue and the PR, comment which item matched and why in plain language, notify, and do not mark it ready-to-ship. No match: mark `j-loop:ready-to-ship` as usual — `/ship` merges it automatically once CI is green.
+
+
 # J Loop — /review
 
 Review ONE built issue like a skeptical senior engineer, then open a PR and ping the human.

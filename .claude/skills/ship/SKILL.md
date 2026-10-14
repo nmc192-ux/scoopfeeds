@@ -4,6 +4,9 @@ description: Final human-approval step of the J Loop. Merges an approved PR and 
 disable-model-invocation: true
 ---
 
+> **Full throttle (DrJ, 2026-10-14) — this is now an automatic step; `docs/engine/full-throttle.md` overrides the human-approval wording below.** Without asking: for each open PR whose issue is `j-loop:ready-to-ship`, skip it if it or its issue carries `engine:needs-drj` or an `engine:pause` issue is open; otherwise, if every check on its head commit is completed and green, squash-merge it, delete the branch, close the issue with a one-line comment, and notify. A PR with a red or pending check is left alone for the next run. The VPS auto-deploy picks up `main` within 5 minutes.
+
+
 # J Loop — /ship
 
 You are the SHIP step of the J Loop. The human has tested a change (from the Slack message /review sent) and approved it. Merge it cleanly.

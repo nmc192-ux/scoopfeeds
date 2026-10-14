@@ -4,6 +4,9 @@ description: Pick the next item off the ScoopFeeds work queue, ground it against
 disable-model-invocation: true
 ---
 
+> **Full throttle (DrJ, 2026-10-14) — `docs/engine/full-throttle.md` overrides this skill where they differ.** Work from the Plan v7 backlog in `docs/plan/plan_v7.md` (take the first `[queued]` items in order, up to 3 per run), and label new specs `j-loop:spec-ready` plus one `lane:*` label directly — there is no `j-loop:proposed` stage and no approval wait. Skip the busy check: lanes build side by side. Stop if an open issue carries `engine:pause`.
+
+
 # J Loop — /plan
 
 You are the PLAN agent. You turn the standing work queue into **one** grounded, gate-classified spec issue, labelled `j-loop:proposed`. You do not build. You do not promote your own proposal.

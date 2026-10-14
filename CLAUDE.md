@@ -55,8 +55,11 @@ cd backend && npm run signal:http     # signal read-layer HTTP server
 cd backend && npm run signal:mcp      # same, as an MCP server
 ```
 
-CI (`.github/workflows/node.js.yml`) only installs, builds the frontend, and runs
-`node --check backend/server.js` on Node 18/20/22. It does not run tests — verify locally.
+CI (`.github/workflows/node.js.yml`) builds the frontend and runs `node --check
+backend/server.js` on Node 18/20/22, and (since 2026-10-14) runs the full backend suite on
+Node 22 through `scripts/ci/backend-tests.sh`, which re-runs each file alone when the whole
+suite is not clean, so the known teardown flake below is reported rather than blocking. A
+merge and an auto-deploy both require every check green.
 
 Most backend tests live under `src/skills/scoring/`. The suite is **green on Node 24** —
 464 pass / 0 fail across 30 files, measured on `main` at 611f3ac. It used to be red out of the
@@ -189,8 +192,18 @@ rather than reimplementing them, and they never write.
 is reported as "unverified", never "passing"; known-corrupt data is flagged and refused, not
 papered over; sampling or truncation is stated. No silent caps.
 
-**DrJ approves every irreversible action** — merge to main, prod deploy, migration, external
-post, credential use. Agents never deploy to prod. Build, verify, and present; don't ship.
+**FULL THROTTLE, decided by DrJ 2026-10-14 — read `docs/engine/full-throttle.md` first.**
+The build engine builds, commits, merges and deploys automatically. What replaces DrJ's
+approval is: CI green (frontend build + the full backend suite), a post-deploy health check
+with automatic rollback (`scripts/ops/autodeploy.sh`), and reader-facing work shipping
+behind a flag for 24 clean hours before it switches on. **Only the stop list waits for DrJ**:
+destructive data changes, credentials/DNS/server/deploy-script changes, cost increases over
+25%, new public channels or post types, editorial-guardrail and legal changes, and
+re-enabling market odds. A PR that matches it gets `engine:needs-drj` and is not merged.
+An open issue labelled `engine:pause` stops the whole engine.
+
+(Before 2026-10-14 the rule was "DrJ approves every irreversible action; agents never deploy
+to prod". The stop list keeps that rule for the six categories above.)
 
 **ONE SCOPED EXCEPTION, decided by DrJ 2026-08-25: the long-form autopost loop.**
 When `LONGFORM_AUTOPOST_ENABLED=1`, that loop selects a topic, writes, renders,
