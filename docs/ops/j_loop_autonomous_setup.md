@@ -77,7 +77,7 @@ instead of a reaction.
 - **One proposal at a time**, two pending maximum. The loop cannot bury you.
 - **`/plan` never promotes its own work.** Only your reaction does.
 - **Gates are enforced from your own doc** — G2 on migration/event-graph/schema/auth/ranking, G7 on any data operation.
-- **Merging and deploying stay human** (G3, G4).
+- **Merging and deploying are automatic since 2026-10-14** (full throttle, `docs/engine/full-throttle.md`): the daemon merges green PRs that are not `engine:needs-drj`, and the VPS timer deploys. Install with `bash .claude/bin/jloop-install`.
 - **Daily cycle cap** (default 40) and **halt-on-limit** — the daemon stops and tells you rather than spinning.
 - **No production credentials on the Mini.** If a proof needs them, the loop says "unverified" and asks.
 

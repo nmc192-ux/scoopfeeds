@@ -14,14 +14,20 @@ The plan the engine works through is **ScoopFeeds Development Plan v7**
 
 ## 1. What runs automatically
 
+**Where it runs (DrJ, 14 Oct 2026): the Mac Mini.** `.claude/bin/jloop-daemon` runs there as a
+launchd agent (install once with `bash .claude/bin/jloop-install`; log in `.j-loop/daemon.log`).
+It spends no model tokens while idle. The merge itself is done by the daemon's shell code
+behind hard checks, never by an agent: `.claude/settings.json` still denies `gh pr merge`.
+The only cloud piece is the 20:00 PKT daily report, which is read-only.
+
 | Step | Who | Rule |
 |---|---|---|
-| Spec | `/plan` (nightly) | Turns the next backlog items from `docs/plan/plan_v7.md` into `j-loop:spec-ready` issues directly. No `j-loop:proposed` stage. |
+| Spec | `/plan` (when fewer than 3 specs wait, at most every 2 h) | Turns the next backlog items from `docs/plan/plan_v7.md` into `j-loop:spec-ready` issues directly. No `j-loop:proposed` stage. |
 | Build | `/build` | Unchanged: one issue, its own branch, never commits to `main`. |
 | Review | `/review` | Unchanged quality bar, plus the **stop-list check** (section 3). Opens the PR. |
-| Merge | `/ship` | **Automatic.** Merges a `j-loop:ready-to-ship` PR when every CI check is green and it does not carry `engine:needs-drj`. Squash merge, delete branch. |
+| Merge | daemon ship step | **Automatic.** Merges a `j-loop:ready-to-ship` PR when every CI check is green and it does not carry `engine:needs-drj`. Squash merge, delete branch. |
 | Deploy | VPS auto-deploy timer | `scripts/ops/autodeploy.sh` every 5 minutes: fast-forwards to `main` only when CI is green on that commit, builds all services, runs the health check, rolls back on failure. |
-| Flag flip | `/ship` follow-up | Reader-facing work still ships **behind a flag**. After 24 hours in production with no new errors, the engine opens a one-line PR that switches the flag on; it merges like any other PR. |
+| Flag flip | daemon, once a day | Reader-facing work still ships **behind a flag**. After 24 hours in production with no new errors, the engine opens a one-line PR that switches the flag on; it merges like any other PR. |
 | Report | Daily report task, 20:00 PKT | What merged, what deployed, what rolled back, which sources went live, anything waiting for DrJ. |
 
 ## 2. The safeguards that replace approvals
@@ -87,7 +93,7 @@ code is built here like any other lane; its playout keeps running on the Mac min
 
 ## 7. Running the stages from a cloud session
 
-Scheduled engine runs start fresh cloud sessions. There, `gh` subcommands that use GitHub's
+The engine runs on the Mac Mini; this section is for a manual or fallback run from a cloud session. There, `gh` subcommands that use GitHub's
 GraphQL API (`gh issue list`, `gh pr create`, `gh pr view`, `gh pr merge`) are refused; use
 the REST API through `gh api` instead. Unset `GH_TOKEN` first (`GH_TOKEN= gh api …`) — the
 session's git proxy supplies the credentials.
