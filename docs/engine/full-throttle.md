@@ -67,6 +67,15 @@ not merged until DrJ says so. Everything not on this list ships automatically.
    the Pakistan-related rules), the AI-disclosure chain, privacy, terms or other legal pages.
 6. **Market odds**: switching Reality Index / Truth Gap / market-implied probabilities back
    on in any reader-facing surface after they were hidden (plan v7, decision 3).
+7. **Automated Shorts** (DrJ, 15 Oct 2026): anything that would let the system make or publish
+   short-form video without a person approving each one. That covers turning
+   `VIDEO_AUTOPOST_ENABLED` or `LONGFORM_AUTOPOST_ENABLED` back on (or advising it), changing
+   either flag's code default or its literal-`"1"` check, raising `VIDEO_MAX_PER_DAY` or
+   `LONGFORM_MAX_PER_WEEK` above zero in a recommendation, enabling the Instagram or Facebook
+   Reels switches, adding a new automatic upload path to YouTube, Instagram, Facebook, TikTok
+   or Bluesky, and a flag-flip PR touching any of these. DrJ switched the automated Shorts
+   loop off in production because it may have caused the YouTube account suspension. Shorts
+   made through the `/video-factory` skill, which DrJ approves one by one, are not affected.
 
 ## 4. Sources
 
@@ -82,6 +91,8 @@ the site is English-only.
 - **Feeds follow the reader's location**: Today and News put the reader's country first.
 - **Door names**: Today, News, Originals, Markets, Watch & Listen.
 - **Market odds stay hidden** until the Markets fix lands (stop-list item 6 to re-enable).
+- **No automated Shorts** (DrJ, 15 Oct 2026): the automated Shorts loop is off in production
+  (`VIDEO_AUTOPOST_ENABLED=0`) and stays off; re-enabling it is stop-list item 7.
 - **AI-written "What we know"** on dossiers is allowed, with a disclosure line, once the
   coherence gate is live — this lifts the old mechanical-only header rule for that block only.
 

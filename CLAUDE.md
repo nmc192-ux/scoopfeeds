@@ -198,12 +198,17 @@ approval is: CI green (frontend build + the full backend suite), a post-deploy h
 with automatic rollback (`scripts/ops/autodeploy.sh`), and reader-facing work shipping
 behind a flag for 24 clean hours before it switches on. **Only the stop list waits for DrJ**:
 destructive data changes, credentials/DNS/server/deploy-script changes, cost increases over
-25%, new public channels or post types, editorial-guardrail and legal changes, and
-re-enabling market odds. A PR that matches it gets `engine:needs-drj` and is not merged.
-An open issue labelled `engine:pause` stops the whole engine.
+25%, new public channels or post types, editorial-guardrail and legal changes,
+re-enabling market odds, and re-enabling automated Shorts (added 2026-10-15). A PR that
+matches it gets `engine:needs-drj` and is not merged. An open issue labelled `engine:pause`
+stops the whole engine.
 
 (Before 2026-10-14 the rule was "DrJ approves every irreversible action; agents never deploy
-to prod". The stop list keeps that rule for the six categories above.)
+to prod". The stop list keeps that rule for the seven categories above.)
+
+**Automated Shorts are OFF in prod (DrJ, 2026-10-15)** — `VIDEO_AUTOPOST_ENABLED=0`, because
+the loop may have caused the YouTube account suspension. Do not turn it back on, change its
+default, or recommend doing so; that is stop-list item 7 in `docs/engine/full-throttle.md`.
 
 **ONE SCOPED EXCEPTION, decided by DrJ 2026-08-25: the long-form autopost loop.**
 When `LONGFORM_AUTOPOST_ENABLED=1`, that loop selects a topic, writes, renders,
