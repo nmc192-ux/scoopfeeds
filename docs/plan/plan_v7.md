@@ -15,6 +15,8 @@ item against the code before changing it; the item text is intent, not a verifie
 - **English only**: language switch and non-English locales removed. **No WhatsApp channel.**
 - **Feeds follow the reader's location**: Today and News put the reader's country first.
 - **Market odds hidden** on Today and dossiers until the Markets fix (re-enabling = stop list).
+- **No automated Shorts** (DrJ, 15 Oct 2026): the automated Shorts loop is off and stays off;
+  re-enabling it is on the stop list. Hand-approved `/video-factory` Shorts are unaffected.
 - **AI "What we know"** allowed on dossiers with a disclosure line once the coherence gate is live.
 - **Coverage Gaps** measured by region, never political leaning.
 - Site and Radio share ink `#090706`, paper `#F4EFE6`, live red `#D7261E`, Newsreader and

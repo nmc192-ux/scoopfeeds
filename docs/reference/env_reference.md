@@ -209,7 +209,7 @@ and run in the **worker**. See `docs/video-pipeline.md` for why the rules are wh
 
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
-| `VIDEO_AUTOPOST_ENABLED` | unset (**off**) | `1` | yes | Master switch. The only thing between built and live. Literal `"1"`. |
+| `VIDEO_AUTOPOST_ENABLED` | unset (**off**) | **`0` (DrJ, 2026-10-15)** | yes | Master switch. The only thing between built and live. Literal `"1"`. **Off in prod since 2026-10-15**: DrJ stopped automated Shorts because the loop may have caused the YouTube account suspension. Was `1`. Re-enabling it is stop-list item 7 (`docs/engine/full-throttle.md`), so it waits for DrJ. Confirmed `0` in both `worker` and `scheduler` with `printenv` after `up -d`. |
 | `VIDEO_SPEC_ENABLED` | unset (**off**) | `1` | yes | Required, *and* `ANTHROPIC_API_KEY` must be set, or the cycle aborts loudly rather than skipping every candidate. |
 | `VIDEO_MAX_PER_DAY` | `4` | **`12`** | yes | Rolling-24h publish cap. Not a calendar day — a calendar reset lets a quiet day burst. |
 | `VIDEO_MIN_INTERVAL_MS` | `24h / max × 0.8` (≈1.6h at 12/day) | default | yes | Spacing gate. The 0.8 slack gives more opportunities than videos, so a failure costs time rather than a video. |
