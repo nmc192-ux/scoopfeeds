@@ -7,9 +7,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { chooseBed, runPlayout } from "./playout.js";
-import { resolveTarget, rtmpAllowed, redact, RTMP_BASE } from "./outputTarget.js";
-import { buildFfmpegArgs, buildFeederArgs, loudnessFilter, VIDEO, AUDIO } from "./ffmpegArgs.js";
+import { chooseBed, runPlayout, isFatalMuxError } from "./playout.js";
+import { resolveTarget, rtmpAllowed, rtmpBase, redact, RTMP_BASE } from "./outputTarget.js";
+import { buildFfmpegArgs, buildFeederArgs, loudnessFilter, VIDEO, AUDIO, RTMP } from "./ffmpegArgs.js";
 import { parseIntegrated } from "./loudness.js";
 import { supervise, nextDelay, BACKOFF } from "./watchdog.js";
 
@@ -257,4 +257,44 @@ test("the feeder loops the bed in real time through the loudness filter into s16
 test("limiter ceiling leaves room for AAC overshoot (measured +1.1 dB on the markets bed)", () => {
   assert.equal(AUDIO.truePeakDb, -3);
   assert.match(loudnessFilter(-16.3), /alimiter=limit=0\.7079:/);
+});
+
+// ── RTMP dead-connection timeout, loopback-only test hook ────────────────────
+test("RTMP output carries an I/O timeout before the URL; file and segment outputs do not", () => {
+  const rtmp = buildFfmpegArgs({ target: { kind: "rtmp", url: `${RTMP_BASE}/abcd` }, bed: "/m/b.mp3", bedLufs: -18, audioPipe: true });
+  const i = rtmp.indexOf("-rw_timeout");
+  assert.ok(i > 0, "rw_timeout present");
+  assert.equal(rtmp[i + 1], String(RTMP.rwTimeoutMs * 1000), "microseconds");
+  assert.deepEqual(rtmp.slice(i + 2), ["-f", "flv", `${RTMP_BASE}/abcd`], "an output option, directly before the URL");
+  assert.ok(RTMP.rwTimeoutMs <= 8000, "detection budget is 10 s including socket-buffer fill");
+  for (const target of [{ kind: "file", path: "/tmp/t.mp4" }, { kind: "segments", dir: "/tmp/r", segmentSec: 60, keep: 10 }]) {
+    assert.ok(!buildFfmpegArgs({ target, bed: "/m/b.mp3", bedLufs: -18 }).includes("-rw_timeout"), target.kind);
+  }
+});
+
+test("RADIO_PLAYOUT_RTMP_BASE only accepts loopback rtmp:// and never bypasses the two gates", () => {
+  assert.equal(rtmpBase({}), RTMP_BASE);
+  assert.equal(rtmpBase({ RADIO_PLAYOUT_RTMP_BASE: "rtmp://127.0.0.1:19350/live/" }), "rtmp://127.0.0.1:19350/live");
+  for (const bad of ["rtmp://a.rtmp.youtube.com/live2", "rtmp://example.com/live", "rtmp://127.0.0.1.evil.com/live", "http://127.0.0.1/live", "nonsense"]) {
+    assert.throws(() => rtmpBase({ RADIO_PLAYOUT_RTMP_BASE: bad }), /RADIO_PLAYOUT_RTMP_BASE/, bad);
+  }
+  const hook = { RADIO_PLAYOUT_RTMP_BASE: "rtmp://127.0.0.1:19350/live" };
+  assert.throws(() => resolveTarget({ env: hook }), /no output target/);
+  assert.throws(() => resolveTarget({ env: { ...hook, RADIO_PLAYOUT_ENABLED: "true" } }), /no output target/);
+  assert.deepEqual(resolveTarget({ env: { ...hook, RADIO_PLAYOUT_ENABLED: "true", RADIO_STREAM_KEY: "testkey" } }),
+    { kind: "rtmp", url: "rtmp://127.0.0.1:19350/live/testkey" });
+});
+
+test("a muxer write error from ffmpeg is fatal at once; ordinary warnings are not", () => {
+  for (const line of [
+    "[vost#0:0/libx264 @ 0xc1b04c000] Error submitting a packet to the muxer: Operation timed out",
+    "[out#0/flv @ 0xc1b02c480] Error muxing a packet",
+    "[out#0/flv @ 0x1] Error muxing a packet\n[out#0/flv @ 0x1] Task finished with error code: -60",
+  ]) assert.equal(isFatalMuxError(line), true, line);
+  for (const line of [
+    "[swscaler @ 0x85c894000] deprecated pixel format used, make sure you did set range correctly",
+    "[aist#1:0/pcm_s16le @ 0xb9cc08480] Guessed Channel Layout: stereo",
+    "[flv @ 0x9c1028500] Failed to update header with correct filesize.",
+    "",
+  ]) assert.equal(isFatalMuxError(line), false, line);
 });
