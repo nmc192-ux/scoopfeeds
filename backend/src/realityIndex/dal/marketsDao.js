@@ -177,6 +177,14 @@ export function markMarketResolved(id, { outcome = null } = {}) {
   ).run(outcome, now(), id);
 }
 
+/**
+ * Record that upstream confirmed the market is still open. Bumps updated_at so the
+ * stalest-first recheck queue moves on instead of re-asking the same 200 forever.
+ */
+export function touchMarketChecked(id) {
+  getDb().prepare(`UPDATE prediction_markets SET updated_at = ? WHERE id = ?`).run(now(), id);
+}
+
 /** Mark as inactive — used when an upstream market disappears or resolves. */
 export function deactivateMarket(id) {
   getDb().prepare(
@@ -187,11 +195,11 @@ export function deactivateMarket(id) {
 export function countActiveMarkets({ source = null } = {}) {
   if (source) {
     return getDb().prepare(
-      `SELECT COUNT(*) AS n FROM prediction_markets WHERE active = 1 AND source = ?`
+      `SELECT COUNT(*) AS n FROM prediction_markets WHERE ${eligibleMarketSql("prediction_markets")} AND source = ?`
     ).get(source).n;
   }
   return getDb().prepare(
-    `SELECT COUNT(*) AS n FROM prediction_markets WHERE active = 1`
+    `SELECT COUNT(*) AS n FROM prediction_markets WHERE ${eligibleMarketSql("prediction_markets")}`
   ).get().n;
 }
 

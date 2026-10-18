@@ -46,7 +46,7 @@ function eligibleClusterMarkets(db, clusterId) {
   `).all(clusterId);
 }
 
-const MIN_ARTICLES      = parseInt(process.env.EVENT_MIN_ARTICLES || "5", 10);
+const MIN_ARTICLES       = parseInt(process.env.EVENT_MIN_ARTICLES || "5", 10);
 const DORMANT_AFTER_MS   = 7 * 24 * 60 * 60 * 1000;
 const MATCH_TAU          = Number.parseFloat(process.env.EVENT_MATCH_TAU || "0.78"); // calibrated (cluster↔event)
 const MERGE_TAU          = Number.parseFloat(process.env.EVENT_MERGE_TAU || "0.86"); // event↔event DIRECT-similarity gate to confirm a convergence merge — prevents the cascade where a borderline cluster fuses two distinct events into a blob

@@ -20,7 +20,7 @@
 
 import axios from "axios";
 import {
-  upsertMarket, listMarketsToRecheck, markMarketResolved, deactivateMarket, deactivateIneligibleMarkets,
+  upsertMarket, listMarketsToRecheck, markMarketResolved, touchMarketChecked, deactivateMarket, deactivateIneligibleMarkets,
 } from "../../dal/marketsDao.js";
 import { insertSnapshot } from "../../dal/snapshotsDao.js";
 import { logger } from "../../../services/logger.js";
@@ -116,6 +116,7 @@ export async function syncPolymarketResolutions({
       const row = upstream.get(t.source_market_id);
       if (!row) { deactivateMarket(t.id); gone++; continue; }
       if (row.closed) { markMarketResolved(t.id); resolved++; }
+      else touchMarketChecked(t.id);
     }
   }
 

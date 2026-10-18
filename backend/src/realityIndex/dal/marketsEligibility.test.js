@@ -129,6 +129,21 @@ test("an empty upstream answer is treated as a fault, not as markets vanishing",
   assert.equal(dao.getMarketById("unverified").active, 1);
 });
 
+test("still-open stale markets are marked checked, so the next run asks about different ids", async () => {
+  const STALE = NOW - 3 * 60 * 60 * 1000;
+  for (let i = 0; i < 5; i++) addMarket(`stale${i}`, { end_date: NOW + 20 * DAY, updated_at: STALE - i });
+  const asked = [];
+  const fetchByIds = async ids => { asked.push(...ids); return ids.map(id => ({ conditionId: id, closed: false })); };
+  const opts = { syncStartedAt: NOW - 60 * 60 * 1000, fetchByIds, limit: 2 };
+  await syncPolymarketResolutions(opts);
+  const first = asked.splice(0);
+  await syncPolymarketResolutions(opts);
+  const second = asked.splice(0);
+  assert.equal(first.length, 2);
+  assert.equal(second.length, 2);
+  assert.ok(first.every(id => !second.includes(id)), "second run must not re-ask the first run's ids");
+});
+
 test("binding rows are never deleted or rewritten by retirement", () => {
   const n = db.prepare(`SELECT COUNT(*) AS n FROM event_market_links WHERE event_id = 'ev1'`).get().n;
   assert.equal(n, Object.keys(MARKETS).length);
