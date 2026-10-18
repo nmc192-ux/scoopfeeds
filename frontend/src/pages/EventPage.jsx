@@ -250,7 +250,7 @@ function LegacyEventBody({ event, slug }) {
       )}
 
       {/* Timeline */}
-      <section className="mb-8">
+      <section id="timeline" className="mb-8">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Clock size={15} className="text-[var(--color-accent)]" />
