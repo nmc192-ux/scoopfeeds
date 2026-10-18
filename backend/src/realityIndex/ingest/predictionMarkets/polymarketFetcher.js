@@ -98,7 +98,7 @@ export async function syncPolymarketResolutions({
   limit = 200,
 } = {}) {
   const tracked = listMarketsToRecheck({ source: "polymarket", staleBeforeMs: syncStartedAt, limit });
-  let resolved = 0, gone = 0;
+  let resolved = 0, gone = 0, unanswered = 0;
 
   for (let i = 0; i < tracked.length; i += RECHECK_BATCH) {
     const batch = tracked.slice(i, i + RECHECK_BATCH);
@@ -109,8 +109,13 @@ export async function syncPolymarketResolutions({
       logger.warn(`📈 Polymarket resolution check failed: ${err.message}`);
       break;
     }
-    // An empty answer for a whole batch is an API fault, not 50 vanished markets: leave them unverified.
-    if (!rows.length) continue;
+    // An empty answer for a whole batch is an API fault, not 50 vanished markets: leave them
+    // active and unverified, but mark them asked so the stalest-first queue still moves on.
+    if (!rows.length) {
+      for (const t of batch) touchMarketChecked(t.id);
+      unanswered += batch.length;
+      continue;
+    }
     const upstream = new Map(rows.map(r => [String(r.conditionId || r.condition_id || r.id), r]));
     for (const t of batch) {
       const row = upstream.get(t.source_market_id);
@@ -121,10 +126,11 @@ export async function syncPolymarketResolutions({
   }
 
   const expired = deactivateIneligibleMarkets();
+  if (unanswered) logger.warn(`📈 Polymarket resolutions: ${unanswered} markets got an empty upstream answer, left unverified`);
   if (resolved || gone || expired) {
     logger.info(`📈 Polymarket resolutions: ${tracked.length} rechecked, ${resolved} resolved, ${gone} gone upstream, ${expired} deactivated (resolved/expired)`);
   }
-  return { rechecked: tracked.length, resolved, gone, expired };
+  return { rechecked: tracked.length, resolved, gone, unanswered, expired };
 }
 
 /**

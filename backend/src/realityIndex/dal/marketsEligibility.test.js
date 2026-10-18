@@ -91,8 +91,8 @@ test("GET /api/events/:slug/markets returns only the eligible bound market", asy
 });
 
 test("cluster bindings to dead markets are not returned or carried forward", () => {
-  db.prepare(`INSERT INTO story_clusters (id, title, category, article_count, created_at, updated_at)
-              VALUES ('c1', 'Cluster', 'world', 6, ?, ?)`).run(NOW, NOW);
+  db.prepare(`INSERT INTO story_clusters (id, title, category, keywords, article_count, created_at, updated_at, expires_at)
+              VALUES ('c1', 'Cluster', 'world', '[]', 6, ?, ?, ?)`).run(NOW, NOW, NOW + DAY);
   let r = 1;
   for (const id of Object.keys(MARKETS)) {
     db.prepare(`INSERT INTO cluster_market_links (cluster_id, market_id, weight, rank, matcher, matched_at) VALUES ('c1', ?, 1, ?, 't', ?)`)
@@ -125,8 +125,11 @@ test("syncPolymarketResolutions resolves closed markets and retires the expired"
 
 test("an empty upstream answer is treated as a fault, not as markets vanishing", async () => {
   addMarket("unverified", { end_date: NOW + 10 * DAY, updated_at: NOW - 3 * 60 * 60 * 1000 });
-  await syncPolymarketResolutions({ syncStartedAt: NOW - 60 * 60 * 1000, fetchByIds: async () => [] });
+  const out = await syncPolymarketResolutions({ syncStartedAt: NOW - 60 * 60 * 1000, fetchByIds: async () => [] });
   assert.equal(dao.getMarketById("unverified").active, 1);
+  assert.ok(out.unanswered >= 1);
+  // Marked as asked, so an API that keeps answering empty cannot pin it to the head of the queue.
+  assert.ok(dao.getMarketById("unverified").updated_at > NOW - 60 * 60 * 1000);
 });
 
 test("still-open stale markets are marked checked, so the next run asks about different ids", async () => {
