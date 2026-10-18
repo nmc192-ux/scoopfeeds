@@ -6,7 +6,7 @@
  * GET  /preview             — the Morning Scoop as it would render, as HTML.
  * POST /test                — send the Morning Scoop to one address without
  *                             touching subscriber rows. Body: { email: string }
- * POST /welcome/run        — manually run one welcome-sequence cycle.
+ * POST /welcome/run         — manually run one welcome-sequence cycle.
  *                             Useful for verifying SMTP after setting env vars.
  *                             Body: { maxPerStage?: number }   (default 50)
  * POST /welcome/test        — send the d1 + d3 templates to a single email

@@ -430,7 +430,9 @@ function scheduleCron(expression, task, options) {
   const name = cronName(task, expression);
   const scheduledTask = cron.schedule(expression, () => instrumented(name, task), options);
   schedulerTasks.push(scheduledTask);
-  registeredCrons.push({ name, expression });
+  // timezone, when set, is what the expression means — without it "30 6 * * *"
+  // in the boot summary reads as UTC.
+  registeredCrons.push(options?.timezone ? { name, expression, timezone: options.timezone } : { name, expression });
   return scheduledTask;
 }
 
@@ -950,7 +952,7 @@ scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "
   // mean enrichment, usgs, or one of the two. This prints name@expression for
   // every registration, so the boot log answers "was it registered?" and the
   // per-tick lines answer "did it fire?" without either being inferred.
-  logger.info(`⏰ ${registeredCrons.length} crons registered: ${registeredCrons.map((c) => `${c.name}`).join(" | ")}`);
+  logger.info(`⏰ ${registeredCrons.length} crons registered: ${registeredCrons.map((c) => `${c.name}${c.timezone ? ` (${c.timezone})` : ""}`).join(" | ")}`);
 
   updateNextRun();
   return true;
