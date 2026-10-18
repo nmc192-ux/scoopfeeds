@@ -326,6 +326,17 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// Public site flags the SPA needs at runtime (the SPA is built once, env flags are not).
+// SITE_MARKET_ODDS gates Reality Index / Truth Gap / market-implied probabilities in
+// every reader surface; off unless literally "true". Turning it on is stop-list item 6.
+app.get("/api/site-config", (_req, res) => {
+  res.set("Cache-Control", "public, max-age=60");
+  res.json({
+    marketOdds: process.env.SITE_MARKET_ODDS === "true",
+    v2: process.env.SITE_V2 === "true",
+  });
+});
+
 // Liveness probe (docker healthcheck). `ok` stays true when we are merely
 // degraded — that is the point of fail-soft: sqlite-vec is a native extension,
 // and its failure disables embedding search but must not take the live site down

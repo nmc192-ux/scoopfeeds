@@ -11,6 +11,7 @@
 
 import { COPY } from "../../lib/copyGuide";
 import { useT } from "../../lib/i18n";
+import { useMarketOdds } from "../../hooks/useSiteConfig";
 
 function bucket(gap) {
   if (gap == null || !Number.isFinite(gap)) return null;
@@ -33,8 +34,9 @@ const LABEL = {
 
 export default function TruthGapBadge({ gap, size = "md" }) {
   const { t } = useT();
+  const oddsOn = useMarketOdds();
   const b = bucket(gap);
-  if (!b) return null;
+  if (!oddsOn || !b) return null;
   const s = STYLE[b];
   const txt = { sm: "text-[10px] px-1.5 py-0.5", md: "text-xs px-2 py-0.5", lg: "text-sm px-2.5 py-1" }[size];
   return (

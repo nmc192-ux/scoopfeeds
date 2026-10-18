@@ -14,9 +14,14 @@ import { Link } from "react-router-dom";
 import { Radio, Layers } from "lucide-react";
 import EventCard from "../components/events/EventCard";
 import { useEvents } from "../hooks/useEvents";
+import { useStats } from "../hooks/useNews";
+import { useSiteConfig } from "../hooks/useSiteConfig";
+import LoadingCard from "../components/ui/LoadingCard";
+import TimeoutNotice, { useTimedOut } from "../components/ui/TimeoutNotice";
 import ScoopMascot from "../components/mascot/ScoopMascot";
 
 const DAY_MS = 86_400_000;
+const MIN_SECTION_STORIES = 3;  // a band with fewer stories than this does not render
 const MIN_SECTION_SOURCES = 2; // floor: single-source noise can't lead a category section
 
 // Five display sections → primary event.category (frontend-only mapping, Phase 1).
@@ -98,26 +103,36 @@ const SkeletonCard = () => (
   <div className="h-64 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] animate-pulse" />
 );
 
-// One stacked category band; renders nothing when the category has no events.
+// SITE_V2 swaps the plain pulse block for the shared LoadingCard skeleton.
+function useSkeleton() {
+  const { v2 } = useSiteConfig();
+  return v2 ? LoadingCard : SkeletonCard;
+}
+
+// One stacked category band; renders nothing when the category has fewer than
+// MIN_SECTION_STORIES stories (no "on the way" placeholders, no lonely one-story block).
 function NewsSection({ label, category, moreHref = "/events", moreCta }) {
   // Recency order (endpoint default = last_activity_at DESC — freshest leads); fetch a few
   // extra so the source_count floor still yields a full row of 4.
-  const { data, isLoading } = useEvents({ category, limit: 10 });
+  const { data, isLoading, refetch } = useEvents({ category, limit: 10 });
+  const timedOut = useTimedOut(isLoading);
+  const Skeleton = useSkeleton();
   const events = (data?.events ?? [])
     .filter(e => (e.source_count || 0) >= MIN_SECTION_SOURCES)
     .slice(0, 4);
 
+  if (isLoading && timedOut) return <TimeoutNotice what={label} onRetry={() => refetch()} />;
   if (isLoading) {
     return (
       <section>
         <div className="h-7 w-44 rounded bg-[var(--color-surface)] border border-[var(--color-border)] animate-pulse mb-4" />
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} />)}
         </div>
       </section>
     );
   }
-  if (events.length === 0) return null; // hide empty bands — no "no data" placeholders
+  if (events.length < MIN_SECTION_STORIES) return null;
 
   return (
     <section>
@@ -129,47 +144,18 @@ function NewsSection({ label, category, moreHref = "/events", moreCta }) {
   );
 }
 
-// Entertainment: honest placeholder while there are no entertainment sources. Auto-populates
-// (recency + floor, like any news band) the moment such events exist; until then a quiet card.
-function EntertainmentSection() {
-  const { data, isLoading } = useEvents({ category: "entertainment", limit: 10 });
-  const events = (data?.events ?? [])
-    .filter(e => (e.source_count || 0) >= MIN_SECTION_SOURCES)
-    .slice(0, 4);
-
-  if (isLoading) return null;
-
-  if (events.length > 0) {
-    return (
-      <section>
-        <SectionHeader title="Entertainment" href="/events" cta="More in Entertainment" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {events.map(ev => <EventCard key={ev.id} event={ev} variant="news" />)}
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section>
-      <h2 className="text-xl font-bold tracking-tight text-[var(--color-text)] mb-4">Entertainment</h2>
-      <div className="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
-        <p className="text-sm font-semibold text-[var(--color-text-secondary)]">Entertainment is on the way</p>
-        <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
-          This section fills in as we add entertainment sources to the feed.
-        </p>
-      </div>
-    </section>
-  );
-}
-
 export default function HomePage() {
   // One prominence fetch powers the whole Top Stories band: the main shows the top 7
   // (lead + 6); the rail derives Developing + Most-sourced from the fuller list.
   // Each story renders at most ONCE above the fold: the rails exclude anything
   // already placed in the band, and Most-sourced also excludes Developing —
   // the 2026-07-13 audit found the same event in up to 4 slots (finding P1-12).
-  const { data, isLoading, isError, isSuccess } = useEvents({ sort: "prominence", limit: 24 });
+  const { data, isLoading, isError, isSuccess, refetch } = useEvents({ sort: "prominence", limit: 24 });
+  const timedOut = useTimedOut(isLoading);
+  const { v2 } = useSiteConfig();
+  const { data: stats } = useStats();
+  const newspapers = Number(stats?.scheduler?.sourceCount) || 0; // never invented: omitted when unknown
+  const Skeleton = useSkeleton();
   const events = data?.events ?? [];
   const [lead, ...rest] = events;
   const topGrid = rest.slice(0, 6);
@@ -188,11 +174,18 @@ export default function HomePage() {
         <div>
           {/* The homepage's only h1 (SEO: the page previously had none). */}
           <SectionHeader title="Top stories" href="/events" cta="See all stories" as="h1" />
-          {isLoading ? (
+          {isLoading && timedOut ? (
+            <TimeoutNotice what="Top stories" onRetry={() => refetch()} />
+          ) : isLoading ? (
             <div className="space-y-4">
-              <SkeletonCard />
+              {v2 && newspapers > 0 && (
+                <p className="text-sm text-[var(--color-text-tertiary)]">
+                  Reading {newspapers} newspapers so you don't have to…
+                </p>
+              )}
+              <Skeleton />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} />)}
               </div>
             </div>
           ) : events.length === 0 ? (
@@ -243,7 +236,7 @@ export default function HomePage() {
       {/* ── Local · Sports · Entertainment (Phase 2) ───────────────────── */}
       <NewsSection label="Local · Pakistan" category="pakistan" moreHref="/country/pk" moreCta="More local" />
       <NewsSection label="Sports" category="sports" moreHref="/sports" moreCta="More in Sports" />
-      <EntertainmentSection />
+      <NewsSection label="Entertainment" category="entertainment" moreHref="/events" moreCta="More in Entertainment" />
     </div>
   );
 }

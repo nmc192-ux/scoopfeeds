@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 
-test("/predictions renders the Reality Index hero + at least the controls", async ({ page }) => {
+test("/predictions renders the Reality Index hero + at least the controls (odds flag on)", async ({ page }) => {
+  await page.route("**/api/site-config", r => r.fulfill({ json: { marketOdds: true, v2: false } }));
   await page.goto("/predictions");
   // h1 text comes from COPY.panelTitle(t) = "Reality Index"
   await expect(page.getByRole("heading", { name: /reality index/i })).toBeVisible();

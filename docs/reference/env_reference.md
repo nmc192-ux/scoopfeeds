@@ -190,6 +190,13 @@ whether the index is mixed. `scripts/reembed.mjs` needs no cutover today — emb
 |---|---|---|---|---|
 | `VITE_SENTIMENT_ENABLED` | `false` (**hidden**) | default | **build** | Sentiment module. Hidden because it fails comprehensibility, not data sufficiency — see the architecture doc. |
 
+## Site flags (runtime — served to the SPA by `GET /api/site-config`)
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `SITE_MARKET_ODDS` | off (anything but literally `"true"`) | unset (**off**) | yes (restart; the SPA caches the answer 5 min) | Reality Index, Truth Gap, anomaly chips and market-implied probabilities on every reader surface (homepage cards, topic and feed cards, dossier, reader modal). Off also hides the `/predictions`, `/truth-gap`, `/anomalies` pages (they redirect home) and stops the badge fetch. The SPA treats a failed or slow `/api/site-config` as off. **Turning it on is stop-list item 6 — DrJ only.** |
+| `SITE_V2` | off (anything but literally `"true"`) | unset (**off**) | yes (restart) | Reader-facing v2 pass: `LoadingCard` skeletons on the homepage, the "Reading N newspapers…" loading line (N from `/api/news/stats` `scheduler.sourceCount`; omitted if unknown), the 404 and empty-search copy. Also switchable per visit with `?v2=1` (`?v2=0` clears). |
+
 ## Scheduler / ingestion
 
 | Var | Default | Prod | Runtime-flip | Purpose |
