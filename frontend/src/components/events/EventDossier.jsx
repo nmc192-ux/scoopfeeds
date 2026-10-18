@@ -31,6 +31,7 @@ import {
 } from "../../hooks/useEvents";
 import ProbabilityBar from "../predictions/ProbabilityBar";
 import RealityGauge   from "../predictions/RealityGauge";
+import { useMarketOdds } from "../../hooks/useSiteConfig";
 import SentimentSmallMultiples from "../predictions/SentimentSmallMultiples";
 
 // A3 earn-render floor: sentiment streams render only when the story carries
@@ -648,14 +649,16 @@ function IntelligenceSection({ event, riData, sentData, markets }) {
   // market with a question) + trend (≥2 snapshots) + source count present.
   const hasBoundQuestion = markets.some(m => m.question);
   const hasTrend = riHistory.length >= 2;
-  const riEarns = !!riSnapshot && hasBoundQuestion && hasTrend && sourceCount > 0;
+  // SITE_MARKET_ODDS off (the default) → neither the Reality Index nor markets earn render.
+  const oddsOn = useMarketOdds();
+  const riEarns = oddsOn && !!riSnapshot && hasBoundQuestion && hasTrend && sourceCount > 0;
 
   // A3 earn-render for Sentiment: measured volume above the floor AND the module is
   // enabled (default OFF — hidden pending genuine multi-source social sentiment).
   const totalVolume = (sentData?.latest ?? []).reduce((s, x) => s + (x.volume ?? 0), 0);
   const sentimentEarns = SENTIMENT_ENABLED && totalVolume >= SENTIMENT_VOLUME_FLOOR;
 
-  const marketsEarn = liveMarkets.length > 0;
+  const marketsEarn = oddsOn && liveMarkets.length > 0;
 
   // Nothing earns render → the whole section is absent. No placeholders.
   if (!riEarns && !sentimentEarns && !marketsEarn) return null;

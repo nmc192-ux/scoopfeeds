@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, useLocation, Navigate } from "react-router-dom";
+import { useSiteConfig } from "./hooks/useSiteConfig";
 import { LANGUAGES as I18N_LANGUAGES, getCurrentLang } from "./lib/i18n";
 import Header from "./components/layout/Header";
 import TopicNav from "./components/layout/TopicNav";
@@ -167,7 +168,7 @@ export default function App() {
           <Route path="/sponsor"             element={<SponsorPage />} />
           <Route path="/analysis"            element={<AnalysisPage />} />
           <Route path="/analysis/explained/:slug" element={<AnalysisExplainedPage />} />
-          <Route path="/predictions"         element={<PredictionsPage />} />
+          <Route path="/predictions"         element={<OddsOnly><PredictionsPage /></OddsOnly>} />
           <Route path="/events"             element={<EventsPage />} />
           <Route path="/events/:slug"       element={<EventPage />} />
           <Route path="/trackers/:id"       element={<TrackerPage />} />
@@ -178,9 +179,9 @@ export default function App() {
           <Route path="/crypto"             element={<CryptoEventsPage />} />
           <Route path="/ai"                 element={<AIEventsPage />} />
           <Route path="/space"              element={<SpaceEventsPage />} />
-          <Route path="/truth-gap"          element={<TruthGapPage />} />
+          <Route path="/truth-gap"          element={<OddsOnly><TruthGapPage /></OddsOnly>} />
           <Route path="/dashboard"          element={<DashboardPage />} />
-          <Route path="/anomalies"          element={<AnomaliesPage />} />
+          <Route path="/anomalies"          element={<OddsOnly><AnomaliesPage /></OddsOnly>} />
           <Route path="/scoop-ops/reality-index" element={<RealityIndexOpsPage />} />
           <Route path="/scoop-ops/metrics"        element={<MetricsOpsPage />} />
           <Route path="/scoop-ops/briefs"     element={<BriefsReviewPage />} />
@@ -245,12 +246,20 @@ function Footer({ kofiUrl }) {
   );
 }
 
+/* Pages that exist only to show market odds: with SITE_MARKET_ODDS off they send readers home. */
+function OddsOnly({ children }) {
+  const { marketOdds, loading } = useSiteConfig();
+  if (loading) return null; // redirecting before the answer arrives would bounce readers even when the flag is on
+  return marketOdds ? children : <Navigate to="/" replace />;
+}
+
 /* ─── 404 ────────────────────────────────────────────────────────────────── */
 function NotFound() {
+  const { v2 } = useSiteConfig();
   return (
     <div className="text-center py-24">
       <ScoopMascot size="lg" mood="reading" animated />
-      <p className="text-3xl font-bold mt-6 mb-2">Page not found</p>
+      <p className="text-3xl font-bold mt-6 mb-2">{v2 ? "This page went off the record." : "Page not found"}</p>
       <p className="text-[var(--color-text-tertiary)] mb-6">
         The page you're looking for doesn't exist or has moved.
       </p>

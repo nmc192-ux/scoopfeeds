@@ -16,6 +16,7 @@ import AnomalyChip         from "../components/predictions/AnomalyChip";
 import WatchlistPushPanel  from "../components/predictions/WatchlistPushPanel";
 import { COPY }            from "../lib/copyGuide";
 import { useT }           from "../lib/i18n";
+import { useMarketOdds }  from "../hooks/useSiteConfig";
 import { useNewsStore }   from "../store/newsStore";
 
 function fmtPct(v) { return Number.isFinite(v) ? `${Math.round(v * 100)}%` : "—"; }
@@ -30,6 +31,7 @@ function relTime(ms) {
 }
 
 function EventRow({ entry }) {
+  const odds = useMarketOdds();
   const e = entry.event;
   if (!e) {
     return (
@@ -61,8 +63,8 @@ function EventRow({ entry }) {
         {e.title}
       </p>
       <div className="flex items-center gap-3 mt-1 text-[10px] text-[var(--color-text-secondary)] tabular-nums">
-        {e.top_probability != null && <span>Market <span className="font-semibold">{fmtPct(e.top_probability)}</span></span>}
-        {e.reality_score   != null && <span>RI <span className="font-semibold">{fmtPct(e.reality_score)}</span></span>}
+        {odds && e.top_probability != null && <span>Market <span className="font-semibold">{fmtPct(e.top_probability)}</span></span>}
+        {odds && e.reality_score   != null && <span>RI <span className="font-semibold">{fmtPct(e.reality_score)}</span></span>}
         <span className="ml-auto">{relTime(e.last_activity_at)}</span>
       </div>
     </Link>
@@ -70,6 +72,7 @@ function EventRow({ entry }) {
 }
 
 function MarketRow({ entry }) {
+  const odds = useMarketOdds();
   const m = entry.market;
   if (!m) return null;
   return (
@@ -86,7 +89,7 @@ function MarketRow({ entry }) {
         {m.question}
       </p>
       <div className="flex items-center gap-3 mt-1 text-[10px] text-[var(--color-text-secondary)] tabular-nums">
-        <span>YES <span className="font-semibold">{fmtPct(m.yes_price)}</span></span>
+        {odds && <span>YES <span className="font-semibold">{fmtPct(m.yes_price)}</span></span>}
         {m.volume_24h > 0 && <span>Vol ${Math.round(m.volume_24h).toLocaleString()}</span>}
       </div>
     </a>
@@ -110,6 +113,7 @@ function AnomalyRow({ a }) {
 
 export default function DashboardPage() {
   const { t } = useT();
+  const odds = useMarketOdds();
   const { setAuthOpen } = useNewsStore();
   const { data: wlData, isLoading: loadingWl, error: wlError } = useWatchlists();
   const { data: actData, isLoading: loadingAct, error: actError } = useWatchlistActivity({ limit: 30 });
@@ -170,7 +174,7 @@ export default function DashboardPage() {
                 Open an{" "}
                 <Link to="/events" className="text-[var(--color-accent)] hover:underline">event</Link>{" "}
                 or{" "}
-                <Link to="/predictions" className="text-[var(--color-accent)] hover:underline">market</Link>{" "}
+                {odds ? <Link to="/predictions" className="text-[var(--color-accent)] hover:underline">market</Link> : "market"}{" "}
                 and tap "+ Watch".
               </p>
             </div>

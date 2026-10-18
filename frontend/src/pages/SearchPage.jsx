@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from "react";
 import { useSearchParams, useNavigate, Link } from "react-router-dom";
+import { useSiteConfig } from "../hooks/useSiteConfig";
 import axios from "axios";
 import { useQuery } from "@tanstack/react-query";
 import { Search, ChevronLeft, X } from "lucide-react";
@@ -31,6 +32,7 @@ export default function SearchPage() {
 
   useEffect(() => { setDraft(q); }, [q]);
 
+  const { v2 } = useSiteConfig();
   const { data: articles = [], isLoading, error, refetch } = useQuery({
     queryKey: ["search", q],
     queryFn:  () => fetchSearch(q),
@@ -147,9 +149,13 @@ export default function SearchPage() {
       {q && articles.length === 0 && !isLoading && !error && (
         <div className="text-center py-12">
           <ScoopMascot size="md" mood="reading" animated />
-          <p className="mt-3 text-lg font-semibold">No matches for "{q}"</p>
+          <p className="mt-3 text-lg font-semibold">
+            {v2
+              ? "Nothing found. Either it hasn't happened yet, or everyone has agreed not to mention it."
+              : `No matches for "${q}"`}
+          </p>
           <p className="text-sm text-[var(--color-text-tertiary)] mt-1">
-            Try a broader keyword, or browse the
+            {v2 ? "Try fewer words, or browse the" : "Try a broader keyword, or browse the"}
             {" "}<Link to="/" className="text-electric-600 hover:underline">latest stories</Link>.
           </p>
         </div>

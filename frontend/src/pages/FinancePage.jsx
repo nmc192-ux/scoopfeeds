@@ -19,6 +19,7 @@ import ProbabilityBar from "../components/predictions/ProbabilityBar";
 import TruthGapBadge  from "../components/predictions/TruthGapBadge";
 import SectorHeatmap  from "../components/charts/SectorHeatmap";
 import { COPY } from "../lib/copyGuide";
+import { useMarketOdds } from "../hooks/useSiteConfig";
 
 function fmtMoney(n) {
   if (!Number.isFinite(n)) return "—";
@@ -52,6 +53,7 @@ function Card({ icon: Icon, title, children, link }) {
 }
 
 export default function FinancePage() {
+  const odds = useMarketOdds();
   const { data: moversData, isLoading: loadingMovers } = usePredictionMovers({ limit: 8 });
   const { data: marketsData, isLoading: loadingMarkets } = usePredictions({ limit: 60 });
   const { data: tgData, isLoading: loadingTg }       = useTruthGap({ direction: "both", limit: 8, windowMs: 7 * 24 * 60 * 60 * 1000 });
@@ -93,8 +95,8 @@ export default function FinancePage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
-        {/* Top movers */}
-        <Card icon={TrendingUp} title="Top market movers (24h)" link="/predictions">
+        {/* Top movers — market odds: hidden while SITE_MARKET_ODDS is off */}
+        {odds && <Card icon={TrendingUp} title="Top market movers (24h)" link="/predictions">
           {loadingMovers ? (
             <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-12 bg-[var(--color-surface-2)] animate-pulse rounded" />)}</div>
           ) : movers.length === 0 ? (
@@ -122,10 +124,10 @@ export default function FinancePage() {
               ))}
             </ul>
           )}
-        </Card>
+        </Card>}
 
         {/* Sector breakdown */}
-        <Card icon={Activity} title="Sectors" link="/predictions">
+        {odds && <Card icon={Activity} title="Sectors" link="/predictions">
           {loadingMarkets ? (
             <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-8 bg-[var(--color-surface-2)] animate-pulse rounded" />)}</div>
           ) : (
@@ -158,10 +160,10 @@ export default function FinancePage() {
               </ul>
             </>
           )}
-        </Card>
+        </Card>}
 
         {/* Top truth-gap events (any category — most newsworthy) */}
-        <Card icon={Activity} title="Top truth-gap events (7d)" link="/truth-gap">
+        {odds && <Card icon={Activity} title="Top truth-gap events (7d)" link="/truth-gap">
           {loadingTg ? (
             <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-14 bg-[var(--color-surface-2)] animate-pulse rounded" />)}</div>
           ) : tg.length === 0 ? (
@@ -185,7 +187,7 @@ export default function FinancePage() {
               ))}
             </ul>
           )}
-        </Card>
+        </Card>}
 
         {/* Recent briefs */}
         <Card icon={FileText} title="Recent analyst briefs" link="/briefs">

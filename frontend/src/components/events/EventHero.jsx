@@ -6,6 +6,7 @@
 import { Activity, Clock, FileText, TrendingUp } from "lucide-react";
 import ProbabilityBar from "../predictions/ProbabilityBar";
 import TruthGapBadge  from "../predictions/TruthGapBadge";
+import { useMarketOdds } from "../../hooks/useSiteConfig";
 import WatchButton    from "../predictions/WatchButton";
 import { COPY } from "../../lib/copyGuide";
 import { useT } from "../../lib/i18n";
@@ -35,6 +36,7 @@ function SeverityBar({ value = 0 }) {
 
 export default function EventHero({ event, markets = [], truthGap }) {
   const { t } = useT();
+  const oddsOn = useMarketOdds();
   const {
     id, title, category, severity = 0, summary,
     article_count = 0, market_count = 0, last_activity_at,
@@ -86,7 +88,7 @@ export default function EventHero({ event, markets = [], truthGap }) {
         <SeverityBar value={severity} />
 
         {/* Market probability */}
-        {topMarket && (
+        {oddsOn && topMarket && (
           <div className="rounded-lg bg-[var(--color-surface-2)] p-4 flex flex-col gap-2">
             <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-secondary)]">
               <TrendingUp size={13} className="text-[var(--color-accent)]" />

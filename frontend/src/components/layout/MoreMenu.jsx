@@ -17,10 +17,15 @@ import {
   Heart, CloudRain, Bitcoin, Cpu, Rocket,
 } from "lucide-react";
 import { useT } from "../../lib/i18n";
+import { useMarketOdds } from "../../hooks/useSiteConfig";
+
+// Pages that exist only to show market odds; they redirect home while SITE_MARKET_ODDS is off.
+const ODDS_ONLY = new Set(["/predictions", "/truth-gap", "/anomalies"]);
 import { COPY } from "../../lib/copyGuide";
 
 export default function MoreMenu() {
   const { t } = useT();
+  const odds = useMarketOdds();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
 
@@ -98,7 +103,7 @@ export default function MoreMenu() {
                   {t(s.titleKey)}
                 </h4>
                 <div className="grid grid-cols-2 gap-1">
-                  {s.items.map(it => {
+                  {s.items.filter(it => odds || !ODDS_ONLY.has(it.to)).map(it => {
                     const Icon = it.icon;
                     return (
                       <Link
