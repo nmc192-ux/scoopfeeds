@@ -94,6 +94,12 @@ function V2Redirect({ to, children }) {
 export default function App() {
   const { v2 } = useSiteConfig();
   const { activeTopics, lastRefreshed, language, authOpen, setAuthOpen } = useNewsStore();
+  const setLanguage = useNewsStore((s) => s.setLanguage);
+  // v2 has no language switch, so a saved non-English (possibly RTL) language
+  // would trap the reader. Under v2 the site is English only.
+  useEffect(() => {
+    if (v2 && language && language !== "en") setLanguage("en");
+  }, [v2, language, setLanguage]);
   const { data: health, isError: isOffline } = useHealth();
   const { data: publicConfig } = usePublicConfig();
   const location = useLocation();

@@ -152,7 +152,7 @@ export function BottomBarV2() {
 
 const FOOTER_GROUPS = [
   { title: "Read", links: [["Today", "/"], ["News", "/events"], ["Originals", "/briefs"], ["Saved", "/saved"]] },
-  { title: "Data", links: [["Markets", "/markets"], ["World map", "/world-map"]] },
+  { title: "Data", links: [["Markets", "/markets"], ["Weather", "/weather"]] },
   { title: "Watch & Listen", links: [["Live TV", "/live-tv"], ["Newsletter", "/newsletter"]] },
   { title: "About", links: [
     ["About", "/about"], ["Sources", "/about#sources"], ["Editorial policy", "/editorial-policy"], ["Contact", "/contact"],

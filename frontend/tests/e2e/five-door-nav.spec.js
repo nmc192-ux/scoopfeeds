@@ -107,3 +107,22 @@ test("flag on, phone: bottom bar has five doors with 44px targets", async ({ pag
   }
   await expect(page.getByTestId("v2-header").getByRole("link", { name: "Scoopfeeds — Home" })).toBeVisible();
 });
+
+test("flag on: a saved non-English language is reset to English (v2 has no switch)", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("khabari-store", JSON.stringify({ state: { language: "ur" }, version: 2 }));
+  });
+  await mockApi(page, true);
+  await page.goto("/");
+  await expect(page.getByTestId("v2-header")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+});
+
+test("flag on: footer Data group links to Weather, not a second Markets link", async ({ page }) => {
+  await mockApi(page, true);
+  await page.goto("/");
+  const footer = page.getByTestId("v2-footer");
+  await expect(footer.getByRole("link", { name: "Weather", exact: true })).toHaveAttribute("href", "/weather");
+  await expect(footer.getByRole("link", { name: "World map" })).toHaveCount(0);
+});

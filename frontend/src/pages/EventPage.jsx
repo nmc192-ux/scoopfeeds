@@ -28,6 +28,7 @@ import {
 import { useEventTrackers } from "../hooks/useTrackers";
 import { trackerStrength } from "../lib/trackerRank";
 import TrackerCard from "../components/trackers/TrackerCard";
+import { useSiteConfig } from "../hooks/useSiteConfig";
 import EventHero     from "../components/events/EventHero";
 import EventDossier  from "../components/events/EventDossier";
 import EventTimeline from "../components/events/EventTimeline";
@@ -167,6 +168,7 @@ export default function EventPage() {
 }
 
 function LegacyEventBody({ event, slug }) {
+  const { v2 } = useSiteConfig();
   const [timelineKind, setTimelineKind] = useState(undefined);
 
   const { data: tlData,  isLoading: loadingTimeline }  = useEventTimeline(slug, { kind: timelineKind, limit: 60 });
@@ -256,12 +258,14 @@ function LegacyEventBody({ event, slug }) {
             <Clock size={15} className="text-[var(--color-accent)]" />
             <h2 className="font-semibold text-base text-[var(--color-text)]">Timeline</h2>
           </div>
-          <Link
-            to={`/timeline/${slug}`}
-            className="text-[10px] text-[var(--color-accent)] hover:underline inline-flex items-center gap-1"
-          >
-            Open standalone <ExternalLink size={9} />
-          </Link>
+          {!v2 && (
+            <Link
+              to={`/timeline/${slug}`}
+              className="text-[10px] text-[var(--color-accent)] hover:underline inline-flex items-center gap-1"
+            >
+              Open standalone <ExternalLink size={9} />
+            </Link>
+          )}
         </div>
         <EventTimeline entries={timeline} isLoading={loadingTimeline} onKindChange={setTimelineKind} />
       </section>
