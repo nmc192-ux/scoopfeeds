@@ -13,6 +13,7 @@
 import { Router } from "express";
 import { getDb } from "../models/database.js";
 import { logger } from "../services/logger.js";
+import { eligibleMarketSql } from "../realityIndex/dal/marketsDao.js";
 
 const router = Router();
 const SITE = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
@@ -55,13 +56,13 @@ router.get("/event/:slug", (req, res) => {
         (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id) AS article_count,
         (SELECT pm.yes_price FROM event_market_links eml
           JOIN prediction_markets pm ON pm.id = eml.market_id
-          WHERE eml.event_id = e.id ORDER BY eml.rank LIMIT 1) AS top_yes,
+          WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")} ORDER BY eml.rank LIMIT 1) AS top_yes,
         (SELECT pm.source    FROM event_market_links eml
           JOIN prediction_markets pm ON pm.id = eml.market_id
-          WHERE eml.event_id = e.id ORDER BY eml.rank LIMIT 1) AS source,
+          WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")} ORDER BY eml.rank LIMIT 1) AS source,
         (SELECT pm.question  FROM event_market_links eml
           JOIN prediction_markets pm ON pm.id = eml.market_id
-          WHERE eml.event_id = e.id ORDER BY eml.rank LIMIT 1) AS question,
+          WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")} ORDER BY eml.rank LIMIT 1) AS question,
         (SELECT r.truth_gap     FROM reality_index_snapshots r
           WHERE r.scope='event' AND r.scope_id = e.id ORDER BY r.ts DESC LIMIT 1) AS truth_gap,
         (SELECT r.reality_score FROM reality_index_snapshots r
@@ -165,7 +166,7 @@ router.get("/market/:id", (req, res) => {
       SELECT id, source, source_market_id, question, description, url, slug,
              yes_price, no_price, volume_24h, liquidity, end_date, active,
              category
-      FROM prediction_markets WHERE id = ?
+      FROM prediction_markets WHERE id = ? AND ${eligibleMarketSql("prediction_markets")}
     `).get(req.params.id);
 
     // 24h sparkline points (hot tier).

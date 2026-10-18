@@ -22,6 +22,7 @@
 import crypto from "crypto";
 import { getDb } from "../../models/database.js";
 import { topTruthGap } from "../dal/realityIndexDao.js";
+import { eligibleMarketSql } from "../dal/marketsDao.js";
 import { latestSnapshotsByScope } from "../dal/sentimentDao.js";
 import { insertBrief, alreadyHasRecentDraft } from "../dal/briefsDao.js";
 import { callJson, getQueueStatus } from "../llmQueue.js";
@@ -69,7 +70,7 @@ function buildContext(db, ev) {
     SELECT pm.id, pm.question, pm.yes_price, pm.no_price, pm.volume_24h, pm.source, eml.weight, eml.rank
     FROM event_market_links eml
     JOIN prediction_markets pm ON pm.id = eml.market_id
-    WHERE eml.event_id = ? AND pm.active=1 ORDER BY eml.rank LIMIT 3
+    WHERE eml.event_id = ? AND ${eligibleMarketSql("pm")} ORDER BY eml.rank LIMIT 3
   `).all(ev.event_id);
 
   const articles = db.prepare(`

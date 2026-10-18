@@ -113,7 +113,7 @@ export function listMarkets({
   const params = [];
   if (source) { where.push("source = ?"); params.push(source); }
   if (category) { where.push("category = ?"); params.push(category); }
-  if (activeOnly) { where.push("active = 1"); }
+  if (activeOnly) { where.push(eligibleMarketSql("prediction_markets")); }
   if (minVolume > 0) { where.push("(volume_24h IS NOT NULL AND volume_24h >= ?)"); params.push(minVolume); }
 
   const sql = `
@@ -124,6 +124,57 @@ export function listMarkets({
     LIMIT ? OFFSET ?
   `;
   return getDb().prepare(sql).all(...params, limit, offset);
+}
+
+/**
+ * Eligibility: the one definition of a market that may be bound to an event or
+ * shown to a reader — active, unresolved, and with an end_date still in the future.
+ * A market with no end_date is NOT eligible (we cannot show it is still open).
+ * Every binding and read path uses this, so a stale binding drops off by itself.
+ */
+export function isMarketEligible(m, nowMs = now()) {
+  return !!m && m.active === 1 && !m.resolved
+    && Number.isFinite(m.end_date) && m.end_date > nowMs;
+}
+
+/** SQL twin of isMarketEligible() for a prediction_markets alias. */
+export function eligibleMarketSql(alias = "pm", nowMs = now()) {
+  const t = Math.floor(Number(nowMs));
+  return `(${alias}.active = 1 AND COALESCE(${alias}.resolved, 0) = 0 AND ${alias}.end_date IS NOT NULL AND ${alias}.end_date > ${t})`;
+}
+
+/**
+ * Deactivate every active market that is resolved or past its end_date.
+ * Touches prediction_markets only, never the binding tables. Returns the count.
+ */
+export function deactivateIneligibleMarkets(nowMs = now()) {
+  return getDb().prepare(`
+    UPDATE prediction_markets SET active = 0, updated_at = ?
+    WHERE active = 1
+      AND (COALESCE(resolved, 0) = 1 OR (end_date IS NOT NULL AND end_date <= ?))
+  `).run(nowMs, nowMs).changes;
+}
+
+/**
+ * Active markets we track that need a status check upstream: past their end_date,
+ * or not refreshed since `staleBeforeMs` (an open-market sync that no longer returns
+ * a market means it closed). Oldest first, bounded.
+ */
+export function listMarketsToRecheck({ source = "polymarket", staleBeforeMs, nowMs = now(), limit = 200 } = {}) {
+  return getDb().prepare(`
+    SELECT id, source_market_id FROM prediction_markets
+    WHERE source = ? AND active = 1
+      AND (COALESCE(resolved, 0) = 1 OR (end_date IS NOT NULL AND end_date <= ?) OR updated_at < ?)
+    ORDER BY updated_at ASC
+    LIMIT ?
+  `).all(source, nowMs, staleBeforeMs, limit);
+}
+
+/** Record an upstream resolution: resolved markets are never active. */
+export function markMarketResolved(id, { outcome = null } = {}) {
+  getDb().prepare(
+    `UPDATE prediction_markets SET resolved = 1, active = 0, outcome = COALESCE(?, outcome), updated_at = ? WHERE id = ?`
+  ).run(outcome, now(), id);
 }
 
 /** Mark as inactive — used when an upstream market disappears or resolves. */
@@ -166,7 +217,7 @@ export function listTopMovers({ windowMs = 24 * 60 * 60 * 1000, limit = 20 } = {
       FROM prediction_market_snapshots s2
       WHERE ts = (SELECT MIN(ts) FROM prediction_market_snapshots WHERE market_id = s2.market_id AND ts >= ?)
     ) earliest ON earliest.market_id = m.id
-    WHERE m.active = 1
+    WHERE ${eligibleMarketSql("m")}
       AND latest.yes_price IS NOT NULL
       AND earliest.yes_price IS NOT NULL
     ORDER BY delta_abs DESC

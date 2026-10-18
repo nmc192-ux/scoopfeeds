@@ -19,7 +19,9 @@
  */
 
 import axios from "axios";
-import { upsertMarket } from "../../dal/marketsDao.js";
+import {
+  upsertMarket, listMarketsToRecheck, markMarketResolved, deactivateMarket, deactivateIneligibleMarkets,
+} from "../../dal/marketsDao.js";
 import { insertSnapshot } from "../../dal/snapshotsDao.js";
 import { logger } from "../../../services/logger.js";
 
@@ -72,6 +74,58 @@ async function fetchPage({ offset, activeOnly }) {
   return Array.isArray(data) ? data : [];
 }
 
+const RECHECK_BATCH = 50;
+
+async function fetchByConditionIds(ids) {
+  const { data } = await axios.get(`${GAMMA_BASE}/markets`, {
+    params: { condition_ids: ids, limit: ids.length },
+    paramsSerializer: { indexes: null },   // condition_ids=a&condition_ids=b, not condition_ids[]=a
+    timeout: 25_000,
+    headers: { "User-Agent": "Scoopfeeds/1.0 (+https://scoopfeeds.com)" },
+  });
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * The open-markets sync (closed:false) can never see a market close. For markets we
+ * already track that are past end_date or were not returned by this sync, ask upstream
+ * for their status by id: closed → resolved + inactive; absent upstream → inactive.
+ * Finally deactivate anything resolved or past end_date. `fetchByIds` is injectable for tests.
+ */
+export async function syncPolymarketResolutions({
+  syncStartedAt = Date.now(),
+  fetchByIds = fetchByConditionIds,
+  limit = 200,
+} = {}) {
+  const tracked = listMarketsToRecheck({ source: "polymarket", staleBeforeMs: syncStartedAt, limit });
+  let resolved = 0, gone = 0;
+
+  for (let i = 0; i < tracked.length; i += RECHECK_BATCH) {
+    const batch = tracked.slice(i, i + RECHECK_BATCH);
+    let rows;
+    try {
+      rows = await fetchByIds(batch.map(t => t.source_market_id));
+    } catch (err) {
+      logger.warn(`📈 Polymarket resolution check failed: ${err.message}`);
+      break;
+    }
+    // An empty answer for a whole batch is an API fault, not 50 vanished markets: leave them unverified.
+    if (!rows.length) continue;
+    const upstream = new Map(rows.map(r => [String(r.conditionId || r.condition_id || r.id), r]));
+    for (const t of batch) {
+      const row = upstream.get(t.source_market_id);
+      if (!row) { deactivateMarket(t.id); gone++; continue; }
+      if (row.closed) { markMarketResolved(t.id); resolved++; }
+    }
+  }
+
+  const expired = deactivateIneligibleMarkets();
+  if (resolved || gone || expired) {
+    logger.info(`📈 Polymarket resolutions: ${tracked.length} rechecked, ${resolved} resolved, ${gone} gone upstream, ${expired} deactivated (resolved/expired)`);
+  }
+  return { rechecked: tracked.length, resolved, gone, expired };
+}
+
 /**
  * Fetch active markets, upsert them, and write a fresh snapshot row.
  * Returns counts: { fetched, upserted, snapshots, pages }.
@@ -81,6 +135,7 @@ export async function syncPolymarketMarkets({
   maxPages = MAX_PAGES,
 } = {}) {
   let fetched = 0, upserted = 0, snapshots = 0, pages = 0;
+  const syncStartedAt = Date.now();
 
   for (let page = 0; page < maxPages; page++) {
     let rows;
@@ -167,5 +222,12 @@ export async function syncPolymarketMarkets({
   }
 
   logger.info(`📈 Polymarket sync: ${pages} pages, ${fetched} fetched, ${upserted} upserted, ${snapshots} snapshots`);
-  return { fetched, upserted, snapshots, pages };
+
+  let resolutions = null;
+  try {
+    resolutions = await syncPolymarketResolutions({ syncStartedAt });
+  } catch (err) {
+    logger.warn(`📈 Polymarket resolution sync failed: ${err.message}`);
+  }
+  return { fetched, upserted, snapshots, pages, resolutions };
 }
