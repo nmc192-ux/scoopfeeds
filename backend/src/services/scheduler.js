@@ -9,6 +9,7 @@ import { pruneOldArticles, findArticlesForVideoQueue, enqueueVideoJob,
 import { logger } from "./logger.js";
 import { RSS_SOURCES, YOUTUBE_SOURCES } from "../config/sources.js";
 import { sendDailyDigest } from "./digest.js";
+import { runConfirmReminderCycle } from "./confirmReminder.js";
 import { sendXPostDigest } from "./xPostDigest.js";
 import { runWelcomeSequenceCycle } from "./welcomeSequence.js";
 import { refreshAllEvents } from "./liveEvents.js";
@@ -425,9 +426,9 @@ function describeInFlight(now, gapStart = now) {
   return "nothing in flight and nothing ran during the gap";
 }
 
-function scheduleCron(expression, task) {
+function scheduleCron(expression, task, options) {
   const name = cronName(task, expression);
-  const scheduledTask = cron.schedule(expression, () => instrumented(name, task));
+  const scheduledTask = cron.schedule(expression, () => instrumented(name, task), options);
   schedulerTasks.push(scheduledTask);
   registeredCrons.push({ name, expression });
   return scheduledTask;
@@ -767,14 +768,27 @@ scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "
     ));
     logger.info("📐 Entity IDF recompute cron ENABLED (daily, 03:30)");
   }
-  // Daily digest at 07:00 server time — no-op if SMTP is not configured.
+  // The Morning Scoop, two editions in the reader's own morning. The cron
+  // `timezone` option handles daylight saving; each subscriber gets one email a
+  // day (last_sent_at guard in sendDailyDigest). No-op if SMTP is not configured.
+  scheduleCron("30 6 * * *", async () => {
+    try {
+      await sendDailyDigest({ edition: "americas" });
+    } catch (err) {
+      logger.error("❌ Digest (americas) failed", { error: err.message });
+    }
+  }, { timezone: "America/New_York" });
   scheduleCron("0 7 * * *", async () => {
     try {
-      await sendDailyDigest();
+      await sendDailyDigest({ edition: "rest" });
     } catch (err) {
-      logger.error("❌ Digest failed", { error: err.message });
+      logger.error("❌ Digest (rest) failed", { error: err.message });
     }
-  });
+  }, { timezone: "Europe/London" });
+  // One confirmation reminder, 48h after sign-up, to anyone still unverified.
+  scheduleCron("47 * * * *", () => runConfirmReminderCycle().catch(err =>
+    logger.warn(`confirmReminder cron failed: ${err.message}`)
+  ));
   // X-posting queue digest at 09:00 UTC (Phase B Sprint 2.x.2). Emails the
   // X-ready posts queued by Sprint 2.x.1 to DIGEST_RECIPIENT_EMAIL. No-op
   // when SMTP / DIGEST_RECIPIENT_EMAIL unset or the queue is empty.
