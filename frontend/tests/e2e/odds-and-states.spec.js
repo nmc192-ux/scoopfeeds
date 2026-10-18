@@ -68,3 +68,25 @@ test("homepage: a topic band with fewer than 3 stories does not render", async (
   await expect(page.getByText("Lone politics story")).toHaveCount(0);
   await expect(page.getByText(/entertainment is on the way/i)).toHaveCount(0);
 });
+
+test("/finance: no market number or odds-only link while the flag is off", async ({ page }) => {
+  await page.route("**/api/site-config", r => r.fulfill({ json: { marketOdds: false, v2: false } }));
+  await page.route("**/api/predictions**", r => r.fulfill({ json: { data: [{ id: 1, question: "Q?", source: "poly", yes_price: 0.61, volume_24h: 5000, delta_24h: 0.04, category: "politics" }] } }));
+  await page.route("**/api/truth-gap**", r => r.fulfill({ json: { items: [{ event_id: 1, slug: "e1", title: "T", truth_gap: 0.4, market_probability: 0.62, reality_score: 0.2 }] } }));
+  await page.goto("/finance");
+  await expect(page.getByRole("heading", { name: "Finance" })).toBeVisible();
+  await expect(page.getByText(/market movers|sectors|truth-gap events/i)).toHaveCount(0);
+  await expect(page.getByText(/\d+(\.\d)?pp|\bRI \d+%|\bMarket \d+%/)).toHaveCount(0);
+  await expect(page.locator('a[href="/predictions"], a[href="/truth-gap"]')).toHaveCount(0);
+});
+
+test("odds-only page is reachable by direct load when the flag is on (slow site-config)", async ({ page }) => {
+  await page.route("**/api/site-config", async r => {
+    await new Promise(res => setTimeout(res, 500));
+    await r.fulfill({ json: { marketOdds: true, v2: false } });
+  });
+  await mockEvents(page);
+  await page.goto("/truth-gap");
+  await page.waitForTimeout(1000);
+  await expect(page).toHaveURL(/\/truth-gap$/);
+});

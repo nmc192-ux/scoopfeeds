@@ -115,13 +115,13 @@ function NewsSection({ label, category, moreHref = "/events", moreCta }) {
   // Recency order (endpoint default = last_activity_at DESC — freshest leads); fetch a few
   // extra so the source_count floor still yields a full row of 4.
   const { data, isLoading, refetch } = useEvents({ category, limit: 10 });
-  const timedOut = useTimedOut(isLoading);
+  const [timedOut, restartTimer] = useTimedOut(isLoading);
   const Skeleton = useSkeleton();
   const events = (data?.events ?? [])
     .filter(e => (e.source_count || 0) >= MIN_SECTION_SOURCES)
     .slice(0, 4);
 
-  if (isLoading && timedOut) return <TimeoutNotice what={label} onRetry={() => refetch()} />;
+  if (isLoading && timedOut) return <TimeoutNotice what={label} onRetry={() => { restartTimer(); refetch(); }} />;
   if (isLoading) {
     return (
       <section>
@@ -151,7 +151,7 @@ export default function HomePage() {
   // already placed in the band, and Most-sourced also excludes Developing —
   // the 2026-07-13 audit found the same event in up to 4 slots (finding P1-12).
   const { data, isLoading, isError, isSuccess, refetch } = useEvents({ sort: "prominence", limit: 24 });
-  const timedOut = useTimedOut(isLoading);
+  const [timedOut, restartTimer] = useTimedOut(isLoading);
   const { v2 } = useSiteConfig();
   const { data: stats } = useStats();
   const newspapers = Number(stats?.scheduler?.sourceCount) || 0; // never invented: omitted when unknown
@@ -175,7 +175,7 @@ export default function HomePage() {
           {/* The homepage's only h1 (SEO: the page previously had none). */}
           <SectionHeader title="Top stories" href="/events" cta="See all stories" as="h1" />
           {isLoading && timedOut ? (
-            <TimeoutNotice what="Top stories" onRetry={() => refetch()} />
+            <TimeoutNotice what="Top stories" onRetry={() => { restartTimer(); refetch(); }} />
           ) : isLoading ? (
             <div className="space-y-4">
               {v2 && newspapers > 0 && (

@@ -2,9 +2,14 @@ import { useEffect, useState } from "react";
 
 export const FETCH_TIMEOUT_MS = 10_000;
 
-/** True once `pending` has stayed true for `ms`; resets when it goes false. */
+/**
+ * [timedOut, restart]: timedOut is true once `pending` has stayed true for `ms`; it resets when
+ * pending goes false. restart() clears it and begins another `ms` wait, so Retry on a request
+ * that is still hanging shows the skeleton again instead of a notice that never changes.
+ */
 export function useTimedOut(pending, ms = FETCH_TIMEOUT_MS) {
   const [timedOut, setTimedOut] = useState(false);
+  const [run, setRun] = useState(0);
   useEffect(() => {
     if (!pending) {
       setTimedOut(false);
@@ -12,8 +17,9 @@ export function useTimedOut(pending, ms = FETCH_TIMEOUT_MS) {
     }
     const id = setTimeout(() => setTimedOut(true), ms);
     return () => clearTimeout(id);
-  }, [pending, ms]);
-  return timedOut;
+  }, [pending, ms, run]);
+  const restart = () => { setTimedOut(false); setRun(n => n + 1); };
+  return [timedOut, restart];
 }
 
 /** Calm failure line shown in place of an endless spinner. */

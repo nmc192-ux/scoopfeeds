@@ -27,7 +27,7 @@ function v2FromUrl() {
 }
 
 export function useSiteConfig() {
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["site-config"],
     queryFn: async () => {
       const res = await api.get("/site-config");
@@ -37,7 +37,7 @@ export function useSiteConfig() {
     retry: 1,
   });
   const cfg = { ...DEFAULTS, ...(data || {}) };
-  return { marketOdds: cfg.marketOdds === true, v2: cfg.v2 === true || v2FromUrl() };
+  return { loading: isLoading, marketOdds: cfg.marketOdds === true, v2: cfg.v2 === true || v2FromUrl() };
 }
 
 export function useMarketOdds() {

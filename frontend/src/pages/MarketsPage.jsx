@@ -170,7 +170,7 @@ function CurrencyConverter({ currencies }) {
 
 export default function MarketsPage() {
   const { data: market, isLoading, isFetching, refetch } = useMarket();
-  const timedOut = useTimedOut(isLoading);
+  const [timedOut, restartTimer] = useTimedOut(isLoading);
   const { country } = useGeo();
   const navigate = useNavigate();
 
@@ -234,7 +234,7 @@ export default function MarketsPage() {
 
       {isLoading ? (
         timedOut ? (
-          <TimeoutNotice what="Markets" onRetry={() => refetch()} />
+          <TimeoutNotice what="Markets" onRetry={() => { restartTimer(); refetch(); }} />
         ) : (
           <div className="flex items-center justify-center py-24">
             <Loader2 size={28} className="animate-spin text-[var(--color-text-tertiary)]" />

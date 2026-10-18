@@ -248,7 +248,8 @@ function Footer({ kofiUrl }) {
 
 /* Pages that exist only to show market odds: with SITE_MARKET_ODDS off they send readers home. */
 function OddsOnly({ children }) {
-  const { marketOdds } = useSiteConfig();
+  const { marketOdds, loading } = useSiteConfig();
+  if (loading) return null; // redirecting before the answer arrives would bounce readers even when the flag is on
   return marketOdds ? children : <Navigate to="/" replace />;
 }
 
