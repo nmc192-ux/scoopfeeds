@@ -20,6 +20,8 @@ import {
   getMarketById,
   listTopMovers,
   countActiveMarkets,
+  eligibleMarketSql,
+  isMarketEligible,
 } from "../realityIndex/dal/marketsDao.js";
 import {
   getSnapshotHistory,
@@ -252,10 +254,10 @@ router.get("/badges", (req, res) => {
         e.slug AS event_slug, e.title AS event_title,
         (SELECT pm.yes_price FROM event_market_links eml
           JOIN prediction_markets pm ON pm.id = eml.market_id
-          WHERE eml.event_id = e.id ORDER BY eml.rank LIMIT 1) AS top_yes,
+          WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")} ORDER BY eml.rank LIMIT 1) AS top_yes,
         (SELECT pm.source    FROM event_market_links eml
           JOIN prediction_markets pm ON pm.id = eml.market_id
-          WHERE eml.event_id = e.id ORDER BY eml.rank LIMIT 1) AS source,
+          WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")} ORDER BY eml.rank LIMIT 1) AS source,
         (SELECT r.truth_gap FROM reality_index_snapshots r
           WHERE r.scope='event' AND r.scope_id = e.id ORDER BY r.ts DESC LIMIT 1) AS truth_gap,
         (SELECT al.id       FROM anomaly_alerts al
@@ -310,7 +312,7 @@ router.get("/badges", (req, res) => {
 router.get("/:id", (req, res) => {
   try {
     const m = getMarketById(req.params.id);
-    if (!m) return res.status(404).json({ success: false, error: "Market not found" });
+    if (!isMarketEligible(m)) return res.status(404).json({ success: false, error: "Market not found" });
     res.json({
       success: true,
       data: publicMarket(m, { withConfidence: true }),
@@ -329,7 +331,7 @@ router.get("/:id/history", (req, res) => {
     const hours = Math.min(parseInt(req.query.hours || "168", 10), 24 * 365);
     const limit = Math.min(parseInt(req.query.limit || "2000", 10), 10_000);
     const m = getMarketById(req.params.id);
-    if (!m) return res.status(404).json({ success: false, error: "Market not found" });
+    if (!isMarketEligible(m)) return res.status(404).json({ success: false, error: "Market not found" });
     const sinceMs = Date.now() - hours * 60 * 60 * 1000;
     const points = getSnapshotHistory(m.id, { sinceMs, limit });
     res.json({

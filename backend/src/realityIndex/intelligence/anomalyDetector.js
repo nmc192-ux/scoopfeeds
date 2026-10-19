@@ -12,6 +12,7 @@
  */
 
 import { getDb } from "../../models/database.js";
+import { eligibleMarketSql } from "../dal/marketsDao.js";
 import { recordAnomaly } from "../dal/realityIndexDao.js";
 import { previousPolarity } from "../dal/sentimentDao.js";
 import { logger } from "../../services/logger.js";
@@ -38,7 +39,7 @@ function detectOddsShift(now) {
            m.question, m.yes_price
     FROM (SELECT DISTINCT market_id FROM prediction_market_snapshots WHERE ts >= ?) s
     JOIN prediction_markets m ON m.id = s.market_id
-    WHERE m.active = 1
+    WHERE ${eligibleMarketSql("m")}
   `).all(now - WINDOW_MS, now - WINDOW_MS);
 
   let alerted = 0;
@@ -146,7 +147,7 @@ function detectViralNoReact(now) {
         pm.yes_price AS last_yes
       FROM event_market_links eml
       JOIN prediction_markets pm ON pm.id = eml.market_id
-      WHERE eml.event_id = ? AND pm.active = 1
+      WHERE eml.event_id = ? AND ${eligibleMarketSql("pm")}
       ORDER BY eml.rank LIMIT 1
     `).get(now - WINDOW_MS, e.id);
 

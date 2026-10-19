@@ -9,6 +9,7 @@
  */
 
 import { getDb } from "../../models/database.js";
+import { eligibleMarketSql } from "./marketsDao.js";
 
 export function addToWatchlist({
   user_id, item_type, item_id,
@@ -63,7 +64,7 @@ export function listForUser(user_id) {
           SELECT e.id, e.slug, e.title, e.category, e.severity, e.status, e.last_activity_at,
             (SELECT pm.yes_price FROM event_market_links eml
              JOIN prediction_markets pm ON pm.id = eml.market_id
-             WHERE eml.event_id = e.id ORDER BY eml.rank LIMIT 1) AS top_probability,
+             WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")} ORDER BY eml.rank LIMIT 1) AS top_probability,
             (SELECT r.reality_score FROM reality_index_snapshots r
              WHERE r.scope='event' AND r.scope_id = e.id ORDER BY ts DESC LIMIT 1) AS reality_score,
             (SELECT r.truth_gap FROM reality_index_snapshots r

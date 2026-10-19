@@ -7,6 +7,7 @@
  */
 
 import { getDb } from "../../models/database.js";
+import { eligibleMarketSql } from "./marketsDao.js";
 
 function now() { return Date.now(); }
 
@@ -45,7 +46,7 @@ export function listClusterMarkets(clusterId, { limit = 5 } = {}) {
     SELECT m.*, l.weight, l.rank, l.matcher, l.reason, l.matched_at
     FROM cluster_market_links l
     JOIN prediction_markets m ON m.id = l.market_id
-    WHERE l.cluster_id = ?
+    WHERE l.cluster_id = ? AND ${eligibleMarketSql("m")}
     ORDER BY l.rank ASC
     LIMIT ?
   `).all(clusterId, limit);
@@ -95,7 +96,7 @@ export function listArticleMarkets(articleId, { limit = 5 } = {}) {
     SELECT m.*, l.relevance, l.matcher, l.matched_at
     FROM article_market_links l
     JOIN prediction_markets m ON m.id = l.market_id
-    WHERE l.article_id = ?
+    WHERE l.article_id = ? AND ${eligibleMarketSql("m")}
     ORDER BY l.relevance DESC
     LIMIT ?
   `).all(articleId, limit);

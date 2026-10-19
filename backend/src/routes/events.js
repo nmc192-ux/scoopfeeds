@@ -24,6 +24,7 @@ import { listTrackersByEvent } from "../models/trackers.js";
 import { publicTracker } from "./trackers.js";
 import { groupTopEvents } from "../realityIndex/intelligence/eventGrouping.js";
 import { buildOccurrenceTimeline } from "../realityIndex/intelligence/eventTimelineLog.js";
+import { eligibleMarketSql } from "../realityIndex/dal/marketsDao.js";
 
 const router = express.Router();
 
@@ -125,11 +126,13 @@ function getEventBySlug(db, slug) {
          FROM event_articles ea JOIN articles a ON a.id = ea.article_id
          WHERE ea.event_id = e.id AND a.source_name IS NOT NULL AND a.source_name <> ''
          GROUP BY a.source_name ORDER BY c DESC, sn ASC LIMIT 5))           AS top_sources_raw,
-      (SELECT COUNT(*) FROM event_market_links eml WHERE eml.event_id = e.id) AS market_count,
+      (SELECT COUNT(*) FROM event_market_links eml
+         JOIN prediction_markets pm ON pm.id = eml.market_id
+         WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")}) AS market_count,
       (SELECT pm.yes_price
        FROM event_market_links eml
        JOIN prediction_markets pm ON pm.id = eml.market_id
-       WHERE eml.event_id = e.id
+       WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")}
        ORDER BY eml.rank LIMIT 1)                                            AS top_probability,
       (SELECT r.truth_gap     FROM reality_index_snapshots r
        WHERE r.scope='event' AND r.scope_id = e.id ORDER BY r.ts DESC LIMIT 1) AS truth_gap,
@@ -288,11 +291,13 @@ router.get("/", (req, res) => {
            FROM event_articles ea JOIN articles a ON a.id = ea.article_id
            WHERE ea.event_id = e.id AND a.source_name IS NOT NULL AND a.source_name <> ''
            GROUP BY a.source_name ORDER BY c DESC, sn ASC LIMIT 5))             AS top_sources_raw,
-        (SELECT COUNT(*) FROM event_market_links eml WHERE eml.event_id = e.id) AS market_count,
+        (SELECT COUNT(*) FROM event_market_links eml
+           JOIN prediction_markets pm ON pm.id = eml.market_id
+           WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")}) AS market_count,
         (SELECT pm.yes_price
          FROM event_market_links eml
          JOIN prediction_markets pm ON pm.id = eml.market_id
-         WHERE eml.event_id = e.id
+         WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")}
          ORDER BY eml.rank LIMIT 1)                                             AS top_probability,
         (SELECT r.truth_gap     FROM reality_index_snapshots r
          WHERE r.scope='event' AND r.scope_id = e.id ORDER BY r.ts DESC LIMIT 1) AS truth_gap,
@@ -483,7 +488,7 @@ router.get("/:slug/markets", (req, res) => {
       SELECT pm.*, eml.weight, eml.rank
       FROM event_market_links eml
       JOIN prediction_markets pm ON pm.id = eml.market_id
-      WHERE eml.event_id = ?
+      WHERE eml.event_id = ? AND ${eligibleMarketSql("pm")}
       ORDER BY eml.rank
     `).all(ev.id);
 
