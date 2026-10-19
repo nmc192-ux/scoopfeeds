@@ -31,7 +31,7 @@ import {
 } from "../../hooks/useEvents";
 import ProbabilityBar from "../predictions/ProbabilityBar";
 import RealityGauge   from "../predictions/RealityGauge";
-import { useMarketOdds } from "../../hooks/useSiteConfig";
+import { useMarketOdds, useSiteConfig } from "../../hooks/useSiteConfig";
 import SentimentSmallMultiples from "../predictions/SentimentSmallMultiples";
 
 // A3 earn-render floor: sentiment streams render only when the story carries
@@ -189,6 +189,7 @@ function TimelineEntry({ entry }) {
 }
 
 function TimelineSection({ slug, entries, isLoading }) {
+  const { v2 } = useSiteConfig();
   const [expanded, setExpanded] = useState(false);
 
   // Group by calendar day, newest first (entries already arrive ts DESC).
@@ -206,15 +207,18 @@ function TimelineSection({ slug, entries, isLoading }) {
   let rank = 0;
 
   return (
-    <section className="mb-8">
+    <section id="timeline" className="mb-8">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Clock size={15} className="text-[var(--color-accent)]" />
           <h2 className="font-semibold text-base text-[var(--color-text)]">Timeline</h2>
         </div>
-        <Link to={`/timeline/${slug}`} className="text-[10px] text-[var(--color-accent)] hover:underline inline-flex items-center gap-1">
-          Open standalone <ExternalLink size={9} />
-        </Link>
+        {/* Under v2 /timeline/:slug redirects back here, so the link would be circular. */}
+        {!v2 && (
+          <Link to={`/timeline/${slug}`} className="text-[10px] text-[var(--color-accent)] hover:underline inline-flex items-center gap-1">
+            Open standalone <ExternalLink size={9} />
+          </Link>
+        )}
       </div>
 
       {isLoading ? (
@@ -307,6 +311,7 @@ function OccurrenceRow({ o }) {
 }
 
 function OccurrenceTimelineSection({ slug, occurrences = [], isLoading }) {
+  const { v2 } = useSiteConfig();
   const [expanded, setExpanded] = useState(false);
 
   // Shown set = the TL_RECENCY_PIN most recent occurrences (occurrences arrive ts DESC)
@@ -332,15 +337,18 @@ function OccurrenceTimelineSection({ slug, occurrences = [], isLoading }) {
   const hidden = occurrences.length - visible.length;
 
   return (
-    <section className="mb-8">
+    <section id="timeline" className="mb-8">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Clock size={15} className="text-[var(--color-accent)]" />
           <h2 className="font-semibold text-base text-[var(--color-text)]">Timeline</h2>
         </div>
-        <Link to={`/timeline/${slug}`} className="text-[10px] text-[var(--color-accent)] hover:underline inline-flex items-center gap-1">
-          Open standalone <ExternalLink size={9} />
-        </Link>
+        {/* Under v2 /timeline/:slug redirects back here, so the link would be circular. */}
+        {!v2 && (
+          <Link to={`/timeline/${slug}`} className="text-[10px] text-[var(--color-accent)] hover:underline inline-flex items-center gap-1">
+            Open standalone <ExternalLink size={9} />
+          </Link>
+        )}
       </div>
 
       {isLoading ? (
