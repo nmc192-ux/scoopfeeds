@@ -52,6 +52,12 @@
  *   2026-05-17  Sprint 4.4: sources DB table created (Migration 002).
  *               This file remains canonical for ingestion; DB table
  *               canonical for scoring. No source-list changes.
+ *   2026-10-22  #175 Sources step 0: fixed 11 feed URLs, removed 10 dead
+ *               feeds (404 or frozen, no working replacement), added a
+ *               batch of 15. Full table in the PR. NOTE: Migration 002
+ *               seeds the `sources` table only when it first runs, so
+ *               entries added here after that are NOT in the scoring
+ *               table and stay unscored until a seeding step exists.
  */
 
 export const RSS_SOURCES = [
@@ -79,38 +85,33 @@ export const RSS_SOURCES = [
 
   // ─── PAKISTAN ─────────────────────────────────────────────────────
   { name: "Dawn News",       url: "https://www.dawn.com/feed",                           category: "pakistan", credibility: 9,  region: "pk"     },
-  { name: "The News Intl",   url: "https://www.thenews.com.pk/rss/1/8",                 category: "pakistan", credibility: 8,  region: "pk"     },
   { name: "Geo News",        url: "https://www.geo.tv/rss/1/1",                         category: "pakistan", credibility: 8,  region: "pk"     },
   { name: "ARY News",        url: "https://arynews.tv/feed/",                            category: "pakistan", credibility: 8,  region: "pk"     },
   { name: "Express Tribune",url: "https://tribune.com.pk/feed",                          category: "pakistan", credibility: 8,  region: "pk"     },
-  { name: "Business Recorder",url: "https://www.brecorder.com/feed",                    category: "pakistan", credibility: 8,  region: "pk"     },
+  { name: "Business Recorder",url: "https://www.brecorder.com/feeds/latest-news",                    category: "pakistan", credibility: 8,  region: "pk"     },
   { name: "Pakistan Observer",url: "https://pakobserver.net/feed/",                     category: "pakistan", credibility: 7,  region: "pk"     },
 
   // ─── SPORTS ───────────────────────────────────────────────────────
   { name: "ESPN",            url: "https://www.espn.com/espn/rss/news",                 category: "sports",  credibility: 9,  region: "us"     },
   { name: "BBC Sport",       url: "https://feeds.bbci.co.uk/sport/rss.xml",             category: "sports",  credibility: 10, region: "global" },
-  { name: "Sports Illustrated", url: "https://www.si.com/rss/si_topstories.rss",        category: "sports",  credibility: 8,  region: "us"     },
 
   // ─── SCIENCE ──────────────────────────────────────────────────────
   { name: "Science Daily",   url: "https://www.sciencedaily.com/rss/all.xml",           category: "science", credibility: 9,  region: "global" },
   { name: "NASA News",       url: "https://www.nasa.gov/rss/dyn/breaking_news.rss",     category: "science", credibility: 10, region: "global" },
   { name: "New Scientist",   url: "https://www.newscientist.com/feed/home/",            category: "science", credibility: 9,  region: "global" },
-  { name: "Nature News",     url: "https://www.nature.com/news.rss",                   category: "science", credibility: 10, region: "global" },
-  { name: "Scientific American", url: "https://rss.sciam.com/ScientificAmerican-Global", category: "science", credibility: 10, region: "global" },
+  { name: "Nature News",     url: "https://www.nature.com/nature.rss",                   category: "science", credibility: 10, region: "global" },
+  { name: "Scientific American", url: "https://www.scientificamerican.com/platform/syndication/rss/", category: "science", credibility: 10, region: "global" },
 
   // ─── MEDICINE & HEALTH ────────────────────────────────────────────
   { name: "Medical News Today", url: "https://www.medicalnewstoday.com/rss/wordsinthenews.xml", category: "medicine", credibility: 8, region: "global" },
-  { name: "WHO News",        url: "https://www.who.int/rss-feeds/news-english.xml",     category: "medicine", credibility: 10, region: "global" },
-  { name: "NIH News",        url: "https://www.nih.gov/news-events/feed.xml",           category: "medicine", credibility: 10, region: "us"     },
   { name: "WebMD",           url: "https://rssfeeds.webmd.com/rss/rss.aspx?RSSSource=RSS_PUBLIC", category: "health", credibility: 8, region: "global" },
   { name: "Healthline",      url: "https://www.healthline.com/rss/health-news",         category: "health",  credibility: 8,  region: "global" },
-  { name: "Harvard Health",  url: "https://www.health.harvard.edu/blog/feed",           category: "health",  credibility: 9,  region: "global" },
 
   // ─── PUBLIC HEALTH ────────────────────────────────────────────────
-  { name: "CDC Newsroom",    url: "https://tools.cdc.gov/api/v2/resources/media/403372.rss", category: "public-health", credibility: 10, region: "us" },
+  // CDC Newsroom removed 2026-10-22 (#175); KFF Health News, in the batch
+  // at the end of this list, now carries this category.
 
   // ─── SELF HELP ────────────────────────────────────────────────────
-  { name: "Psychology Today",url: "https://www.psychologytoday.com/us/front-page/rss.xml", category: "self-help", credibility: 8, region: "us" },
   { name: "Mind Body Green", url: "https://www.mindbodygreen.com/rss.xml",              category: "self-help", credibility: 7,  region: "global" },
   { name: "Verywell Mind",   url: "https://www.verywellmind.com/rss",                  category: "self-help", credibility: 8,  region: "global" },
 
@@ -127,12 +128,12 @@ export const RSS_SOURCES = [
   { name: "Car and Driver",  url: "https://www.caranddriver.com/rss/all.xml",           category: "cars",    credibility: 9,  region: "global" },
   { name: "Top Gear",        url: "https://www.topgear.com/car-news/rss",               category: "cars",    credibility: 9,  region: "global" },
   { name: "MotorTrend",      url: "https://www.motortrend.com/rss/all.xml",             category: "cars",    credibility: 8,  region: "global" },
-  { name: "Road & Track",    url: "https://www.roadandtrack.com/rss/",                  category: "cars",    credibility: 8,  region: "global" },
+  { name: "Road & Track",    url: "https://www.roadandtrack.com/rss/all.xml/",                  category: "cars",    credibility: 8,  region: "global" },
 
   // ─── AI ───────────────────────────────────────────────────────────
   { name: "MIT Technology Review", url: "https://www.technologyreview.com/feed/",      category: "ai",      credibility: 10, region: "global" },
-  { name: "VentureBeat AI",  url: "https://feeds.feedburner.com/venturebeat/SZYF",     category: "ai",      credibility: 8,  region: "global" },
-  { name: "The Verge AI",    url: "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml", category: "ai", credibility: 8, region: "global" },
+  { name: "VentureBeat AI",  url: "https://venturebeat.com/category/ai/feed/",     category: "ai",      credibility: 8,  region: "global" },
+  { name: "The Verge AI",    url: "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml", category: "ai", credibility: 8, region: "global" },
   { name: "Wired",           url: "https://www.wired.com/feed/rss",                    category: "ai",      credibility: 9,  region: "global" },
   { name: "TechCrunch AI",   url: "https://techcrunch.com/category/artificial-intelligence/feed/", category: "ai", credibility: 8, region: "global" },
 
@@ -143,10 +144,8 @@ export const RSS_SOURCES = [
   { name: "Ars Technica",    url: "https://feeds.arstechnica.com/arstechnica/index",   category: "computer-science", credibility: 9, region: "global" },
 
   // ─── AGENTIC AI ───────────────────────────────────────────────────
-  { name: "Anthropic Blog",  url: "https://www.anthropic.com/news/rss.xml",            category: "agentic-ai", credibility: 10, region: "global" },
   { name: "OpenAI Blog",     url: "https://openai.com/blog/rss.xml",                  category: "agentic-ai", credibility: 10, region: "global" },
   { name: "LessWrong",       url: "https://www.lesswrong.com/feed.xml",               category: "agentic-ai", credibility: 8,  region: "global" },
-  { name: "The Gradient",    url: "https://thegradient.pub/rss/",                     category: "agentic-ai", credibility: 9,  region: "global" },
 
   // ─── LOCAL ────────────────────────────────────────────────────────
   { name: "LA Times",        url: "https://www.latimes.com/rss2.0.xml",               category: "local",   credibility: 9,  region: "us-west" },
@@ -191,7 +190,7 @@ export const RSS_SOURCES = [
 
   // ─── MENA ─────────────────────────────────────────────────────────
   { name: "Times of Israel",    url: "https://www.timesofisrael.com/feed/",                      category: "international", credibility: 8, region: "il" },
-  { name: "Haaretz",            url: "https://www.haaretz.com/cmlink/1.628752",                  category: "international", credibility: 9, region: "il" },
+  { name: "Haaretz",            url: "https://www.haaretz.com/srv/haaretz-latest-headlines",                  category: "international", credibility: 9, region: "il" },
   { name: "Arab News",          url: "https://www.arabnews.com/rss.xml",                         category: "international", credibility: 7, region: "sa" },
 
   // ─── EUROPE (non-UK) ──────────────────────────────────────────────
@@ -203,19 +202,18 @@ export const RSS_SOURCES = [
   // ─── ASIA-PACIFIC ─────────────────────────────────────────────────
   { name: "ABC Australia",      url: "https://www.abc.net.au/news/feed/45910/rss.xml",           category: "international", credibility: 9, region: "au" },
   { name: "NHK World",          url: "https://www3.nhk.or.jp/nhkworld/en/news/feeds/",           category: "international", credibility: 9, region: "jp" },
-  { name: "Korea Herald",       url: "https://www.koreaherald.com/rss/0",                        category: "international", credibility: 7, region: "kr" },
+  { name: "Korea Herald",       url: "https://www.koreaherald.com/rss/newsAll",                        category: "international", credibility: 7, region: "kr" },
 
   // ─── LATIN AMERICA ────────────────────────────────────────────────
   { name: "Folha (English)",    url: "https://www1.folha.uol.com.br/internacional/en/rss091.xml", category: "international", credibility: 8, region: "br" },
   { name: "MercoPress",         url: "https://en.mercopress.com/rss/",                           category: "international", credibility: 7, region: "latam" },
 
   // ─── AFRICA ───────────────────────────────────────────────────────
-  { name: "Mail & Guardian",    url: "https://mg.co.za/feed/",                                   category: "international", credibility: 8, region: "za" },
-  { name: "Daily Nation",       url: "https://nation.africa/kenya/rss",                          category: "international", credibility: 7, region: "ke" },
+  { name: "Mail & Guardian",    url: "https://mg.co.za/rss/",                                   category: "international", credibility: 8, region: "za" },
+  { name: "Daily Nation",       url: "https://nation.africa/kenya/rss.xml",                          category: "international", credibility: 7, region: "ke" },
 
   // ─── FINANCE (deeper) ─────────────────────────────────────────────
   { name: "MarketWatch",        url: "https://feeds.marketwatch.com/marketwatch/topstories/",    category: "business", credibility: 8, region: "us" },
-  { name: "Yahoo Finance",      url: "https://finance.yahoo.com/news/rssindex",                  category: "business", credibility: 7, region: "us" },
   { name: "Investing.com",      url: "https://www.investing.com/rss/news.rss",                   category: "business", credibility: 7, region: "global" },
 
   // ─── CRYPTO ───────────────────────────────────────────────────────
@@ -237,7 +235,35 @@ export const RSS_SOURCES = [
 
   // ─── HEALTH (extended) ────────────────────────────────────────────
   { name: "STAT News",          url: "https://www.statnews.com/feed/",                           category: "health", credibility: 9, region: "global" },
-  { name: "BMJ News",           url: "https://www.bmj.com/feed",                                 category: "health", credibility: 10, region: "global" },
+  { name: "BMJ News",           url: "https://www.bmj.com/rss/recent.xml",                                 category: "health", credibility: 10, region: "global" },
+
+  // ─── 2026-10-22 BATCH (#175, plan v7 Sources step 0) ──────────────
+  // Every feed probed through the production fetchSource and returned fresh
+  // (<7 day) items. Weighted to US national/regional, UK/Ireland/EU English
+  // and business press. Not yet quality-scored — see the change log above.
+  // US national
+  { name: "PBS NewsHour",       url: "https://www.pbs.org/newshour/feeds/rss/headlines",          category: "top",      credibility: 9, region: "us" },
+  { name: "ABC News",           url: "https://abcnews.go.com/abcnews/topstories",                 category: "top",      credibility: 8, region: "us" },
+  { name: "CBS News",           url: "https://www.cbsnews.com/latest/rss/main",                   category: "top",      credibility: 8, region: "us" },
+  { name: "NBC News",           url: "https://feeds.nbcnews.com/nbcnews/public/news",             category: "top",      credibility: 8, region: "us" },
+  { name: "Axios",              url: "https://api.axios.com/feed/",                               category: "politics", credibility: 8, region: "us" },
+  // US regional
+  { name: "CalMatters",         url: "https://calmatters.org/feed/",                              category: "local",    credibility: 8, region: "us-west" },
+  { name: "Seattle Times",      url: "https://www.seattletimes.com/feed/",                        category: "local",    credibility: 8, region: "us-west" },
+  // UK / Ireland / EU (English)
+  // Sky's WORLD feed, so "global" rather than "uk": a "uk" tag would make it the
+  // whole GB Local tab (COUNTRY_REGIONS.GB) with world news. Radio places it in
+  // Europe by name (sourceRegions.js OVERRIDES).
+  { name: "Sky News",           url: "https://feeds.skynews.com/feeds/rss/world.xml",             category: "international", credibility: 8, region: "global" },
+  { name: "RTÉ News",           url: "https://www.rte.ie/feeds/rss/?index=/news/",                category: "international", credibility: 8, region: "eu" },
+  { name: "The Irish Times",    url: "https://www.irishtimes.com/arc/outboundfeeds/feed-irish-news/?outputType=xml", category: "international", credibility: 8, region: "eu" },
+  { name: "Euractiv",           url: "https://www.euractiv.com/feed/",                            category: "international", credibility: 7, region: "eu" },
+  // Business / markets
+  { name: "Business Insider",   url: "https://feeds.businessinsider.com/custom/all",              category: "business", credibility: 7, region: "us" },
+  { name: "Bloomberg Economics",url: "https://feeds.bloomberg.com/economics/news.rss",            category: "business", credibility: 9, region: "global" },
+  // Explainers / public health
+  { name: "The Conversation US",url: "https://theconversation.com/us/articles.atom",              category: "publications", credibility: 8, region: "us" },
+  { name: "KFF Health News",    url: "https://kffhealthnews.org/feed/",                           category: "public-health", credibility: 9, region: "us" },
 ];
 
 // ─── YouTube Channel Sources ──────────────────────────────────────────────
