@@ -40,6 +40,7 @@ export const JOB_NAMES = {
   eventsPromote: "events.promote",
   realityIndexCompose: "reality-index.compose",
   radioStateBuild: "radio.state.build",
+  newsletterConfirmReminder: "newsletter.confirm-reminder",
 };
 
 export const JOB_IDS = {
@@ -57,6 +58,7 @@ export const JOB_IDS = {
   [JOB_NAMES.eventsPromote]: "events-promote-singleton",
   [JOB_NAMES.realityIndexCompose]: "reality-index-compose-singleton",
   [JOB_NAMES.radioStateBuild]: "radio-state-build-singleton",
+  [JOB_NAMES.newsletterConfirmReminder]: "newsletter-confirm-reminder-singleton",
 };
 
 export const defaultJobOptions = {
@@ -130,6 +132,11 @@ export const queueLockDuration = {
   // Radio state: DB reads, title grouping and up to four short LLM calls — seconds,
   // not minutes. 2 minutes is ample and keeps a hung build from holding the slot long.
   [QUEUE_NAMES.radio]:        parseIntEnv("QUEUE_LOCK_MS_RADIO", 2 * 60_000),
+  // Confirmation reminders: at most 50 SMTP sends a cycle, each a few seconds at
+  // worst. 5 minutes covers a slow relay; a lapsed lock would re-run the job, and
+  // although each row is stamped after its send, a re-run mid-batch could mail
+  // the one subscriber whose stamp had not landed yet.
+  [QUEUE_NAMES.newsletter]:   parseIntEnv("QUEUE_LOCK_MS_NEWSLETTER", 5 * 60_000),
   [QUEUE_NAMES.enrichment]:   parseIntEnv("QUEUE_LOCK_MS_ENRICHMENT", 2 * 60_000),
   [QUEUE_NAMES.videoRender]:  parseIntEnv("QUEUE_LOCK_MS_VIDEO_RENDER", 10 * 60_000),
   // 30 MIN. A full bundle — 71 cards of satori+resvg, a 9-minute encode, five
@@ -209,4 +216,7 @@ export const queueConcurrency = {
   // 1: one state file, one writer. Two builders racing would both be atomic
   // but could land out of order (an older state replacing a newer one).
   radio: parseIntEnv("QUEUE_CONCURRENCY_RADIO", 1),
+  // STRICTLY 1. Two concurrent reminder cycles would read the same unstamped
+  // rows and both send — a subscriber gets the "only reminder" twice.
+  newsletter: parseIntEnv("QUEUE_CONCURRENCY_NEWSLETTER", 1),
 };

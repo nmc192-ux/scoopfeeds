@@ -33,7 +33,7 @@ not exist before; `backend/.env.example` documented 77 of the ~262 vars the code
 | `EVENT_UNIFIED_AFFINITY` | `false` | **`true`** | yes | Wave 2. One `storyAffinity` measure shared by promoter/merge/breaker. Killed the create-merge-split treadmill. |
 | `EVENT_MIN_ARTICLES` | `5` | default | yes | Cluster size (or ≥1 bound market) required to promote an event. |
 | `PROMOTER_YIELD_MS` | `50` | default | yes | Ceiling on how long the promoter may hold the worker's JS thread between yields. `0` disables yielding and restores the pre-2026-08-31 monopolising behaviour — the only value for which a promote cycle can again starve RSS timeouts and BullMQ lock renewal. Garbage or negative falls back to `50` rather than to `0`. |
-| `WORKER_QUEUES` | unset = every queue | `ingestion,video,video_render,longform,social,enrichment,radio` on `worker`; `analysis,reality-index` on `worker-graph` | no (restart) | Which queues a worker container consumes. The two lists must PARTITION the queue set — a queue in both runs its cycle twice (the `isRunning` guards are process-local), a queue in neither goes silently dark. `workerQueues.test.js` reads the compose file and fails on either. An unknown name refuses the boot. |
+| `WORKER_QUEUES` | unset = every queue | `ingestion,video,video_render,longform,social,enrichment,radio,newsletter` on `worker`; `analysis,reality-index` on `worker-graph` | no (restart) | Which queues a worker container consumes. The two lists must PARTITION the queue set — a queue in both runs its cycle twice (the `isRunning` guards are process-local), a queue in neither goes silently dark. `workerQueues.test.js` reads the compose file and fails on either. An unknown name refuses the boot. |
 | `EVENT_MATCH_TAU` | `0.78` | default | yes | Cluster↔event centroid-cosine floor for a match. |
 | `EVENT_MERGE_TAU` | `0.86` | default | yes | Event↔event cosine floor confirming a convergence merge. |
 | `EVENT_MATCH_COSINE_FLOOR` | = `MATCH_TAU` | default | yes | Override the match cosine floor independently. |
@@ -591,6 +591,8 @@ FAIL-with-reason, so the three cases separate themselves:
 | `QUEUE_CONCURRENCY_SOCIAL` | `1` | default | restart | **Strictly 1.** `socialPublisher`'s single-flight guard is process-local, so a second concurrent consumer would not see it and both would post. |
 | `QUEUE_CONCURRENCY_RADIO` | `1` | default | restart | **Keep at 1.** One state file, one writer: two radio builders would each write atomically but could land out of order, an older state replacing a newer one. |
 | `QUEUE_LOCK_MS_RADIO` | `120000` | default | restart | BullMQ lock for the radio state build. A build is seconds; two minutes keeps a hung one from holding the slot. |
+| `QUEUE_CONCURRENCY_NEWSLETTER` | `1` | default | restart | **Keep at 1.** The Morning Scoop confirmation reminder (`confirmReminder.js`) stamps each row after its send; two concurrent cycles would read the same unstamped rows and both mail them. |
+| `QUEUE_LOCK_MS_NEWSLETTER` | `300000` | default | restart | BullMQ lock for the reminder cycle (at most 50 SMTP sends). Five minutes covers a slow relay; a lapsed lock re-runs the job. |
 
 > ⚠️ **`assertRedisAvailable` does no I/O.** It is `Boolean(REDIS_URL)` plus a `REQUIRE_REDIS`
 > throw — no socket, no PING, no connection object. It cannot hang and cannot be affected by
@@ -646,6 +648,7 @@ updated with it; the table below is **parsed and asserted** by
 | `dispatchVideoRenderCycle` | `39 * * * *` | `scheduler.js` |
 | `dispatchSocialCycle` | `*/30` | host crontab — `ENABLE_AUTO_SOCIAL=false` skips the `15,45` node-cron |
 | `dispatchXTextCycle` | `10,40 * * * *` | `scheduler.js` |
+| `dispatchConfirmReminderCycle` | `47 * * * *` | `scheduler.js` |
 
 <!-- cron-map:end -->
 

@@ -296,7 +296,7 @@ app.use("/scoop-ops",       socialRouter);     // /scoop-ops/social-queue — pr
 app.use("/scoop-ops/videos-gen", videoGenRouter); // video generation queue: /queue, /run, /approve/:id, /reject/:id
 app.use("/scoop-ops/video", videoOpsRouter);      // autopost recovery (§6.3): /unlist-recent, /status — inherits adminAuth above
 app.use("/scoop-ops/incident", incidentOpsRouter); // incident media ledger (Phase 1): /candidates, /commissions — inherits adminAuth above
-app.use("/scoop-ops/newsletter", newsletterOpsRouter); // newsletter ops: /status, /welcome/run, /welcome/test
+app.use("/scoop-ops/newsletter", newsletterOpsRouter); // newsletter ops: /status, /preview, /test, /welcome/run, /welcome/test
 app.use("/scoop-ops/x-digest",   xDigestOpsRouter);    // X-posting queue digest ops (Sprint 2.x.2): /status, /preview, /send-now
 app.use("/scoop-ops/queues", queueOpsRouter); // BullMQ / Redis queue diagnostics
 app.use("/scoop-ops/diagnostics", diagnosticsOpsRouter); // prod-safe DB/Redis/process diagnostics
