@@ -58,6 +58,9 @@
  *               seeds the `sources` table only when it first runs, so
  *               entries added here after that are NOT in the scoring
  *               table and stay unscored until a seeding step exists.
+ *   2026-10-22  #194 US midterms batch: added 10 US politics / battleground
+ *               feeds (Fox, WSJ, NBC, CBS, NYT politics, Ballotpedia, Votebeat,
+ *               Nevada Independent, Bridge Michigan, Wisconsin Watch).
  */
 
 export const RSS_SOURCES = [
@@ -76,6 +79,21 @@ export const RSS_SOURCES = [
   { name: "The Hill",        url: "https://thehill.com/news/feed/",                      category: "politics", credibility: 8,  region: "us"     },
   { name: "NPR Politics",    url: "https://feeds.npr.org/1014/rss.xml",                  category: "politics", credibility: 9,  region: "us"     },
   { name: "BBC Politics",    url: "https://feeds.bbci.co.uk/news/politics/rss.xml",      category: "politics", credibility: 10, region: "global" },
+
+  // US midterms batch (#194, 2026-10-22). Region "us" + category "politics" so
+  // the radio and the election desk can select them. Each URL returned fresh
+  // items when probed; see the PR for the added/skipped table.
+  { name: "Fox News Politics",   url: "https://moxie.foxnews.com/google-publisher/politics.xml",        category: "politics", credibility: 8, region: "us" },
+  { name: "WSJ Politics",        url: "https://feeds.content.dowjones.io/public/rss/socialpoliticsfeed", category: "politics", credibility: 9, region: "us" },
+  { name: "NBC News Politics",   url: "https://feeds.nbcnews.com/nbcnews/public/politics",              category: "politics", credibility: 8, region: "us" },
+  { name: "CBS News Politics",   url: "https://www.cbsnews.com/latest/rss/politics",                    category: "politics", credibility: 8, region: "us" },
+  { name: "NY Times Politics",   url: "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",      category: "politics", credibility: 10, region: "us" },
+  { name: "Ballotpedia News",    url: "https://news.ballotpedia.org/feed/",                             category: "politics", credibility: 8, region: "us" },
+  { name: "Votebeat",            url: "https://www.votebeat.org/arc/outboundfeeds/rss/",                category: "politics", credibility: 8, region: "us" },
+  // Battleground-state outlets
+  { name: "Nevada Independent",  url: "https://thenevadaindependent.com/feed",                          category: "politics", credibility: 8, region: "us" },
+  { name: "Bridge Michigan",     url: "https://www.bridgemi.com/rss.xml",                               category: "politics", credibility: 8, region: "us" },
+  { name: "Wisconsin Watch",     url: "https://wisconsinwatch.org/feed/",                               category: "politics", credibility: 8, region: "us" },
 
   // ─── INTERNATIONAL ────────────────────────────────────────────────
   { name: "BBC World",       url: "https://feeds.bbci.co.uk/news/world/rss.xml",         category: "international", credibility: 10, region: "global" },
