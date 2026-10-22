@@ -25,6 +25,7 @@ import { publicTracker } from "./trackers.js";
 import { groupTopEvents } from "../realityIndex/intelligence/eventGrouping.js";
 import { buildOccurrenceTimeline } from "../realityIndex/intelligence/eventTimelineLog.js";
 import { eligibleMarketSql } from "../realityIndex/dal/marketsDao.js";
+import { notMachineEventSql } from "../realityIndex/dal/machineEvents.js";
 
 const router = express.Router();
 
@@ -329,6 +330,12 @@ router.get("/", (req, res) => {
     `;
     const now = Date.now();
     const params = [cutoff, cutoff, cutoff, cutoff, cutoff, now, PROMINENCE_HALFLIFE_MS, status];
+
+    // USGS/NOAA machine events carry no articles; they stay out of the news list unless a
+    // quake/weather surface asks for them with ?include_machine=1.
+    if (!["1", "true"].includes(String(req.query.include_machine ?? ""))) {
+      sql += ` AND ${notMachineEventSql("e")}`;
+    }
 
     if (category) {
       // Accept a single category or a comma-separated list (super-category sections,

@@ -36,6 +36,7 @@ import { getApiKey, touchApiKey } from "../realityIndex/dal/apiKeysDao.js";
 import { listMarkets as listPmMarkets, getMarketById, isMarketEligible, eligibleMarketSql } from "../realityIndex/dal/marketsDao.js";
 import { topTruthGap, listAnomalies } from "../realityIndex/dal/realityIndexDao.js";
 import { listBriefs } from "../realityIndex/dal/briefsDao.js";
+import { notMachineEventSql } from "../realityIndex/dal/machineEvents.js";
 import { listMarkets as listSyntheticMarkets } from "../realityIndex/dal/syntheticMarketsDao.js";
 
 const router = Router();
@@ -99,7 +100,7 @@ router.get("/events", (req, res) => {
          FROM event_market_links eml JOIN prediction_markets pm ON pm.id = eml.market_id
          WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")} ORDER BY eml.rank LIMIT 1) AS top_probability
       FROM events e
-      WHERE status = ?
+      WHERE status = ? AND ${notMachineEventSql("e")}
     `;
     const params = [status];
     if (category) { sql += " AND category = ?"; params.push(category); }
