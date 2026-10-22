@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { firstSentences } from "./readerPayload.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import { readFileSync, existsSync } from "fs";
@@ -225,17 +226,7 @@ router.get("/article/:id", ssrForBots((req, res) => {
   const desc = (article.description || article.title || "").slice(0, 300);
   const title = `${article.title} — Scoop`;
   const published = new Date(article.published_at).toISOString();
-  const hasFullContent = article.content && article.content.length > 500;
-  // Strip leading site chrome (share/save buttons, bylines glued to body)
-  // before splitting into paragraphs — same cleanup the takeaway extractor
-  // does, applied to the visible body too. Keeps the SSR page free of "Share
-  // Save Add as preferred on Google Lina SinjabCorrespondent, Beirut" lede.
-  const articleBody = hasFullContent
-    ? _stripLeadingChrome(article.content)
-    : desc;
-  const paragraphs = articleBody
-    ? articleBody.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
-    : [];
+  // Summary only (#176): the stored article body is never rendered or put in JSON-LD.
   const takeaways = extractTakeaways(article);
   const alternates = (() => { try { return listAlternateCoverage(article, 4); } catch { return []; } })();
   const related = (() => { try { return listRelatedStories(article, 5); } catch { return []; } })();
@@ -260,7 +251,6 @@ router.get("/article/:id", ssrForBots((req, res) => {
     "mainEntityOfPage": { "@type": "WebPage", "@id": canonical },
     "articleSection": article.category,
     "url": article.url,
-    ...(hasFullContent ? { "articleBody": article.content } : {}),
   };
 
   res.type("html").send(`<!DOCTYPE html>
@@ -270,6 +260,7 @@ router.get("/article/:id", ssrForBots((req, res) => {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${xmlEscape(title)}</title>
 <meta name="description" content="${xmlEscape(desc)}">
+<meta name="robots" content="noindex,follow">
 <link rel="canonical" href="${canonical}">
 <link rel="alternate" hreflang="en" href="${canonical}">
 <link rel="alternate" hreflang="ur" href="${canonical}?lang=ur">
@@ -365,10 +356,7 @@ router.get("/article/:id", ssrForBots((req, res) => {
 
         ${whyItMatters ? `<p class="why-matters">${xmlEscape(whyItMatters)}</p>` : ""}
 
-        ${hasFullContent
-          ? `<div class="content">${paragraphs.slice(0, 3).map(p => `<p>${xmlEscape(p)}</p>`).join("")}</div>
-             <div class="source-note">Article preview — originally published by <strong>${xmlEscape(article.source_name || "")}</strong>. Full story at the source.</div>`
-          : (desc ? `<p class="desc">${xmlEscape(desc)}</p>` : "")}
+        ${desc ? `<p class="desc">${xmlEscape(firstSentences(desc))}</p>` : ""}
 
         <a class="cta" href="${xmlEscape(article.url)}" target="_blank" rel="noopener noreferrer">Read full story on ${xmlEscape(article.source_name || "source")} →</a>
         <a class="secondary" href="/">More top stories</a>
