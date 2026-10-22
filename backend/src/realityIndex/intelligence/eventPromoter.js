@@ -500,6 +500,10 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
     const sEv = eventState.get(survivor), aEv = eventState.get(absorbedId);
     if (!sEv || !aEv) continue;
     for (const aid of aEv.ids) { linkArticle.run(survivor, aid, now); sEv.ids.add(aid); }
+    // The survivor just gained the absorbed event's articles, so it was active
+    // NOW. markMerged only touches the absorbed row; without this the survivor
+    // keeps its old last_activity_at and can go dormant mid-story (#174).
+    touchActivity.run(now, now, survivor);
     markMerged.run(JSON.stringify({ merged_into: survivor, merged_into_slug: sEv.slug }), now, absorbedId);
     // Wave 1: 🧭 merge log — the pair + the scores that justified convergence.
     // The ent reported MUST be the measure the gate used (unified when on) —
