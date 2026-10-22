@@ -178,6 +178,8 @@ whether the index is mixed. `scripts/reembed.mjs` needs no cutover today — emb
 `LLM_RPM`, `CEREBRAS_*`, `GROQ_*`, `DEEPSEEK_*`, `NVIDIA_API_KEY`, `NIM_*`, `CLOUDFLARE_GEN_MODEL`,
 `OLLAMA_MODEL` (generation).
 
+**Removed 2026-10-22 (DrJ: paid Google usage is embeddings only):** `GOOGLE_TRANSLATE_KEY` (Google Cloud Translation tier in `translator.js`) and `GOOGLE_TTS_KEY` (Google Cloud TTS tier in `ttsService.js`). Setting either now does nothing. The free, keyless Google Translate voice in `ttsService.js` stays; it has no bill. `GOOGLE_VISION_API_KEY` is untouched: unset in prod, so it costs nothing.
+
 | `ENTITY_EXTRACTION_ENABLED` | `false` | **set** | yes | LLM/NER entity extraction feeding the affinity measure. |
 | `ENTITY_EXTRACTION_BATCH` | `100` | **set** | yes | Articles per extraction batch. |
 | `ENTITY_IDF_ENABLED` | `false` | default | yes | Maintain the rolling entity-IDF window that all rarity weighting depends on. |
