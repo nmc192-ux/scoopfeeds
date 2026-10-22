@@ -67,6 +67,7 @@
  */
 
 import { getDb } from "../../models/database.js";
+import { notMachineEventSql } from "./machineEvents.js";
 
 // Env-tunable so the bar can be moved without a deploy, but defaulted to the
 // backtested values rather than to something permissive.
@@ -175,6 +176,7 @@ export function listQualifyingEvents({ withinMs = 7 * 24 * 60 * 60 * 1000, limit
     FROM events e
     LEFT JOIN event_entity_signature s ON s.event_id = e.id
     WHERE e.status = 'active'
+      AND ${notMachineEventSql("e")}
       AND COALESCE(TRIM(e.summary), '') <> ''
       AND e.last_activity_at >= ?
       AND (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id) >= ?
