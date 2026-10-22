@@ -108,6 +108,8 @@ export const RSS_SOURCES = [
   { name: "Healthline",      url: "https://www.healthline.com/rss/health-news",         category: "health",  credibility: 8,  region: "global" },
 
   // ─── PUBLIC HEALTH ────────────────────────────────────────────────
+  // CDC Newsroom removed 2026-10-22 (#175); KFF Health News, in the batch
+  // at the end of this list, now carries this category.
 
   // ─── SELF HELP ────────────────────────────────────────────────────
   { name: "Mind Body Green", url: "https://www.mindbodygreen.com/rss.xml",              category: "self-help", credibility: 7,  region: "global" },
@@ -249,7 +251,10 @@ export const RSS_SOURCES = [
   { name: "CalMatters",         url: "https://calmatters.org/feed/",                              category: "local",    credibility: 8, region: "us-west" },
   { name: "Seattle Times",      url: "https://www.seattletimes.com/feed/",                        category: "local",    credibility: 8, region: "us-west" },
   // UK / Ireland / EU (English)
-  { name: "Sky News",           url: "https://feeds.skynews.com/feeds/rss/world.xml",             category: "international", credibility: 8, region: "uk" },
+  // Sky's WORLD feed, so "global" rather than "uk": a "uk" tag would make it the
+  // whole GB Local tab (COUNTRY_REGIONS.GB) with world news. Radio places it in
+  // Europe by name (sourceRegions.js OVERRIDES).
+  { name: "Sky News",           url: "https://feeds.skynews.com/feeds/rss/world.xml",             category: "international", credibility: 8, region: "global" },
   { name: "RTÉ News",           url: "https://www.rte.ie/feeds/rss/?index=/news/",                category: "international", credibility: 8, region: "eu" },
   { name: "The Irish Times",    url: "https://www.irishtimes.com/arc/outboundfeeds/feed-irish-news/?outputType=xml", category: "international", credibility: 8, region: "eu" },
   { name: "Euractiv",           url: "https://www.euractiv.com/feed/",                            category: "international", credibility: 7, region: "eu" },

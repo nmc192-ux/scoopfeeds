@@ -46,6 +46,7 @@ const OVERRIDES = {
   "Financial Times": "europe", "The Economist": "europe", "New Scientist": "europe",
   "Nature News": "europe", "Top Gear": "europe", "Carbon Brief": "europe",
   "Climate Home News": "europe", "BMJ News": "europe", "DW English": "europe", "France 24": "europe",
+  "Sky News": "europe",
   // Gulf / Middle East (English)
   "Al Jazeera": "middle_east",
   // US
