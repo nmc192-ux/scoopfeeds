@@ -32,9 +32,9 @@ Specced directly as issues on 14 Oct; see the GitHub backlog (label `phase:0`).
 
 ## Phase 1 — new look (29 Oct–18 Nov 2026)
 
-- [queued] lane:website — Shared design tokens and fonts (site + Radio), new header/footer look across all pages
-- [queued] lane:website — New Today page per the canvas: lead story, developing strip, today's stories, Radio card; earn-render throughout
-- [queued] lane:website — Location-aware feeds: country from the request (existing geo lookup), menu override, country-first ordering on Today and News, US/UK/Europe first
+- [spec #188] lane:website — Shared design tokens and fonts (site + Radio), new header/footer look across all pages
+- [spec #189] lane:website — New Today page per the canvas: lead story, developing strip, today's stories, Radio card; earn-render throughout
+- [spec #190] lane:website — Location-aware feeds: country from the request (existing geo lookup), menu override, country-first ordering on Today and News, US/UK/Europe first
 - [queued] lane:website — News page (all tracked stories: developing, long-running, settled, trackers) replacing /events and the six category pages
 - [queued] lane:website — Dossier v2 layout per the canvas, including "Since your last visit" from the timeline
 - [queued] lane:graph — "What we know" AI block on dossiers with disclosure line, gated on the coherence gate verdict
