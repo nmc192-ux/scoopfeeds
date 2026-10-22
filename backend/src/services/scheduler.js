@@ -9,7 +9,6 @@ import { pruneOldArticles, findArticlesForVideoQueue, enqueueVideoJob,
 import { logger } from "./logger.js";
 import { RSS_SOURCES, YOUTUBE_SOURCES } from "../config/sources.js";
 import { sendDailyDigest } from "./digest.js";
-import { runConfirmReminderCycle } from "./confirmReminder.js";
 import { sendXPostDigest } from "./xPostDigest.js";
 import { runWelcomeSequenceCycle } from "./welcomeSequence.js";
 import { refreshAllEvents } from "./liveEvents.js";
@@ -183,6 +182,14 @@ const dispatchSocialCycle = () => dispatchCycle({
 const dispatchRadioStateCycle = () => dispatchCycle({
   queue: QUEUE_NAMES.radio, job: JOB_NAMES.radioStateBuild,
   inProcess: null, label: "radio state",
+});
+
+// Morning Scoop confirmation reminders (#172). SMTP sends and a DB write per
+// subscriber — outbound I/O that would hold this loop for as long as the relay
+// takes. `inProcess: null`: the scheduler only enqueues (cronCollision test).
+const dispatchConfirmReminderCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.newsletter, job: JOB_NAMES.newsletterConfirmReminder,
+  inProcess: null, label: "confirm reminders",
 });
 
 const dispatchXTextCycle = () => dispatchCycle({
@@ -788,9 +795,8 @@ scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "
     }
   }, { timezone: "Europe/London" });
   // One confirmation reminder, 48h after sign-up, to anyone still unverified.
-  scheduleCron("47 * * * *", () => runConfirmReminderCycle().catch(err =>
-    logger.warn(`confirmReminder cron failed: ${err.message}`)
-  ));
+  // Dispatched to the worker's `newsletter` queue, not run here.
+  scheduleCron("47 * * * *", () => runDispatch(() => dispatchConfirmReminderCycle(), "confirm reminders"));
   // X-posting queue digest at 09:00 UTC (Phase B Sprint 2.x.2). Emails the
   // X-ready posts queued by Sprint 2.x.1 to DIGEST_RECIPIENT_EMAIL. No-op
   // when SMTP / DIGEST_RECIPIENT_EMAIL unset or the queue is empty.
