@@ -37,12 +37,16 @@ export function liveCredentials(env = process.env) {
 }
 export const liveConfigured = (env = process.env) => { const c = liveCredentials(env); return Boolean(c.clientId && c.clientSecret && c.refreshToken); };
 
-/** The broadcast resource: public, auto-start and auto-stop on, no monitor stream (so "live" is one step), DVR on. */
-export function broadcastBody({ title, description = "", startMs, privacy = "public" }) {
+/**
+ * The broadcast resource: public, auto-start and auto-stop on, no monitor stream (so "live" is one step), DVR on.
+ * `autoStop: false` is for the 24/7 continuous broadcast (#195): the hourly playout hand-over drops the encoder for
+ * a few seconds, and auto-stop must not end the broadcast then; the orchestrator completes it itself when it rolls.
+ */
+export function broadcastBody({ title, description = "", startMs, privacy = "public", autoStop = true }) {
   return {
     snippet: { title: String(title).slice(0, 100), description: String(description).slice(0, 5000), scheduledStartTime: new Date(startMs).toISOString() },
     status: { privacyStatus: privacy, selfDeclaredMadeForKids: false },
-    contentDetails: { enableAutoStart: true, enableAutoStop: true, enableDvr: true, latencyPreference: "low", monitorStream: { enableMonitorStream: false } },
+    contentDetails: { enableAutoStart: true, enableAutoStop: autoStop !== false, enableDvr: true, latencyPreference: "low", monitorStream: { enableMonitorStream: false } },
   };
 }
 

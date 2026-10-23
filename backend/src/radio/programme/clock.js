@@ -80,9 +80,20 @@ function withFeature(order, featureSec, featureTitle) {
   return [...head, ...mid, ...tail];
 }
 
-export function buildClock(hourStartMs, { featureSec = 0, featureTitle = null } = {}) {
+/**
+ * No weather this hour (the 24/7 day reads it every two hours, dayClock.js): its 90 s go to the half-hour
+ * headlines, which read seven stories instead of five. Contiguity is unchanged.
+ */
+function withoutWeather(order) {
+  const w = order.find(([id]) => id === "weather");
+  if (!w) return order;
+  return order.filter(([id]) => id !== "weather").map((row) => (row[0] === "half" ? [row[0], row[1], w[2], row[3], { ...row[4], stories: 7 }] : row));
+}
+
+export function buildClock(hourStartMs, { featureSec = 0, featureTitle = null, weather = true } = {}) {
   if (!Number.isFinite(hourStartMs)) throw new Error("buildClock: hourStartMs must be a number");
-  const order = featureSec > 0 ? withFeature(ORDER, featureSec, featureTitle) : ORDER;
+  let order = featureSec > 0 ? withFeature(ORDER, featureSec, featureTitle) : ORDER;
+  if (!weather) order = withoutWeather(order);
   return order.map(([id, s, e, kind, extra]) => ({
     id, kind, startSec: s, endSec: e, lenSec: e - s,
     start: hourStartMs + s * 1000, end: hourStartMs + e * 1000,

@@ -32,10 +32,27 @@ If YouTube setup fails, the stream still goes out and DrJ is alerted to go live 
 3. `install-autoair.sh 20:14`. Until step 4 every run is a rehearsal: produced and checked, never aired.
 4. After one clean rehearsal: `RADIO_AUTOAIR_ENABLED=1`. Kill switch any time: `touch ~/scoopfeeds-radio/PAUSE`.
 
-## Stage 2: several hours a day
-- More timed hours (`install-autoair.sh 08:14 14:14 20:14`), the 24/7 music radio between them.
-- A half-hour script refresh, so breaking news gets in (the `--from` refresh, run by the orchestrator).
-- Prepare film/feature lists automatically from the published shorts and series.
+## Stage 2: every hour, 24/7 (built for #195; rehearsal next, on air only after #208)
+
+| Piece | What it does | Where |
+|---|---|---|
+| Loop | one long-running process owns the air. At :15 it prepares the next hour (must finish by :45), at :30 it refreshes the hour on air if the top story changed, at :59 it hands over. One job at a time: producers never overlap | `programme/rolling.mjs`, `programme/rollingStation.js` |
+| Day clock | 6 am to midnight New York: full produced hours. Midnight to 6 am: the strongest produced hour of the last 18, repeated, with a freshly written The Hour at the top (Middle East morning, then UK/Europe morning). Weather every 2 hours (the half-hour headlines take its slot otherwise). Markets Now leads with the exchanges in session. #200's grid replaces `planHour` | `programme/dayClock.js` |
+| Fallback | an hour whose producer or air check fails airs the 24/7 headline screen + music bed; the next hour tries again. DrJ is alerted only when 2 hours in a row fail | `rollingStation.js` |
+| Cost guard | every Claude writer call is counted per hour (`status.json`) and per day (`writer-calls/<date>.json`). Over `RADIO_WRITER_DAILY_MAX`, or after a usage limit, produced hours become repeats read from headlines (no Claude) | `rollingStation.js`, `produce.mjs` |
+| YouTube | one continuous broadcast (auto-stop off), rolled at a quiet hand-over (4 am / 4 pm New York) before 12 h, so the channel's /live URL always has it | `rollingStation.js`, `live/youtubeLive.js` |
+| Mac wrapper | env file, Kokoro, caffeinate, notification hook; stands down the 24/7 music radio agent and the one-hour timer while it runs | `playout/deploy/macos/install-rolling.sh`, `run-rolling.sh` |
+
+**Gates.** Streams only when `RADIO_AUTOAIR_ENABLED=1` AND `RADIO_ROLLING_ENABLED=1`; otherwise each hour plays to
+`~/scoopfeeds-radio/rehearsal-seg/`. `PAUSE` stops hours being prepared (the headline screen airs). The standing
+approval below names `autoair.mjs` only, and DrJ gated 24/7 airing on #208: switching the 24/7 loop on air is DrJ's call.
+
+**Rehearsal (6 hours, nothing streamed):** `bash backend/src/radio/playout/deploy/macos/install-rolling.sh`, or by hand
+`node src/radio/programme/rolling.mjs --hours 6 --force-fail <one hour, e.g. 2026-10-27T17>` (add `--force-top-change`
+if the news is quiet, to see the :30 refresh). Read `~/scoopfeeds-radio/logs/rolling.log`, each hour's `status.json`, and
+the recordings under `rehearsal-seg/`.
+
+Still open from the old Stage 2 list: prepare film/feature lists automatically from the published shorts and series (#203).
 
 ## Stage 3: an editor and a quality gate
 - An editor step that sets the running order and can hold a story.
