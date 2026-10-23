@@ -206,6 +206,13 @@ stops the whole engine.
 (Before 2026-10-14 the rule was "DrJ approves every irreversible action; agents never deploy
 to prod". The stop list keeps that rule for the seven categories above.)
 
+**No sexual, violent, abusive or animal-harm media, ever (DrJ, 2026-10-23, #218).** "NO SEXUAL, VIOLENCE and
+ABUSE, physical or otherwise, ANIMAL HARM and videos and audio in other such category will ever be allowed." It bans
+the footage, images and audio (gore and injury aftermath included), not reporting such a story in words. No override
+flag, no newsworthy exception, official feeds not exempt. Every pre-recorded item passes `assertMediaSafe()`
+(`backend/src/radio/safety/contentSafety.js`) and every live feed the delay gate (`liveSafetyGate.js`); an unmeasured
+check is a FAIL. Loosening it is stop-list item 5. See `docs/radio/content-safety.md`.
+
 **Automated Shorts are OFF in prod (DrJ, 2026-10-15)** — `VIDEO_AUTOPOST_ENABLED=0`, because
 the loop may have caused the YouTube account suspension. Do not turn it back on, change its
 default, or recommend doing so; that is stop-list item 7 in `docs/engine/full-throttle.md`.
