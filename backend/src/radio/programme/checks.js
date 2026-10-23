@@ -7,9 +7,13 @@
  *   outlet    a Compared line must name an outlet that actually covered that story
  *   numbers   every figure must appear in the pack (story text, market row or weather row)
  *   quotes    quoted words must appear verbatim in the pack
+ *   election  (#197) ScoopFeeds never calls a race: a result line must name the organisation that
+ *             projected it, and match a projection in the election pack; polls are never results;
+ *             a partial count says how much is in, as the source states it, or "counting continues"
  */
 import { radioRulesVerdict, hasPakistanSignal } from "../radioRules.js";
 import { storyIndex } from "./factPack.js";
+import { electionText, canonOrg, ORGS, statesIn } from "./electionPack.js";
 
 export const toSpoken = (t) => String(t || "").replace(/\s*%/g, " percent").replace(/\s+/g, " ").trim();
 
@@ -46,10 +50,54 @@ export function backed(n, packNums) {
   return packNums.some((m) => Math.abs(m - n) <= Math.max(0.06, Math.abs(m) * 0.006) || Math.abs(Math.abs(m) - n) <= 0.06);
 }
 
+// ─── election rules (#197) ──────────────────────────────────────────────────
+/** A line about the 2026 races (a line naming an earlier year is background, not a result). */
+const RACE_TALK = /\b(midterms?|(senate|governor['’]?s?|gubernatorial|house|congressional) (race|seat|contest|election|majority)s?|race for (the )?(senate|house|governor(ship)?)|called the (race|seat|contest)|(majority in|control of) the (house|senate)|election night)\b/i;
+const US_POLITICS = /\b(senate|senator|governor|gubernatorial|house|congress(ional)?|republicans?|democrats?|gop)\b/i;
+const ELECT_WORD = /\b(elections?|ballots?|projects?|projected|re-?elected|elected|wins?|won|polls?)\b/i;
+const WIN_CLAIM = /\b(wins?|won|winner|will win|victor(y|ious)|re-?elected|elected|defeat(s|ed)?|beat(s|en)?|projects?|projected|called the (race|seat|contest)|declared)\b|\b(holds?|held|keeps?|kept|retains?|retained|takes?|took|captures?|captured|flips?|flipped)( on to| onto)? (control|the (seat|house|senate|majority|governorship)|(a|its|their|his|her) (seat|majority))\b/i;
+const NO_CALL = /\b(not (yet )?(been )?(called|projected|declared)|too (early|close|soon) to (call|project)|yet to be (called|projected)|no (call|projection|winner)( has been| yet)?|(has|have)n['’]?t (yet )?(been )?(called|projected)|never calls?)\b/i;
+const ATTRIB = /\b(projects?|projected|called|calls|declared|declares|according to)\b/i;
+const POLL = /\b(polls?|polling|pollsters?|surveys?|forecasts?|odds)\b/i;
+const POLLS_CLOSED = /\bpolls? (have |had )?(closed|close[sd]?|closing|open(ed)?)\b/gi;
+const RESULT = /\b(wins?|won|winner|will win|victor(y|ious)|results?|elected|defeat(s|ed)?)\b/i;
+const COUNTING = /\b(early returns|votes? counted|counted so far|partial (count|results)|precincts reporting)\b/i;
+const LEADS = /\b(leads?|leading|ahead|trails?|trailing)\b/i, COUNT_CTX = /\b(race|count|votes?|returns|ballots|reporting)\b/i;
+const HOW_MUCH = /\b\d+(\.\d+)? percent of (the )?(expected |estimated )?(vote|votes|ballots|precincts)\b|\bcounting continues\b/i;
+const ORG_NAMES = ORGS.map(([c, names]) => [c, new RegExp(`\\b(${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`, "i")]);
+
+/** Is this line about this year's races? */
+export function isElectoral(text, slot) {
+  if (/\b(19|20)(?!26)\d{2}\b/.test(text) && slot?.segment !== "midterms") return false;
+  if (slot?.segment === "midterms" || RACE_TALK.test(text)) return true;
+  return US_POLITICS.test(text.replace(/\bwhite house\b/gi, " ")) && ELECT_WORD.test(text);
+}
+
+/** null when an electoral line may air; otherwise why it may not. */
+export function electionReason(text, election) {
+  const plain = text.replace(POLLS_CLOSED, " ");
+  if (POLL.test(plain) && RESULT.test(plain)) return "election: a poll read as a result";
+  if ((COUNTING.test(plain) || (LEADS.test(plain) && COUNT_CTX.test(plain))) && !POLL.test(plain) && !HOW_MUCH.test(plain)) return "election: a partial count must say how much is in, or that counting continues";
+  if (NO_CALL.test(plain) || !WIN_CLAIM.test(plain)) return null;
+  // a result: it must name the projecting organisation, and that projection must be in the pack
+  const named = ORG_NAMES.filter(([, re]) => re.test(plain)).map(([c]) => c);
+  if (!named.length || !ATTRIB.test(plain)) return "election: a result without the organisation that projected it";
+  const states = statesIn(plain);
+  const items = (election?.races || []).flatMap((r) => r.calls).concat((election?.items || []).filter((i) => i.kind === "house-seats"));
+  const match = items.some((i) => named.includes(canonOrg(i.outlet) || i.outlet) && (
+    i.kind === "house-seats" ? /\bseats?\b/i.test(plain)
+      : i.race === "house-control" ? /\bhouse\b/i.test(plain) && !states.length
+        : i.race === "senate-control" ? /\bsenate\b/i.test(plain) && !states.length
+          : states.includes(i.state)));
+  return match ? null : "election: no matching attributed projection in the election pack";
+}
+
 export function checkSegments(segments, slots, pack, { log = () => {} } = {}) {
   const idx = storyIndex(pack);
   const marketNums = pack.markets.flatMap((m) => [m.price, m.pct, Math.round(m.price), m.pct == null ? null : Math.round(m.pct * 10) / 10].filter((x) => x != null));
   const weatherNums = pack.weather.flatMap((w) => [w.c, w.f]);
+  const elText = pack.election ? electionText(pack.election) : "";
+  const elOutlets = new Set((pack.election?.items || []).flatMap((i) => [i.outlet, i.source]).filter(Boolean));
   const report = [];
   const out = {};
 
@@ -68,8 +116,10 @@ export function checkSegments(segments, slots, pack, { log = () => {} } = {}) {
         if (!v.allowed && (String(v.rule || "").startsWith("radio:") || hasPakistanSignal({ title: judged }))) return `rule0 ${v.rule}`;
         const story = line.story ? idx.get(line.story) : segStory;
         if (line.story && !story) return `story "${line.story}" not in pack`;
-        if (line.outlet && (!story || !story.outlets.some((o) => o.source === line.outlet))) return `outlet "${line.outlet}" did not cover this story`;
-        const src = story ? storyText(story) : "";
+        const electoral = isElectoral(text, slot);
+        if (line.outlet && (!story || !story.outlets.some((o) => o.source === line.outlet)) && !(electoral && elOutlets.has(line.outlet))) return `outlet "${line.outlet}" did not cover this story`;
+        if (electoral) { const e = electionReason(text, pack.election); if (e) return e; }
+        const src = (story ? storyText(story) : "") + (electoral && elText ? ` \n ${elText}` : "");
         const pool = slot.segment === "markets" ? marketNums : slot.segment === "weather" ? weatherNums : numsIn(src, { all: true }).concat(marketNums);
         const bad = numsIn(text).filter((n) => !backed(n, pool) && !src.includes(String(n)));
         if (bad.length) return `unbacked figure(s) ${bad.join(", ")}`;

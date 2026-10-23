@@ -8,6 +8,7 @@
  */
 import { spawn } from "node:child_process";
 import { wordBudget } from "./clock.js";
+import { electionText } from "./electionPack.js";
 
 export const SEGMENT_KINDS = ["the-hour", "markets", "compared", "desk", "half", "weather", "signoff"];
 
@@ -21,6 +22,7 @@ export function packText(pack) {
   for (const [desk, list] of Object.entries(pack.desks)) out.push("", `DESK: ${desk}`, ...list.map(story));
   out.push("", "MARKETS (price, % change on the day)", ...pack.markets.map((m) => `    ${m.key} (${m.group}): ${m.price} ${fmtPct(m.pct)}`));
   out.push("", "WEATHER NOW", ...pack.weather.map((w) => `    ${w.city}: ${w.c}°C / ${w.f}°F, ${w.condition}`));
+  if (pack.election) out.push("", electionText(pack.election));   // the Midterms desk (#197)
   return out.join("\n");
 }
 
@@ -62,6 +64,7 @@ export function buildPrompt(pack, slots, when) {
       case "desk": return `${base}: the ${s.desk} desk. Use stories from DESK: ${s.desk} (or TOP STORIES if clearly from that beat). Line "open" ("On the ${s.title}..." style, one sentence), then 2-3 story lines ("d1".., each with "story": id), then "close" (one short sentence).`;
       case "half": return `${base}: "Headlines at the half hour." Line "open", then ${s.stories} lines "h1".., 25-30 words each, each with "story": id; you may repeat The Hour's stories here (it is a recap) but prefer any newer TOP STORIES or desk stories not yet used.`;
       case "weather": return `${base}: lines "w1".. using only WEATHER NOW, US cities first, then Europe, the Gulf, South Asia, Tokyo; give °F for US cities and °C elsewhere.`;
+      case "midterms": return `${base}: the Midterms desk, on the 3 November 2026 US midterm elections. Line "open" (one sentence, "The Midterms, on ScoopFeeds Radio." style). Lines "b1".. ("what's on the ballot") may be added for you after "open": do not write them, and leave about 130 words of the budget for them. Then up to 3 story lines ("e1".., each with "story": an id from DESK: midterms) on what the outlets report about the campaigns. Then, only if ELECTION PROJECTIONS lists any, one line per projected race ("p1"..): name the organisation that projected it, in its own words ("The Associated Press projects ..."); where outlets disagree, say so and name each; if a race is not in ELECTION PROJECTIONS, never say anyone won it, leads it or will win it. A poll is never a result. A partial count must say how much of the count is in, exactly as in COUNTS, or say that counting continues. ScoopFeeds never calls a race. Then "close" (one short sentence).`;
       case "signoff": return `${base}: line "s1": "That was the first hour of ScoopFeeds Radio. Every newsroom, one stream." plus one sentence inviting listeners to subscribe to ScoopFeeds on YouTube.`;
       default: return base;
     }

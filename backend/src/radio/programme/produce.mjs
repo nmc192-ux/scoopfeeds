@@ -20,6 +20,8 @@ import { buildClock, checkClock } from "./clock.js";
 import { buildFactPack } from "./factPack.js";
 import { writeSegments, claudeWriter } from "./writer.js";
 import { checkSegments } from "./checks.js";
+import { buildElectionPack } from "./electionPack.js";
+import { deskOn, addDeskToClock, addBallotLines } from "./electionDesk.js";
 import { assemble, fakeVoice, kokoroVoice, durationSecs } from "./assemble.js";
 import { listBeds, DAYPARTS } from "../musicLibrary.js";
 import { measureIntegrated } from "../playout/loudness.js";
@@ -47,6 +49,9 @@ const featureSec = feature ? durationSecs(feature) + 2.6 + 1.0 : 0;   // sting +
 const clock = buildClock(hourStart, { featureSec, featureTitle: v["feature-title"] || (feature ? path.basename(feature).replace(/\.[^.]+$/, "") : null) });
 const problems = checkClock(clock);
 if (problems.length) die(`clock is broken: ${problems.join("; ")}`);
+// The Midterms desk (#197): dark unless RADIO_ELECTION_DESK=1; hours from 26 Oct to 6 Nov (New York)
+const midterms = deskOn(hourStart) ? addDeskToClock(clock, hourStart) : null;
+if (midterms && checkClock(clock).length) die(`clock is broken after adding the Midterms desk: ${checkClock(clock).join("; ")}`);
 const fromIdx = v.from ? clock.findIndex((s) => s.id === v.from) : 0;
 if (fromIdx < 0) die(`--from: no slot "${v.from}" (slots: ${clock.map((s) => s.id).join(", ")})`);
 const slots = clock.slice(fromIdx);
@@ -65,6 +70,11 @@ log(`beds: ${Object.entries(beds).map(([d, b]) => `${d}=${path.basename(b.file)}
 
 // ── facts ──
 const pack = await buildFactPack({ base: v.base || "https://scoopfeeds.com", log });
+if (midterms) {
+  pack.election = await buildElectionPack({ base: v.base || "https://scoopfeeds.com", log, now: pack.builtAt });
+  pack.desks.midterms = pack.election.stories;
+  log(`election pack: ${pack.election.items.length} attributed item(s), ${pack.election.races.filter((r) => r.status === "conflict").length} conflict(s), ${pack.election.refused.length} refused, ${pack.election.stories.length} stories`);
+}
 fs.writeFileSync(path.join(out, "pack.json"), JSON.stringify(pack, null, 1));
 log(`fact pack: ${pack.top.length} top stories, desks ${Object.entries(pack.desks).map(([k, l]) => `${k}:${l.length}`).join(" ")}, ${pack.markets.length} market rows, ${pack.weather.length} cities, ${pack.dropped.length} articles dropped by Rule 0`);
 if (pack.top.length < 5) log(`WARNING: only ${pack.top.length} top stories`);
@@ -98,6 +108,7 @@ const spoken = slots.filter((s) => s.kind === "spoken");
 const write = v["fake-writer"] ? fakeWriter : claudeWriter({ model: v.model || "sonnet", log });
 const raw = await writeSegments(pack, spoken, when, { write, log });
 fs.writeFileSync(path.join(out, "segments.raw.json"), JSON.stringify(raw, null, 1));
+if (midterms) addBallotLines(raw, hourStart);   // mechanical "what's on the ballot" lines, checked like the rest
 const { segments, report } = checkSegments(raw, spoken, pack, { log });
 fs.writeFileSync(path.join(out, "segments.json"), JSON.stringify(segments, null, 1));
 fs.writeFileSync(path.join(out, "checks.json"), JSON.stringify(report, null, 1));
@@ -163,6 +174,12 @@ async function fakeWriter() {
     else if (slot.segment === "desk") { const d = pack.desks[slot.desk] || []; L.push({ id: "open", text: `On the ${slot.title}.` }); d.slice(0, 3).forEach((st, i) => L.push(line(st, `d${i + 1}`))); L.push({ id: "close", text: "That's the desk." }); }
     else if (slot.segment === "markets") pack.markets.forEach((m, i) => L.push({ id: `m${i + 1}`, story: null, text: `${m.key} at ${Math.round(m.price)}, ${m.pct >= 0 ? "up" : "down"} ${Math.abs(m.pct).toFixed(1)} percent.` }));
     else if (slot.segment === "weather") pack.weather.forEach((w, i) => L.push({ id: `w${i + 1}`, story: null, text: `${w.city}, ${w.c} degrees, ${w.condition}.` }));
+    else if (slot.segment === "midterms") {
+      L.push({ id: "open", text: "The Midterms, on ScoopFeeds Radio." });
+      (pack.desks.midterms || []).slice(0, 2).forEach((st, i) => L.push(line(st, `e${i + 1}`)));
+      (pack.election?.races || []).flatMap((r) => r.calls).slice(0, 4).forEach((c, i) => L.push({ id: `p${i + 1}`, story: null, text: c.quote }));
+      L.push({ id: "close", text: "That's the Midterms desk." });
+    }
     else if (slot.segment === "signoff") L.push({ id: "s1", text: "That was the first hour of ScoopFeeds Radio. Every newsroom, one stream." });
     else if (slot.segment === "compared") {
       const st = [...pack.top, ...Object.values(pack.desks).flat()].filter((x) => x.count >= 3)[slot.id === "compared-2" ? 1 : 0] || pack.top[0];

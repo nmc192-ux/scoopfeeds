@@ -18,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { storyIndex } from "./factPack.js";
+import { boardData } from "./electionDesk.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SONIC_DIR = path.join(HERE, "../brand/sonic");
@@ -186,6 +187,22 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
             else if (["gap", "agree", "watch"].includes(l.id)) cues.push({ at: at(l.atSec), scene: "known", data: { title: s.title, headline: headline(seg.story), label: { gap: "What some leave out", agree: "What every outlet agrees on", watch: "What to watch" }[l.id], text: l.text } });
           }
           if (!cues.some((c) => c.at >= at(s.startSec) && c.scene === "compared")) cues.push({ at: at(t0), scene: "compared", data: { title: s.title, headline: headline(seg.story), cards, active: -1 } });
+          break;
+        }
+        if (s.segment === "midterms") {   // #197: title, ballot cards, story cards, then the board (earn-render: only with an attributed item)
+          const board = boardData(pack.election);
+          cues.push({ at: at(t0), scene: "title", data: { kicker: "ScoopFeeds Radio", title: s.title, items: storyLines.map((l) => headline(l.story)).filter(Boolean) } });
+          for (const l of lines.filter((x) => /^b\d+$/.test(x.id || ""))) cues.push({ at: at(l.atSec), scene: "known", data: { kicker: s.title, title: s.title, headline: "What's on the ballot, 3 November", label: "On the ballot", text: l.text } });
+          storyLines.forEach((l, i) => cues.push({ at: at(l.atSec), scene: "story", data: { kicker: s.title, n: i + 1, of: storyLines.length, headline: headline(l.story), outlets: outletsOf(l.story).slice(0, 4), lede: ledeOf(l.story) } }));
+          if (board) {
+            const first = lines.find((l) => /^p\d+$/.test(l.id || "")) || lines.find((l) => l.id === "close") || lines.at(-1);
+            cues.push({ at: at(first.atSec), scene: "election", data: { ...board, view: "senate" } });
+            const gov = board.governor.rows.some((r) => r.status !== "open"), t2 = first.atSec + 20;
+            if (gov && t2 < s.endSec - 5) cues.push({ at: at(t2), scene: "election", data: { ...board, view: "governor" } });
+          }
+          const lastEnd = lines.at(-1).endSec;
+          const nextSlot = slots.slice(slots.indexOf(s) + 1).find((x) => x.title);
+          if (!board && s.endSec - lastEnd > 12) cues.push({ at: at(lastEnd + 2), scene: "music", data: nextSlot ? { next: { title: nextSlot.title, at: at(nextSlot.startSec) } } : {} });
           break;
         }
         // the-hour, half, desks: a title card, then one card per story
