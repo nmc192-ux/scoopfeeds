@@ -27,3 +27,10 @@ node backend/src/radio/playout/cli.js --out test.mp4 --seconds 120 --music-dir <
 - Test-only: `--force-daypart-cycle SEC` (refused with RTMP).
 - Known limitation: the RTMP URL, which contains the stream key, is an argument of the ffmpeg process, so other local processes of the same user can read it with `ps`. Logs are redacted; process listings are not.
 - Linux: run `run-playout.sh` from a systemd unit with `Restart=always` (drop the `caffeinate` line).
+
+## Live official feeds (#202)
+
+Dark unless `RADIO_LIVE_ENABLED=true`. At an event's start the unit swaps its audio feeder for a live feeder
+(official feed's sound) and shows the feed's picture in the `livefeed` scene with `LIVE · <publisher>`; at the end, or
+after 30 s with no media, it swaps back to the bed. Encoder and RTMP untouched. Only allow-listed feeds can air:
+see `../live/README.md`. Rehearsal: `--live-now <feed id> --live-url <url> [--live-minutes 5]` with `--segments-dir` (refused with RTMP or `--out`).
