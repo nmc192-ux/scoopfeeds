@@ -7,9 +7,10 @@ import { TILE_LAYOUT, SENATE_UP, SENATE_NOT_UP, GOVERNOR_UP, STATE_NAMES, hasRac
 import { refuseReason, foldProjections, foldHouseReports } from "./projections.js";
 import { buildMapState } from "./mapState.js";
 import { renderMapHtml, MIN_SOURCE_PX } from "./mapScene.js";
-import { parseRace, createCivicClient, MIN_INTERVAL_MS, countsSwitch } from "./civicApi.js";
+import { parseRace, createCivicClient, MIN_INTERVAL_MS, countsSwitch, AUDIT_CAP } from "./civicApi.js";
+import { lastPollsCloseIso, voteCeiling, LAST_POLLS_CLOSE_ET } from "./races2026.js";
 
-const AFTER_CLOSE = Date.parse("2026-11-04T03:00:00Z");
+const AFTER_CLOSE = Date.parse("2026-11-04T07:00:00Z"); // after every state's last close (AK 01:00 ET)
 import { mapCue, isElectionNight, inHeadlinesWindow } from "./schedule.js";
 
 const T = "2026-11-04T02:10:00Z";
@@ -97,8 +98,84 @@ test("never coloured from a poll or a lead in a partial count", () => {
   assert.deepEqual(s.refused.map((r) => r.reason), ["kind:poll", "kind:lead", "poll-or-lead", "poll-or-lead", "poll-or-lead"]);
 });
 
-test("a projection quote that mentions the count is still a projection", () => {
-  assert.equal(refuseReason(P({ quote: "AP projects Cooper wins with 52% of the vote counted" })), null);
+test("review 23 Oct: polls, leads and negated calls that say 'project' or 'call' are refused", () => {
+  const cases = {
+    "A new poll projects Cooper winning by 4 points": "poll-or-lead",
+    "Cooper leads with 40% of precincts reporting; the race has not yet been called": "negated-call",
+    "It is too early to call the race, Cooper leads": "negated-call",
+    "Polls show Cooper ahead and project a narrow win": "poll-or-lead",
+    "AP has not called the race": "negated-call",
+    "The race is too close to call": "negated-call",
+    "Forecasters project Cooper will win": "poll-or-lead",
+    "Cooper is expected to win, AP says": "poll-or-lead",
+    "AP projects Cooper wins with 52% of the vote counted": "poll-or-lead", // count words → refused (safe side)
+    "AP withdrew its call for Cooper": "negated-call",
+    "Cooper's campaign says he won": "no-call-form",
+  };
+  for (const [quote, reason] of Object.entries(cases)) {
+    assert.equal(refuseReason(P({ quote })), reason, quote);
+  }
+  const s = buildMapState({ projections: Object.keys(cases).map((quote) => P({ quote })) });
+  assert.equal(tile("NC", s).status, "uncalled");
+});
+
+test("positive call forms are accepted", () => {
+  for (const quote of [
+    "AP projects Cooper wins",
+    "AP projects Roy Cooper will win the North Carolina Senate race",
+    "NBC News has projected Cooper the winner",
+    "Cooper is the projected winner, according to CNN",
+    "The Associated Press called the North Carolina Senate race for Roy Cooper",
+    "Fox News declared Cooper the winner",
+    "Polls closed at 7:30 pm and AP projects Cooper wins",
+  ]) assert.equal(refuseReason(P({ quote })), null, quote);
+  assert.equal(refuseReason(P({ quote: undefined })), null, "no quote: trusted on kind + outlet + time");
+});
+
+// ── retractions ────────────────────────────────────────────────────────────────
+const W = (o) => ({ kind: "retraction", race: "senate", state: "NC", outlet: "AP", at: "2026-11-04T03:00:00Z", ...o });
+
+test("a retraction removes the outlet's call; the list says it withdrew", () => {
+  const s = buildMapState({ projections: [P(), W()] });
+  const nc = tile("NC", s);
+  assert.equal(nc.status, "uncalled");
+  assert.equal(nc.party, undefined);
+  assert.deepEqual(nc.withdrawn.map((w) => w.outlet), ["AP"]);
+  assert.equal(s.senate.bar.projected.D, undefined);
+  assert.equal(s.hasAnyCall, true);
+  const html = renderMapHtml(s);
+  assert.match(html, /AP withdrew its call/);
+  assert.doesNotMatch(html, /Projected by AP ·/);
+  assert.doesNotMatch(html, /data-state="NC" [^>]*background/);
+});
+
+test("retraction: an older one does nothing; a newer call restores; others' calls stand", () => {
+  assert.equal(tile("NC", buildMapState({ projections: [P(), W({ at: "2026-11-04T01:00:00Z" })] })).status, "called");
+  assert.equal(tile("NC", buildMapState({ projections: [P(), W(), P({ at: "2026-11-04T04:00:00Z" })] })).status, "called");
+  const s = buildMapState({ projections: [P(), P({ outlet: "NBC News" }), W()] });
+  const nc = tile("NC", s);
+  assert.equal(nc.status, "called");
+  assert.deepEqual(nc.projections.map((p) => p.outlet), ["NBC News"]);
+  assert.deepEqual(nc.withdrawn.map((w) => w.outlet), ["AP"]);
+  // A retraction resolves a conflict in the other outlet's favour.
+  const c = buildMapState({ projections: [P(), P({ outlet: "Fox News", party: "R" }), W({ outlet: "Fox News" })] });
+  assert.equal(tile("NC", c).status, "called");
+  assert.equal(tile("NC", c).party, "D");
+});
+
+test("retraction with no race applies to every race in the state; bad ones are refused", () => {
+  const s = buildMapState({ projections: [
+    P({ race: "governor", state: "PA", candidate: "Josh Shapiro" }),
+    W({ race: undefined, state: "PA" }),
+    W({ outlet: "" }),
+  ] });
+  assert.equal(tile("PA", s, "governor").status, "uncalled");
+  assert.deepEqual(s.refused.map((r) => r.reason), ["retraction:no-outlet"]);
+});
+
+test("an item with no race is refused once, not once per view (review finding 5)", () => {
+  const s = buildMapState({ projections: [P({ race: undefined })] });
+  assert.deepEqual(s.refused.map((r) => r.reason), ["no-such-race"]);
 });
 
 test("refused: no outlet, no party, no such race, no time", () => {
@@ -206,9 +283,10 @@ test("civicAPI client: named User-Agent, one fetch per race per minute, keeps la
   assert.equal(client.errors.length, 1);
 });
 
-test("civicAPI: counts before polls close, or above registered voters, are held (the 23 Oct PA case)", () => {
-  // Shape measured on 23 Oct 2026: PA governor, 8.6M votes each, 76.1% reporting.
-  const pa = { province: "PA", percent_reporting: 76.1, candidates: [
+test("civicAPI: counts before polls close, or implausibly large, are held (the 23 Oct PA case)", () => {
+  // Shape measured on 23 Oct 2026: PA governor, 8.6M votes each, 76.1% reporting,
+  // polls_close present, registered_voters null.
+  const pa = { province: "PA", percent_reporting: 76.1, polls_close: "2026-11-04T01:00:00.000Z", registered_voters: null, candidates: [
     { name: "Ken Krawchuk", party: "Libertarian", votes: 8617128, percent: 33.36 },
     { name: "Stacy Garrity", party: "Republican", votes: 8610711, percent: 33.33 },
     { name: "Josh Shapiro", party: "Democratic", votes: 8604294, percent: 33.31 },
@@ -219,10 +297,34 @@ test("civicAPI: counts before polls close, or above registered voters, are held 
   const s = buildMapState({ counts: { governor: new Map([["PA", early]]) } });
   assert.equal(tile("PA", s, "governor").count, undefined);
   assert.doesNotMatch(renderMapHtml(s, { view: "governor" }), /Krawchuk|civicAPI/);
-  // Per-race polls_close wins over the 18:00 ET default.
-  assert.equal(parseRace({ ...pa, polls_close: "2026-11-04T06:00:00Z" }, { now: AFTER_CLOSE }).held, "before-polls-close");
-  assert.equal(parseRace({ ...pa, registered_voters: 9_000_000 }, { now: AFTER_CLOSE }).held, "total-exceeds-registered");
-  assert.equal(parseRace({ ...pa, registered_voters: 90_000_000 }, { now: AFTER_CLOSE }).held, null);
+  // The same numbers AFTER polls close, with no registered_voters: held by the ceiling.
+  assert.ok(voteCeiling("PA") < 25_000_000 && voteCeiling("PA") > 7_000_000);
+  assert.equal(parseRace(pa, { now: AFTER_CLOSE }).held, "total-exceeds-ceiling");
+  // A plausible PA count after close is shown.
+  const ok = { ...pa, candidates: [{ name: "Josh Shapiro", party: "Democratic", votes: 2_000_000 }, { name: "Stacy Garrity", party: "Republican", votes: 1_800_000 }] };
+  assert.equal(parseRace(ok, { now: AFTER_CLOSE }).held, null);
+  assert.equal(parseRace({ ...ok, registered_voters: 3_000_000 }, { now: AFTER_CLOSE }).held, "total-exceeds-registered");
+});
+
+test("civicAPI: the hold uses the LATER of civicAPI's polls_close and our last-close table", () => {
+  const ky = (polls_close) => ({ province: "KY", polls_close, candidates: [{ name: "A", party: "Republican", votes: 10 }] });
+  // civicAPI said 17:00 ET for KY on 23 Oct; western KY votes until 19:00 ET.
+  assert.equal(lastPollsCloseIso("KY"), "2026-11-04T00:00:00.000Z");
+  assert.equal(parseRace(ky("2026-11-03T22:00:00.000Z"), { now: Date.parse("2026-11-03T23:30:00Z") }).held, "before-polls-close");
+  assert.equal(parseRace(ky("2026-11-03T22:00:00.000Z"), { now: Date.parse("2026-11-04T00:00:00Z") }).held, null);
+  // A later payload time still wins over the table.
+  assert.equal(parseRace(ky("2026-11-04T06:00:00Z"), { now: Date.parse("2026-11-04T01:00:00Z") }).held, "before-polls-close");
+  // No payload time: the table alone (AK = 01:00 ET on 4 Nov).
+  assert.equal(parseRace({ province: "AK", candidates: [{ name: "A", party: "Republican", votes: 10 }] }, { now: Date.parse("2026-11-04T05:30:00Z") }).held, "before-polls-close");
+  assert.equal(Object.keys(LAST_POLLS_CLOSE_ET).length, 51);
+});
+
+test("civicAPI client: audit lists are capped", async () => {
+  const fetchImpl = async () => ({ ok: false, status: 503 });
+  let t = AFTER_CLOSE;
+  const c = createCivicClient({ fetchImpl, now: () => t });
+  for (let i = 0; i < AUDIT_CAP + 20; i += 1) { await c.raceIds("senate"); t += MIN_INTERVAL_MS; }
+  assert.equal(c.errors.length, AUDIT_CAP);
 });
 
 test("civicAPI off switch and per-state block", async () => {
@@ -233,7 +335,9 @@ test("civicAPI off switch and per-state block", async () => {
   const c = createCivicClient({ fetchImpl, now: () => AFTER_CLOSE });
   assert.equal((await c.counts("governor", { RADIO_ELECTION_COUNTS: "off" })).size, 0);
   assert.equal(n, 0, "off means not even fetched");
+  const before = n;
   assert.equal((await c.counts("governor", { RADIO_ELECTION_COUNTS_BLOCK: "PA" })).size, 0);
+  assert.equal(n - before, 1, "a blocked state is not fetched (only the race search is)");
   assert.equal((await c.counts("governor", {})).size, 1);
 });
 

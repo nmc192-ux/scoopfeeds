@@ -19,11 +19,15 @@
  *  - The count's own measure is `percent_reporting`; what it measures (precincts,
  *    expected vote) is not documented, so the screen says "% reporting (civicAPI)",
  *    never "% of expected vote".
- *  - HELD, not shown: any count fetched before that race's polls close (payload
- *    `polls_close`, else 3 Nov 18:00 ET), and any count whose total exceeds the race's
- *    `registered_voters`. Measured 23 Oct 2026: the Pennsylvania governor race showed
- *    8.6 million votes for each of three candidates and "76.1% reporting" eleven days
- *    before the election. A held count keeps its reason for the audit.
+ *  - HELD, not shown: any count fetched before that state's LAST polls close (the
+ *    later of the payload's `polls_close` and races2026.js LAST_POLLS_CLOSE_ET, since
+ *    civicAPI's time is often the first close and sometimes early); any count whose
+ *    total exceeds the state's plausibility ceiling (2020 turnout × 1.5, races2026.js);
+ *    any count above the race's `registered_voters` when civicAPI ever fills it (null
+ *    in all 71 races on 23 Oct). Measured 23 Oct 2026:
+ *    the Pennsylvania governor race showed 8.6 million votes for each of three
+ *    candidates and "76.1% reporting" eleven days before the election (by 10:00 UTC
+ *    the same day it read 0 votes). A held count keeps its reason for the audit.
  *  - Off switch: RADIO_ELECTION_COUNTS=off drops every civicAPI number from the map;
  *    RADIO_ELECTION_COUNTS_BLOCK=PA,AK drops chosen states. Read on every fetch.
  */
@@ -33,6 +37,12 @@ export const USER_AGENT = "ScoopFeedsRadio/1.0 (+https://scoopfeeds.com)";
 export const MIN_INTERVAL_MS = 60_000;
 /** First polls close 18:00 ET on 3 Nov 2026 (EST, UTC−5). */
 export const EARLIEST_POLLS_CLOSE = "2026-11-03T23:00:00.000Z";
+
+import { lastPollsCloseIso, voteCeiling } from "./races2026.js";
+
+/** Audit lists (held counts, fetch errors) keep only the most recent entries. */
+export const AUDIT_CAP = 200;
+const capPush = (arr, x) => { arr.push(x); if (arr.length > AUDIT_CAP) arr.splice(0, arr.length - AUDIT_CAP); };
 
 export function countsSwitch(env = process.env) {
   const off = String(env.RADIO_ELECTION_COUNTS || "").trim().toLowerCase() === "off";
@@ -68,11 +78,16 @@ export function parseRace(json, { fetchedAt = new Date().toISOString(), now = Da
     }))
     .sort((a, b) => b.votes - a.votes);
   const pr = Number(json.percent_reporting);
-  const close = Date.parse(json.polls_close || "") || Date.parse(EARLIEST_POLLS_CLOSE);
+  const close = Math.max(
+    Date.parse(json.polls_close || "") || 0,
+    Date.parse(lastPollsCloseIso(state)),
+    Date.parse(EARLIEST_POLLS_CLOSE),
+  );
   const total = cands.reduce((n, c) => n + Number(c.votes), 0);
   const reg = Number(json.registered_voters);
   let held = null;
   if (shares.length && now < close) held = "before-polls-close";
+  else if (shares.length && total > voteCeiling(state)) held = "total-exceeds-ceiling";
   else if (shares.length && reg > 0 && total > reg) held = "total-exceeds-registered";
   return {
     held,
@@ -108,7 +123,7 @@ export function createCivicClient({ fetchImpl = globalThis.fetch, intervalMs = M
       cache.set(url, { at: now(), body });
       return body;
     } catch (err) {
-      errors.push({ url, error: String(err?.message || err), at: new Date(now()).toISOString() });
+      capPush(errors, { url, error: String(err?.message || err), at: new Date(now()).toISOString() });
       if (hit) { hit.at = now(); return hit.body; } // keep the last good copy, don't hammer
       cache.set(url, { at: now(), body: null });
       return null;
@@ -138,10 +153,11 @@ export function createCivicClient({ fetchImpl = globalThis.fetch, intervalMs = M
     if (sw.off) return out;
     const ids = await raceIds(race);
     for (const [state, id] of ids) {
+      if (sw.block.has(state)) continue; // blocked states are not even fetched
       const body = await getJson(`${CIVIC_BASE}/race/${id}`);
       const parsed = parseRace(body, { fetchedAt: new Date(now()).toISOString(), now: now() });
-      if (!parsed || parsed.state !== state || sw.block.has(state)) continue;
-      if (parsed.held) held.push({ race, state, reason: parsed.held, at: parsed.fetchedAt });
+      if (!parsed || parsed.state !== state) continue;
+      if (parsed.held) capPush(held, { race, state, reason: parsed.held, at: parsed.fetchedAt });
       out.set(state, parsed);
     }
     return out;

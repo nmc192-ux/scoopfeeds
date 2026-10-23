@@ -14,7 +14,7 @@
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 export const COLOURS = Object.freeze({
-  D: "#2A62C9", R: "#C8302B", other: "#8A6FB8", uncalled: "#4A5566", ground: "#0F2238", paper: "#F4EFE6", line: "#2A3D57",
+  D: "#2A62C9", R: "#C8302B", I: "#8A6FB8", other: "#A08A5C", uncalled: "#4A5566", ground: "#0F2238", paper: "#F4EFE6", line: "#2A3D57",
 });
 export const MIN_SOURCE_PX = 26;
 
@@ -48,8 +48,8 @@ function senateBarHtml(bar) {
   const open = bar.seats - bar.D - bar.R - bar.I - bar.other;
   return `<section class="ctl">
   <h2>Senate</h2>
-  <div class="bar">${seg(bar.D, COLOURS.D)}${seg(bar.I, "#6F86A8")}${seg(open, COLOURS.uncalled)}${seg(bar.other, COLOURS.other)}${seg(bar.R, COLOURS.R)}<i class="maj" style="left:${(bar.majority / bar.seats) * 100}%"></i></div>
-  <p class="legend"><b style="color:#8FB0F0">Democrats ${bar.D}</b>${bar.I ? ` · Independents ${bar.I}` : ""} · <b style="color:#F0928D">Republicans ${bar.R}</b> · ${bar.uncalled} not yet called</p>
+  <div class="bar">${seg(bar.D, COLOURS.D)}${seg(bar.I, COLOURS.I)}${seg(open, COLOURS.uncalled)}${seg(bar.other, COLOURS.other)}${seg(bar.R, COLOURS.R)}<i class="maj" style="left:${(bar.majority / bar.seats) * 100}%"></i></div>
+  <p class="legend"><b style="color:#8FB0F0">Democrats ${bar.D}</b>${bar.I ? ` · <b style="color:#C9B7E8">Independents ${bar.I}</b>` : ""} · <b style="color:#F0928D">Republicans ${bar.R}</b> · ${bar.uncalled} not yet called</p>
   <p class="src">Seats not up this year + seats projected by a named outlet. ${bar.majority} for a majority.</p>
 </section>`;
 }
@@ -66,19 +66,27 @@ function houseBarHtml(house) {
 }
 
 function callsHtml(tiles, max = 6) {
-  const called = tiles.filter((t) => t.status === "called" || t.status === "conflict")
-    .map((t) => ({ t, at: (t.projections || []).map((p) => p.at).sort().pop() || "" }))
-    .sort((a, b) => b.at.localeCompare(a.at));
-  if (!called.length) return "";
-  const lines = called.slice(0, max).map(({ t }) => {
-    if (t.status === "conflict") {
+  const entries = [];
+  for (const t of tiles) {
+    if (t.status === "called" || t.status === "conflict") {
+      entries.push({ t, kind: t.status, at: (t.projections || []).map((p) => p.at).sort().pop() || "" });
+    }
+    for (const w of t.withdrawn || []) entries.push({ t, kind: "withdrawn", w, at: w.withdrawnAt });
+  }
+  entries.sort((a, b) => b.at.localeCompare(a.at));
+  if (!entries.length) return "";
+  const lines = entries.slice(0, max).map(({ t, kind, w }) => {
+    if (kind === "withdrawn") {
+      return `<li><b>${esc(t.name)}</b> <span class="flag">${esc(w.outlet)} withdrew its call</span><br><span class="src">Was: ${esc(w.candidate || w.party)} · withdrawn ${esc(timeET(w.withdrawnAt))}</span></li>`;
+    }
+    if (kind === "conflict") {
       const parts = t.projections.map((p) => `${esc(p.outlet)}: ${esc(p.candidate || p.party)}`).join(" · ");
       return `<li><b>${esc(t.name)}</b> <span class="flag">outlets disagree</span><br><span class="src">${parts}</span></li>`;
     }
     const p = t.projections[t.projections.length - 1];
-    return `<li><b style="color:${t.party === "D" ? "#8FB0F0" : t.party === "R" ? "#F0928D" : "#C9B7E8"}">${esc(t.name)}</b> ${esc(p.candidate || "")}<br><span class="src">Projected by ${esc(outletsOf(t).join(", "))} · ${esc(timeET(p.at))}</span></li>`;
+    return `<li><b style="color:${t.party === "D" ? "#8FB0F0" : t.party === "R" ? "#F0928D" : t.party === "I" ? "#C9B7E8" : "#D8C79E"}">${esc(t.name)}</b> ${esc(p.candidate || "")}<br><span class="src">Projected by ${esc(outletsOf(t).join(", "))} · ${esc(timeET(p.at))}</span></li>`;
   }).join("");
-  const more = called.length > max ? `<li class="src">+${called.length - max} more called: each tile shows its outlet</li>` : "";
+  const more = entries.length > max ? `<li class="src">+${entries.length - max} more: each tile shows its outlet</li>` : "";
   return `<section class="calls"><h2>Latest calls</h2><ul>${lines}${more}</ul></section>`;
 }
 

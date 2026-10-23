@@ -11,7 +11,8 @@
  *                  source and time; they NEVER colour a tile.
  *
  * Tile status: "called" (coloured, "Projected by <outlet>"), "conflict" (grey, every
- * call listed), "uncalled" (grey, "Not yet called"), "no-race" (hatched).
+ * call listed), "uncalled" (grey, "Not yet called"), "no-race" (hatched). A tile may
+ * also carry `withdrawn`: calls an outlet retracted (never coloured, always listed).
  * Every number carries `source` and `at`.
  */
 import { foldProjections, foldHouseReports } from "./projections.js";
@@ -30,6 +31,8 @@ function tilesFor(race, projections, counts) {
     if (call?.status === "called") Object.assign(tile, { status: "called", party: call.party, projections: call.projections });
     else if (call?.status === "conflict") Object.assign(tile, { status: "conflict", projections: call.projections });
     else tile.status = "uncalled";
+    // A withdrawn call never colours; it is listed so the audience sees the retraction.
+    if (call?.withdrawn?.length) tile.withdrawn = call.withdrawn;
     const c = counts?.get?.(state);
     if (c && c.shares?.length) {
       tile.count = {
@@ -77,6 +80,6 @@ export function buildMapState({ projections = [], houseReports = [], counts = {}
     house: { seats: HOUSE_SEATS, majority: HOUSE_MAJORITY, reports: house },
     sources: { projections: [...projOutlets].sort(), counts: [...countSources].sort() },
     refused: [...senate.refused, ...governor.refused].map((r) => ({ reason: r.reason, state: r.item?.state || null, outlet: r.item?.outlet || null })),
-    hasAnyCall: [...senate.tiles, ...governor.tiles].some((t) => t.status === "called" || t.status === "conflict") || house.length > 0,
+    hasAnyCall: [...senate.tiles, ...governor.tiles].some((t) => t.status === "called" || t.status === "conflict" || t.withdrawn?.length) || house.length > 0,
   };
 }

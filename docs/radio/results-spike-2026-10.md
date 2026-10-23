@@ -25,10 +25,27 @@ mini's home connection, so they are listed under "to verify on the Mac", not as 
 | `winner` | The docs say the API provides "results and calls". Whose calls is not stated. |
 
 **What the build does about it:** civicAPI numbers never colour a state; they are
-shown only with "Source: civicAPI" and their time. A count is **held** (not shown)
-before that race's polls close and when its total exceeds registered voters, which
-blocks the PA case above. `RADIO_ELECTION_COUNTS=off` drops all civicAPI numbers and
-`RADIO_ELECTION_COUNTS_BLOCK=PA,…` drops single states on the night. The label says
+shown only with "Source: civicAPI" and their time. A count is **held** (not shown):
+
+- before that state's **last** polls close: the later of civicAPI's `polls_close` and the
+  builder's last-close table (`races2026.js`, UNVERIFIED, rounded late);
+- when its total is above a plausibility ceiling, 2020 presidential turnout × 1.5
+  (`races2026.js`, figures UNVERIFIED; PA ceiling ≈ 10.4M against the 25.8M seen);
+- when its total is above `registered_voters`, if civicAPI ever fills that field.
+
+**Fields the real per-state payload carries (measured 23 Oct 2026, 10:01 UTC, all 35 Senate
+and 36 governor per-state races fetched once each from the cloud box):** `polls_close` is
+present in **71/71**; `registered_voters` is **null in 71/71**; every race showed 0 votes
+(the PA 8.6M numbers seen earlier the same day were gone). So the registered-voters check
+alone would never have fired; the ceiling is what catches the PA shape after polls close.
+civicAPI's `polls_close` is often the *first* close, and some are plainly early: KY 17:00 ET,
+DE 18:00 ET (DE closes at 20:00), AK 23:00 ET (the Aleutians close at 01:00 ET). That is
+why the hold takes the later of the two times. Other top-level fields seen: `polls_open`,
+`last_updated`, `is_disputed`, `round`, `test_data`, `region_results`, `maps`.
+
+`RADIO_ELECTION_COUNTS=off` drops all civicAPI numbers and
+`RADIO_ELECTION_COUNTS_BLOCK=PA,…` drops single states on the night (blocked states are not
+fetched at all). The label says
 "% reporting", never "% of expected vote", because no free source tested gives expected
 vote. A wrong civicAPI number that is plausible and after polls close (the MA 2024 kind)
 is **not** caught by any automatic check; that risk is why counts are a fallback below

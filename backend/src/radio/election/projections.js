@@ -11,9 +11,19 @@
  * Rules, all tested in election.test.js:
  *  - Only `kind: "projection"` with a named outlet, a party and a state that has that
  *    race this year is accepted. Everything else is refused, with the reason.
- *  - A quote that reads as a poll, a lead or a partial count, and does not also say
- *    the race was projected / called, is refused. The map NEVER colours from a poll
- *    or a lead in a partial count, whatever the extractor upstream did.
+ *  - The quote check is strict (review of 23 Oct: a poll or lead sentence that also
+ *    said "project" or "call" used to get through). When a quote is present it is
+ *    accepted ONLY if it has a positive call form ("AP projects Cooper wins",
+ *    "projected winner", "called the race for") AND none of: a negated call ("not yet
+ *    called", "too early to call"), a poll / forecast word, a lead or partial-count
+ *    word. A refused real call costs a grey tile; an accepted poll would put a false
+ *    call on air. The map NEVER colours from a poll or a lead in a partial count.
+ *    (One exemption: the phrase "polls closed" is not a poll.) An item with no quote
+ *    is trusted on its `kind`, outlet and time alone.
+ *  - Retractions: { kind: "retraction", race, state, outlet, at } removes that outlet's
+ *    call when it is at least as new as the call. A later call from the same outlet
+ *    restores it. Withdrawn calls are listed ("<outlet> withdrew its call"). A
+ *    retraction with no race applies to every race in that state (the safe direction).
  *  - The latest item per (state, race, outlet) is that outlet's call.
  *  - All outlets agree on the party → "called", coloured, "Projected by <outlets>".
  *    Outlets disagree → "conflict": NOT coloured, every call shown side by side.
@@ -22,8 +32,19 @@
  */
 import { hasRace } from "./races2026.js";
 
-const PROJECTION_WORDS = /\b(project(s|ed|ing|ion|ions)?|call(s|ed|ing)?|declare[sd]?|race call)\b/i;
-const NOT_A_RESULT = /\b(polls?|polling|survey|leads?|leading|ahead|trails?|trailing|early (returns|results)|partial|so far|with \d+% (of|in)|% of (the )?(vote|precincts|expected) (in|counted|reporting))\b/i;
+/** A positive call. Required in any quote that is present. */
+const CALL_FORM = new RegExp([
+  String.raw`\b(project(s|ed)?|has projected|call(s|ed)?|declare[sd]?)\b[^.;]*\b(win(s|ner|ning)?|won|victor(y|ious)|re-?elect(s|ed|ion)?|defeat(s|ed)?|beat(s|en)?|hold(s)?|keep(s)?|flip(s|ped)?)\b`,
+  String.raw`\bprojected (winner|victor)\b`,
+  String.raw`\b(call(s|ed)?|declare[sd]?) the (race|seat|contest|election)\b`,
+  String.raw`\bdeclared [^.;]*\b(the )?winner\b`,
+  String.raw`\b(call(s|ed)?|declare[sd]?)\b[^.;]*\b(race|seat|contest)\b[^.;]*\bfor\b`,
+].join("|"), "i");
+/** A call that did not happen, or was withdrawn. Refused whatever else the quote says. */
+const NEGATED = /\b(not (yet )?(been )?(called|projected|declared)|too (early|close|soon) to (call|project|declare)|yet to (be )?(call(ed)?|project(ed)?|declare[d]?)|no (call|projection|winner)s?( has been| yet)?|(un|not )called|can(not|'t|’t) (yet )?(call|project)|(has|have|had)n['’]?t (yet )?(been )?(called|projected)|withdr(ew|awn|aw)|retract(s|ed|ion)?|rescind(s|ed)?)\b/i;
+/** Polls, forecasts, leads and partial counts. */
+const NOT_A_RESULT = /\b(polls?|polling|pollsters?|survey(s|ed)?|forecast(s|er|ers)?|model(s|led)?|odds|ratings?|toss-?up|likely|lean(s|ing)?|favou?red|expected to|on track|leads?|leading|ahead|trails?|trailing|edge|early (returns|results|count)|partial|so far|preliminary|with \d+(\.\d+)?% (of|in)|\d+(\.\d+)?% (of (the )?)?(vote|votes|precincts|expected vote|ballots)( (in|counted|reporting))?|(precincts|votes|ballots) (counted|reporting|in))\b/i;
+const POLLS_CLOSED = /\bpolls? (have |had )?(closed|close[sd]?|closing)\b/gi;
 
 export const PARTY_NAMES = Object.freeze({ D: "Democrats", R: "Republicans", I: "Independent" });
 
@@ -44,20 +65,52 @@ export function refuseReason(item) {
   if (!hasRace(item.race, state)) return "no-such-race";
   if (!normParty(item.party)) return "no-party";
   if (!item.at || Number.isNaN(Date.parse(item.at))) return "no-time";
-  const q = String(item.quote || "");
-  if (q && NOT_A_RESULT.test(q) && !PROJECTION_WORDS.test(q)) return "poll-or-lead";
+  return quoteReason(item.quote);
+}
+
+/** null when a projection's quote reads as a real call; otherwise why not. */
+export function quoteReason(quote) {
+  const q = String(quote || "").trim();
+  if (!q) return null;
+  if (NEGATED.test(q)) return "negated-call";
+  if (NOT_A_RESULT.test(q.replace(POLLS_CLOSED, " "))) return "poll-or-lead";
+  if (!CALL_FORM.test(q)) return "no-call-form";
+  return null;
+}
+
+/** null when a retraction is usable; otherwise why not. */
+function retractionReason(item) {
+  if (!String(item.outlet || "").trim()) return "no-outlet";
+  if (!item.at || Number.isNaN(Date.parse(item.at))) return "no-time";
+  const state = String(item.state || "").toUpperCase();
+  if (item.race ? !hasRace(item.race, state) : !(hasRace("senate", state) || hasRace("governor", state))) return "no-such-race";
   return null;
 }
 
 /**
- * Fold projection items into per-state calls for one race.
- * @returns {{ calls: Map<string, {status:"called"|"conflict", party?:string, projections:Array}>, refused: Array }}
+ * Fold projection (and retraction) items into per-state calls for one race.
+ * Items with no `race` are only refused under the Senate fold, so a caller folding
+ * both races does not count them twice (review finding 5).
+ * @returns {{ calls: Map<string, {status:"called"|"conflict"|"withdrawn", party?:string, projections:Array, withdrawn:Array}>, refused: Array }}
  */
 export function foldProjections(items, race) {
   const refused = [];
   const latest = new Map(); // `${state}|${outlet}` → item
+  const retractions = new Map(); // `${state}|${outlet}` → latest retraction
   for (const raw of items || []) {
     if (raw?.race && raw.race !== race) continue;
+    if (raw?.kind === "retraction") {
+      const why = retractionReason(raw);
+      if (why) { if (raw.race || race === "senate") refused.push({ item: raw, reason: `retraction:${why}` }); continue; }
+      const state = String(raw.state).toUpperCase();
+      if (!hasRace(race, state)) continue;
+      const r = { state, outlet: String(raw.outlet).trim(), at: new Date(raw.at).toISOString(), url: raw.url || null };
+      const key = `${state}|${r.outlet.toLowerCase()}`;
+      const prev = retractions.get(key);
+      if (!prev || Date.parse(prev.at) <= Date.parse(r.at)) retractions.set(key, r);
+      continue;
+    }
+    if (!raw?.race && race !== "senate") continue;
     const why = refuseReason(raw);
     if (why) { refused.push({ item: raw, reason: why }); continue; }
     const it = {
@@ -73,17 +126,24 @@ export function foldProjections(items, race) {
     if (!prev || Date.parse(prev.at) <= Date.parse(it.at)) latest.set(key, it);
   }
   const byState = new Map();
-  for (const it of latest.values()) {
-    if (!byState.has(it.state)) byState.set(it.state, []);
-    byState.get(it.state).push(it);
+  const slot = (state) => {
+    if (!byState.has(state)) byState.set(state, { projections: [], withdrawn: [] });
+    return byState.get(state);
+  };
+  for (const [key, it] of latest) {
+    const r = retractions.get(key);
+    // A retraction at least as new as the call removes it; a newer call restores it.
+    if (r && Date.parse(r.at) >= Date.parse(it.at)) slot(it.state).withdrawn.push({ ...it, withdrawnAt: r.at, retractionUrl: r.url });
+    else slot(it.state).projections.push(it);
   }
   const calls = new Map();
-  for (const [state, projections] of byState) {
+  for (const [state, { projections, withdrawn }] of byState) {
     projections.sort((a, b) => a.at.localeCompare(b.at) || a.outlet.localeCompare(b.outlet));
+    withdrawn.sort((a, b) => a.withdrawnAt.localeCompare(b.withdrawnAt) || a.outlet.localeCompare(b.outlet));
     const parties = new Set(projections.map((p) => p.party));
-    calls.set(state, parties.size === 1
-      ? { status: "called", party: projections[0].party, projections }
-      : { status: "conflict", projections });
+    if (!projections.length) calls.set(state, { status: "withdrawn", projections, withdrawn });
+    else if (parties.size === 1) calls.set(state, { status: "called", party: projections[0].party, projections, withdrawn });
+    else calls.set(state, { status: "conflict", projections, withdrawn });
   }
   return { calls, refused };
 }

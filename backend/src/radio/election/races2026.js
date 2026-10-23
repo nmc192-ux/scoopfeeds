@@ -35,6 +35,55 @@ export const GOVERNOR_UP = Object.freeze([
   "RI", "SC", "SD", "TN", "TX", "VT", "WI", "WY",
 ]);
 
+/**
+ * When the LAST polls in each state close on 3 Nov 2026, in ET hours (EST, UTC−5; DST
+ * ended 1 Nov). Used to HOLD vote counts until a state has finished voting. Written by
+ * the builder from the usual poll-closing schedule, rounding each state to its latest
+ * time zone (e.g. TX = El Paso, MI = the Upper Peninsula, AK = the Aleutians) and,
+ * where unsure, LATER. UNVERIFIED against each state's election office: check on the
+ * Mac. Erring late only keeps a count off screen a little longer; it never airs one.
+ *
+ * civicAPI's own `polls_close` (measured 23 Oct, all 71 per-state races carry it) is
+ * often the FIRST close, not the last, and sometimes plainly early (KY 17:00 ET,
+ * DE 18:00 ET, AK 23:00 ET). So the hold uses the LATER of the two.
+ */
+export const LAST_POLLS_CLOSE_ET = Object.freeze({
+  AL: 20, AK: 25, AZ: 21, AR: 20.5, CA: 23, CO: 21, CT: 20, DE: 20, DC: 20, FL: 20, GA: 19,
+  HI: 24, ID: 23, IL: 20, IN: 19, IA: 22, KS: 21, KY: 19, LA: 21, ME: 20, MD: 20, MA: 20,
+  MI: 21, MN: 21, MS: 20, MO: 20, MT: 22, NE: 22, NV: 22, NH: 20, NJ: 20, NM: 21, NY: 21,
+  NC: 19.5, ND: 22, OH: 19.5, OK: 20, OR: 23, PA: 20, RI: 20, SC: 19, SD: 21, TN: 21,
+  TX: 21, UT: 22, VT: 19, VA: 19, WA: 23, WV: 19.5, WI: 21, WY: 21,
+});
+
+/** ISO time of a state's last poll close on 3 Nov 2026 (default: 01:00 ET on 4 Nov). */
+export function lastPollsCloseIso(state) {
+  const h = LAST_POLLS_CLOSE_ET[String(state || "").toUpperCase()] ?? 25;
+  return new Date(Date.parse("2026-11-03T05:00:00.000Z") + h * 3_600_000).toISOString();
+}
+
+/**
+ * Plausibility ceiling for a statewide count: total votes cast in the 2020 presidential
+ * election (millions, rounded; builder's figures, UNVERIFIED against each state's
+ * certified total) × 1.5. A midterm count above it is impossible, so it is HELD. This
+ * catches the 23 Oct PA case (25.8M votes against a 10.4M ceiling) without needing
+ * civicAPI's `registered_voters`, which was null in all 71 per-state races on 23 Oct.
+ */
+export const TURNOUT_2020_M = Object.freeze({
+  AL: 2.32, AK: 0.36, AZ: 3.39, AR: 1.22, CA: 17.5, CO: 3.26, CT: 1.82, DE: 0.5, DC: 0.34,
+  FL: 11.07, GA: 5.0, HI: 0.57, ID: 0.87, IL: 6.03, IN: 3.03, IA: 1.69, KS: 1.37, KY: 2.14,
+  LA: 2.15, ME: 0.82, MD: 3.04, MA: 3.63, MI: 5.54, MN: 3.28, MS: 1.31, MO: 3.03, MT: 0.6,
+  NE: 0.96, NV: 1.41, NH: 0.81, NJ: 4.55, NM: 0.92, NY: 8.62, NC: 5.52, ND: 0.36, OH: 5.92,
+  OK: 1.56, OR: 2.37, PA: 6.92, RI: 0.52, SC: 2.51, SD: 0.42, TN: 3.05, TX: 11.32, UT: 1.49,
+  VT: 0.37, VA: 4.46, WA: 4.09, WV: 0.79, WI: 3.3, WY: 0.28,
+});
+export const TURNOUT_CEILING_FACTOR = 1.5;
+
+/** Most votes a statewide race in `state` can plausibly have, or Infinity if unknown. */
+export function voteCeiling(state) {
+  const m = TURNOUT_2020_M[String(state || "").toUpperCase()];
+  return m ? Math.round(m * 1e6 * TURNOUT_CEILING_FACTOR) : Infinity;
+}
+
 export const HOUSE_SEATS = 435;
 export const HOUSE_MAJORITY = 218;
 
