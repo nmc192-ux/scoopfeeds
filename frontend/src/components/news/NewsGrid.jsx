@@ -10,6 +10,7 @@ import SponsorCard from "../ads/SponsorCard";
 import StoryBriefingCard from "../analysis/StoryBriefingCard";
 import { usePublicConfig } from "../../hooks/useNews";
 import { useArticleBadges } from "../../hooks/usePredictions";
+import { useMarketOdds } from "../../hooks/useSiteConfig";
 import RIBadgeStrip from "../predictions/RIBadgeStrip";
 import { topicColor } from "../../lib/topicColors";
 
@@ -46,7 +47,9 @@ export default function NewsGrid({ articles = [], isLoading, error, onRefresh })
   // Falls back to {} on error so cards render unchanged when the endpoint
   // is unreachable.
   const visibleIds = useMemo(() => visibleArticles.map(a => a.id).slice(0, 60), [visibleArticles]);
-  const { data: badgeData } = useArticleBadges(visibleIds);
+  // Odds hidden (SITE_MARKET_ODDS off) → don't even fetch the badges.
+  const oddsOn = useMarketOdds();
+  const { data: badgeData } = useArticleBadges(oddsOn ? visibleIds : []);
   const badges = badgeData?.badges ?? {};
 
   if (isLoading && dedupedArticles.length === 0) {

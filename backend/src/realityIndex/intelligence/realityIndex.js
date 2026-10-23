@@ -17,6 +17,7 @@
  */
 
 import { getDb } from "../../models/database.js";
+import { eligibleMarketSql } from "../dal/marketsDao.js";
 import { latestSnapshotsByScope } from "../dal/sentimentDao.js";
 import { formatSnapshotWriteStats } from "../dal/writeOnChange.js";
 import { upsertRealityIndexSnapshot } from "../dal/realityIndexDao.js";
@@ -38,7 +39,7 @@ function eventMarketProbability(db, eventId) {
            eml.weight, eml.rank
     FROM event_market_links eml
     JOIN prediction_markets pm ON pm.id = eml.market_id
-    WHERE eml.event_id = ? AND pm.yes_price IS NOT NULL AND pm.active = 1
+    WHERE eml.event_id = ? AND pm.yes_price IS NOT NULL AND ${eligibleMarketSql("pm")}
     ORDER BY eml.rank
     LIMIT 5
   `).all(eventId);

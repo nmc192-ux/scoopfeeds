@@ -32,6 +32,19 @@ import {
   buildAffinityCtx, affinity, isIncoherent, BANDS, logDecision,
 } from "./storyAffinity.js";
 import { logger } from "../../services/logger.js";
+import { eligibleMarketSql } from "../dal/marketsDao.js";
+
+// Cluster→market links the promoter may copy onto an event. Eligibility (active,
+// unresolved, future end_date) is re-checked on every compose, so a binding to a
+// market that has since resolved or expired is simply not carried forward.
+function eligibleClusterMarkets(db, clusterId) {
+  return db.prepare(`
+    SELECT cml.* FROM cluster_market_links cml
+    JOIN prediction_markets pm ON pm.id = cml.market_id
+    WHERE cml.cluster_id = ? AND ${eligibleMarketSql("pm")}
+    ORDER BY cml.rank
+  `).all(clusterId);
+}
 
 const MIN_ARTICLES       = parseInt(process.env.EVENT_MIN_ARTICLES || "5", 10);
 const DORMANT_AFTER_MS   = 7 * 24 * 60 * 60 * 1000;
@@ -335,10 +348,12 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
   // ── 1. Eligible clusters (>= MIN_ARTICLES OR a bound market) ─────────────────
   const eligible = db.prepare(`
     SELECT sc.*,
-           (SELECT COUNT(*) FROM cluster_market_links cml WHERE cml.cluster_id = sc.id) AS market_count
+           (SELECT COUNT(*) FROM cluster_market_links cml JOIN prediction_markets pm ON pm.id = cml.market_id
+              WHERE cml.cluster_id = sc.id AND ${eligibleMarketSql("pm")}) AS market_count
     FROM story_clusters sc
     WHERE sc.article_count >= ?
-       OR (SELECT COUNT(*) FROM cluster_market_links cml WHERE cml.cluster_id = sc.id) >= 1
+       OR (SELECT COUNT(*) FROM cluster_market_links cml JOIN prediction_markets pm ON pm.id = cml.market_id
+              WHERE cml.cluster_id = sc.id AND ${eligibleMarketSql("pm")}) >= 1
     ORDER BY sc.updated_at DESC
     LIMIT 300
   `).all(MIN_ARTICLES);
@@ -485,6 +500,10 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
     const sEv = eventState.get(survivor), aEv = eventState.get(absorbedId);
     if (!sEv || !aEv) continue;
     for (const aid of aEv.ids) { linkArticle.run(survivor, aid, now); sEv.ids.add(aid); }
+    // The survivor just gained the absorbed event's articles, so it was active
+    // NOW. markMerged only touches the absorbed row; without this the survivor
+    // keeps its old last_activity_at and can go dormant mid-story (#174).
+    touchActivity.run(now, now, survivor);
     markMerged.run(JSON.stringify({ merged_into: survivor, merged_into_slug: sEv.slug }), now, absorbedId);
     // Wave 1: 🧭 merge log — the pair + the scores that justified convergence.
     // The ent reported MUST be the measure the gate used (unified when on) —
@@ -566,7 +585,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
         const tEv = eventState.get(target);
         if (tEv) {
           for (const aid of cl.aids) { linkArticle.run(target, aid, now); tEv.ids.add(aid); }
-          for (const cm of db.prepare("SELECT * FROM cluster_market_links WHERE cluster_id = ? ORDER BY rank").all(c.id)) {
+          for (const cm of eligibleClusterMarkets(db, c.id)) {
             linkMarket.run(target, cm.market_id, cm.weight, cm.rank, now);
           }
           touchActivity.run(now, now, target);
@@ -652,7 +671,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
             if (ENTITY_MIN > 0) upsertSignature(db, eventId, cl.entKeys, idfMap, fallbackIdf, now); // cluster keys ≈ the adopted event's live identity
 
             for (const aid of cl.aids) linkArticle.run(eventId, aid, now);
-            for (const cm of db.prepare("SELECT * FROM cluster_market_links WHERE cluster_id = ? ORDER BY rank").all(c.id)) {
+            for (const cm of eligibleClusterMarkets(db, c.id)) {
               linkMarket.run(eventId, cm.market_id, cm.weight, cm.rank, now);
             }
             return;
@@ -687,7 +706,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
         }
       }
       for (const aid of cl.aids) linkArticle.run(eventId, aid, now);
-      for (const cm of db.prepare("SELECT * FROM cluster_market_links WHERE cluster_id = ? ORDER BY rank").all(c.id)) {
+      for (const cm of eligibleClusterMarkets(db, c.id)) {
         linkMarket.run(eventId, cm.market_id, cm.weight, cm.rank, now);
       }
     } catch (err) {

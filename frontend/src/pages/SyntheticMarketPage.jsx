@@ -12,11 +12,13 @@ import { useSyntheticMarket, useTradeQuote, useExecuteTrade } from "../hooks/use
 import ProbabilityBar from "../components/predictions/ProbabilityBar";
 import { COPY } from "../lib/copyGuide";
 import { useT } from "../lib/i18n";
+import { useMarketOdds } from "../hooks/useSiteConfig";
 
 const PRESET_AMOUNTS = [5, 10, 25, 100];
 
 export default function SyntheticMarketPage() {
   const { t } = useT();
+  const showOdds = useMarketOdds();
   const { id } = useParams();
   const { data, isLoading, error } = useSyntheticMarket(id);
   const [side, setSide] = useState("yes");
@@ -130,7 +132,7 @@ export default function SyntheticMarketPage() {
             <div className="text-xs space-y-1 text-[var(--color-text-secondary)] tabular-nums mb-3 p-2 bg-[var(--color-surface-2)] rounded">
               <div>You receive: <strong className="text-[var(--color-text)]">{quote.data.quote.shares.toFixed(2)} {side.toUpperCase()} shares</strong></div>
               <div>Avg price: <strong className="text-[var(--color-text)]">${quote.data.quote.avg_price.toFixed(3)}</strong> · Slippage {(quote.data.quote.slippage * 100).toFixed(2)}%</div>
-              <div>YES price moves to <strong className="text-[var(--color-text)]">{(quote.data.quote.yes_price_after * 100).toFixed(1)}%</strong></div>
+              {showOdds && <div>YES price moves to <strong className="text-[var(--color-text)]">{(quote.data.quote.yes_price_after * 100).toFixed(1)}%</strong></div>}
             </div>
           ) : quote.isError ? (
             <p className="text-xs text-red-500 mb-3">Quote failed: {quote.error?.response?.data?.error || quote.error?.message}</p>

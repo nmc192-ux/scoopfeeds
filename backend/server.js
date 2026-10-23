@@ -296,7 +296,7 @@ app.use("/scoop-ops",       socialRouter);     // /scoop-ops/social-queue — pr
 app.use("/scoop-ops/videos-gen", videoGenRouter); // video generation queue: /queue, /run, /approve/:id, /reject/:id
 app.use("/scoop-ops/video", videoOpsRouter);      // autopost recovery (§6.3): /unlist-recent, /status — inherits adminAuth above
 app.use("/scoop-ops/incident", incidentOpsRouter); // incident media ledger (Phase 1): /candidates, /commissions — inherits adminAuth above
-app.use("/scoop-ops/newsletter", newsletterOpsRouter); // newsletter ops: /status, /welcome/run, /welcome/test
+app.use("/scoop-ops/newsletter", newsletterOpsRouter); // newsletter ops: /status, /preview, /test, /welcome/run, /welcome/test
 app.use("/scoop-ops/x-digest",   xDigestOpsRouter);    // X-posting queue digest ops (Sprint 2.x.2): /status, /preview, /send-now
 app.use("/scoop-ops/queues", queueOpsRouter); // BullMQ / Redis queue diagnostics
 app.use("/scoop-ops/diagnostics", diagnosticsOpsRouter); // prod-safe DB/Redis/process diagnostics
@@ -323,6 +323,17 @@ app.get("/api/health", (req, res) => {
     // green-logs/dead-pipeline outages; `pipelines.ok:false` or any `stale:true` means a
     // stage stopped producing even though every process looks healthy.
     pipelines: getPipelineHealth(db),
+  });
+});
+
+// Public site flags the SPA needs at runtime (the SPA is built once, env flags are not).
+// SITE_MARKET_ODDS gates Reality Index / Truth Gap / market-implied probabilities in
+// every reader surface; off unless literally "true". Turning it on is stop-list item 6.
+app.get("/api/site-config", (_req, res) => {
+  res.set("Cache-Control", "public, max-age=60");
+  res.json({
+    marketOdds: process.env.SITE_MARKET_ODDS === "true",
+    v2: process.env.SITE_V2 === "true",
   });
 });
 

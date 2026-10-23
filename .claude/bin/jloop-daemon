@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# J Loop daemon — unattended worker for the Mac Mini.
+# J Loop daemon — the full-throttle build engine, running unattended on the Mac Mini.
+# Rulebook: docs/engine/full-throttle.md (DrJ, 2026-10-14). Install: .claude/bin/jloop-install.
 #
-# Cost model: the queue check is a plain `gh` call and the approval check is a
-# plain Slack API call. Neither spends model tokens. `claude` is invoked ONLY
-# when there is real work, so an idle 24/7 daemon costs nothing.
+# Cost model: every queue check, the pause check and the merge are plain `gh` calls and
+# spend no model tokens. `claude` runs ONLY when there is real work, so an idle daemon
+# costs nothing.
 #
-# Cycle order each tick:
-#   1. process Slack approvals   (free)
-#   2. /build  if an issue is spec-ready
-#   3. /review if an issue is built
-#   4. /plan   if everything is idle and fewer than 2 proposals are pending
+# Each tick, in order:
+#   0. pause      — an open issue labelled engine:pause stops everything (free)
+#   1. sync       — main checked out, clean and fast-forwarded (free)
+#   2. SHIP       — merge green PRs: issue PRs at j-loop:ready-to-ship, and /plan's
+#                   docs-only marker PRs. Done HERE, in shell, behind hard checks, so the
+#                   agents never hold merge rights (settings.json still denies them). (free)
+#   3. REVIEW     — /review if an issue is built        (finish work before starting more)
+#   4. BUILD      — /build  if an issue is spec-ready
+#   5. PLAN       — /plan   when fewer than JLOOP_MIN_READY specs are waiting (rate-limited)
+#   6. FLAGS      — once a day: open PRs that switch on flags with 24 clean hours
 set -uo pipefail
 
 INTERVAL="${JLOOP_INTERVAL:-60}"
@@ -20,25 +26,32 @@ MODEL_PLAN="${JLOOP_MODEL_PLAN:-opus}"
 DAILY_CAP="${JLOOP_DAILY_CAP:-40}"
 MAX_FAILS="${JLOOP_MAX_FAILS:-3}"
 ENABLE_PLAN="${JLOOP_ENABLE_PLAN:-1}"
+ENABLE_SHIP="${JLOOP_ENABLE_SHIP:-1}"
+MIN_READY="${JLOOP_MIN_READY:-3}"            # plan when fewer spec-ready issues than this
+PLAN_EVERY="${JLOOP_PLAN_EVERY_MIN:-120}"    # minutes between /plan runs
+FLAG_HOUR="${JLOOP_FLAG_HOUR:-10}"           # local hour after which the daily flag pass runs
+REPO_SLUG="${JLOOP_REPO:-nmc192-ux/scoopfeeds}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_DIR="$REPO_ROOT/.j-loop"; LOG_DIR="$STATE_DIR/logs"
 NOTIFY="$REPO_ROOT/.claude/bin/jloop-notify"
-APPROVE="$REPO_ROOT/.claude/bin/jloop-approve"
 COUNT_FILE="$STATE_DIR/daily-count"
+PLAN_STAMP="$STATE_DIR/last-plan"
+FLAG_STAMP="$STATE_DIR/last-flag-pass"
 
 cd "$REPO_ROOT" || exit 1
 mkdir -p "$LOG_DIR"
 FAILS=0
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+notify() { "$NOTIFY" "$@" >/dev/null 2>&1 || true; }
 
 die() {
   log "FATAL: $1"
-  "$NOTIFY" failed "J Loop daemon stopped" "$1
+  notify failed "Build engine stopped" "$1
 
 Halted instead of retrying. Restart:
-launchctl kickstart -k gui/\$(id -u)/com.jloop.scoopfeeds" >/dev/null 2>&1
+launchctl kickstart -k gui/\$(id -u)/com.jloop.scoopfeeds"
   exit 1
 }
 
@@ -51,100 +64,190 @@ cycles_today() {
 bump_cycles() { echo "$(today) $(( $(cycles_today) + 1 ))" > "$COUNT_FILE"; }
 
 count_label() {
-  gh issue list --label "$1" --state open --json number --jq 'length' 2>/dev/null || echo 0
+  gh issue list -R "$REPO_SLUG" --label "$1" --state open --json number --jq 'length' 2>/dev/null || echo 0
 }
 first_issue() {
-  gh issue list --label "$1" --state open --json number,createdAt \
-    --jq 'sort_by(.createdAt) | .[0].number // empty' 2>/dev/null
+  gh issue list -R "$REPO_SLUG" --label "$1" --state open --json number,createdAt,labels \
+    --jq '[.[] | select([.labels[].name] | index("engine:needs-drj") | not)] | sort_by(.createdAt) | .[0].number // empty' 2>/dev/null
+}
+minutes_since() { [ -f "$1" ] || { echo 999999; return; }; echo $(( ( $(date +%s) - $(cat "$1") ) / 60 )); }
+
+# ── 0. pause ────────────────────────────────────────────────────────────────────
+paused() {
+  local n; n="$(count_label 'engine:pause')"
+  [ "${n:-0}" -gt 0 ]
 }
 
-run_cycle() {
-  local skill="$1" label="$2" model stamp logf code
-  case "$skill" in
-    build)  model="$MODEL_BUILD" ;;
-    review) model="$MODEL_REVIEW" ;;
-    plan)   model="$MODEL_PLAN" ;;
-    *)      model="sonnet" ;;
-  esac
-  stamp="$(date '+%Y%m%d-%H%M%S')"; logf="$LOG_DIR/${skill}-${stamp}.log"
-  log "/$skill on $model ${label}"
+# ── 1. sync main ────────────────────────────────────────────────────────────────
+# Every agent run starts from a clean, current main. A dirty tree means a previous run
+# left something behind: stop rather than build on top of it.
+sync_main() {
+  git fetch -q origin main || { log "  sync: fetch failed"; return 1; }
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    die "Working tree is dirty — a previous run left uncommitted changes.
+$(git status --short | head -10)
+Inspect in $REPO_ROOT, then commit/stash and restart."
+  fi
+  git checkout -q main 2>/dev/null || { log "  sync: checkout main failed"; return 1; }
+  git merge -q --ff-only origin/main 2>/dev/null || { log "  sync: main cannot fast-forward"; return 1; }
+}
+
+# ── 2. ship ─────────────────────────────────────────────────────────────────────
+# All checks on the head commit completed and green (success/skipped/neutral), at least one.
+pr_green() {
+  gh pr view "$1" -R "$REPO_SLUG" --json statusCheckRollup --jq '
+    (.statusCheckRollup // []) as $c
+    | ($c | length) > 0
+      and ([ $c[] | (.conclusion // .state // "") | ascii_upcase ]
+           | all(. == "SUCCESS" or . == "SKIPPED" or . == "NEUTRAL"))' 2>/dev/null
+}
+pr_has_label() {
+  gh pr view "$1" -R "$REPO_SLUG" --json labels --jq "[.labels[].name] | index(\"$2\") != null" 2>/dev/null
+}
+merge_pr() {  # $1 PR, $2 title, $3 issue-or-empty
+  if gh pr merge "$1" -R "$REPO_SLUG" --squash --delete-branch >/dev/null 2>&1; then
+    log "  SHIPPED #$1 — $2"
+    if [ -n "$3" ]; then
+      gh issue close "$3" -R "$REPO_SLUG" --comment "Shipped automatically in #$1 (full throttle). The VPS deploys main within 5 minutes." >/dev/null 2>&1 || true
+    fi
+    notify shipped "$2 (#$1)" "Merged to main. The VPS deploys within 5 minutes."
+    return 0
+  fi
+  log "  merge of #$1 refused by GitHub (conflict or branch protection) — left for review"
+  return 1
+}
+
+ship_ready() {
+  [ "$ENABLE_SHIP" = "1" ] || return 0
+  local shipped=0 n pr title
+
+  # a) issue PRs at j-loop:ready-to-ship
+  for n in $(gh issue list -R "$REPO_SLUG" --label j-loop:ready-to-ship --state open --json number,labels \
+      --jq '.[] | select([.labels[].name] | index("engine:needs-drj") | not) | .number' 2>/dev/null); do
+    pr="$(gh pr list -R "$REPO_SLUG" --state open --json number,headRefName,body \
+      --jq "[.[] | select((.headRefName | startswith(\"j-loop/issue-$n-\")) or ((.body // \"\") | test(\"(?i)(closes|fixes|resolves) #$n\\\\b\")))] | .[0].number // empty" 2>/dev/null)"
+    [ -n "$pr" ] || { log "  ship: issue #$n is ready-to-ship but has no open PR"; continue; }
+    [ "$(pr_has_label "$pr" engine:needs-drj)" = "true" ] && continue
+    [ "$(pr_green "$pr")" = "true" ] || { log "  ship: #$pr (issue #$n) not green yet"; continue; }
+    title="$(gh pr view "$pr" -R "$REPO_SLUG" --json title --jq .title)"
+    merge_pr "$pr" "$title" "$n" && shipped=$((shipped+1))
+  done
+
+  # b) /plan's backlog-marker PRs and the daily flag-flip PRs.
+  #    Marker PRs may touch docs/ only. Flag PRs are opened by the flag pass below and are
+  #    reviewed like any PR, so they travel the issue path above instead.
+  for pr in $(gh pr list -R "$REPO_SLUG" --state open --json number,headRefName \
+      --jq '.[] | select(.headRefName | startswith("j-loop/plan-")) | .number' 2>/dev/null); do
+    if gh pr view "$pr" -R "$REPO_SLUG" --json files --jq '[.files[].path] | all(startswith("docs/"))' 2>/dev/null | grep -q true; then
+      [ "$(pr_green "$pr")" = "true" ] || continue
+      merge_pr "$pr" "Plan v7 backlog markers" "" && shipped=$((shipped+1))
+    else
+      log "  ship: plan PR #$pr touches files outside docs/ — not auto-merged"
+    fi
+  done
+
+  [ $shipped -gt 0 ] && sync_main
+  return 0
+}
+
+# ── agent cycles ────────────────────────────────────────────────────────────────
+run_cycle() {  # $1 name, $2 model, $3 prompt, $4 label-for-log
+  local name="$1" model="$2" prompt="$3" stamp logf code
+  stamp="$(date '+%Y%m%d-%H%M%S')"; logf="$LOG_DIR/${name}-${stamp}.log"
+  log "$name on $model ${4:-}"
 
   if [ "${JLOOP_DRYRUN:-0}" = "1" ]; then log "  DRYRUN"; return 0; fi
 
-  claude -p "/$skill" --model "$model" --permission-mode acceptEdits --max-turns "$MAX_TURNS" > "$logf" 2>&1
+  claude -p "$prompt" --model "$model" --permission-mode acceptEdits --max-turns "$MAX_TURNS" > "$logf" 2>&1
   code=$?; bump_cycles
 
-  if grep -qiE "session limit|usage limit|rate limit|quota|credit balance|invalid api key|401|403" "$logf"; then
-    die "Account limit or auth failure during /$skill.
+  # Only the first lines carry CLI-level errors; test output further down can mention 403.
+  if head -5 "$logf" | grep -qiE "session limit|usage limit|rate limit|credit balance|invalid api key|please run /login"; then
+    die "Account limit or auth failure during $name.
 $(head -3 "$logf")
 Log: $logf"
   fi
 
-  if grep -q "JLOOP_IDLE" "$logf"; then log "  /$skill had nothing to do"; FAILS=0; return 10; fi
+  if grep -q "JLOOP_IDLE" "$logf"; then log "  $name had nothing to do"; FAILS=0; return 10; fi
 
   if [ $code -ne 0 ]; then
     FAILS=$((FAILS+1))
-    log "  /$skill exited $code (failure $FAILS/$MAX_FAILS) — $logf"
+    log "  $name exited $code (failure $FAILS/$MAX_FAILS) — $logf"
     [ $FAILS -ge $MAX_FAILS ] && die "$MAX_FAILS consecutive failures.
 $(tail -5 "$logf")
 Log: $logf"
     sleep $((60*FAILS)); return 1
   fi
 
-  FAILS=0; log "  /$skill finished — $logf"; return 0
+  FAILS=0; log "  $name finished — $logf"; return 0
 }
 
-prune_logs() { find "$LOG_DIR" -name "*.log" -mtime +7 -delete 2>/dev/null; }
+PLAN_PROMPT="/plan
+Full throttle: follow docs/engine/full-throttle.md. Spec the next [queued] items of docs/plan/plan_v7.md (at most 3 this run) as issues labelled j-loop:spec-ready + their lane:* + phase:N, in the shape of issues #170-#179. Then change their markers to [spec #N] on a new branch named j-loop/plan-<YYYYMMDD-HHMM> (local time), commit, push and open a PR that touches docs/ only; the daemon merges it when green. Return to main afterwards (git checkout main is the daemon's job: just leave your branch pushed). If nothing is [queued], print JLOOP_IDLE."
+
+FLAG_PROMPT="Full throttle flag pass — follow docs/engine/full-throttle.md section 1 ('Flag flip').
+List PRs merged to main in the last 14 days that added a reader-facing flag (env flag or URL param, see docs/reference/env_reference.md). For each flag whose PR merged more than 24 hours ago and that is still off by default: check Sentry (if a Sentry tool is available) and the PR's issue for new errors since the merge. If clean, open ONE GitHub issue titled 'Switch on <FLAG>' labelled j-loop:spec-ready, its lane:* label and phase:flip, whose spec is: change the code default to on, update env_reference.md, nothing else. If an error appeared, comment on the original issue instead and do not open a flip. Never flip anything that re-enables market odds (stop list item 6). If there is nothing to flip, print JLOOP_IDLE."
 
 trap 'log "stopped."; exit 0' INT TERM
 
-log "J Loop daemon starting"
-log "  repo:     $REPO_ROOT"
+log "Build engine (full throttle) starting"
+log "  repo:     $REPO_ROOT  ($REPO_SLUG)"
 log "  models:   plan=$MODEL_PLAN build=$MODEL_BUILD review=$MODEL_REVIEW"
-log "  interval: ${INTERVAL}s   daily cap: ${DAILY_CAP}   /plan: $ENABLE_PLAN"
+log "  interval: ${INTERVAL}s   daily cap: ${DAILY_CAP}   plan: $ENABLE_PLAN (min ready $MIN_READY, every ${PLAN_EVERY}m)   ship: $ENABLE_SHIP"
 
 command -v claude >/dev/null 2>&1 || die "claude not found in PATH"
 command -v gh >/dev/null 2>&1 || die "gh not found in PATH"
-gh auth status >/dev/null 2>&1 || die "gh is not authenticated"
-if [ -n "${SLACK_BOT_TOKEN:-}" ] && [ -n "${SLACK_CHANNEL_ID:-}" ]; then
-  log "  slack:    bot token (emoji approval enabled)"
-else
-  log "  slack:    webhook or file only — approve with gh issue edit instead"
-fi
+command -v jq >/dev/null 2>&1 || log "  note: jq not installed — fine, gh has --jq built in"
+gh auth status >/dev/null 2>&1 || die "gh is not authenticated (run: gh auth login)"
 
 PRUNE_TICK=0
+WAS_PAUSED=0
 
 while true; do
-  if [ "$DAILY_CAP" -gt 0 ] && [ "$(cycles_today)" -ge "$DAILY_CAP" ]; then
-    log "daily cap reached ($DAILY_CAP) — idling"; sleep 900; continue
+  # 0. pause
+  if paused; then
+    [ $WAS_PAUSED -eq 0 ] && { log "engine:pause issue is open — paused"; notify info "Engine paused" "An engine:pause issue is open. Close it to resume."; }
+    WAS_PAUSED=1; sleep 300; continue
   fi
+  [ $WAS_PAUSED -eq 1 ] && { log "resumed"; notify info "Engine resumed" "No engine:pause issue is open."; WAS_PAUSED=0; }
 
-  # 1. Approvals — free.
-  [ -x "$APPROVE" ] && "$APPROVE" 2>&1 | sed 's/^/  approvals: /' | grep -v '^  approvals: $' || true
+  # 1. sync
+  sync_main || { sleep "$INTERVAL"; continue; }
+
+  # 2. ship — free, and not counted against the daily cap
+  ship_ready
+
+  if [ "$DAILY_CAP" -gt 0 ] && [ "$(cycles_today)" -ge "$DAILY_CAP" ]; then
+    log "daily cap reached ($DAILY_CAP agent runs) — shipping only until midnight"; sleep 900; continue
+  fi
 
   did_work=0
 
-  # 2. Build.
-  b="$(first_issue 'j-loop:spec-ready')"
-  if [ -n "$b" ]; then run_cycle build "for issue #$b"; [ $? -ne 10 ] && did_work=1; fi
-
-  # 3. Review.
+  # 3. review first: finishing work beats starting more
   r="$(first_issue 'j-loop:built')"
-  if [ -n "$r" ]; then run_cycle review "for issue #$r"; [ $? -ne 10 ] && did_work=1; fi
+  if [ -n "$r" ]; then run_cycle review "$MODEL_REVIEW" "/review" "for issue #$r"; [ $? -ne 10 ] && did_work=1; sync_main; fi
 
-  # 4. Plan — only when nothing else is moving.
-  if [ "$ENABLE_PLAN" = "1" ] && [ $did_work -eq 0 ]; then
-    inflight=0
-    for L in j-loop:spec-ready j-loop:building j-loop:built j-loop:reviewing j-loop:ready-to-ship; do
-      inflight=$(( inflight + $(count_label "$L") ))
-    done
-    pending="$(count_label 'j-loop:proposed')"
-    if [ "$inflight" -eq 0 ] && [ "$pending" -lt 2 ]; then
-      run_cycle plan "(queue empty, $pending proposal(s) pending)"; [ $? -ne 10 ] && did_work=1
-    fi
+  # 4. build
+  if [ $did_work -eq 0 ]; then
+    b="$(first_issue 'j-loop:spec-ready')"
+    if [ -n "$b" ]; then run_cycle build "$MODEL_BUILD" "/build" "for issue #$b"; [ $? -ne 10 ] && did_work=1; sync_main; fi
   fi
 
-  PRUNE_TICK=$((PRUNE_TICK+1)); [ $((PRUNE_TICK % 60)) -eq 0 ] && prune_logs
+  # 5. plan — keep the spec-ready queue fed, at most once per PLAN_EVERY minutes
+  if [ "$ENABLE_PLAN" = "1" ] && [ "$(count_label 'j-loop:spec-ready')" -lt "$MIN_READY" ] \
+     && [ "$(minutes_since "$PLAN_STAMP")" -ge "$PLAN_EVERY" ]; then
+    date +%s > "$PLAN_STAMP"
+    run_cycle plan "$MODEL_PLAN" "$PLAN_PROMPT" "(spec-ready below $MIN_READY)"; [ $? -ne 10 ] && did_work=1; sync_main
+  fi
+
+  # 6. daily flag pass
+  if [ "$(date +%H)" -ge "$FLAG_HOUR" ] && [ "$(cat "$FLAG_STAMP" 2>/dev/null)" != "$(today)" ]; then
+    today > "$FLAG_STAMP"
+    run_cycle flags "$MODEL_REVIEW" "$FLAG_PROMPT" "(daily)"; sync_main
+  fi
+
+  PRUNE_TICK=$((PRUNE_TICK+1))
+  [ $((PRUNE_TICK % 60)) -eq 0 ] && find "$LOG_DIR" -name "*.log" -mtime +7 -delete 2>/dev/null
 
   if [ $did_work -eq 1 ]; then sleep 10; else sleep "$INTERVAL"; fi
 done
