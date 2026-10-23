@@ -25,6 +25,7 @@ import { startScreenServer, screenUrl } from "./screenServer.js";
 import { supervise } from "./watchdog.js";
 import { startPictureHub } from "../live/pictureHub.js";
 import { createLiveDesk, liveEnabled, TICK_MS } from "../live/liveDesk.js";
+import { OFFICIAL_FEEDS } from "../live/officialFeeds.js";
 import { loadManualEvents, fetchPublisherEvents, mergeCalendar, eventsFile, validateEvent } from "../live/eventsCalendar.js";
 import { probeFeed } from "../live/feedProbe.js";
 import { createLiveLog, liveLogDir } from "../live/liveLog.js";
@@ -142,13 +143,16 @@ export async function startUnit(opts) {
     await takeOver(spawnFeeder({ args: buildLiveFeederArgs({ mediaUrl, httpHeaders }), live }), { what: "live feed", firstMs: 20_000 });
     await page.evaluate((o) => window.ScoopRadio?.goLive?.(o), { ...overlay, picture: opts.pictureHub.url });
   };
-  /** Back to the grid: our screen first, then the bed takes the audio back. */
+  /** Back to the grid: the bed takes the audio back first (the credit stays up while the feed's sound is on air), then our screen. */
   const endLive = async () => {
-    await page?.evaluate(() => window.ScoopRadio?.endLive?.()).catch(() => {});
-    opts.pictureHub?.clear();
-    if (!feeder?.live || done || stopping) return;
-    try { await takeOver(spawnFeeder({ args: buildFeederArgs({ bed: bedNow.bed, bedLufs: bedNow.lufs }), bed: bedNow.bed }), { what: "bed" }); }
-    catch (err) { finish(`planned-restart`); throw err; }   // the restarted unit starts on the grid
+    try {
+      if (!feeder?.live || done || stopping) return;
+      try { await takeOver(spawnFeeder({ args: buildFeederArgs({ bed: bedNow.bed, bedLufs: bedNow.lufs }), bed: bedNow.bed }), { what: "bed" }); }
+      catch (err) { finish(`planned-restart`); throw err; }   // the restarted unit starts on the grid
+    } finally {
+      await page?.evaluate(() => window.ScoopRadio?.endLive?.()).catch(() => {});
+      opts.pictureHub?.clear();
+    }
   };
 
   let page = null, lastWritten = null, browser = null, timer = null, stallTimer = null, demoTimer = null, latest = null, lastFrameAt = Date.now();
@@ -283,7 +287,10 @@ export async function runPlayout(o = {}) {
       const man = loadManualEvents(eventsFile(env));
       for (const r of man.rejected) log(`live calendar: rejected ${JSON.stringify(r.raw ?? "")}: ${r.error}`);
       if (Date.now() - (calCache.pubAt || 0) > 30 * 60_000) {
-        calCache.pub = await fetchPublisherEvents({ log }).catch((e) => { log(`live calendar: publisher schedules failed (${e.message})`); return []; });
+        // Only feeds set to schedule "auto" can air a publisher event, so only those are fetched here
+        // (cli.js calendar --fetch lists the rest): no YouTube scraping from the playout box for nothing.
+        const autoFeeds = OFFICIAL_FEEDS.filter((f) => f.schedule === "auto");
+        calCache.pub = !autoFeeds.length ? [] : await fetchPublisherEvents({ feeds: autoFeeds, log }).catch((e) => { log(`live calendar: publisher schedules failed (${e.message})`); return []; });
         calCache.pubAt = Date.now();
       }
       calCache = { ...calCache, at: Date.now(), events: mergeCalendar(man.events, calCache.pub || []) };

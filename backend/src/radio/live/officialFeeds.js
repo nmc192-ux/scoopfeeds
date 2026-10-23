@@ -157,6 +157,14 @@ export function assertCanAir({ entryId, url, probe }, { feeds = OFFICIAL_FEEDS }
   if (h && !(entry.youtube || []).some((x) => x.toLowerCase() === h)) {
     throw new Error(`live feed refused: ${url} plays a stream from ${probe.uploaderHandle}, which is not on "${entry.id}"`);
   }
+  // A page that resolves to a YouTube stream whose channel the probe could not name is refused too:
+  // an unknown channel is not an allowed one.
+  if (!h && !youtubeHandleOf(url) && /youtube/i.test(String(probe?.extractor || ""))) {
+    throw new Error(`live feed refused: ${url} plays a YouTube stream whose channel could not be confirmed`);
+  }
+  for (const resolved of [probe?.mediaUrl, probe?.channelUrl]) {
+    if (resolved && isNeverAirHost(resolved)) throw new Error(`live feed refused: ${url} resolves to another broadcaster's stream`);
+  }
   if (!probe || probe.ok !== true) {
     throw new Error(`live feed refused: pre-air check ${probe ? `failed (${probe.reason})` : "did not run"} for ${url}`);
   }
