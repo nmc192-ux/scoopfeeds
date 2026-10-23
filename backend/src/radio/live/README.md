@@ -7,6 +7,7 @@ broadcaster's live feed** (CNN, Al Jazeera, BBC…).
 | File | What |
 |---|---|
 | `officialFeeds.js` | The allow-list. DrJ adds entries; the engine may propose one in a PR. `assertCanAir()` is the only gate to air. |
+| ↳ #217 fields | `licence` {url, quote}, `credit` (on screen), `nonCommercialOnly` (refused while `RADIO_STREAM_MONETISED` is on), `macCheck` (`null` = refused until `cli.js check` has passed on the Mac and the result is recorded). Research and left-out candidates: `docs/radio/official-feeds-217.md`. |
 | `feedProbe.js` | Pre-air check: live, public, plays with no login (yt-dlp with no cookies/config, then ffprobe). |
 | `eventsCalendar.js` + `events.manual.json` | Scheduled events: the manual file, plus publisher-announced YouTube streams (listed only unless the entry says `schedule: "auto"`). |
 | `liveDesk.js` | Grid → `LIVE · <publisher>` at start → grid at end or after 30 s with no media. One attempt per event. |
