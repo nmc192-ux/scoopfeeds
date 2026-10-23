@@ -47,15 +47,15 @@ If YouTube setup fails, the stream still goes out and DrJ is alerted to go live 
 - Two presenter voices and live data graphics.
 - An always-on wired host with backup power, or a cloud playout, so air never depends on home Wi-Fi.
 
-## Standing approval: DRAFT for DrJ
+## Standing approval: IN FORCE (DrJ, 22 Oct 2026)
 
-CLAUDE.md says DrJ approves every irreversible action, with one exception (the long-form autopost loop). Going on
-air unattended is an external post, so it needs the same kind of explicit, scoped exception. **Proposed scope:**
+CLAUDE.md says DrJ approves every irreversible action, with scoped exceptions (the long-form autopost loop, and this one).
+Going on air unattended is an external post, so it has an explicit, scoped exception, recorded in CLAUDE.md. **Scope:**
 
 - **Covers only** `programme/autoair.mjs` airing a programme hour produced by `produce.mjs` that passed `airCheck`,
-  on the ScoopFeeds YouTube channel, at times DrJ installed with `install-autoair.sh`.
+  on the main ScoopFeeds YouTube channel and the ScoopFeeds X account (X Live), at times installed on the Mac
+  with `install-autoair.sh`. `autoair.mjs` drives YouTube only until #196/#207 add X.
 - **Off** unless `RADIO_AUTOAIR_ENABLED` is literally `1`; `~/scoopfeeds-radio/PAUSE` stops it without editing anything.
-- **Never covered:** code merges, prod deploys, new formats or segments, changing the clock or the Rule 0 layer,
-  credentials, or any other channel. Those stay human-approved.
-
-*Not in force until DrJ approves it and it is added to CLAUDE.md.*
+- **Never covered:** code merges outside the engine's normal gates, prod deploys of the web app outside autodeploy,
+  new formats, changing the clock or the Rule 0 layer, credentials, or any other channel. Those stay human-approved.
+- **Playout host:** the Mac mini now; the design must allow a cloud host later.
