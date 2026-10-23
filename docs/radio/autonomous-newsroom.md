@@ -59,3 +59,5 @@ air unattended is an external post, so it needs the same kind of explicit, scope
   credentials, or any other channel. Those stay human-approved.
 
 *Not in force until DrJ approves it and it is added to CLAUDE.md.*
+
+Platform safety (disclosure, music provenance, film clearance, the standing watchdog, election claims): `docs/radio/safety.md` (#208).

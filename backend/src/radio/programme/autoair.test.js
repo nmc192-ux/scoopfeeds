@@ -4,17 +4,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { airCheck } from "./airCheck.js";
+import { STATION_ID_LINE } from "../safety/disclosure.js";
 import { nextHour, newestVideo } from "./autoair.mjs";
 import { parseCnbc } from "./factPack.js";
 
 const H = Date.UTC(2026, 9, 14, 16);
-function produced({ hourStart = H, kept = 10, written = 12, hourStories = 5, partBytes = 2_000_000 } = {}) {
+function produced({ hourStart = H, kept = 10, written = 12, hourStories = 5, partBytes = 2_000_000, stationId = true } = {}) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), "air-"));
   fs.writeFileSync(path.join(d, "part-the-hour.wav"), Buffer.alloc(partBytes));
   fs.writeFileSync(path.join(d, "programme.json"), JSON.stringify({ hourStart, cues: Array(30).fill({}), audio: [{ file: "part-the-hour.wav", from: H }], headlines: [] }));
   const lines = (n, story) => Array.from({ length: n }, (_, i) => ({ id: `s${i + 1}`, story }));
   fs.writeFileSync(path.join(d, "segments.raw.json"), JSON.stringify({ "the-hour": { lines: lines(written, "t1") } }));
-  fs.writeFileSync(path.join(d, "segments.json"), JSON.stringify({ "the-hour": { lines: lines(Math.min(kept, hourStories), "t1").concat(lines(Math.max(0, kept - hourStories), null)) } }));
+  const sid = stationId ? [{ id: "station-id", story: null, text: STATION_ID_LINE, mechanical: true }] : [];
+  fs.writeFileSync(path.join(d, "segments.json"), JSON.stringify({ "the-hour": { lines: sid.concat(lines(Math.min(kept, hourStories), "t1"), lines(Math.max(0, kept - hourStories), null)) } }));
   return d;
 }
 
@@ -27,6 +29,12 @@ test("air check: wrong hour, short audio, heavy fact-check losses and a thin Hou
   assert.match(airCheck(produced({ partBytes: 10 }), { hourStart: H }).problems.join(), /only 10 bytes/);
   assert.match(airCheck(produced({ kept: 5, written: 12 }), { hourStart: H }).problems.join(), /passed the fact checks/);
   assert.match(airCheck(produced({ hourStories: 2 }), { hourStart: H }).problems.join(), /only 2 checked stories/);
+});
+test("air check (#208): an hour without the spoken station-ID disclosure does not air; the mechanical line is not counted as kept", () => {
+  assert.match(airCheck(produced({ stationId: false }), { hourStart: H }).problems.join(), /station-ID disclosure/);
+  // 9 written lines kept of 12 = 75 %: the station-ID line must not lift it, nor 7 of 12 (58 %) over the 60 % bar
+  assert.match(airCheck(produced({ kept: 7, written: 12 }), { hourStart: H }).problems.join(), /passed the fact checks/);
+  assert.equal(airCheck(produced({ kept: 7, written: 12 }), { hourStart: H }).stats.linesKept, 7);
 });
 test("air check: an empty directory is a failure, not a pass", () => {
   const r = airCheck(fs.mkdtempSync(path.join(os.tmpdir(), "air-")), { hourStart: H });

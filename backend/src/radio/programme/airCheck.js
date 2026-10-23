@@ -7,6 +7,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { STATION_ID_LINE, STATION_ID_LINE_ID } from "../safety/disclosure.js";
 
 export const AIR_RULES = Object.freeze({
   minKeptShare: 0.6,       // at least 60 % of the written lines survived the fact checks
@@ -16,7 +17,8 @@ export const AIR_RULES = Object.freeze({
 });
 
 const readJson = (f) => JSON.parse(fs.readFileSync(f, "utf8"));
-const lineCount = (segs) => Object.values(segs || {}).reduce((n, s) => n + (Array.isArray(s?.lines) ? s.lines.length : 0), 0);
+// mechanical lines (the station ID) are not written by the model, so they do not count toward the kept share
+const lineCount = (segs) => Object.values(segs || {}).reduce((n, s) => n + (Array.isArray(s?.lines) ? s.lines.filter((l) => !l?.mechanical).length : 0), 0);
 
 /**
  * @param {string} dir   the producer's --out directory
@@ -56,6 +58,8 @@ export function airCheck(dir, { hourStart, rules = AIR_RULES } = {}) {
     const hour = Object.entries(kept).find(([id]) => id === "the-hour")?.[1];
     stats.hourStories = (hour?.lines || []).filter((l) => /^s\d/.test(l.id || "") && l.story).length;
     if (stats.hourStories < rules.minHourStories) problems.push(`The Hour has only ${stats.hourStories} checked stories`);
+    // #208: the hour carries the spoken disclosure, word for word
+    if (!(hour?.lines || []).some((l) => l.id === STATION_ID_LINE_ID && l.text === STATION_ID_LINE)) problems.push("The Hour is missing the spoken station-ID disclosure line");
   }
 
   return { ok: problems.length === 0, problems, stats };

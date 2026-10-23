@@ -8,6 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { daypartAt, pickBed, listBeds } from "./musicLibrary.js";
+import { makeMusicLibrary } from "./musicTestLibrary.js";
 
 const at = (iso) => new Date(iso);
 
@@ -33,14 +34,8 @@ for (const [iso, want] of CASES) {
   test(`daypart ${iso} → ${want}`, () => assert.equal(daypartAt(at(iso)), want));
 }
 
-function tmpLibrary(files) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "radio-music-"));
-  for (const [part, names] of Object.entries(files)) {
-    fs.mkdirSync(path.join(dir, part), { recursive: true });
-    for (const n of names) fs.writeFileSync(path.join(dir, part, n), "x");
-  }
-  return dir;
-}
+// every file carries a complete manifest entry (#208): the provenance gate itself is tested in safety/safety.test.js
+const tmpLibrary = (files) => makeMusicLibrary(files);
 
 test("pickBed never returns the same file twice in a row", () => {
   const dir = tmpLibrary({ markets: ["a.mp3", "b.mp3", "c.mp3"] });
