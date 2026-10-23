@@ -16,7 +16,7 @@ started muted. The stutter is fixed: films now play through the encoder, not the
 |---|---|---|
 | Timer | launchd fires about 45 min before the hour | `playout/deploy/macos/install-autoair.sh 20:14` |
 | Orchestrator | produce → air check → YouTube setup → hand over from the 24/7 radio → air → watch → wrap up | `programme/autoair.mjs` |
-| Air check | the hour airs only if the files are there, it is the right hour, at least 60 % of written lines passed the fact checks and The Hour has at least 3 checked stories. Anything unmeasured fails | `programme/airCheck.js` |
+| Air check | the hour airs only if the files are there, it is the right hour, at least 60 % of written lines passed the fact checks, The Hour has at least 3 checked stories, and any film or feature has a content-safety clearance (#218, `docs/radio/content-safety.md`). Anything unmeasured fails | `programme/airCheck.js` |
 | YouTube Live | creates the public broadcast, binds the station's stream, sets the thumbnail, goes live once the signal arrives, completes it at the end | `live/youtubeLive.js` |
 | Markets | CNBC's quote feed first, Yahoo second | `programme/factPack.js` |
 | Unmute line | "No sound? Tap the speaker to unmute" on the countdown | programme screen |

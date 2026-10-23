@@ -4,9 +4,14 @@
  * The gate the auto-air run passes before it starts the playout. Anything it cannot measure is a FAILURE,
  * not a pass: a missing file, an unreadable report, a wrong hour. When it fails, nothing goes out and the
  * 24/7 music radio keeps the channel.
+ *
+ * A film or feature in the hour needs a valid content-safety clearance (safety/contentSafety.js, #218).
+ * autoair.mjs drops an uncleared film or feature before producing, so normally this never fires; it is
+ * the second lock.
  */
 import fs from "node:fs";
 import path from "node:path";
+import { hasValidClearance } from "../safety/contentSafety.js";
 
 export const AIR_RULES = Object.freeze({
   minKeptShare: 0.6,       // at least 60 % of the written lines survived the fact checks
@@ -45,6 +50,14 @@ export function airCheck(dir, { hourStart, rules = AIR_RULES } = {}) {
     stats.headlines = prog.headlines?.length || 0;
     if (prog.feature && prog.featurePath && !fs.existsSync(prog.featurePath)) problems.push(`feature file ${prog.featurePath} missing`);
     if (prog.film && prog.filmPath && !fs.existsSync(prog.filmPath)) problems.push(`film file ${prog.filmPath} missing`);
+    // DrJ's media rule (#218): no film or feature airs without a content-safety clearance for that exact file.
+    for (const [kind, name, p] of [["film", prog.film, prog.filmPath], ["feature", prog.feature, prog.featurePath]]) {
+      if (!name && !p) continue;
+      if (!p) { problems.push(`${kind} ${name} has no file path, so its content-safety clearance cannot be checked`); continue; }
+      if (!fs.existsSync(p)) continue;   // reported above
+      const c = hasValidClearance(p);
+      if (!c.ok) problems.push(`${kind} ${path.basename(p)}: ${c.why} (DrJ's media rule, #218)`);
+    }
   }
 
   if (raw && kept) {

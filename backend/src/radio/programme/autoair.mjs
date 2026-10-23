@@ -23,6 +23,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { airCheck } from "./airCheck.js";
+import { hasValidClearance } from "../safety/contentSafety.js";
 import { makeYouTubeLive, liveConfigured, goLiveWhenActive } from "../live/youtubeLive.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -94,8 +95,17 @@ async function main() {
 
   // ── 1. produce ──
   stage("producing");
-  const film = newestVideo(tilde(v.film || env.RADIO_AUTOAIR_FILM));
-  const feature = newestVideo(tilde(v.feature || env.RADIO_AUTOAIR_FEATURE));
+  // DrJ's media rule (#218): a film or feature without a valid content-safety clearance is dropped from
+  // the hour (the rest of the hour still airs); airCheck refuses the hour if one slips through anyway.
+  const cleared = async (kind, file) => {
+    if (!file) return null;
+    const c = hasValidClearance(file);
+    if (c.ok) return file;
+    await alert(`the ${kind} ${path.basename(file)} was left out of the ${fmtPkt(hourStart)} hour: ${c.why}. Clear it with: node src/radio/safety/contentSafetyCli.mjs check "${file}"`);
+    return null;
+  };
+  const film = await cleared("film", newestVideo(tilde(v.film || env.RADIO_AUTOAIR_FILM)));
+  const feature = await cleared("feature", newestVideo(tilde(v.feature || env.RADIO_AUTOAIR_FEATURE)));
   const featureTitle = v["feature-title"] || env.RADIO_AUTOAIR_FEATURE_TITLE || null;
   const pargs = [path.join(HERE, "produce.mjs"), "--hour", new Date(hourStart).toISOString(), "--out", out,
     "--music-dir", tilde(v["music-dir"] || env.RADIO_MUSIC_DIR || path.join(BASE, "music"))];

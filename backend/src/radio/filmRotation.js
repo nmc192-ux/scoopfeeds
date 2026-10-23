@@ -15,6 +15,21 @@
  */
 import { easternMinutes } from "./musicLibrary.js";
 
+/**
+ * DrJ's media rule (#218): only items with a valid content-safety clearance may be planned. `isCleared(file)`
+ * is safety/contentSafety.js hasValidClearance in production; injected so this stays pure. The ones left out
+ * are returned with the reason, never dropped silently.
+ */
+export function clearedLibrary(library, isCleared) {
+  if (typeof isCleared !== "function") throw new Error("clearedLibrary needs isCleared(file)");
+  const items = [], notCleared = [];
+  for (const it of library.items) {
+    const c = isCleared(it.file);
+    if (c?.ok === true) items.push(it); else notCleared.push({ id: it.id, why: c?.why || "not cleared" });
+  }
+  return { ...library, items, notCleared };
+}
+
 export const MIN_GAP_MS = 6 * 3600_000;
 export const NEW_DAYS = 7;
 export const BREAK_SEC = 5 * 60;
