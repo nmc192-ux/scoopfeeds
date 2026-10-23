@@ -18,6 +18,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { radioEnabled, statePath } from "../radio/radioState.js";
+import { electionMapEnabled, readMapState } from "../radio/election/mapStore.js";
+import { renderMapHtml } from "../radio/election/mapScene.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SCREEN_FILE = path.join(HERE, "../radio/screen/scoopfeeds-radio-screen.html");
@@ -37,8 +39,23 @@ radioApiRouter.get("/state.json", (req, res) => {
   res.type("application/json").send(body);
 });
 
+// Election map (#204): dark unless RADIO_ELECTION_MAP_ENABLED=true as well.
+const mapGate = (req, res, next) => (electionMapEnabled() ? next() : res.status(404).json({ error: "not found" }));
+radioApiRouter.get("/election-map.json", mapGate, (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const state = readMapState();
+  if (!state) return res.status(503).json({ error: "election map not built yet" });
+  res.json(state);
+});
+
 export const radioScreenRouter = express.Router();
 radioScreenRouter.use(gate);
+radioScreenRouter.get("/election-map", mapGate, (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const state = readMapState();
+  if (!state) return res.status(503).type("text/plain").send("Election map not built yet.");
+  res.type("html").send(renderMapHtml(state, { view: req.query.view === "governor" ? "governor" : "senate" }));
+});
 radioScreenRouter.get("/screen", (req, res) => {
   res.set("Cache-Control", "no-store");
   if (!fs.existsSync(SCREEN_FILE)) {
