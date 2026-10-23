@@ -66,3 +66,25 @@ export function buildFeederArgs({ bed, bedLufs }) {
   return ["-hide_banner", "-loglevel", "error", "-re", "-stream_loop", "-1", "-i", bed, "-vn",
     "-af", loudnessFilter(bedLufs), "-f", "s16le", "-ar", String(AUDIO.rate), "-ac", "2", "pipe:1"];
 }
+
+export const LIVE_PICTURE = Object.freeze({ fps: 15, width: 1280, height: 720, q: 4 });
+
+/**
+ * The live feeder (#202): ONE ffmpeg reads an official feed at real time and writes
+ *   stdout (fd 1): its sound as -16 LUFS raw s16le stereo PCM, the same format as the bed feeder, so it
+ *                  can take over the encoder's audio pipe with no restart;
+ *   fd 3:          its picture as JPEG frames for the screen (live/pictureHub.js).
+ * One reader for both keeps sound and picture from the same segment. Nothing is written to disk.
+ */
+export function buildLiveFeederArgs({ mediaUrl, httpHeaders = {} }) {
+  const a = ["-hide_banner", "-loglevel", "error", "-rw_timeout", "15000000"];
+  const h = Object.entries(httpHeaders || {}).filter(([k]) => /^(user-agent|referer|origin)$/i.test(k));
+  if (h.length) a.push("-headers", h.map(([k, v]) => `${k}: ${v}`).join("\r\n") + "\r\n");
+  a.push("-re", "-i", mediaUrl,
+    "-map", "0:a:0", "-vn", "-af", `aresample=async=1,loudnorm=I=${AUDIO.targetLufs}:TP=${AUDIO.truePeakDb}:LRA=11`,
+    "-f", "s16le", "-ar", String(AUDIO.rate), "-ac", "2", "pipe:1",
+    "-map", "0:v:0", "-an",
+    "-vf", `fps=${LIVE_PICTURE.fps},scale=${LIVE_PICTURE.width}:${LIVE_PICTURE.height}:force_original_aspect_ratio=decrease`,
+    "-c:v", "mjpeg", "-q:v", String(LIVE_PICTURE.q), "-f", "image2pipe", "pipe:3");
+  return a;
+}
