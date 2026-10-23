@@ -37,6 +37,7 @@ import PrivacyPage         from "./pages/PrivacyPage";
 import TermsPage           from "./pages/TermsPage";
 import EditorialPolicyPage from "./pages/EditorialPolicyPage";
 import ContactPage         from "./pages/ContactPage";
+import SendVideoPage       from "./pages/SendVideoPage";
 import SponsorPage         from "./pages/SponsorPage";
 import AnalysisPage        from "./pages/AnalysisPage";
 import AnalysisExplainedPage from "./pages/AnalysisExplainedPage";
@@ -192,6 +193,7 @@ export default function App() {
           <Route path="/terms"               element={<TermsPage />} />
           <Route path="/editorial-policy"    element={<EditorialPolicyPage />} />
           <Route path="/contact"             element={<ContactPage />} />
+          <Route path="/send-video"          element={<SendVideoPage />} />
           <Route path="/sponsor"             element={<SponsorPage />} />
           <Route path="/analysis"            element={<V2Redirect to="/briefs"><AnalysisPage /></V2Redirect>} />
           <Route path="/analysis/explained/:slug" element={<AnalysisExplainedPage />} />

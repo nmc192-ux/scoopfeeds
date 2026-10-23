@@ -24,6 +24,7 @@ import readerRouter      from "./src/routes/reader.js";
 import newsletterRouter  from "./src/routes/newsletter.js";
 import liveEventsRouter  from "./src/routes/liveEvents.js";
 import trackRouter       from "./src/routes/track.js";
+import footageRouter, { createFootageOpsRouter } from "./src/routes/footage.js";
 import affiliateRouter   from "./src/routes/affiliate.js";
 import socialRouter      from "./src/routes/social.js";
 import cardsRouter       from "./src/routes/cards.js";
@@ -249,6 +250,7 @@ app.use("/api/tips",         mutationLimiter);
 app.use("/api/watchlists",   mutationLimiter);
 app.use("/api/meter",        mutationLimiter);
 app.use("/api/csp-report",   mutationLimiter);
+app.use("/api/footage",      mutationLimiter);
 
 // Routes
 app.use("/api/news",      cacheMiddleware("medium"), newsRouter);
@@ -262,6 +264,7 @@ app.use("/api/reader",      readerLimiter, readerRouter);     // Readability-pow
 app.use("/api/newsletter",  newsletterRouter); // subscribe / unsubscribe / daily digest
 app.use("/api/live-events", liveEventsRouter); // "Live" tab dossiers (AI-synthesized briefs + metrics)
 app.use("/api/track",       trackRouter);      // frontend event beacons (page_view, share, save, dwell, etc.)
+app.use("/api/footage",     footageRouter);    // "Send us your video" intake (#219) — 404 unless RADIO_FOOTAGE_INTAKE_ENABLED=1
 app.use("/api/csp-report",  cspReportRouter);  // CSP violation reports (Sprint 2 Issue 2.2 — Stage 1 report-only)
 app.use("/api/affiliate",   affiliateRouter);  // geo-aware affiliate program picker + paywall CTA resolver
 app.use("/api/cards",       cardsRouter);      // branded OG/IG/Story PNG cards — disk-cached, 1-week public cache
@@ -302,6 +305,7 @@ app.use("/scoop-ops/queues", queueOpsRouter); // BullMQ / Redis queue diagnostic
 app.use("/scoop-ops/diagnostics", diagnosticsOpsRouter); // prod-safe DB/Redis/process diagnostics
 app.use("/scoop-ops/ri-ops",     riOpsRouter);          // Reality Index live provider/queue diag: /provider
 app.use("/scoop-ops/articles",   articlesOpsRouter);    // per-article remediation: /:id/set-published-at
+app.use("/scoop-ops/footage",    createFootageOpsRouter()); // #219 public submissions, for the Mac to pull — inherits adminAuth above
 app.use("/scoop-ops/metrics-ops", metricsOpsRouter);    // Phase A baseline metrics dashboard (Sprint 3.4) — distinct from SPA route at /scoop-ops/metrics
 
 // Health — public. Keeps only the operational contract: status, counts, and
