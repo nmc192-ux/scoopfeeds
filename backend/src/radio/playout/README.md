@@ -44,6 +44,25 @@ node backend/src/radio/playout/cli.js --out test.mp4 --seconds 120 --music-dir <
   boundary; neither YouTube nor X "start immediately" has a cap.
 - The relays' command lines contain their own URL + key, so the `ps` limitation above applies to each of them.
 
+### Stream watch and the Mac mini's resilience (#196)
+
+- **Stream watch** (`../live/streamWatch.js`, off unless `RADIO_STREAM_WATCH_ENABLED=true` and the `RADIO_YT_*` API
+  credentials are set): once a minute it asks YouTube's Live API whether the stream is arriving. YouTube reporting no
+  data for 2 minutes while the encoder runs restarts the YouTube output (only YouTube's relay when X is on too; the
+  whole unit when YouTube is the only output). In the 24/7 radio, a stream with no broadcast bound to it (the last one
+  ended) gets a new broadcast, created and bound (at most one every 10 minutes). In a programme hour autoair.mjs owns
+  the broadcast, so the watch only restarts. DrJ is alerted (Mac notification + email via `RADIO_ALERT_EMAIL`) only when
+  a restart has not recovered within 5 minutes. A failed API call is skipped, never counted as "no data".
+- **720p fallback**: at the start of a live RTMP run the upload is measured once (`networkQuality`); below 6 Mbps per
+  output the run uses `RADIO_PLAYOUT_QUALITY=720p`. A hand-set `RADIO_PLAYOUT_QUALITY` always wins; `RADIO_AUTO_QUALITY=off`
+  skips the measurement; an unmeasured upload stays at 1080p and says so in the log.
+- **Sleep, reboot, power cut**: `caffeinate` holds sleep off while the radio runs; the launch agent has `RunAtLoad` +
+  `KeepAlive`. Two settings only DrJ can make, and `deploy/macos/check-resilience.sh` (read-only; `install.sh` runs it)
+  says whether they are on: **System Settings > Energy > "Start up automatically after a power failure"**
+  (`sudo pmset -a autorestart 1`), and **System Settings > Users & Groups > "Automatically log in as"** the radio's user,
+  because a login agent starts only after that user logs in (needs FileVault off).
+- What a cloud playout host would need instead: `docs/radio/cloud-backup.md` (nothing provisioned).
+
 ### Upload bandwidth (path a: direct, or b: VPS relay)
 
 Two 1080p outputs need about 10.2 Mbps, 14.3 Mbps with the 40% headroom DrJ set (720p: 8.1 Mbps).

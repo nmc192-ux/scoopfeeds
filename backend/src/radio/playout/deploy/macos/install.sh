@@ -14,3 +14,4 @@ fi
 chmod 600 "$HOME/.scoopfeeds-radio.env"
 launchctl bootstrap "gui/$UIDN" "$PLIST"
 echo "installed $PLIST"
+bash "$HERE/check-resilience.sh" || true

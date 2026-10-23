@@ -24,6 +24,8 @@ import { resolveTarget, redact } from "./outputTarget.js";
 import { startScreenServer, screenUrl, programmeUrl } from "./screenServer.js";
 import { supervise } from "./watchdog.js";
 import { createFanout } from "../live/fanout.js";
+import { createStreamWatch, makePlayoutAlert, watchEnabled, WATCH } from "../live/streamWatch.js";
+import { makeYouTubeLive, liveConfigured } from "../live/youtubeLive.js";
 
 export const STALL_MS = 30_000;
 const AUDIO_TARGET = -16;
@@ -215,7 +217,7 @@ export async function startUnit(opts) {
         page.evaluate((s) => window.ScoopRadio?.scene(s), DEMO_SCENES[++i % DEMO_SCENES.length]).catch(() => {});
       }, demoCycleSec * 1000);
     }
-    return { exited, stop, page, boundary: () => fanout?.boundary(), outputs: () => fanout?.status() ?? null, swapBed: audioPipe ? swapBed : undefined, setMedia, clearMedia, get mediaTag() { return media?.tag ?? null; }, get bed() { return feeder?.bed ?? bed; } };
+    return { exited, stop, page, boundary: () => fanout?.boundary(), restartOutput: fanout ? (id) => fanout.restart(id) : null, outputs: () => fanout?.status() ?? null, swapBed: audioPipe ? swapBed : undefined, setMedia, clearMedia, get mediaTag() { return media?.tag ?? null; }, get bed() { return feeder?.bed ?? bed; } };
   } catch (err) {
     await stop();
     throw err;
@@ -348,7 +350,32 @@ export async function runPlayout(o = {}) {
     } finally { swapping = false; }
   }, DAYPART_CHECK_MS) : null;
   const statsTimer = live ? setInterval(() => log(`stats ${JSON.stringify(stats)} rssMB=${Math.round(process.memoryUsage().rss / 1048576)}${current.unit?.outputs?.() ? ` outputs=${current.unit.outputs().map((x) => `${x.id}:${x.state}`).join(",")}` : ""}`), 60_000) : null;
-  const wrapped = async () => { const u = await start(); current.unit = u; return u; };
+  const wrapped = async () => {
+    const u = await start();
+    Object.assign(current, { unit: u, alive: true, startedAt: Date.now() });
+    u.exited.then(() => { if (current.unit === u) current.alive = false; });
+    return u;
+  };
+
+  // #196 stream watch: is YouTube itself receiving? Off unless RADIO_STREAM_WATCH_ENABLED=true and the API credentials are set.
+  let watch = null;
+  if ((target.kind === "rtmp" || target.kind === "multi") && watchEnabled(env)) {
+    if (!liveConfigured(env)) log("stream watch: RADIO_STREAM_WATCH_ENABLED=true but no RADIO_YT_* API credentials; not watching");
+    else {
+      watch = (o.makeStreamWatch || createStreamWatch)({
+        yt: o.youtube || makeYouTubeLive({ env }),
+        streamId: String(env.RADIO_YT_STREAM_ID || "").trim() || null,
+        manageBroadcast: !progDir,   // a programme hour's broadcast belongs to autoair.mjs
+        encoderRunning: () => Boolean(current.unit && current.alive && Date.now() - current.startedAt >= WATCH.WARMUP_MS),
+        // several destinations: restart YouTube's relay only, so X stays up; one destination: the whole unit
+        restart: async (why) => { const u = current.unit; if (!u) return; if (u.restartOutput?.("youtube")) return; await u.stop(`stream-watch: ${why}`); },
+        alert: o.alerts === "off" ? (m) => log(`⚠ ${redact(m, env)}`) : makePlayoutAlert({ log: (m) => log(redact(m, env)), env }),
+        log: (m) => log(redact(m, env)), env,
+      });
+      watch.start();
+      log(`stream watch on: checks YouTube every ${WATCH.EVERY_MS / 1000} s${progDir ? " (programme mode: restarts only; autoair owns the broadcast)" : ""}`);
+    }
+  }
 
   try {
     const res = await supervise(wrapped, {
@@ -357,7 +384,7 @@ export async function runPlayout(o = {}) {
     });
     return { ...res, stats, target: target.kind === "file" ? target.path : target.kind === "segments" ? target.dir : target.kind === "multi" ? `rtmp x${target.outputs.length}` : "rtmp" };
   } finally {
-    clearInterval(dp); clearInterval(statsTimer); clearInterval(progTimer);
+    clearInterval(dp); clearInterval(statsTimer); clearInterval(progTimer); watch?.stop();
     await server?.close();
   }
 }

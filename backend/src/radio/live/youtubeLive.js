@@ -60,6 +60,12 @@ export function pickStream(items, wantedId) {
   throw new Error(`this channel has ${reusable.length} reusable streams; set RADIO_YT_STREAM_ID to one of: ${reusable.map((s) => `${s.id} (${s.snippet?.title || "untitled"})`).join(", ")}`);
 }
 
+/** The first broadcast in `items` bound to `streamId` that has not ended. */
+export function pickBound(items, streamId) {
+  const b = (items || []).find((x) => x?.id && x.contentDetails?.boundStreamId === streamId && !["complete", "revoked"].includes(x.status?.lifeCycleStatus));
+  return b ? { id: b.id, lifeCycleStatus: b.status?.lifeCycleStatus || null } : null;
+}
+
 export function makeYouTubeLive({ env = process.env, fetchImpl = fetch, now = Date.now } = {}) {
   const cred = liveCredentials(env);
   let tok = null;
@@ -128,6 +134,20 @@ export function makeYouTubeLive({ env = process.env, fetchImpl = fetch, now = Da
     async broadcastState(id) {
       const b = await call("GET", `${API}/liveBroadcasts?part=status&id=${encodeURIComponent(id)}`);
       return b.items?.[0]?.status?.lifeCycleStatus || null;
+    },
+
+    /**
+     * The broadcast this stream is bound to right now, live or waiting for data (#196 stream watch), else null.
+     * Looks at active broadcasts first, then upcoming ones; persistent ("Stream now") broadcasts are included.
+     * @returns {Promise<{ id: string, lifeCycleStatus: string|null }|null>}
+     */
+    async boundBroadcast(streamId) {
+      for (const status of ["active", "upcoming"]) {
+        const b = await call("GET", `${API}/liveBroadcasts?part=id,status,contentDetails&broadcastStatus=${status}&broadcastType=all&maxResults=50`);
+        const hit = pickBound(b.items, streamId);
+        if (hit) return hit;
+      }
+      return null;
     },
 
     /** Transition; "already there" (redundantTransition) is success. */

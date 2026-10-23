@@ -257,6 +257,19 @@ export function createFanout(o) {
     for (const out of outs) if (out.restartDue && out.proc && !out.expect) { out.restartDue = false; log(`${out.label}: restarting at a segment boundary before its cap`); endRelay(out, "restart"); }
   }
 
+  /**
+   * Restart one output now, by id (#196: the stream watch saw YouTube report no data). Only that relay is touched;
+   * the encoder and every other output keep running. Returns false for an unknown, shed or stopped output.
+   */
+  function restart(id) {
+    const out = outs.find((x) => x.id === id);
+    if (!out || stopped || out.state === "shed" || out.expect) return false;
+    log(`${out.label}: restart requested (only this output)`);
+    if (out.proc) endRelay(out, "restart");
+    else { out.retryAt = now(); spawnRelay(out); }
+    return true;
+  }
+
   async function stop() {
     if (stopped) return;
     const procs = outs.map((x) => x.proc).filter(Boolean);
@@ -273,5 +286,5 @@ export function createFanout(o) {
   for (const out of outs) spawnRelay(out);
   log(`fan-out to ${outs.map((x) => `${x.label} (${x.priority})`).join(", ")}`);
 
-  return { write, boundary, status, summary, stop, tick, on: (e, f) => ev.on(e, f), get outputs() { return outs; } };
+  return { write, boundary, restart, status, summary, stop, tick, on: (e, f) => ev.on(e, f), get outputs() { return outs; } };
 }
