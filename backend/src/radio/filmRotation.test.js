@@ -187,6 +187,31 @@ test("rehearsal args: each item's sound is padded/trimmed to its own picture; si
   assert.throws(() => buildRehearsalArgs({ items: [{ file: "/x.mp4", videoSec: NaN }], out: "/o.mp4" }), /measured/);
 });
 
+test("review #203: a re-import from the library slot itself is refused, not deleted", () => {
+  const { dir, add } = tmpLibrary();
+  const r = add("people", "e1", "One", "2026-10-01", 400);
+  fs.rmSync(r.target);
+  fs.writeFileSync(r.target, "real bytes");
+  assert.throws(() => importFilm({ file: r.target, series: "people", title: "One", publishedAt: "2026-10-01", name: "e1", dir, probe: () => 400 }), /already the library copy/);
+  assert.equal(fs.readFileSync(r.target, "utf8"), "real bytes");
+});
+
+test("review #203: every ScoopFeeds 60 item is a Short (even past 60 s); a sub-minute teaser never takes a film slot", () => {
+  const { dir, add } = tmpLibrary();
+  add("scoopfeeds-60", "long", "Long Short", "2026-10-10", 95);
+  add("a-eye", "teaser", "A-Eye teaser", "2026-10-10", 40);
+  add("a-eye", "e1", "A-Eye 1", "2026-10-10", 540);
+  const kinds = Object.fromEntries(loadLibrary(dir, { now: NOW }).items.map((i) => [i.id, i.kind]));
+  assert.deepEqual(kinds, { "scoopfeeds-60/long": "short", "a-eye/teaser": "short", "a-eye/e1": "film" });
+});
+
+test("review #203: film audio uses a fixed gain when measured, loudnorm only when not", () => {
+  const measured = buildFilmAudioArgs({ file: "/f.mp4", lufs: -20 });
+  assert.match(measured[measured.indexOf("-af") + 1], /^volume=4\.00dB,alimiter/);
+  const unmeasured = buildFilmAudioArgs({ file: "/f.mp4" });
+  assert.match(unmeasured[unmeasured.indexOf("-af") + 1], /^loudnorm=/);
+});
+
 test("marker pairing reports the worst offset and every unmatched marker", () => {
   const r = pairMarkers([1, 15, 31], [1.002, 15.03, 52]);
   assert.equal(r.pairs.length, 2);

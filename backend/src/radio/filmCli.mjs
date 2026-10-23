@@ -147,7 +147,9 @@ try {
   } else if (cmd === "plan") {
     const lib = loadLibrary(dir);
     const day = v.day || easternToday();
-    const recent = v.recent ? JSON.parse(fs.readFileSync(v.recent, "utf8")) : [];
+    // --recent takes either [{id, at}] or yesterday's `plan --out` file as written
+    const raw = v.recent ? JSON.parse(fs.readFileSync(v.recent, "utf8")) : [];
+    const recent = Array.isArray(raw) ? raw : (raw.plan || []).filter((p) => p.type !== "promo").map((p) => ({ id: p.id, at: p.at }));
     const res = planDay(lib, { slots: defaultSlots(day), recent });
     const out = { day, dir, libraryItems: lib.items.length, skipped: lib.skipped, ...res,
       plan: res.plan.map((p) => ({ ...p, atIso: new Date(p.at).toISOString() })), empty: res.empty.map((e) => ({ ...e, atIso: new Date(e.at).toISOString() })) };

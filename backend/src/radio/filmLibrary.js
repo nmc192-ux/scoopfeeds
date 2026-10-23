@@ -72,7 +72,9 @@ export function loadLibrary(dir = filmsDir(), { now = Date.now() } = {}) {
         durationSec,
         publishedAt,
         file,
-        kind: s.name === SHORTS_SERIES && durationSec <= SHORT_MAX_SEC ? "short" : "film",
+        // everything in ScoopFeeds 60 is a Short, whatever its length (YouTube Shorts run to 3 min); a
+        // sub-minute clip filed under a film series is a teaser, not a film, and must not take a grid slot
+        kind: s.name === SHORTS_SERIES || durationSec <= SHORT_MAX_SEC ? "short" : "film",
       });
     }
   }
@@ -102,6 +104,8 @@ export function importFilm({ file, series, title, publishedAt, name, copy = fals
   const base = (name || path.basename(file).replace(VIDEO, "")).replace(/[^a-z0-9._-]+/gi, "-");
   const ext = path.extname(file).toLowerCase();
   const target = path.join(dir, series, base + ext);
+  // re-importing a file from its own library slot would delete it below before linking/copying it
+  if (path.resolve(file) === path.resolve(target)) throw new Error(`${file} is already the library copy; import from the publish folder`);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.rmSync(target, { force: true });
   if (copy) fs.copyFileSync(file, target); else fs.symlinkSync(path.resolve(file), target);

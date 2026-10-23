@@ -15,7 +15,7 @@
  * Nothing here is imported by the live playout yet: PR #168 (issue #193) owns the programme-mode
  * playout, and it is not merged. Kept in its own file so it does not conflict with that PR.
  */
-import { VIDEO, AUDIO } from "./playout/ffmpegArgs.js";
+import { VIDEO, AUDIO, loudnessFilter } from "./playout/ffmpegArgs.js";
 
 const FRAME = `fps=${VIDEO.fps},scale=${VIDEO.width}:${VIDEO.height}:force_original_aspect_ratio=decrease,` +
   `pad=${VIDEO.width}:${VIDEO.height}:(ow-iw)/2:(oh-ih)/2:color=0x111111`;
@@ -44,10 +44,14 @@ export function buildFilmFrameArgs({ file, ssSec = 0 }) {
     "-vf", `${FRAME},format=yuvj420p`, "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "3", "pipe:1"];
 }
 
-/** Audio side: the film's own sound from ssSec, at real time, loudness-normalised, raw s16le stereo on stdout. */
-export function buildFilmAudioArgs({ file, ssSec = 0 }) {
+/**
+ * Audio side: the film's own sound from ssSec, at real time, raw s16le stereo on stdout. Gained the way the
+ * feeder gains a bed: a fixed gain from the film's measured loudness (`lufs`, playout/loudness.js), falling back
+ * to single-pass loudnorm only when unmeasured, so a film does not pump and starts with no loudnorm look-ahead.
+ */
+export function buildFilmAudioArgs({ file, ssSec = 0, lufs = null }) {
   return ["-hide_banner", "-loglevel", "error", "-re", "-ss", Math.max(0, ssSec).toFixed(3), "-i", file, "-vn",
-    "-af", `loudnorm=I=${AUDIO.targetLufs}:TP=${AUDIO.truePeakDb}:LRA=11`,
+    "-af", loudnessFilter(lufs),
     "-f", "s16le", "-ar", String(AUDIO.rate), "-ac", "2", "pipe:1"];
 }
 
