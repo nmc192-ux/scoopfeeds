@@ -4,7 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { airCheck } from "./airCheck.js";
-import { nextHour, newestVideo } from "./autoair.mjs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { nextHour, newestVideo, isPaused, autoairLive } from "./autoair.mjs";
 import { parseCnbc } from "./factPack.js";
 
 const H = Date.UTC(2026, 9, 14, 16);
@@ -57,4 +59,50 @@ test("CNBC quotes: prices, percent, UNCH as zero, unknown symbols ignored", () =
   assert.equal(q["^GDAXI"].pct, 0);
   assert.equal(q["BZ=F"].pct, 0.56);
   assert.equal(Object.keys(q).length, 3);
+});
+
+// #193: DrJ's standing approval covers airing only when RADIO_AUTOAIR_ENABLED is literally "1",
+// and ~/scoopfeeds-radio/PAUSE stops it. Both gates are asserted here.
+const AUTOAIR = fileURLToPath(new URL("./autoair.mjs", import.meta.url));
+
+test("gate: only a literal RADIO_AUTOAIR_ENABLED=1 airs; anything else is a rehearsal", () => {
+  assert.equal(autoairLive({ RADIO_AUTOAIR_ENABLED: "1" }), true);
+  for (const v of [undefined, "", "0", "true", "TRUE", "yes", " 1", "1 ", "01", "on"]) {
+    assert.equal(autoairLive({ RADIO_AUTOAIR_ENABLED: v }), false, `value ${JSON.stringify(v)} must not air`);
+  }
+  assert.equal(autoairLive({}), false);
+});
+
+test("gate: the PAUSE file is detected under the radio base dir", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "radio-base-"));
+  assert.equal(isPaused(base), false);
+  fs.writeFileSync(path.join(base, "PAUSE"), "");
+  assert.equal(isPaused(base), true);
+});
+
+test("gate: with PAUSE present, a run stops before producing even when RADIO_AUTOAIR_ENABLED=1", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "radio-base-"));
+  fs.writeFileSync(path.join(base, "PAUSE"), "");
+  const out = path.join(base, "air", "t");
+  const r = spawnSync(process.execPath, [AUTOAIR, "--hour", new Date(H).toISOString(), "--out", out], {
+    env: { ...process.env, RADIO_BASE_DIR: base, RADIO_AUTOAIR_ENABLED: "1", RADIO_YT_CLIENT_ID: "", YOUTUBE_CLIENT_ID: "" },
+    encoding: "utf8", timeout: 20_000,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const status = JSON.parse(fs.readFileSync(path.join(out, "status.json"), "utf8"));
+  assert.equal(status.stage, "paused");
+  assert.doesNotMatch(r.stdout, /producing|youtube|LIVE run/);
+  assert.equal(fs.existsSync(path.join(base, "autoair.lock")), false, "a paused run must not take the lock");
+});
+
+test("gate: the rehearsal return comes before any YouTube or playout step in the run", () => {
+  const src = fs.readFileSync(AUTOAIR, "utf8");
+  const body = src.slice(src.indexOf("async function main()"));
+  const rehearsal = body.indexOf("if (!live) {");
+  assert.ok(rehearsal > 0, "rehearsal gate not found");
+  for (const later of ['stage("youtube-setup")', "makeYouTubeLive(", 'stage("waiting")', "launchctl"]) {
+    const at = body.indexOf(later);
+    assert.ok(at > rehearsal, `${later} must come after the rehearsal gate`);
+  }
+  assert.ok(body.indexOf("isPaused(BASE)") < body.indexOf('stage("producing")'), "PAUSE must be checked before producing");
 });
