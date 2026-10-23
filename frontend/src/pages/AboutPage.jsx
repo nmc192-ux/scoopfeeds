@@ -50,7 +50,7 @@ export default function AboutPage() {
           way.
         </p>
 
-        <div className="grid sm:grid-cols-3 gap-4 my-8 not-prose">
+        <div id="sources" className="grid sm:grid-cols-3 gap-4 my-8 not-prose">
           <Pillar
             icon={<Globe size={22} className="text-electric-600" />}
             title="Global by default"

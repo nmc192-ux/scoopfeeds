@@ -21,6 +21,7 @@ import { longformCycleJob } from "../services/longform/runLongformCycle.js";
 import { runSocialCycleWithTimeout } from "../services/socialPublisher.js";
 import { runXTextCycle } from "../services/xTextPoster.js";
 import { runRadioStateCycle } from "../radio/radioState.js";
+import { runConfirmReminderCycle } from "../services/confirmReminder.js";
 import { withJobRunLogging } from "./jobLogger.js";
 import { queueConcurrency, queueLockDuration, DEFAULT_LOCK_MS, JOB_NAMES, QUEUE_NAMES, BULLMQ_PREFIX } from "./jobOptions.js";
 import { resolveWorkerQueues } from "./workerQueues.js";
@@ -224,6 +225,15 @@ try {
       JOB_NAMES.radioStateBuild,
       queueConcurrency.radio,
       async () => runRadioStateCycle()
+    );
+    // MORNING SCOOP CONFIRMATION REMINDERS (#172). Hourly, one reminder per
+    // unconfirmed sign-up 48h-7d old, no-op without SMTP. Concurrency 1: two
+    // cycles would read the same unstamped rows and both send.
+    registerIfMine(
+      QUEUE_NAMES.newsletter,
+      JOB_NAMES.newsletterConfirmReminder,
+      queueConcurrency.newsletter,
+      async () => runConfirmReminderCycle()
     );
     // ─── The four cycles that used to block the scheduler's event loop ──────
     //

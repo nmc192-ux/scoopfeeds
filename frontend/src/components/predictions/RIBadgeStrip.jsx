@@ -16,9 +16,11 @@ import { Activity } from "lucide-react";
 import ProbabilityBar from "./ProbabilityBar";
 import TruthGapBadge  from "./TruthGapBadge";
 import AnomalyChip    from "./AnomalyChip";
+import { useMarketOdds } from "../../hooks/useSiteConfig";
 
 export default function RIBadgeStrip({ badge }) {
-  if (!badge) return null;
+  const oddsOn = useMarketOdds();
+  if (!oddsOn || !badge) return null;
 
   const hasMarket   = Number.isFinite(badge.top_yes);
   const hasTruthGap = Number.isFinite(badge.truth_gap) && Math.abs(badge.truth_gap) > 0.15;

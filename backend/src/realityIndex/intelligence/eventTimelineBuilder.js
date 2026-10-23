@@ -10,6 +10,7 @@
  */
 
 import { getDb } from "../../models/database.js";
+import { eligibleMarketSql } from "../dal/marketsDao.js";
 import { logger } from "../../services/logger.js";
 
 const PRICE_MOVE_THRESHOLD = 0.05; // 5% YES-price shift qualifies as a market move
@@ -78,7 +79,7 @@ function buildMarketMoveEntries(db, event) {
     SELECT eml.market_id, pm.question
     FROM event_market_links eml
     JOIN prediction_markets pm ON pm.id = eml.market_id
-    WHERE eml.event_id = ?
+    WHERE eml.event_id = ? AND ${eligibleMarketSql("pm")}
     ORDER BY eml.rank
   `).all(event.id);
 

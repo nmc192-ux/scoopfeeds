@@ -14,6 +14,7 @@
 import { formatProbability, probabilityColor } from "../../lib/predictionFormat";
 import { COPY } from "../../lib/copyGuide";
 import { useT } from "../../lib/i18n";
+import { useMarketOdds } from "../../hooks/useSiteConfig";
 
 export default function ProbabilityBar({
   yesPrice,
@@ -24,6 +25,8 @@ export default function ProbabilityBar({
   className = "",
 }) {
   const { t } = useT();
+  const oddsOn = useMarketOdds();
+  if (!oddsOn) return null;
   const yes = Number.isFinite(yesPrice) ? yesPrice : null;
   const no  = Number.isFinite(noPrice)  ? noPrice  : (yes != null ? 1 - yes : null);
 

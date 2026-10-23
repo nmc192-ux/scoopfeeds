@@ -33,7 +33,7 @@ not exist before; `backend/.env.example` documented 77 of the ~262 vars the code
 | `EVENT_UNIFIED_AFFINITY` | `false` | **`true`** | yes | Wave 2. One `storyAffinity` measure shared by promoter/merge/breaker. Killed the create-merge-split treadmill. |
 | `EVENT_MIN_ARTICLES` | `5` | default | yes | Cluster size (or ≥1 bound market) required to promote an event. |
 | `PROMOTER_YIELD_MS` | `50` | default | yes | Ceiling on how long the promoter may hold the worker's JS thread between yields. `0` disables yielding and restores the pre-2026-08-31 monopolising behaviour — the only value for which a promote cycle can again starve RSS timeouts and BullMQ lock renewal. Garbage or negative falls back to `50` rather than to `0`. |
-| `WORKER_QUEUES` | unset = every queue | `ingestion,video,video_render,longform,social,enrichment,radio` on `worker`; `analysis,reality-index` on `worker-graph` | no (restart) | Which queues a worker container consumes. The two lists must PARTITION the queue set — a queue in both runs its cycle twice (the `isRunning` guards are process-local), a queue in neither goes silently dark. `workerQueues.test.js` reads the compose file and fails on either. An unknown name refuses the boot. |
+| `WORKER_QUEUES` | unset = every queue | `ingestion,video,video_render,longform,social,enrichment,radio,newsletter` on `worker`; `analysis,reality-index` on `worker-graph` | no (restart) | Which queues a worker container consumes. The two lists must PARTITION the queue set — a queue in both runs its cycle twice (the `isRunning` guards are process-local), a queue in neither goes silently dark. `workerQueues.test.js` reads the compose file and fails on either. An unknown name refuses the boot. |
 | `EVENT_MATCH_TAU` | `0.78` | default | yes | Cluster↔event centroid-cosine floor for a match. |
 | `EVENT_MERGE_TAU` | `0.86` | default | yes | Event↔event cosine floor confirming a convergence merge. |
 | `EVENT_MATCH_COSINE_FLOOR` | = `MATCH_TAU` | default | yes | Override the match cosine floor independently. |
@@ -190,12 +190,19 @@ whether the index is mixed. `scripts/reembed.mjs` needs no cutover today — emb
 |---|---|---|---|---|
 | `VITE_SENTIMENT_ENABLED` | `false` (**hidden**) | default | **build** | Sentiment module. Hidden because it fails comprehensibility, not data sufficiency — see the architecture doc. |
 
+## Site flags (runtime — served to the SPA by `GET /api/site-config`)
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `SITE_MARKET_ODDS` | off (anything but literally `"true"`) | unset (**off**) | yes (restart; the SPA caches the answer 5 min) | Reality Index, Truth Gap, anomaly chips and market-implied probabilities on every reader surface (homepage cards, topic and feed cards, dossier, reader modal). Off also hides the `/predictions`, `/truth-gap`, `/anomalies` pages (they redirect home) and stops the badge fetch. The SPA treats a failed or slow `/api/site-config` as off. **Turning it on is stop-list item 6 — DrJ only.** |
+| `SITE_V2` | off (anything but literally `"true"`) | unset (**off**) | yes (restart) | Reader-facing v2 pass: `LoadingCard` skeletons on the homepage, the "Reading N newspapers…" loading line (N from `/api/news/stats` `scheduler.sourceCount`; omitted if unknown), the 404 and empty-search copy, and (issue #173) the five-door chrome: new header with topic chips, phone bottom bar and footer (English only, no language switch), plus redirects of the old addresses (`/health /climate /sports /ai /space` → `/topic/*`, `/finance /macro /predictions /truth-gap /world-map` → `/markets?tab=*`, `/analysis` → `/briefs`, `/dashboard` → `/saved`, `/timeline/:slug` → `/events/:slug#timeline`, `/sources` → `/about#sources`, `/live` → `/live-tv`). Also switchable per visit with `?v2=1` (`?v2=0` clears). |
+
 ## Scheduler / ingestion
 
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
 | `ENABLE_REALITY_INDEX` | `true` | default | yes | Master gate for the whole Reality-Index cron block (markets, promoter, breaker, timeline, actors, sentiment, GDELT/USGS/NOAA/ACLED/FRED). |
-| `ENABLE_GDELT` / `ENABLE_USGS` / `ENABLE_NOAA` / `ENABLE_ACLED` / `ENABLE_SPORTSDB` / `ENABLE_TMDB` | varies | varies | yes | Per-source ingestion toggles. **USGS/NOAA create article-less machine events — see the quarantine open item.** |
+| `ENABLE_GDELT` / `ENABLE_USGS` / `ENABLE_NOAA` / `ENABLE_ACLED` / `ENABLE_SPORTSDB` / `ENABLE_TMDB` | varies | varies | yes | Per-source ingestion toggles. **USGS/NOAA create article-less machine events; news selection excludes them via `realityIndex/dal/machineEvents.js` (#177). ACLED writes the same kind of row and is not excluded yet.** |
 | `SCOOP_PERSISTENT_DATA_DIR` | `backend/data` | set | restart | SQLite location **and, since 2026-08-16, the log directory** (`<dir>/logs`). Prod: `/var/lib/scoop`. Logs previously went to `<repo>/backend/data/logs`, i.e. inside the container, and every `--force-recreate` destroyed them — that erased a day of `VIDEO_SPEC_LOG_JSON` evidence before anyone read it. No compose change was needed: all three services already set this var and already mount `scoop_data` there. Unset (dev) keeps the original path exactly. An **empty** value is treated as unset rather than resolving to `/logs`. |
 | `SPEC_LOG_MAX_BYTES` / `SPEC_LOG_MAX_FILES` | `20971520` / `6` (=120MB) | default | restart | Rotation for `video-spec.log`, the spec corpus's **own** ring. Separate from `combined.log` on purpose: that one is 10MB × 10 shared with every other line, so its retention is set by ingestion chatter rather than by the corpus — a busy day would evict the evidence leak 3 is waiting on. Sized against the worst case (hourly render cycle × 8 spec calls × ~30KB, the source text being capped by `VIDEO_FULLTEXT_MAX_CHARS`) ≈ 5.8MB/day, so ~20 days. The ceiling is hard, which is what makes it safe to co-locate with `news.db` on the same volume. |
 | `SCOOP_PROCESS_ROLE` | — | set | restart | `web` \| `worker` \| `scheduler`. Determines which crons a container runs. |
@@ -209,7 +216,7 @@ and run in the **worker**. See `docs/video-pipeline.md` for why the rules are wh
 
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
-| `VIDEO_AUTOPOST_ENABLED` | unset (**off**) | `1` | yes | Master switch. The only thing between built and live. Literal `"1"`. |
+| `VIDEO_AUTOPOST_ENABLED` | unset (**off**) | **`0` (DrJ, 2026-10-15)** | yes | Master switch. The only thing between built and live. Literal `"1"`. **Off in prod since 2026-10-15**: DrJ stopped automated Shorts because the loop may have caused the YouTube account suspension. Was `1`. Re-enabling it is stop-list item 7 (`docs/engine/full-throttle.md`), so it waits for DrJ. Confirmed `0` in both `worker` and `scheduler` with `printenv` after `up -d`. |
 | `VIDEO_SPEC_ENABLED` | unset (**off**) | `1` | yes | Required, *and* `ANTHROPIC_API_KEY` must be set, or the cycle aborts loudly rather than skipping every candidate. |
 | `VIDEO_MAX_PER_DAY` | `4` | **`12`** | yes | Rolling-24h publish cap. Not a calendar day — a calendar reset lets a quiet day burst. |
 | `VIDEO_MIN_INTERVAL_MS` | `24h / max × 0.8` (≈1.6h at 12/day) | default | yes | Spacing gate. The 0.8 slack gives more opportunities than videos, so a failure costs time rather than a video. |
@@ -584,6 +591,8 @@ FAIL-with-reason, so the three cases separate themselves:
 | `QUEUE_CONCURRENCY_SOCIAL` | `1` | default | restart | **Strictly 1.** `socialPublisher`'s single-flight guard is process-local, so a second concurrent consumer would not see it and both would post. |
 | `QUEUE_CONCURRENCY_RADIO` | `1` | default | restart | **Keep at 1.** One state file, one writer: two radio builders would each write atomically but could land out of order, an older state replacing a newer one. |
 | `QUEUE_LOCK_MS_RADIO` | `120000` | default | restart | BullMQ lock for the radio state build. A build is seconds; two minutes keeps a hung one from holding the slot. |
+| `QUEUE_CONCURRENCY_NEWSLETTER` | `1` | default | restart | **Keep at 1.** The Morning Scoop confirmation reminder (`confirmReminder.js`) stamps each row after its send; two concurrent cycles would read the same unstamped rows and both mail them. |
+| `QUEUE_LOCK_MS_NEWSLETTER` | `300000` | default | restart | BullMQ lock for the reminder cycle (at most 50 SMTP sends). Five minutes covers a slow relay; a lapsed lock re-runs the job. |
 
 > ⚠️ **`assertRedisAvailable` does no I/O.** It is `Boolean(REDIS_URL)` plus a `REQUIRE_REDIS`
 > throw — no socket, no PING, no connection object. It cannot hang and cannot be affected by
@@ -639,6 +648,7 @@ updated with it; the table below is **parsed and asserted** by
 | `dispatchVideoRenderCycle` | `39 * * * *` | `scheduler.js` |
 | `dispatchSocialCycle` | `*/30` | host crontab — `ENABLE_AUTO_SOCIAL=false` skips the `15,45` node-cron |
 | `dispatchXTextCycle` | `10,40 * * * *` | `scheduler.js` |
+| `dispatchConfirmReminderCycle` | `47 * * * *` | `scheduler.js` |
 
 <!-- cron-map:end -->
 
@@ -791,6 +801,8 @@ is `longformQcGate.js`; treat changes to it as changes to a publishing control.
 |---|---|---|---|---|
 | `RADIO_ENABLED` | `false` (anything but literally `"true"`) | unset (**dark**) | yes (read each cycle and each request) | Turns on the radio state builder (`radio/radioState.js`, worker `radio` queue, ~every 5 min) and the two routes `GET /api/radio/state.json` and `GET /radio/screen`. Off: the cycle returns at once and both routes are 404. Turn on only after DrJ has looked at `/radio/screen?broadcast=1&state=/api/radio/state.json` in a dry run. |
 | `RADIO_PING_URL` | unset | unset | restart | See the heartbeat table above. |
+| `RADIO_FILMS_DIR` | `$SCOOP_PERSISTENT_DATA_DIR/radio/films` | unset | restart | Catalogue root for the radio's ScoopFeeds films (#203, `radio/filmLibrary.js`): one folder per series (`a-eye`, `the-invisible-hand`, `the-record`, `the-body-politic`, `people`, `peace-and-war`, `scoopfeeds-60`), each video with a `<name>.json` sidecar (`title`, `publishedAt`, `durationSec`). Fill it with `node backend/src/radio/filmCli.mjs import` (links the published file, measures the duration with ffprobe); `plan` prints a day's rotation; `rehearse --out` renders one film + two Shorts through the playout's encode settings to a file (`--selftest` measures A/V sync on synthetic markers). Videos without a usable sidecar, or with a future `publishedAt`, are skipped and listed. Nothing in the live playout reads it yet (that wiring rides on PR #168). |
+| `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` on PATH | unset | per run | Binaries used by `radio/filmCli.mjs` (import measures durations with ffprobe; rehearse encodes with ffmpeg). |
 | `RADIO_PLAYOUT_ENABLED` | `false` (anything but literally `"true"`) | unset (**dark**) | restart | One of TWO gates on the playout's RTMP output (`radio/playout/`, run by hand with `node backend/src/radio/playout/cli.js`). Nothing in the app imports the playout; with `--out <file>` it only writes a file and ignores this var. R3 ships the file path only: do not set this until DrJ has watched a test render and the machine question in the PR is settled. |
 | `RADIO_STREAM_KEY` | unset | unset (**never commit; never log**) | restart | The YouTube stream key, the SECOND gate. RTMP starts only when this is non-empty AND `RADIO_PLAYOUT_ENABLED=true`; the playout redacts it from every log line. |
 | `RADIO_PROGRAMME_AV_DELAY_MS` | `300` (0–5000; anything else is 300) | unset (Mac Mini playout host, not the VPS) | restart | Programme mode only (`cli.js --programme`): how many ms the produced programme audio is held back so it meets the captured picture, which reaches the encoder later than the feeder's sound. Measure it on the host from an ident in a rehearsal recording (picture vs ping) and set it in `~/.scoopfeeds-radio.env`. |

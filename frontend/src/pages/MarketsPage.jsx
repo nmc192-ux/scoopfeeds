@@ -12,6 +12,7 @@ import { motion } from "framer-motion";
 import { ChevronLeft, TrendingUp, Loader2, RefreshCw, ArrowRightLeft } from "lucide-react";
 import clsx from "clsx";
 import { useMarket } from "../hooks/useMarket";
+import TimeoutNotice, { useTimedOut } from "../components/ui/TimeoutNotice";
 import { useGeo } from "../hooks/useGeo";
 
 function pctClass(p) {
@@ -169,6 +170,7 @@ function CurrencyConverter({ currencies }) {
 
 export default function MarketsPage() {
   const { data: market, isLoading, isFetching, refetch } = useMarket();
+  const [timedOut, restartTimer] = useTimedOut(isLoading);
   const { country } = useGeo();
   const navigate = useNavigate();
 
@@ -231,9 +233,13 @@ export default function MarketsPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center py-24">
-          <Loader2 size={28} className="animate-spin text-[var(--color-text-tertiary)]" />
-        </div>
+        timedOut ? (
+          <TimeoutNotice what="Markets" onRetry={() => { restartTimer(); refetch(); }} />
+        ) : (
+          <div className="flex items-center justify-center py-24">
+            <Loader2 size={28} className="animate-spin text-[var(--color-text-tertiary)]" />
+          </div>
+        )
       ) : (
         <>
         <div className="grid md:grid-cols-2 gap-4">

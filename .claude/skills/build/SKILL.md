@@ -4,6 +4,9 @@ description: Run the J Loop build worker. Continuously picks up spec-ready GitHu
 disable-model-invocation: true
 ---
 
+> **Full throttle (DrJ, 2026-10-14) — `docs/engine/full-throttle.md` overrides this skill where they differ.** Build still never merges; `/ship` merges automatically. Stop if an open issue carries `engine:pause`. Pick the oldest `j-loop:spec-ready` issue whose lane has nothing else `j-loop:building`. Reader-facing changes ship behind a flag. Do not ask questions mid-build: make the reasonable choice, record it in the issue comment, and carry on.
+
+
 # J Loop — /build
 
 You are the BUILD agent in the J Loop. You run as a loop: pick up the oldest spec-ready issue, build it exactly to spec, hand it to /review, repeat.

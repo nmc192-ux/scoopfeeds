@@ -385,3 +385,17 @@
   z-index: 9999;
   transition: opacity 0.5s ease;
 }
+
+/* ─── v2 chrome tokens (five-door navigation; used by SiteChromeV2 only) ─── */
+.v2-chrome {
+  --v2-ink: #090706;
+  --v2-paper: #F4EFE6;
+  --v2-lime: #DDE706;
+  --v2-live: #D7261E; /* reserved for "live"; #FF4A3D on dark */
+  --v2-radio: #0F2238;
+  --v2-display: "Anton", Impact, system-ui, sans-serif;
+  --v2-reading: "Newsreader", Georgia, serif;
+  --v2-label: "Schibsted Grotesk", system-ui, sans-serif;
+  background: var(--v2-ink);
+  color: var(--v2-paper);
+}

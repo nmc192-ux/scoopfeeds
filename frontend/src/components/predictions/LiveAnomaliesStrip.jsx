@@ -14,6 +14,7 @@ import { Link } from "react-router-dom";
 import { Activity, ChevronRight } from "lucide-react";
 import { useAnomalies } from "../../hooks/useTruthGap";
 import AnomalyChip from "./AnomalyChip";
+import { useMarketOdds } from "../../hooks/useSiteConfig";
 
 function relTime(ms) {
   if (!ms) return "";
@@ -23,7 +24,12 @@ function relTime(ms) {
   return `${Math.floor(diff / 3600_000)}h ago`;
 }
 
-export default function LiveAnomaliesStrip({ limit = 8, className = "" }) {
+/* The whole strip is anomaly (market-odds) data: with SITE_MARKET_ODDS off it must not render at all. */
+export default function LiveAnomaliesStrip(props) {
+  return useMarketOdds() ? <AnomaliesStrip {...props} /> : null;
+}
+
+function AnomaliesStrip({ limit = 8, className = "" }) {
   // useAnomalies quantizes sinceMs into 10-min buckets; without that, a raw
   // Date.now() here changes the queryKey every render and fetches unboundedly.
   const { data, isLoading } = useAnomalies({ limit, sinceMs: Date.now() - 6 * 60 * 60 * 1000 });

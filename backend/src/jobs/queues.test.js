@@ -20,6 +20,14 @@ process.env.QUEUE_ENQUEUE_TIMEOUT_MS = "150";
 
 const { __testing } = await import("./queues.js");
 
+// withStepDeadline unref()s its timer on purpose (a deadline must never keep a
+// production process alive). In a test whose only pending work is a promise that
+// never settles, that leaves the event loop empty, and the runner cancels the
+// whole file before any deadline fires ("Promise resolution is still pending but
+// the event loop has already resolved"). Hold one ref'd handle for the file.
+const keepAlive = setInterval(() => {}, 1_000);
+test.after(() => clearInterval(keepAlive));
+
 const never = () => new Promise(() => {});           // never settles
 const ctx = { queueName: "ingestion", jobName: "news.ingest.all", jobId: "news-ingest-all-singleton" };
 

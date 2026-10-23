@@ -226,6 +226,14 @@ High-stakes/irreversible → **Opus**.
 
 ## 4. 🛑 HARD STOPs — the human approval gates
 
+> **Amended 2026-10-14 by DrJ: full throttle.** G1, G2, G3, G4 and G6 no longer wait for a
+> human. Merges and deploys run automatically behind CI, a post-deploy health check and
+> automatic rollback; new sources need no approval. G5, G7, G8 and G9 are kept in the form of
+> the **stop list** in `docs/engine/full-throttle.md` (destructive data changes, credentials
+> and infrastructure, cost increases over 25%, new public surfaces, editorial and legal
+> changes, re-enabling market odds). Where this section and that document disagree, that
+> document wins. The text below is the pre-amendment design, kept for its reasoning.
+
 **The absolute rule:** every irreversible action — **commit / merge, deploy,
 migration, external post, credential use** — is **ALWAYS gated.** No exceptions, no
 "just this once," no agent self-approval. This is the operational form of C7 and C8.
