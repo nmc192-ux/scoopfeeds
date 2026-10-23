@@ -74,8 +74,20 @@ export function buildFfmpegArgs({ target, bed, bedLufs, seconds = null, audioPip
   else if (target.kind === "segments") {
     a.push("-f", "segment", "-segment_format", "mpegts", "-segment_time", String(target.segmentSec),
       "-segment_wrap", String(target.keep), "-reset_timestamps", "1", path.join(target.dir, "seg-%02d.ts"));
+  } else if (target.kind === "multi") {
+    // #207: one encode, FLV on stdout; live/fanout.js relays it to each destination with its own process and reconnect
+    a.push("-flvflags", "no_duration_filesize", "-f", "flv", "pipe:1");
   } else a.push("-rw_timeout", String(RTMP.rwTimeoutMs * 1000), "-f", "flv", target.url);
   return a;
+}
+
+/**
+ * One destination's relay (#207): FLV in on stdin, copied (no re-encode) to that destination's RTMP URL, with the same
+ * dead-link timeout as the single-output path. A relay that dies takes only its own destination down.
+ */
+export function buildRelayArgs({ url }) {
+  return ["-hide_banner", "-loglevel", "warning", "-f", "flv", "-i", "pipe:0", "-map", "0", "-c", "copy",
+    "-rw_timeout", String(RTMP.rwTimeoutMs * 1000), "-f", "flv", url];
 }
 
 /** The feeder: the bed looped at real time, gained to -16 LUFS + limited, as raw s16le stereo PCM on stdout. */
