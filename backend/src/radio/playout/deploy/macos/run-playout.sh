@@ -32,6 +32,14 @@ if [ "${RADIO_PLAYOUT_MODE:-segments}" = "rtmp" ]; then :; else
 fi
 [ -n "${RADIO_FORCE_DAYPART_CYCLE:-}" ] && ARGS+=(--force-daypart-cycle "$RADIO_FORCE_DAYPART_CYCLE")
 
+# #208: while ~/scoopfeeds-radio/PAUSE exists (the standing watchdog, or DrJ), do not go on air. Hold here rather than
+# exit, so launchd's KeepAlive does not spin; removing PAUSE by hand resumes within 30 s.
+if [ -f "$BASE_DIR/PAUSE" ]; then
+  echo "$(date -u +%FT%TZ) $BASE_DIR/PAUSE exists: holding off air ($(head -c 300 "$BASE_DIR/PAUSE" | tr '\n' ' '))" >&2
+  while [ -f "$BASE_DIR/PAUSE" ]; do sleep 30; done
+  echo "$(date -u +%FT%TZ) PAUSE removed: going on" >&2
+fi
+
 # macOS: no idle or AC-power system sleep while this process (the exec'd node) lives
 if [ -x /usr/bin/caffeinate ]; then /usr/bin/caffeinate -i -s -w $$ & fi
 exec node "${ARGS[@]}"
