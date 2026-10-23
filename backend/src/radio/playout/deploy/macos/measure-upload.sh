@@ -17,5 +17,5 @@ for i in $(seq 1 "$N"); do
   MBPS="$(/usr/bin/python3 -c "print(round(${UL:-0}/1e6,2))")"
   LINE="{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"uploadMbps\":${MBPS},\"tool\":\"networkQuality -s\"}"
   echo "$LINE" | tee -a "$OUT"
-  [ "$i" -lt "$N" ] && sleep $((GAP_MIN * 60))
+  if [ "$i" -lt "$N" ]; then sleep $((GAP_MIN * 60)); fi
 done

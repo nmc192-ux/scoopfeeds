@@ -12,7 +12,7 @@
  * ffmpeg would otherwise starve (and a live RTMP session with it) while the page is still. If ffmpeg
  * falls behind, repeats are skipped (counted in `slotsSkippedBackpressure`) rather than queued.
  */
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -240,7 +240,11 @@ export async function runPlayout(o = {}) {
   const onPrimaryDown = ({ label, downMs, lastError }) => {
     const msg = `${label} has been off air for ${Math.round(downMs / 60_000)} min (${lastError || "no error text"}); the other outputs are unaffected`;
     log(`⚠ ${redact(msg, env)}`);
-    if (o.alerts !== "off" && process.platform === "darwin") spawnSync("osascript", ["-e", `display notification ${JSON.stringify(redact(msg, env).slice(0, 200))} with title "ScoopFeeds Radio"`], { stdio: "ignore" });
+    // async: a synchronous spawn would stop this process reading the encoder's stdout and stall every output while it runs
+    if (o.alerts !== "off" && process.platform === "darwin") {
+      const n = spawn("osascript", ["-e", `display notification ${JSON.stringify(redact(msg, env).slice(0, 200))} with title "ScoopFeeds Radio"`], { stdio: "ignore" });
+      n.on("error", () => { /* best effort */ }); n.unref();
+    }
   };
   const stats = { framesCaptured: 0, framesWritten: 0, framesRepeated: 0, pcmBytes: 0, slotsSkippedBackpressure: 0, slotsSkippedLate: 0 };
 
