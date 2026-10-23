@@ -1,15 +1,25 @@
 /**
- * Daily newsletter digest.
+ * The Morning Scoop — daily newsletter digest.
  *
- * Runs from the scheduler (cron) at 07:00 server time. Picks the top articles
- * from the last 24h and sends a per-subscriber email, optionally filtered by
- * that subscriber's preferred topics.
+ * Two editions, each fired by its own cron in the reader's own morning (the
+ * crons carry a `timezone`, so daylight saving is node-cron's problem, not ours):
+ *   - "americas": 06:30 America/New_York, subscribers whose country_code is in
+ *     the Americas.
+ *   - "rest":     07:00 Europe/London, everyone else, including unknown.
+ * Each picks the top articles from the last 24h and sends a per-subscriber
+ * email, optionally filtered by that subscriber's preferred topics.
+ *
+ * One email per subscriber per day: `last_sent_at` is the guard, so a re-run, a
+ * manual trigger or a subscriber whose country changed between the crons cannot
+ * get a second copy.
+ *
+ * The Reality Index block is market-odds data, so it follows SITE_MARKET_ODDS
+ * exactly like the site does: off (the default) means it is not built at all.
  *
  * No-ops gracefully if SMTP is not configured (mailer returns null) or if
  * there are no verified, non-unsubscribed subscribers.
  */
 import { getDb } from "../models/database.js";
-import { getReferralCount } from "../models/database.js";
 import { getTransport, sendMail } from "./mailer.js";
 import { logger } from "./logger.js";
 import { buildRealityIndexBlock } from "../realityIndex/generation/newsletterEnricher.js";
@@ -17,6 +27,30 @@ import { buildRealityIndexBlock } from "../realityIndex/generation/newsletterEnr
 const SITE_URL = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 const PER_DIGEST = 8;
 const LOOKBACK_MS = 24 * 60 * 60 * 1000;
+// Longer than any gap between the two editions, shorter than a day minus the
+// worst daylight-saving drift of a cron that fires at the same local time.
+const ONE_PER_DAY_MS = 20 * 60 * 60 * 1000;
+const SUBJECT_PREFIX = "The Morning Scoop —";
+
+export const EDITIONS = ["americas", "rest"];
+
+// ISO 3166-1 alpha-2: North, Central and South America and the Caribbean.
+const AMERICAS = new Set([
+  "AG", "AI", "AR", "AW", "BB", "BL", "BM", "BO", "BQ", "BR", "BS", "BZ", "CA", "CL", "CO", "CR",
+  "CU", "CW", "DM", "DO", "EC", "FK", "GD", "GF", "GL", "GP", "GT", "GY", "HN", "HT", "JM", "KN",
+  "KY", "LC", "MF", "MQ", "MS", "MX", "NI", "PA", "PE", "PM", "PR", "PY", "SR", "SV", "SX", "TC",
+  "TT", "US", "UY", "VC", "VE", "VG", "VI",
+]);
+
+/** Which edition a subscriber belongs to. Unknown or unparseable → "rest". */
+export function editionForCountry(countryCode) {
+  return AMERICAS.has(String(countryCode || "").trim().toUpperCase()) ? "americas" : "rest";
+}
+
+/** Same switch the site reads at /api/site-config. */
+export function marketOddsEnabled() {
+  return process.env.SITE_MARKET_ODDS === "true";
+}
 
 // ── Sponsor slot ─────────────────────────────────────────────────────────────
 // To activate: set these env vars in your Hostinger panel. Leave blank to hide.
@@ -45,8 +79,7 @@ function getSponsorBlock() {
   };
 }
 
-function pickTopArticles(categories) {
-  const db = getDb();
+function pickTopArticles(categories, db = getDb()) {
   const since = Date.now() - LOOKBACK_MS;
   if (categories && categories.length) {
     const ph = categories.map(() => "?").join(",");
@@ -95,7 +128,7 @@ function renderDigestHtml(articles, unsubUrl, { referralUrl = null, referralCoun
 
   return `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:auto;padding:24px;color:#111">
-      <div style="font-size:22px;font-weight:800;margin-bottom:4px">Scoop Daily</div>
+      <div style="font-size:22px;font-weight:800;margin-bottom:4px">The Morning Scoop</div>
       <div style="font-size:12px;color:#666;margin-bottom:18px">Top stories from the last 24 hours</div>
       ${sponsorHtml}
       ${riHtml}
@@ -114,47 +147,89 @@ function escapeHtml(s = "") {
 }
 function trim(s, n) { return s.length > n ? s.slice(0, n - 1) + "…" : s; }
 
-export async function sendDailyDigest() {
+// getReferralCount() reads the process-wide connection; the digest takes `db`.
+function referralCountFor(db, token) {
+  return db.prepare(`
+    SELECT COUNT(*) AS n FROM subscribers
+    WHERE referred_by_token = ? AND verified_at IS NOT NULL AND unsubscribed_at IS NULL
+  `).get(token).n;
+}
+
+function digestSubject(articles) {
+  return `${SUBJECT_PREFIX} ${articles[0].title.slice(0, 60)}`;
+}
+
+function digestText(articles, { sponsor, realityIndex, referralUrl }) {
+  return (sponsor?.text || "") + (realityIndex?.text || "") +
+    articles.map((a) => `• ${a.title}\n  ${a.url}`).join("\n\n") +
+    (referralUrl ? `\n\n──\nInvite friends: ${referralUrl}` : "");
+}
+
+function buildBlocks() {
+  return {
+    sponsor: getSponsorBlock(),
+    realityIndex: marketOddsEnabled() ? buildRealityIndexBlock() : { html: "", text: "" },
+  };
+}
+
+/**
+ * The email as it would render for a subscriber with no topic filter. The
+ * unsubscribe link is a placeholder — nothing here reads or writes a subscriber
+ * row. Returns null when there is nothing to send.
+ */
+export function buildDigestPreview({ db = getDb() } = {}) {
+  const articles = pickTopArticles(null, db);
+  if (!articles.length) return null;
+  const blocks = buildBlocks();
+  const unsubUrl = `${SITE_URL}/api/newsletter/unsubscribe?token=preview`;
+  return {
+    subject: digestSubject(articles),
+    html: renderDigestHtml(articles, unsubUrl, blocks),
+    text: digestText(articles, blocks),
+  };
+}
+
+export async function sendDailyDigest({ edition = null, db = getDb(), now = Date.now() } = {}) {
+  if (edition !== null && !EDITIONS.includes(edition)) {
+    throw new Error(`digest: unknown edition "${edition}"`);
+  }
   if (!getTransport()) {
     logger.info("digest: skipped (no SMTP configured)");
     return { sent: 0, skipped: true };
   }
-  const db = getDb();
-  const subs = db.prepare(`
-    SELECT id, email, topics, token
+  // Already sent today (either edition, or an earlier run of this one) → skip.
+  const due = db.prepare(`
+    SELECT id, email, topics, token, country_code
     FROM subscribers
     WHERE verified_at IS NOT NULL AND unsubscribed_at IS NULL
-  `).all();
+      AND (last_sent_at IS NULL OR last_sent_at < ?)
+  `).all(now - ONE_PER_DAY_MS);
+  const subs = edition ? due.filter((s) => editionForCountry(s.country_code) === edition) : due;
 
   if (!subs.length) {
-    logger.info("digest: no verified subscribers");
-    return { sent: 0 };
+    logger.info(`digest: no verified subscribers due${edition ? ` for the ${edition} edition` : ""}`);
+    return { sent: 0, edition };
   }
 
-  // Compute sponsor + Reality Index blocks once — same for all subscribers
-  // in this send. The RI block is empty when no events meet the truth-gap
-  // threshold, in which case the digest renders cleanly without it.
-  const sponsor      = getSponsorBlock();
-  const realityIndex = buildRealityIndexBlock();
+  // Sponsor + Reality Index blocks are the same for every subscriber in this send.
+  const { sponsor, realityIndex } = buildBlocks();
 
   let sent = 0;
   for (const sub of subs) {
     let topics = [];
     try { topics = JSON.parse(sub.topics || "[]"); } catch { /* ignore */ }
-    const articles = pickTopArticles(topics.length ? topics : null);
+    const articles = pickTopArticles(topics.length ? topics : null, db);
     if (!articles.length) continue;
 
     const unsubUrl = `${SITE_URL}/api/newsletter/unsubscribe?token=${sub.token}`;
     const referralUrl = `${SITE_URL}/?ref=${sub.token}`;
-    const referralCount = getReferralCount(sub.token);
+    const referralCount = referralCountFor(db, sub.token);
     try {
       await sendMail({
         to: sub.email,
-        subject: `Scoop Daily — ${articles[0].title.slice(0, 60)}`,
+        subject: digestSubject(articles),
         html: renderDigestHtml(articles, unsubUrl, { referralUrl, referralCount, sponsor, realityIndex }),
-        text: (sponsor.text || "") + (realityIndex.text || "") +
-          articles.map((a) => `• ${a.title}\n  ${a.url}`).join("\n\n") +
-          `\n\n──\nInvite friends: ${referralUrl}`,
+        text: digestText(articles, { sponsor, realityIndex, referralUrl }),
       });
       db.prepare(`UPDATE subscribers SET last_sent_at = ? WHERE id = ?`).run(Date.now(), sub.id);
       sent++;
@@ -162,6 +237,6 @@ export async function sendDailyDigest() {
       logger.warn(`digest: send failed for ${sub.email}: ${err.message}`);
     }
   }
-  logger.info(`📬 Digest sent: ${sent}/${subs.length}`);
-  return { sent, total: subs.length };
+  logger.info(`📬 Morning Scoop${edition ? ` (${edition})` : ""} sent: ${sent}/${subs.length}`);
+  return { sent, total: subs.length, edition };
 }

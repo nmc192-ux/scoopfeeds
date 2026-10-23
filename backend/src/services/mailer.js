@@ -36,6 +36,12 @@ export function getTransport() {
   return transport;
 }
 
+/** Tests only: swap in a fake transport ({ sendMail }) or null to unconfigure. */
+export function setTransportForTests(t) {
+  transport = t;
+  initialized = true;
+}
+
 export async function sendMail({ to, subject, html, text, attachments }) {
   const t = getTransport();
   if (!t) return { skipped: true };

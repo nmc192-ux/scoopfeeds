@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, useLocation, useParams, Navigate } from "react-router-dom";
+import { useSiteConfig } from "./hooks/useSiteConfig";
 import { LANGUAGES as I18N_LANGUAGES, getCurrentLang } from "./lib/i18n";
 import Header from "./components/layout/Header";
 import TopicNav from "./components/layout/TopicNav";
@@ -60,6 +61,7 @@ import SyntheticMarketPage  from "./pages/SyntheticMarketPage";
 import LeaderboardPage      from "./pages/LeaderboardPage";
 import SyntheticReviewPage  from "./pages/SyntheticReviewPage";
 import MobileBottomBar      from "./components/layout/MobileBottomBar";
+import { HeaderV2, BottomBarV2, FooterV2 } from "./components/layout/SiteChromeV2";
 
 // Category alias pages — thin wrappers around EventsPage with locked filter.
 import HealthEventsPage  from "./pages/category/HealthEventsPage";
@@ -80,8 +82,24 @@ const HIDE_TOPICNAV_ON = [
   "/health", "/climate", "/sports", "/crypto", "/ai", "/space",
 ];
 
+/* Issue #173. With the v2 flag on, an old address redirects into the five-door site;
+   with it off the old page renders untouched (the two addresses that never existed keep their 404). */
+function V2Redirect({ to, children }) {
+  const { v2, loading } = useSiteConfig();
+  const params = useParams();
+  if (!v2) return loading ? null : (children ?? <NotFound />);
+  return <Navigate to={typeof to === "function" ? to(params) : to} replace />;
+}
+
 export default function App() {
+  const { v2 } = useSiteConfig();
   const { activeTopics, lastRefreshed, language, authOpen, setAuthOpen } = useNewsStore();
+  const setLanguage = useNewsStore((s) => s.setLanguage);
+  // v2 has no language switch, so a saved non-English (possibly RTL) language
+  // would trap the reader. Under v2 the site is English only.
+  useEffect(() => {
+    if (v2 && language && language !== "en") setLanguage("en");
+  }, [v2, language, setLanguage]);
   const { data: health, isError: isOffline } = useHealth();
   const { data: publicConfig } = usePublicConfig();
   const location = useLocation();
@@ -130,18 +148,28 @@ export default function App() {
   }, [lastRefreshed]);
 
   // Scroll to top on route change so users always land at the top of a new page
+  // ...unless the address carries a #hash (e.g. /events/x#timeline): then scroll to that element once it exists.
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
-  }, [location.pathname]);
+    if (!location.hash) return;
+    const id = decodeURIComponent(location.hash.slice(1));
+    let tries = 0;
+    const t = setInterval(() => {
+      const el = document.getElementById(id);
+      if (el) { el.scrollIntoView(); clearInterval(t); }
+      else if (++tries > 20) clearInterval(t);
+    }, 150);
+    return () => clearInterval(t);
+  }, [location.pathname, location.hash]);
 
   if (isOffline) return <BackendOffline />;
 
   return (
     <div dir={isRtlLang ? "rtl" : "ltr"} className="min-h-screen bg-[var(--color-bg)] transition-colors duration-300">
       <SkimlinksLoader publisherId={publicConfig?.affiliate?.skimlinksId} />
-      <Header />
+      {v2 ? <HeaderV2 /> : <Header />}
       <BreakingBanner />
-      {!hideTopicNav && <TopicNav />}
+      {!v2 && !hideTopicNav && <TopicNav />}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         <Routes>
@@ -165,30 +193,32 @@ export default function App() {
           <Route path="/editorial-policy"    element={<EditorialPolicyPage />} />
           <Route path="/contact"             element={<ContactPage />} />
           <Route path="/sponsor"             element={<SponsorPage />} />
-          <Route path="/analysis"            element={<AnalysisPage />} />
+          <Route path="/analysis"            element={<V2Redirect to="/briefs"><AnalysisPage /></V2Redirect>} />
           <Route path="/analysis/explained/:slug" element={<AnalysisExplainedPage />} />
-          <Route path="/predictions"         element={<PredictionsPage />} />
+          <Route path="/predictions"         element={<V2Redirect to="/markets?tab=predictions"><OddsOnly><PredictionsPage /></OddsOnly></V2Redirect>} />
           <Route path="/events"             element={<EventsPage />} />
           <Route path="/events/:slug"       element={<EventPage />} />
           <Route path="/trackers/:id"       element={<TrackerPage />} />
-          <Route path="/timeline/:slug"     element={<TimelinePage />} />
-          <Route path="/health"             element={<HealthEventsPage />} />
-          <Route path="/climate"            element={<ClimateEventsPage />} />
-          <Route path="/sports"             element={<SportsEventsPage />} />
+          <Route path="/timeline/:slug"     element={<V2Redirect to={({ slug }) => `/events/${slug}#timeline`}><TimelinePage /></V2Redirect>} />
+          <Route path="/health"             element={<V2Redirect to="/topic/health"><HealthEventsPage /></V2Redirect>} />
+          <Route path="/climate"            element={<V2Redirect to="/topic/environment"><ClimateEventsPage /></V2Redirect>} />
+          <Route path="/sports"             element={<V2Redirect to="/topic/sports"><SportsEventsPage /></V2Redirect>} />
           <Route path="/crypto"             element={<CryptoEventsPage />} />
-          <Route path="/ai"                 element={<AIEventsPage />} />
-          <Route path="/space"              element={<SpaceEventsPage />} />
-          <Route path="/truth-gap"          element={<TruthGapPage />} />
-          <Route path="/dashboard"          element={<DashboardPage />} />
-          <Route path="/anomalies"          element={<AnomaliesPage />} />
+          <Route path="/ai"                 element={<V2Redirect to="/topic/ai"><AIEventsPage /></V2Redirect>} />
+          <Route path="/space"              element={<V2Redirect to="/topic/science"><SpaceEventsPage /></V2Redirect>} />
+          <Route path="/truth-gap"          element={<V2Redirect to="/markets?tab=truth-gap"><OddsOnly><TruthGapPage /></OddsOnly></V2Redirect>} />
+          <Route path="/dashboard"          element={<V2Redirect to="/saved"><DashboardPage /></V2Redirect>} />
+          <Route path="/sources"            element={<V2Redirect to="/about#sources" />} />
+          <Route path="/live"               element={<V2Redirect to="/live-tv" />} />
+          <Route path="/anomalies"          element={<OddsOnly><AnomaliesPage /></OddsOnly>} />
           <Route path="/scoop-ops/reality-index" element={<RealityIndexOpsPage />} />
           <Route path="/scoop-ops/metrics"        element={<MetricsOpsPage />} />
           <Route path="/scoop-ops/briefs"     element={<BriefsReviewPage />} />
           <Route path="/briefs"               element={<BriefsPage />} />
           <Route path="/briefs/:slug"         element={<BriefPage />} />
-          <Route path="/world-map"            element={<WorldMapPage />} />
-          <Route path="/finance"              element={<FinancePage />} />
-          <Route path="/macro"                element={<MacroPage />} />
+          <Route path="/world-map"            element={<V2Redirect to="/markets?tab=world-map"><WorldMapPage /></V2Redirect>} />
+          <Route path="/finance"              element={<V2Redirect to="/markets?tab=finance"><FinancePage /></V2Redirect>} />
+          <Route path="/macro"                element={<V2Redirect to="/markets?tab=macro"><MacroPage /></V2Redirect>} />
           <Route path="/synthetic"            element={<SyntheticMarketsPage />} />
           <Route path="/synthetic/:id"        element={<SyntheticMarketPage />} />
           <Route path="/leaderboard"          element={<LeaderboardPage />} />
@@ -197,7 +227,7 @@ export default function App() {
         </Routes>
       </main>
 
-      <Footer kofiUrl={publicConfig?.kofi?.url} />
+      {v2 ? <FooterV2 /> : <Footer kofiUrl={publicConfig?.kofi?.url} />}
 
       <ReaderModal />
       <OnboardingModal />
@@ -208,7 +238,7 @@ export default function App() {
 
       {/* Mobile-only bottom navigation. Adds matching bottom padding so
           fixed-position bar doesn't crowd content. */}
-      <MobileBottomBar />
+      {v2 ? <BottomBarV2 /> : <MobileBottomBar />}
       <div className="h-14 sm:hidden" aria-hidden />
     </div>
   );
@@ -245,12 +275,20 @@ function Footer({ kofiUrl }) {
   );
 }
 
+/* Pages that exist only to show market odds: with SITE_MARKET_ODDS off they send readers home. */
+function OddsOnly({ children }) {
+  const { marketOdds, loading } = useSiteConfig();
+  if (loading) return null; // redirecting before the answer arrives would bounce readers even when the flag is on
+  return marketOdds ? children : <Navigate to="/" replace />;
+}
+
 /* ─── 404 ────────────────────────────────────────────────────────────────── */
 function NotFound() {
+  const { v2 } = useSiteConfig();
   return (
     <div className="text-center py-24">
       <ScoopMascot size="lg" mood="reading" animated />
-      <p className="text-3xl font-bold mt-6 mb-2">Page not found</p>
+      <p className="text-3xl font-bold mt-6 mb-2">{v2 ? "This page went off the record." : "Page not found"}</p>
       <p className="text-[var(--color-text-tertiary)] mb-6">
         The page you're looking for doesn't exist or has moved.
       </p>

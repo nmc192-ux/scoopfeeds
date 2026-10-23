@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# One-time install of the full-throttle build engine on the Mac Mini (launchd agent).
+# Run from the repo on the Mini, as yourself (not sudo):
+#   cd <repo> && git pull origin main && bash .claude/bin/jloop-install
+# Undo: launchctl bootout gui/$(id -u)/com.jloop.scoopfeeds
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+LABEL="com.jloop.scoopfeeds"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+mkdir -p "$HOME/Library/LaunchAgents" "$REPO/.j-loop/logs"
+
+echo "Checking the tools the engine needs…"
+for bin in git gh claude node; do
+  command -v "$bin" >/dev/null 2>&1 || { echo "  missing: $bin — install it, then run this again"; exit 1; }
+  echo "  ok: $bin ($(command -v "$bin"))"
+done
+gh auth status >/dev/null 2>&1 || { echo "  gh is not signed in — run: gh auth login"; exit 1; }
+echo "  ok: gh signed in"
+
+# launchd starts with a bare PATH; give it the one this shell has, so claude/gh/node resolve.
+SAFE_PATH="$(dirname "$(command -v claude)"):$(dirname "$(command -v gh)"):$(dirname "$(command -v node)"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+# Optional Slack settings are passed through only if already set in this shell.
+EXTRA=""
+for v in SLACK_WEBHOOK_URL SLACK_BOT_TOKEN SLACK_CHANNEL_ID; do
+  if [ -n "${!v:-}" ]; then EXTRA="$EXTRA
+    <key>$v</key><string>${!v}</string>"; fi
+done
+
+# Stop any older copy before replacing it.
+launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+
+cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/bash</string><string>$REPO/.claude/bin/jloop-daemon</string></array>
+  <key>WorkingDirectory</key><string>$REPO</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>$SAFE_PATH</string>
+    <key>HOME</key><string>$HOME</string>$EXTRA
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>300</integer>
+  <key>StandardOutPath</key><string>$REPO/.j-loop/daemon.log</string>
+  <key>StandardErrorPath</key><string>$REPO/.j-loop/daemon.log</string>
+</dict>
+</plist>
+EOF
+chmod 600 "$PLIST"   # may hold a Slack token
+
+chmod +x "$REPO/.claude/bin/jloop-daemon" "$REPO/.claude/bin/jloop-notify" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$PLIST"
+sleep 3
+
+echo
+echo "The build engine is running on this Mac."
+echo "  Watch it:   tail -f \"$REPO/.j-loop/daemon.log\""
+echo "  Restart:    launchctl kickstart -k gui/\$(id -u)/$LABEL"
+echo "  Pause all:  open any GitHub issue labelled engine:pause (close it to resume)"
+echo "  Turn off:   launchctl bootout gui/\$(id -u)/$LABEL"
+echo "  Keep the Mac awake: System Settings → Energy → 'Prevent automatic sleeping'."
+echo
+tail -8 "$REPO/.j-loop/daemon.log" 2>/dev/null || true

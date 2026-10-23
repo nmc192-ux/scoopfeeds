@@ -184,6 +184,14 @@ const dispatchRadioStateCycle = () => dispatchCycle({
   inProcess: null, label: "radio state",
 });
 
+// Morning Scoop confirmation reminders (#172). SMTP sends and a DB write per
+// subscriber — outbound I/O that would hold this loop for as long as the relay
+// takes. `inProcess: null`: the scheduler only enqueues (cronCollision test).
+const dispatchConfirmReminderCycle = () => dispatchCycle({
+  queue: QUEUE_NAMES.newsletter, job: JOB_NAMES.newsletterConfirmReminder,
+  inProcess: null, label: "confirm reminders",
+});
+
 const dispatchXTextCycle = () => dispatchCycle({
   queue: QUEUE_NAMES.social, job: JOB_NAMES.xTextPost,
   inProcess: null, label: "x text posts",
@@ -425,11 +433,13 @@ function describeInFlight(now, gapStart = now) {
   return "nothing in flight and nothing ran during the gap";
 }
 
-function scheduleCron(expression, task) {
+function scheduleCron(expression, task, options) {
   const name = cronName(task, expression);
-  const scheduledTask = cron.schedule(expression, () => instrumented(name, task));
+  const scheduledTask = cron.schedule(expression, () => instrumented(name, task), options);
   schedulerTasks.push(scheduledTask);
-  registeredCrons.push({ name, expression });
+  // timezone, when set, is what the expression means — without it "30 6 * * *"
+  // in the boot summary reads as UTC.
+  registeredCrons.push(options?.timezone ? { name, expression, timezone: options.timezone } : { name, expression });
   return scheduledTask;
 }
 
@@ -767,14 +777,26 @@ scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "
     ));
     logger.info("📐 Entity IDF recompute cron ENABLED (daily, 03:30)");
   }
-  // Daily digest at 07:00 server time — no-op if SMTP is not configured.
+  // The Morning Scoop, two editions in the reader's own morning. The cron
+  // `timezone` option handles daylight saving; each subscriber gets one email a
+  // day (last_sent_at guard in sendDailyDigest). No-op if SMTP is not configured.
+  scheduleCron("30 6 * * *", async () => {
+    try {
+      await sendDailyDigest({ edition: "americas" });
+    } catch (err) {
+      logger.error("❌ Digest (americas) failed", { error: err.message });
+    }
+  }, { timezone: "America/New_York" });
   scheduleCron("0 7 * * *", async () => {
     try {
-      await sendDailyDigest();
+      await sendDailyDigest({ edition: "rest" });
     } catch (err) {
-      logger.error("❌ Digest failed", { error: err.message });
+      logger.error("❌ Digest (rest) failed", { error: err.message });
     }
-  });
+  }, { timezone: "Europe/London" });
+  // One confirmation reminder, 48h after sign-up, to anyone still unverified.
+  // Dispatched to the worker's `newsletter` queue, not run here.
+  scheduleCron("47 * * * *", () => runDispatch(() => dispatchConfirmReminderCycle(), "confirm reminders"));
   // X-posting queue digest at 09:00 UTC (Phase B Sprint 2.x.2). Emails the
   // X-ready posts queued by Sprint 2.x.1 to DIGEST_RECIPIENT_EMAIL. No-op
   // when SMTP / DIGEST_RECIPIENT_EMAIL unset or the queue is empty.
@@ -936,7 +958,7 @@ scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "
   // mean enrichment, usgs, or one of the two. This prints name@expression for
   // every registration, so the boot log answers "was it registered?" and the
   // per-tick lines answer "did it fire?" without either being inferred.
-  logger.info(`⏰ ${registeredCrons.length} crons registered: ${registeredCrons.map((c) => `${c.name}`).join(" | ")}`);
+  logger.info(`⏰ ${registeredCrons.length} crons registered: ${registeredCrons.map((c) => `${c.name}${c.timezone ? ` (${c.timezone})` : ""}`).join(" | ")}`);
 
   updateNextRun();
   return true;

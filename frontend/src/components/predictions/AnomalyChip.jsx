@@ -6,6 +6,7 @@
  */
 
 import { COPY } from "../../lib/copyGuide";
+import { useMarketOdds } from "../../hooks/useSiteConfig";
 import { AlertTriangle, TrendingUp, Zap, RefreshCw } from "lucide-react";
 
 const ICON = {
@@ -38,7 +39,8 @@ function summary(anomaly) {
 }
 
 export default function AnomalyChip({ anomaly, size = "sm" }) {
-  if (!anomaly) return null;
+  const oddsOn = useMarketOdds();
+  if (!oddsOn || !anomaly) return null;
   const Icon  = ICON[anomaly.type] ?? AlertTriangle;
   const label = COPY.anomalyLabel?.[anomaly.type] ?? anomaly.type;
   const style = severityStyle(anomaly.severity);

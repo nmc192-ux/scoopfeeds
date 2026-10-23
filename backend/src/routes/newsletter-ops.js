@@ -3,6 +3,9 @@
  *
  * GET  /status              — SMTP configured? subscriber counts, welcome
  *                             d1/d3 backlog, last digest send.
+ * GET  /preview             — the Morning Scoop as it would render, as HTML.
+ * POST /test                — send the Morning Scoop to one address without
+ *                             touching subscriber rows. Body: { email: string }
  * POST /welcome/run         — manually run one welcome-sequence cycle.
  *                             Useful for verifying SMTP after setting env vars.
  *                             Body: { maxPerStage?: number }   (default 50)
@@ -17,6 +20,7 @@ import { Router } from "express";
 import { getDb } from "../models/database.js";
 import { getTransport, sendMail } from "../services/mailer.js";
 import { runWelcomeSequenceCycle } from "../services/welcomeSequence.js";
+import { buildDigestPreview } from "../services/digest.js";
 import { logger } from "../services/logger.js";
 
 const router = Router();
@@ -77,6 +81,34 @@ router.get("/status", (_req, res) => {
     },
     lastDigestAt: lastDigest ? new Date(lastDigest).toISOString() : null,
   });
+});
+
+// Tomorrow's Morning Scoop as HTML in the browser. Reads articles only.
+router.get("/preview", (_req, res) => {
+  const preview = buildDigestPreview();
+  if (!preview) return res.status(404).type("text/plain").send("No articles in the last 24h — nothing would be sent.");
+  res.type("html").send(preview.html);
+});
+
+// Send the Morning Scoop to one address. Does NOT touch any subscriber row
+// (no last_sent_at, no subscription), so it cannot use up anyone's daily send.
+router.post("/test", async (req, res) => {
+  const email = String(req.body?.email || "").trim();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ ok: false, error: "Provide a valid `email` in the body." });
+  }
+  if (!getTransport()) {
+    return res.status(503).json({ ok: false, error: "SMTP not configured (set SMTP_HOST/PORT/USER/PASS in Hostinger env)." });
+  }
+  const preview = buildDigestPreview();
+  if (!preview) return res.status(404).json({ ok: false, error: "No articles in the last 24h — nothing to send." });
+  try {
+    await sendMail({ to: email, subject: `[Scoop test] ${preview.subject}`, html: preview.html, text: preview.text });
+    res.json({ ok: true, sent: email, subject: preview.subject });
+  } catch (err) {
+    logger.error(`newsletter/test failed: ${err.message}`);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // Manually run the welcome cycle once.

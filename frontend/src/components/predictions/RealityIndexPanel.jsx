@@ -15,11 +15,18 @@ import { ExternalLink, Activity } from "lucide-react";
 import { useArticlePredictions } from "../../hooks/usePredictions";
 import { COPY } from "../../lib/copyGuide";
 import { useT } from "../../lib/i18n";
+import { useMarketOdds } from "../../hooks/useSiteConfig";
 import { formatMoney, formatDistanceToEnd } from "../../lib/predictionFormat";
 import ProbabilityBar from "./ProbabilityBar";
 import ConfidenceDots from "./ConfidenceDots";
 
-export default function RealityIndexPanel({ articleId }) {
+// Gate at the door: with SITE_MARKET_ODDS off the inner component (and its fetch) never mounts.
+export default function RealityIndexPanel(props) {
+  const oddsOn = useMarketOdds();
+  return oddsOn ? <RealityIndexPanelInner {...props} /> : null;
+}
+
+function RealityIndexPanelInner({ articleId }) {
   const { t } = useT();
   const { data, isLoading, error } = useArticlePredictions(articleId);
 

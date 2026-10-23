@@ -14,6 +14,7 @@
 
 import { COPY } from "../../lib/copyGuide";
 import { useT } from "../../lib/i18n";
+import { useMarketOdds } from "../../hooks/useSiteConfig";
 
 const LANE_COLOR = {
   market: "var(--color-accent)",
@@ -71,7 +72,8 @@ function Lane({ name, label, weight, value, sublabel }) {
 
 export default function RealityGauge({ snapshot }) {
   const { t } = useT();
-  if (!snapshot) return null;
+  const oddsOn = useMarketOdds();
+  if (!oddsOn || !snapshot) return null;
   const {
     reality_score, confidence, truth_gap,
     market_probability, media_sentiment, social_sentiment,

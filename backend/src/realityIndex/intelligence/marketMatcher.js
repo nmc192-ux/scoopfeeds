@@ -19,7 +19,7 @@
 
 import { getDb } from "../../models/database.js";
 import { listUnmatchedClusters, setClusterMarketLinks } from "../dal/linksDao.js";
-import { listMarkets, getMarketById } from "../dal/marketsDao.js";
+import { listMarkets, getMarketById, isMarketEligible, eligibleMarketSql } from "../dal/marketsDao.js";
 import { searchNearest, getEmbeddingMeta } from "../dal/embeddingsDao.js";
 import { embedDocument, embedQuery, embeddingsConfig } from "../embeddings/embeddingService.js";
 import { isVecAvailable } from "../schema.js";
@@ -43,7 +43,7 @@ function listMarketsNeedingEmbedding(limit) {
     FROM prediction_markets m
     LEFT JOIN embedding_meta em
       ON em.scope = 'market' AND em.scope_id = m.id
-    WHERE m.active = 1
+    WHERE ${eligibleMarketSql("m")}
       AND em.scope_id IS NULL
       AND m.question IS NOT NULL
       AND length(m.question) > 5
@@ -139,7 +139,7 @@ async function matchOneCluster(cluster) {
   // Hydrate market rows; filter low-liquidity to avoid noisy probabilities.
   const candidates = hits
     .map(h => getMarketById(h.scope_id))
-    .filter(Boolean)
+    .filter(m => isMarketEligible(m))
     .filter(m => (m.liquidity ?? 0) >= MIN_LIQUIDITY)
     .slice(0, KEEP_AFTER_FILTER);
 

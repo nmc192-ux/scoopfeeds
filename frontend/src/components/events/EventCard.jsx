@@ -8,6 +8,7 @@ import { Activity, FileText, Clock } from "lucide-react";
 import ProbabilityBar from "../predictions/ProbabilityBar";
 import TruthGapBadge  from "../predictions/TruthGapBadge";
 import AnomalyChip    from "../predictions/AnomalyChip";
+import { useMarketOdds } from "../../hooks/useSiteConfig";
 
 const CATEGORY_COLORS = {
   politics:    "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
@@ -63,6 +64,7 @@ function avatarColor(name = "") {
 }
 
 export default function EventCard({ event, variant = "default", featured = false }) {
+  const oddsOn = useMarketOdds();
   const {
     slug, title, summary, category, severity = 0,
     article_count = 0, source_count = 0, top_sources = [], market_count = 0,
@@ -207,7 +209,7 @@ export default function EventCard({ event, variant = "default", featured = false
         )}
 
         {/* Market probability strip */}
-        {top_probability != null && (
+        {oddsOn && top_probability != null && (
           <div className="mt-auto pt-2 border-t border-[var(--color-border)]">
             <p className="text-[10px] text-[var(--color-text-secondary)] mb-1 flex items-center gap-1">
               <Activity size={10} className="text-[var(--color-accent)]" />

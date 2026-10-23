@@ -36,3 +36,22 @@ jobs:
       run: npm run build --prefix frontend
     - name: Validate backend entrypoint
       run: node --check backend/server.js
+
+  backend-tests:
+    # Full-throttle engine (2026-10-14): a merge and a deploy both require this job
+    # to pass. See docs/engine/full-throttle.md.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Use Node.js 22.x
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22.x
+        cache: 'npm'
+        cache-dependency-path: backend/package-lock.json
+    - name: Install ffmpeg (the video tests probe the real binary)
+      run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+    - name: Install backend dependencies
+      run: npm ci --prefix backend
+    - name: Run the backend suite
+      run: bash scripts/ci/backend-tests.sh

@@ -33,9 +33,10 @@ import rateLimit from "express-rate-limit";
 import { getDb } from "../models/database.js";
 import { logger } from "../services/logger.js";
 import { getApiKey, touchApiKey } from "../realityIndex/dal/apiKeysDao.js";
-import { listMarkets as listPmMarkets, getMarketById } from "../realityIndex/dal/marketsDao.js";
+import { listMarkets as listPmMarkets, getMarketById, isMarketEligible, eligibleMarketSql } from "../realityIndex/dal/marketsDao.js";
 import { topTruthGap, listAnomalies } from "../realityIndex/dal/realityIndexDao.js";
 import { listBriefs } from "../realityIndex/dal/briefsDao.js";
+import { notMachineEventSql } from "../realityIndex/dal/machineEvents.js";
 import { listMarkets as listSyntheticMarkets } from "../realityIndex/dal/syntheticMarketsDao.js";
 
 const router = Router();
@@ -93,12 +94,13 @@ router.get("/events", (req, res) => {
       SELECT id, slug, title, summary, category, status, severity,
              geo_lat, geo_lng, started_at, last_activity_at,
         (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id)       AS article_count,
-        (SELECT COUNT(*) FROM event_market_links eml WHERE eml.event_id = e.id) AS market_count,
+        (SELECT COUNT(*) FROM event_market_links eml JOIN prediction_markets pm ON pm.id = eml.market_id
+         WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")}) AS market_count,
         (SELECT pm.yes_price
          FROM event_market_links eml JOIN prediction_markets pm ON pm.id = eml.market_id
-         WHERE eml.event_id = e.id ORDER BY eml.rank LIMIT 1) AS top_probability
+         WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")} ORDER BY eml.rank LIMIT 1) AS top_probability
       FROM events e
-      WHERE status = ?
+      WHERE status = ? AND ${notMachineEventSql("e")}
     `;
     const params = [status];
     if (category) { sql += " AND category = ?"; params.push(category); }
@@ -126,7 +128,7 @@ router.get("/predictions", (req, res) => {
 router.get("/predictions/:id", (req, res) => {
   try {
     const m = getMarketById(req.params.id);
-    if (!m) return res.status(404).json({ error: "Market not found" });
+    if (!isMarketEligible(m)) return res.status(404).json({ error: "Market not found" });
     res.json({ market: m });
   } catch (err) { fail(res, err); }
 });
