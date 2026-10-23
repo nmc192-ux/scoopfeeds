@@ -9,7 +9,7 @@
  *            silent under idents and the film, faded out at the end
  *   voice    each line normalised to -16 LUFS, placed at its computed start
  *   sonic    Signal idents and stings from brand/sonic, at -16 LUFS-ish (-2 dB)
- *   film     the ScoopFeeds 60 film's own sound in its slot
+ *   film     the Short's own sound in its slot (a Short cut from a published long-form film, #216)
  * Screen: cues [{ at, scene, data }] with absolute epoch-ms times; the screen plays them
  * by its own clock (see screen/scoopfeeds-radio-programme.html).
  */
@@ -129,7 +129,7 @@ class WavWriter {
  * @param {object} o.pack         fact pack
  * @param {number} o.hourStart    epoch ms of H
  * @param {(daypart:string)=>{file:string,lufs:number}} o.bedFor
- * @param {string|null} o.film    path to a ScoopFeeds 60 film (mp4) or null
+ * @param {string|null} o.film    path to an eligible Short (filmLibrary.resolveHourShort) or null
  * @param {Function} o.voice      (text) => {path, durationSecs}
  * @param {string} o.outWav
  */

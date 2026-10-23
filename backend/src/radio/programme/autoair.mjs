@@ -14,7 +14,7 @@
  * The scope of this unattended loop is DrJ's standing approval: see docs/radio/autonomous-newsroom.md.
  *
  *   node src/radio/programme/autoair.mjs --hour next --out ~/scoopfeeds-radio/air/auto \
- *     --music-dir ~/scoopfeeds-radio/music [--film <file|dir>] [--feature <file>] [--feature-title "..."] [--thumbnail <jpg>]
+ *     --music-dir ~/scoopfeeds-radio/music [--film <file|dir>: only an eligible library Short, #216] [--feature <file>] [--feature-title "..."] [--thumbnail <jpg>]
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -23,6 +23,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { airCheck } from "./airCheck.js";
+import { resolveHourShort } from "../filmLibrary.js";
 import { makeYouTubeLive, liveConfigured, goLiveWhenActive } from "../live/youtubeLive.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -94,7 +95,16 @@ async function main() {
 
   // ── 1. produce ──
   stage("producing");
-  const film = newestVideo(tilde(v.film || env.RADIO_AUTOAIR_FILM));
+  // #216: the film slot takes only a Short cut from a published long-form film (the newest eligible one in a
+  // folder); anything else, ScoopFeeds 60 included, leaves the slot to the normal programme, and says why
+  const filmArg = tilde(v.film || env.RADIO_AUTOAIR_FILM);
+  let film = null;
+  if (filmArg) {
+    const r = resolveHourShort(filmArg, { env });
+    film = r.item ? r.item.file : null;
+    status.film = r.item ? { id: r.item.id, parentFilm: r.item.parentFilm } : { id: null, reason: r.reason }; saveStatus();
+    log(r.item ? `film slot: ${r.item.id} (Short from ${r.item.parentFilm})` : `film slot: no film this hour: ${r.reason}`);
+  }
   const feature = newestVideo(tilde(v.feature || env.RADIO_AUTOAIR_FEATURE));
   const featureTitle = v["feature-title"] || env.RADIO_AUTOAIR_FEATURE_TITLE || null;
   const pargs = [path.join(HERE, "produce.mjs"), "--hour", new Date(hourStart).toISOString(), "--out", out,
