@@ -145,7 +145,9 @@ async function main() {
 
   stage("on-air");
   const prog = JSON.parse(fs.readFileSync(path.join(out, "programme.json"), "utf8"));
-  const playArgs = [path.join(BACKEND, "src/radio/playout/cli.js"), "--programme", out, "--music-dir", tilde(v["music-dir"] || env.RADIO_MUSIC_DIR || path.join(BASE, "music"))];
+  const outputsFile = path.join(out, "outputs.json");   // per-destination status from the fan-out (#207); only written with more than one destination
+  const playArgs = [path.join(BACKEND, "src/radio/playout/cli.js"), "--programme", out, "--music-dir", tilde(v["music-dir"] || env.RADIO_MUSIC_DIR || path.join(BASE, "music")),
+    "--status-file", outputsFile, "--alerts", "off"];
   let playExit = null;
   const playing = runLogged(process.execPath, playArgs, { cwd: BACKEND, logFile: path.join(out, "playout.log"), log: () => {}, env: { ...env, RADIO_PLAYOUT_CHROME: env.RADIO_PLAYOUT_CHROME || "system" } })
     .then((c) => { playExit = c; return c; });
@@ -160,8 +162,22 @@ async function main() {
 
   // ── 5. watch until the end ──
   let badSince = null, lastWarn = 0;
+  const downSince = {}, warned = {};
   while (playExit === null) {
     await Promise.race([playing, sleep(30_000)]);
+    // #207: each destination's state goes into this hour's status.json; alert only for a primary down over 5 min
+    const outs = readOutputs(outputsFile);
+    if (outs) {
+      status.outputs = outs.summary; saveStatus();
+      for (const x of outs.outputs) {
+        if (x.state === "live") { downSince[x.id] = null; warned[x.id] = false; continue; }
+        downSince[x.id] ??= Date.now();
+        if (x.priority === "primary" && !warned[x.id] && Date.now() - downSince[x.id] > 5 * 60_000) {
+          warned[x.id] = true;
+          await alert(`${x.label} has been off air for over 5 minutes (${x.state}${x.lastError ? `: ${x.lastError}` : ""}). The other outputs are unaffected.`);
+        }
+      }
+    }
     if (playExit !== null || !yt || !streamId || !status.liveAt) continue;
     const st = await yt.streamState(streamId).catch(() => null);
     const bad = !st || st.streamStatus !== "active" || st.health === "bad" || st.health === "noData";
@@ -188,6 +204,10 @@ async function main() {
 }
 
 // ── helpers ──
+/** The fan-out's status file, or null when there is none (one destination) or it is mid-write. */
+export function readOutputs(file) {
+  try { const j = JSON.parse(fs.readFileSync(file, "utf8")); return Array.isArray(j.outputs) ? j : null; } catch { return null; }
+}
 function sleep(ms) { return new Promise((r) => setTimeout(r, Math.max(0, ms))); }
 async function sleepUntil(t) { while (Date.now() < t) await sleep(Math.min(30_000, t - Date.now())); }
 const fmt = (ms, tz, o) => new Intl.DateTimeFormat("en-GB", { timeZone: tz, ...o }).format(new Date(ms));

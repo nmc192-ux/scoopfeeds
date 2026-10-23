@@ -7,6 +7,7 @@
  * The stream key is never logged: use redact() on anything that may contain it.
  */
 import path from "node:path";
+import { extraOutputs, redactAll } from "../live/destinations.js";
 
 export const RTMP_BASE = "rtmp://a.rtmp.youtube.com/live2";
 
@@ -40,7 +41,12 @@ export function rtmpBase(env = process.env) {
 
 /**
  * @param {{ out?: string|null, env?: object }} opts
- * @returns {{ kind: "file", path: string } | { kind: "segments", dir: string, segmentSec: number, keep: number } | { kind: "rtmp", url: string }}
+ * @returns {{ kind: "file", path: string } | { kind: "segments", dir: string, segmentSec: number, keep: number } | { kind: "rtmp", url: string }
+ *           | { kind: "multi", outputs: Array<{id,label,priority,maxDurationSec,url}> }}
+ * "multi" (#207) only when an extra destination (../live/destinations.js, e.g. RADIO_X_ENABLED=true) is fully configured:
+ * the encoder then writes FLV to stdout and live/fanout.js relays it to each output separately. With every extra flag unset
+ * the result is the single "rtmp" target, exactly as before. `skipped` lists extra destinations that were switched on
+ * but are misconfigured (they never block YouTube).
  */
 export function resolveTarget({ out = null, segmentsDir = null, segmentSec = 60, segmentKeep = 10, env = process.env } = {}) {
   if (out) return { kind: "file", path: path.resolve(out) };
@@ -51,13 +57,15 @@ export function resolveTarget({ out = null, segmentsDir = null, segmentSec = 60,
       "no output target: pass --out <file>, or set BOTH RADIO_PLAYOUT_ENABLED=true and RADIO_STREAM_KEY to enable the RTMP path",
     );
   }
-  return { kind: "rtmp", url: `${rtmpBase(env)}/${streamKey(env)}` };
+  const url = `${rtmpBase(env)}/${streamKey(env)}`;
+  const { outputs, skipped } = extraOutputs(env);
+  if (!outputs.length) return skipped.length ? { kind: "rtmp", url, skipped } : { kind: "rtmp", url };
+  const youtube = { id: "youtube", label: "YouTube", priority: "primary", maxDurationSec: null, url };
+  return { kind: "multi", outputs: [youtube, ...outputs], skipped };
 }
 
 /** Strip the stream key (and anything after the RTMP base) from a string before it is logged. */
 export function redact(text, env = process.env) {
-  let s = String(text);
-  const key = streamKey(env);
-  if (key) s = s.split(key).join("***");
+  let s = redactAll(text, env);   // every destination's key (YouTube's RADIO_STREAM_KEY included)
   return s.replace(new RegExp(`${RTMP_BASE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/\\S+`, "g"), `${RTMP_BASE}/***`);
 }
