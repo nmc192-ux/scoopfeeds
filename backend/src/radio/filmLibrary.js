@@ -10,10 +10,16 @@
  *
  * The sidecar is written by the publish step (or by hand). A video with no sidecar, no
  * duration, or no parseable publish date is REPORTED as skipped, never guessed at: an unknown
- * length would break the grid.
+ * length would break the grid. A sidecar whose publishedAt is in the future (a scheduled upload
+ * that has not gone out yet) is skipped too: the channel plays only what is already published.
+ *
+ * importFilm() writes that layout from a publish folder: it links (or copies) the finished video
+ * into the series folder and writes the sidecar, with the duration MEASURED by ffprobe, never
+ * typed in. The channel's own uploads are imported the same way once their files are local.
  */
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 export const SERIES = Object.freeze({
   "a-eye": "A-Eye",
@@ -35,7 +41,7 @@ export function filmsDir() {
 }
 
 /** @returns {{ items: object[], skipped: {file:string, reason:string}[] }} */
-export function loadLibrary(dir = filmsDir()) {
+export function loadLibrary(dir = filmsDir(), { now = Date.now() } = {}) {
   const items = [];
   const skipped = [];
   let series;
@@ -56,6 +62,7 @@ export function loadLibrary(dir = filmsDir()) {
       const publishedAt = Date.parse(meta.publishedAt);
       if (!(durationSec > 0)) { skipped.push({ file, reason: "sidecar has no durationSec" }); continue; }
       if (!Number.isFinite(publishedAt)) { skipped.push({ file, reason: "sidecar has no valid publishedAt" }); continue; }
+      if (publishedAt > now) { skipped.push({ file, reason: "publishedAt is in the future (not published yet)" }); continue; }
       if (!meta.title) { skipped.push({ file, reason: "sidecar has no title" }); continue; }
       items.push({
         id: `${s.name}/${f.replace(VIDEO, "")}`,
@@ -71,4 +78,34 @@ export function loadLibrary(dir = filmsDir()) {
   }
   items.sort((a, b) => b.publishedAt - a.publishedAt || a.id.localeCompare(b.id));
   return { items, skipped };
+}
+
+/** Duration in seconds of a media file, measured by ffprobe. Throws if it cannot be measured. */
+export function probeDurationSec(file, { ffprobe = process.env.FFPROBE_PATH || "ffprobe", exec = execFileSync } = {}) {
+  const out = exec(ffprobe, ["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", file], { encoding: "utf8" });
+  const sec = Number(String(out).trim());
+  if (!(sec > 0)) throw new Error(`ffprobe could not measure a duration for ${file}`);
+  return sec;
+}
+
+/**
+ * Add one published video to the library: <dir>/<series>/<name>.<ext> + <name>.json.
+ * @param {{ file: string, series: string, title: string, publishedAt: string, name?: string, copy?: boolean,
+ *           dir?: string, durationSec?: number, probe?: (f: string) => number }} o
+ */
+export function importFilm({ file, series, title, publishedAt, name, copy = false, dir = filmsDir(), durationSec, probe = probeDurationSec }) {
+  if (!SERIES[series]) throw new Error(`unknown series "${series}" (one of: ${Object.keys(SERIES).join(", ")})`);
+  if (!title) throw new Error("title is required");
+  if (!Number.isFinite(Date.parse(publishedAt))) throw new Error(`publishedAt "${publishedAt}" is not a date`);
+  if (!VIDEO.test(file) || !fs.existsSync(file)) throw new Error(`not a video file: ${file}`);
+  const measured = durationSec ?? probe(file);
+  const base = (name || path.basename(file).replace(VIDEO, "")).replace(/[^a-z0-9._-]+/gi, "-");
+  const ext = path.extname(file).toLowerCase();
+  const target = path.join(dir, series, base + ext);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.rmSync(target, { force: true });
+  if (copy) fs.copyFileSync(file, target); else fs.symlinkSync(path.resolve(file), target);
+  const sidecar = { title: String(title), publishedAt: new Date(Date.parse(publishedAt)).toISOString(), durationSec: Math.round(measured * 1000) / 1000, source: path.resolve(file) };
+  fs.writeFileSync(target.replace(VIDEO, ".json"), JSON.stringify(sidecar, null, 2) + "\n");
+  return { target, sidecar };
 }

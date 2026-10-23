@@ -9,6 +9,7 @@
  *  - No film repeats within MIN_GAP_MS of its last airing (`recent` seeds this from yesterday).
  *    When nothing eligible is left a slot is left EMPTY and reported, not filled with a repeat.
  *  - Shorts fill the break after each film slot, up to BREAK_SEC, never repeating within the gap.
+ *  - A slot that would start while the previous film or its break is still on air is left empty.
  *  - A promo ("New episode of X, Sunday") is produced from metadata for each film in the plan
  *    that is under NEW_DAYS old, placed PROMO_LEAD_MS before its slot.
  */
@@ -36,11 +37,13 @@ export function defaultSlots(day, hours = DEFAULT_SLOT_HOURS) {
   return hours.map(({ hour, prime }) => ({ at: easternInstant(day, hour), prime }));
 }
 
-const WEEKDAY = (d) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "long" }).format(d);
+const fmt = (opts) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", ...opts });
+const WEEKDAY = (d) => fmt({ weekday: "long" }).format(d);
+const CLOCK = (d) => fmt({ hour: "numeric", minute: "2-digit", hourCycle: "h12" }).format(d).replace(":00", "");
 
-/** Promo line from episode metadata only. `airAt` names the day it will air. */
+/** Promo line from episode metadata only: "New episode of The Invisible Hand: <title>. Sunday, 9 PM ET." */
 export function promoText(film, airAt) {
-  return `New from ${film.seriesName}: ${film.title}. On air ${WEEKDAY(airAt)}.`;
+  return `New episode of ${film.seriesName}: ${film.title}. ${WEEKDAY(airAt)}, ${CLOCK(airAt)} ET.`;
 }
 
 /**
@@ -65,10 +68,12 @@ export function planDay(library, { slots, recent = [], now = Date.now() }) {
   const plan = [];
   const empty = [];
   let shortCursor = 0;
+  let busyUntil = -Infinity;
   const ordered = [...slots].sort((a, b) => a.at - b.at);
 
   for (const slot of ordered) {
     const at = slot.at.getTime();
+    if (at < busyUntil) { empty.push({ at, reason: "previous film and break still on air" }); continue; }
     const pools = slot.prime ? [newest, films] : [films.filter((f) => !newest.includes(f)), films];
     let film = null;
     for (const pool of pools) {
@@ -93,6 +98,7 @@ export function planDay(library, { slots, recent = [], now = Date.now() }) {
       i = -1; // rescan from the new cursor so the break fills in order
       if (used >= BREAK_SEC) break;
     }
+    busyUntil = cursor;
   }
   plan.sort((a, b) => a.at - b.at);
   return { plan, empty };
