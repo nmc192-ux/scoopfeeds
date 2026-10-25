@@ -84,6 +84,7 @@ import { getPipelineHealth } from "./src/services/pipelineHealth.js";
 import { RSS_SOURCES, YOUTUBE_SOURCES } from "./src/config/sources.js";
 import { assertRedisStartup, getRedisStatus } from "./src/jobs/redis.js";
 import { sendError, sendInternalError, sendNotFound } from "./src/utils/apiResponse.js";
+import { marketOddsEnabled } from "./src/config/marketOdds.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -333,7 +334,7 @@ app.get("/api/health", (req, res) => {
 app.get("/api/site-config", (_req, res) => {
   res.set("Cache-Control", "public, max-age=60");
   res.json({
-    marketOdds: process.env.SITE_MARKET_ODDS === "true",
+    marketOdds: marketOddsEnabled(),   // one definition: src/config/marketOdds.js (#205)
     v2: process.env.SITE_V2 === "true",
   });
 });
