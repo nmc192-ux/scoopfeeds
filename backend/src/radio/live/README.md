@@ -4,6 +4,10 @@ DrJ, 22 Oct 2026: carry live events and speeches **only from official, public fe
 person's own stream), plus short credited social clips inside our segments. **Never re-air another
 broadcaster's live feed** (CNN, Al Jazeera, BBC…).
 
+> **Do not switch on `RADIO_LIVE_ENABLED`, and do not wire social-clip playback, until #218's pre-air and
+> live-delay content-safety gate has landed** (DrJ, 23 Oct 2026). After that, the flag still waits for the
+> 5-minute NASA rehearsal on the Mac and DrJ's go-ahead.
+
 | File | What |
 |---|---|
 | `officialFeeds.js` | The allow-list. DrJ adds entries; the engine may propose one in a PR. `assertCanAir()` is the only gate to air. |
