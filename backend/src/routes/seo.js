@@ -80,18 +80,31 @@ Sitemap: ${SITE}/feed.xml
   );
 });
 
-// ── sitemap.xml — homepage, categories, latest articles (up to 10k) ──────
+// ── Dossiers for the sitemaps (#178) ─────────────────────────────────────
+// Events with real coverage only: machine events (USGS/NOAA) carry no articles (CLAUDE.md), and a
+// merged event's slug is an alias whose canonical is its survivor, so neither is listed.
+export function sitemapEvents(db, { sinceMs, limit = 5000 }) {
+  return db.prepare(`
+    SELECT e.slug, e.title, e.last_activity_at FROM events e
+    WHERE e.last_activity_at >= ? AND e.status != 'merged'
+      AND EXISTS (SELECT 1 FROM event_articles ea WHERE ea.event_id = e.id)
+    ORDER BY e.last_activity_at DESC LIMIT ?
+  `).all(sinceMs, limit);
+}
+
+// ── sitemap.xml — homepage, doors, hubs, dossiers of the last 30 days ─────
+// Article pages are noindex since #176, so they are not listed. Nor is "/?topic=…": its canonical
+// is the homepage, and the /topic/:slug hubs are the indexable version.
 router.get("/sitemap.xml", (_req, res) => {
   const db = getDb();
-  const rows = db.prepare(
-    `SELECT id, published_at FROM articles ORDER BY published_at DESC LIMIT 10000`
-  ).all();
+  const events = sitemapEvents(db, { sinceMs: Date.now() - 30 * 24 * 60 * 60 * 1000 });
 
   const now = new Date().toISOString();
   const urls = [];
   urls.push(`<url><loc>${SITE}/</loc><lastmod>${now}</lastmod><changefreq>hourly</changefreq><priority>1.0</priority></url>`);
-  for (const cat of CATEGORIES) {
-    urls.push(`<url><loc>${SITE}/?topic=${cat}</loc><changefreq>hourly</changefreq><priority>0.8</priority></url>`);
+  // The doors (plan v7): News, Originals, Markets, Watch & Listen.
+  for (const door of ["events", "briefs", "markets", "live-tv"]) {
+    urls.push(`<url><loc>${SITE}/${door}</loc><changefreq>hourly</changefreq><priority>0.8</priority></url>`);
   }
   // E-E-A-T pages — required for Google News / Discover eligibility.
   for (const slug of ["about", "editorial-policy", "corrections", "contact", "privacy"]) {
@@ -101,9 +114,8 @@ router.get("/sitemap.xml", (_req, res) => {
   for (const slug of ["ai", "cars", "science", "politics", "pakistan", "international", "health", "sports"]) {
     urls.push(`<url><loc>${SITE}/topic/${slug}</loc><changefreq>daily</changefreq><priority>0.7</priority></url>`);
   }
-  for (const r of rows) {
-    const lastmod = new Date(r.published_at).toISOString();
-    urls.push(`<url><loc>${SITE}/article/${xmlEscape(r.id)}</loc><lastmod>${lastmod}</lastmod><priority>0.6</priority></url>`);
+  for (const e of events) {
+    urls.push(`<url><loc>${SITE}/events/${xmlEscape(encodeURIComponent(e.slug))}</loc><lastmod>${new Date(e.last_activity_at).toISOString()}</lastmod><changefreq>hourly</changefreq><priority>0.7</priority></url>`);
   }
 
   res.type("application/xml").send(
@@ -175,22 +187,19 @@ router.get("/feed/:category.xml", (req, res) => {
   }));
 });
 
-// ── Google News sitemap — last 48 hours only ─────────────────────────────
+// ── Google News sitemap — dossiers active in the last 48 hours only (#178) ──
+// Article pages are noindex (#176); the dossier is the page we publish.
 router.get("/sitemap-news.xml", (_req, res) => {
   const db = getDb();
-  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
-  const rows = db.prepare(
-    `SELECT id, title, published_at, source_name FROM articles
-     WHERE published_at >= ? ORDER BY published_at DESC LIMIT 1000`
-  ).all(cutoff);
+  const rows = sitemapEvents(db, { sinceMs: Date.now() - 48 * 60 * 60 * 1000, limit: 1000 });
 
   const urls = rows.map(r => {
-    const pub = new Date(r.published_at).toISOString();
+    const pub = new Date(r.last_activity_at).toISOString();
     return `<url>
-  <loc>${SITE}/article/${xmlEscape(r.id)}</loc>
+  <loc>${SITE}/events/${xmlEscape(encodeURIComponent(r.slug))}</loc>
   <news:news>
     <news:publication>
-      <news:name>Scoop</news:name>
+      <news:name>Scoopfeeds</news:name>
       <news:language>en</news:language>
     </news:publication>
     <news:publication_date>${pub}</news:publication_date>
@@ -202,6 +211,43 @@ router.get("/sitemap-news.xml", (_req, res) => {
   res.type("application/xml").send(
     `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">\n${urls}\n</urlset>\n`
   );
+});
+
+// ── llms.txt (#178) — the doors and the 50 most recent dossiers, for AI crawlers ──
+// Built on request and kept for an hour: a cheap static file in effect.
+let llmsCache = { at: 0, text: "" };
+export function buildLlmsTxt(db, now = Date.now()) {
+  const events = sitemapEvents(db, { sinceMs: now - 30 * 24 * 60 * 60 * 1000, limit: 50 });
+  const lines = [
+    "# Scoopfeeds",
+    "",
+    "> Scoopfeeds groups every outlet's coverage of a story into one event dossier: the timeline, which outlets covered it, and how their angles differ. Each dossier links out to the original reporting.",
+    "",
+    "## Doors",
+    "",
+    `- [Today](${SITE}/): the lead story, developing stories and today's top coverage`,
+    `- [News](${SITE}/events): every developing story as a dossier`,
+    `- [Originals](${SITE}/briefs): ScoopFeeds' own analysis briefs`,
+    `- [Markets](${SITE}/markets): markets and macro indicators`,
+    `- [Watch & Listen](${SITE}/live-tv): ScoopFeeds Radio and live news channels`,
+    "",
+    "## Recent dossiers",
+    "",
+    ...events.map((e) => `- [${String(e.title).replace(/[\[\]\n]/g, " ").trim()}](${SITE}/events/${encodeURIComponent(e.slug)}): updated ${new Date(e.last_activity_at).toISOString().slice(0, 16).replace("T", " ")} UTC`),
+    "",
+    "## About",
+    "",
+    `- [About](${SITE}/about)`,
+    `- [Editorial policy](${SITE}/editorial-policy)`,
+    `- [Sitemap](${SITE}/sitemap.xml)`,
+    "",
+  ];
+  return lines.join("\n");
+}
+router.get("/llms.txt", (_req, res) => {
+  const now = Date.now();
+  if (!llmsCache.text || now - llmsCache.at > 60 * 60 * 1000) llmsCache = { at: now, text: buildLlmsTxt(getDb(), now) };
+  res.type("text/plain").set("Cache-Control", "public, max-age=3600").send(llmsCache.text);
 });
 
 // ── Article detail page — SSR shell with rich meta tags ──────────────────
@@ -391,7 +437,7 @@ router.get("/article/:id", ssrForBots((req, res) => {
 // Google ("AI news", "Pakistan news") with substantive editorial framing,
 // the day's top stories, and the month's archive. CollectionPage JSON-LD
 // gives Google a structured signal that this is a topical hub, not thin SEO.
-const TOPIC_HUBS = {
+export const TOPIC_HUBS = {
   ai: {
     title: "AI News",
     intro:
@@ -451,11 +497,13 @@ const TOPIC_SLUG_TO_CATEGORY = {
   sports: "sports",
 };
 
-router.get("/topic/:slug", ssrForBots((req, res) => {
+router.get("/topic/:slug", ssrForBots((req, res, next) => {
   const slug = String(req.params.slug || "").toLowerCase();
   const meta = TOPIC_HUBS[slug];
   const category = TOPIC_SLUG_TO_CATEGORY[slug];
-  if (!meta || !category) return res.status(404).send(renderNotFound());
+  // #178: a topic without an SSR hub (/topic/world, /topic/business, …) is still a real SPA page:
+  // fall through to the shell with its own head tags instead of telling crawlers it is a 404.
+  if (!meta || !category) return next();
 
   const db = getDb();
   // Last 30 days, credibility-gated, recency-ordered.
