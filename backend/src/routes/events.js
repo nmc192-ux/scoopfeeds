@@ -28,6 +28,7 @@ import { eligibleMarketSql } from "../realityIndex/dal/marketsDao.js";
 import { notMachineEventSql } from "../realityIndex/dal/machineEvents.js";
 import { resolveSlugAlias } from "../realityIndex/dal/slugAliases.js";
 import { dossierCoherence } from "../realityIndex/intelligence/eventCoherence.js";
+import { reorderByCountry, parseCountry } from "../realityIndex/dal/countryAffinity.js";
 
 const router = express.Router();
 
@@ -271,7 +272,15 @@ router.get("/world-map", (req, res) => {
 
 /**
  * GET /api/events
- * Query params: category, status (default 'active'), limit (default 30), offset
+ * Query params: category, status (default 'active'), limit (default 30), offset,
+ *   sort ("recency" | "prominence"),
+ *   country (#190, ISO-2, e.g. "GB"): reader's country first. A stable re-order of
+ *     the page the query returned: events covered by >= 1 outlet from that country
+ *     first, the rest after, each group in its original order. A country with no
+ *     outlets gets the US -> GB -> Europe tiers. Never filters, never changes the
+ *     prominence score. Adds `country_affinity` (outlet count) to each event and
+ *     `country` to the response. Absent or malformed: the response is unchanged.
+ *     See realityIndex/dal/countryAffinity.js.
  */
 router.get("/", (req, res) => {
   try {
@@ -360,18 +369,29 @@ router.get("/", (req, res) => {
     sql += " LIMIT ? OFFSET ?";
     params.push(limit, offset);
 
-    const rows = db.prepare(sql).all(...params);
+    let rows = db.prepare(sql).all(...params);
+    // #190 reader's country first. Only when ?country= is a valid ISO-2 code; otherwise
+    // this block is skipped and the response is byte-identical to before.
+    const country = parseCountry(req.query.country);
+    let affinity = null;
+    if (country) {
+      const r = reorderByCountry(db, rows, country);
+      rows = r.rows;
+      affinity = r.affinity;
+    }
+    const withAffinity = (ev, row) => (affinity ? { ...ev, country_affinity: affinity.get(row.id) ?? 0 } : ev);
+    const extra = country ? { country } : {};
     // Display-layer story grouping (read-only). Behind HOMEPAGE_GROUPING (default OFF) — when off,
     // this branch is skipped and the response below is byte-identical to before (prod-neutral).
     if (String(process.env.HOMEPAGE_GROUPING ?? "false").toLowerCase() === "true") {
       const enriched = rows.map((r) => ({ ...r, ids: db.prepare("SELECT article_id FROM event_articles WHERE event_id = ?").all(r.id).map((x) => x.article_id) }));
       const grouped = groupTopEvents(db, enriched);
       return res.json({
-        events: grouped.map((g) => ({ ...publicEvent(g), related: (g.related ?? []).map((x) => ({ id: x.id, title: x.title, slug: x.slug, source_count: x.source_count })) })),
-        limit, offset, sort, grouped: true,
+        events: grouped.map((g) => ({ ...withAffinity(publicEvent(g), g), related: (g.related ?? []).map((x) => ({ id: x.id, title: x.title, slug: x.slug, source_count: x.source_count })) })),
+        limit, offset, sort, grouped: true, ...extra,
       });
     }
-    res.json({ events: rows.map(publicEvent), limit, offset, sort });
+    res.json({ events: rows.map((r) => withAffinity(publicEvent(r), r)), limit, offset, sort, ...extra });
   } catch (err) {
     logger.error(`GET /api/events error: ${err.message}`);
     res.status(500).json({ error: "Internal server error" });

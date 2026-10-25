@@ -7,7 +7,7 @@
  *   node backend/src/radio/live/cli.js audit              the live log: carries, refusals, clips (none over 30 s)
  * Needs yt-dlp and ffprobe on PATH for check / --fetch.
  */
-import { OFFICIAL_FEEDS, entryForUrl, assertCanAir, isProposed } from "./officialFeeds.js";
+import { OFFICIAL_FEEDS, entryForUrl, assertCanAir, isProposed, awaitingMacCheck, streamMonetised } from "./officialFeeds.js";
 import { probeFeed } from "./feedProbe.js";
 import { loadManualEvents, fetchPublisherEvents, mergeCalendar, eventsFile, airsAutomatically } from "./eventsCalendar.js";
 import { createLiveLog, liveLogDir } from "./liveLog.js";
@@ -17,14 +17,23 @@ const [cmd, ...rest] = process.argv.slice(2);
 const out = (x) => console.log(typeof x === "string" ? x : JSON.stringify(x, null, 2));
 
 if (cmd === "feeds") {
-  for (const f of OFFICIAL_FEEDS) out(`${f.id.padEnd(12)} ${isProposed(f) ? "[PROPOSED, cannot air] " : ""}${f.publisher}  [${[...(f.youtube || []), ...(f.pages || [])].join(", ")}]  ${f.why}`);
+  out(`RADIO_STREAM_MONETISED: ${streamMonetised() ? "on (nonCommercialOnly feeds refused)" : "off"}`);
+  for (const f of OFFICIAL_FEEDS) {
+    const tags = [isProposed(f) ? "PROPOSED, cannot air" : null, f.nonCommercialOnly ? "non-commercial only" : null, awaitingMacCheck(f) ? "AWAITING MAC CHECK" : null].filter(Boolean);
+    out(`${f.id.padEnd(16)} ${f.publisher}  [${[...(f.youtube || []), ...(f.pages || [])].join(", ")}]${tags.length ? `  (${tags.join("; ")})` : ""}  ${f.why}`);
+  }
 } else if (cmd === "check") {
   const url = rest[0];
   if (!url) { console.error("usage: check <url>"); process.exit(2); }
   const probe = await probeFeed(url);
   const entry = entryForUrl(url, { probe });
   let verdict;
-  try { assertCanAir({ entryId: entry?.id, url, probe }); verdict = `CAN AIR as "${entry.id}" (${entry.publisher})`; }
+  // The Mac check itself: everything but the recorded macCheck is enforced, so a new #217 entry can pass.
+  try {
+    assertCanAir({ entryId: entry?.id, url, probe }, { ignoreMacCheck: true });
+    verdict = `CAN AIR as "${entry.id}" (${entry.publisher})`;
+    if (awaitingMacCheck(entry)) verdict += ` once its macCheck is recorded in officialFeeds.js: { passedAt: "${new Date().toISOString()}", url: "${url}", by: "<who ran it>" }`;
+  }
   catch (e) { verdict = `CANNOT AIR: ${e.message}`; }
   out({ url, entry: entry?.id ?? null, probe: { ...probe, mediaUrl: probe.mediaUrl ? "(resolved)" : undefined, httpHeaders: undefined }, verdict });
   process.exit(verdict.startsWith("CAN AIR") ? 0 : 1);

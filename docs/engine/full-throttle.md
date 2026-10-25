@@ -66,6 +66,9 @@ not merged until DrJ says so. Everything not on this list ships automatically.
    (The radio auto-air loop below is the only scoped exception to this item.)
 5. **Editorial and legal**: changes to editorial guardrails (Rule 0, sensitive-topic rules,
    the Pakistan-related rules), the AI-disclosure chain, privacy, terms or other legal pages.
+   This includes DrJ's media rule (23 Oct 2026, #218): no sexual, violent, abusive or animal-harm
+   video or audio, ever (`docs/radio/content-safety.md`). Any change that loosens it (a threshold,
+   a category, the "unmeasured is a fail" rule, an exemption for a source) waits for DrJ.
 6. **Market odds**: switching Reality Index / Truth Gap / market-implied probabilities back
    on in any reader-facing surface after they were hidden (plan v7, decision 3).
 7. **Automated Shorts** (DrJ, 15 Oct 2026): anything that would let the system make or publish
