@@ -28,10 +28,16 @@
  *   - `macCheck`: null until `node backend/src/radio/live/cli.js check <url>` has passed on the Mac for
  *     this entry; then { passedAt, url, by }. An entry with `macCheck: null` cannot go to air.
  *     (#202 entries have no `macCheck` key and are unaffected.)
+ *
+ * #223 field:
+ *   - `proposed: true`: an entry the ENGINE proposed and DrJ has not yet approved. assertCanAir refuses
+ *     it, the publisher-schedule fetch skips it, and `cli.js feeds` marks it PROPOSED. DrJ approves an
+ *     entry by deleting its `proposed` line (and setting `addedBy`); striking one means deleting it.
  */
 
 const DRJ_202 = "DrJ, #202 decision, 22 Oct 2026";
 const DRJ_217 = "DrJ, #217 decision, 23 Oct 2026";
+const PROPOSED_223 = "PROPOSED (engine), awaiting DrJ";
 
 export const OFFICIAL_FEEDS = Object.freeze([
   {
@@ -68,6 +74,80 @@ export const OFFICIAL_FEEDS = Object.freeze([
     addedBy: "DrJ, #202 decision 22 Oct 2026; narrowed to the floor page 25 Oct 2026",
   },
   // Candidates' and campaigns' own streams: DrJ adds each one here (handle + why) before it can air.
+  //
+  // ── #223 (DrJ, 25 Oct 2026): election night 3 Nov, campaigns' OWN streams for victory and concession
+  //    speeches. Everything below is PROPOSED by the engine and CANNOT AIR (`proposed: true`) until DrJ
+  //    removes that flag, entry by entry, before 2 Nov. Races: Ballotpedia's 12 Senate and 7 governor
+  //    battlegrounds. Each handle was read, on 25 Oct 2026, as a link on the campaign's own website (the
+  //    page carrying its "Paid for by" line), via a fetch tool that summarises pages: re-check each one
+  //    in a browser before approving. Candidates whose site links no channel, or links one only by a
+  //    channel id / legacy URL (no @handle), are left OUT: see docs/radio/campaign-feeds-223.md.
+  {
+    id: "moody-campaign", publisher: "Ashley Moody campaign", proposed: true,
+    youtube: ["@AshleyMoodyFL"], pages: [],
+    why: "Florida Senate (special), Republican incumbent. Handle linked from the campaign's own site: https://ashleymoody.com/about/ (footer).",
+    addedBy: PROPOSED_223,
+  },
+  {
+    id: "nixon-campaign", publisher: "Angie Nixon campaign", proposed: true,
+    youtube: ["@AngieForFL"], pages: [],
+    why: "Florida Senate (special), Democratic nominee. Handle linked from the campaign's own site: https://angienixon.com/state-rep-angie-nixon-launchescampaign-for-u-s-senate/ (header, social row).",
+    addedBy: PROPOSED_223,
+  },
+  {
+    id: "collins-me-campaign", publisher: "Susan Collins campaign", proposed: true,
+    youtube: ["@susancollins4senator"], pages: [],
+    why: "Maine Senate, Republican incumbent. Handle linked from the campaign's own site: https://susancollins.com/ (header and footer).",
+    addedBy: PROPOSED_223,
+  },
+  {
+    id: "jackson-me-campaign", publisher: "Troy Jackson campaign", proposed: true,
+    youtube: ["@troyjacksonformaine"], pages: [],
+    why: "Maine Senate, Democratic nominee. Handle linked from the campaign's own site: https://www.jacksonformaine.com/ (header, footer).",
+    addedBy: PROPOSED_223,
+  },
+  {
+    id: "alme-campaign", publisher: "Kurt Alme campaign", proposed: true,
+    youtube: ["@almeforsenate"], pages: [],
+    why: "Montana Senate, Republican nominee. Handle linked from the campaign's own site: https://almeforsenate.com/ (footer).",
+    addedBy: PROPOSED_223,
+  },
+  {
+    id: "bankhead-campaign", publisher: "Alani Bankhead campaign", proposed: true,
+    youtube: ["@montanamatters"], pages: [],
+    why: "Montana Senate, Democratic nominee. The channel name is not hers: her press kit calls it \"the campaign's YouTube channel\". Handle linked from the campaign's own site: https://alaniformt.com/press-kit and https://alaniformt.com/ (Watch on YouTube).",
+    addedBy: PROPOSED_223,
+  },
+  {
+    id: "bodnar-campaign", publisher: "Seth Bodnar campaign", proposed: true,
+    youtube: ["@SethForMontana"], pages: [],
+    why: "Montana Senate, independent. Handle linked from the campaign's own site: https://www.sethformontana.com/ (header and footer).",
+    addedBy: PROPOSED_223,
+  },
+  {
+    id: "sununu-campaign", publisher: "John Sununu campaign", proposed: true,
+    youtube: ["@sununusenator"], pages: [],
+    why: "New Hampshire Senate, Republican nominee. Handle linked from the campaign's own site: https://www.sununusenator.com/ (header and footer).",
+    addedBy: PROPOSED_223,
+  },
+  {
+    id: "pappas-campaign", publisher: "Chris Pappas campaign", proposed: true,
+    youtube: ["@ChrisPappasNH"], pages: [],
+    why: "New Hampshire Senate, Democratic nominee. Handle linked from the campaign's own site: https://chrispappas.org/ (header and footer).",
+    addedBy: PROPOSED_223,
+  },
+  {
+    id: "sand-campaign", publisher: "Rob Sand campaign", proposed: true,
+    youtube: ["@robsandia"], pages: [],
+    why: "Iowa governor, Democratic nominee. Handle linked from the campaign's own site: https://robsand.com/about/.",
+    addedBy: PROPOSED_223,
+  },
+  {
+    id: "lahn-campaign", publisher: "Zach Lahn campaign", proposed: true,
+    youtube: ["@ZachLahnforGovernor"], pages: [],
+    why: "Iowa governor, Republican nominee. Handle linked from the campaign's own site: https://zachlahn.com/ (Follow Zach footer).",
+    addedBy: PROPOSED_223,
+  },
 
   // ── #217 (DrJ, 23 Oct 2026): more official feeds. Licence quotes were read on the URL given, on
   //    23 Oct 2026, through a fetch tool that returns clause fragments: re-read the full clause there
@@ -234,6 +314,11 @@ export function feedById(id, feeds = OFFICIAL_FEEDS) {
   return feeds.find((f) => f.id === id) || null;
 }
 
+/** #223: an entry the engine proposed and DrJ has not approved yet. It cannot air. */
+export function isProposed(entry) {
+  return Boolean(entry) && entry.proposed !== undefined && entry.proposed !== false;
+}
+
 /**
  * Is the radio stream monetised (#217)? Fails closed: anything but unset, "", "0", "false" or "no"
  * counts as monetised, because "monetised" is the setting that REFUSES feeds.
@@ -259,6 +344,7 @@ export function creditFor(entry, now = new Date()) {
  * The single on-air gate. Throws unless ALL hold:
  *   - `entryId` is on the allow-list,
  *   - `url` resolves to that same entry (by URL, or by the probe's channel for a watch?v= URL),
+ *   - the entry is not `proposed` (#223),
  *   - the pre-air probe ran and passed (public, live, plays without a login),
  *   - (#217) a nonCommercialOnly entry is refused while RADIO_STREAM_MONETISED is on,
  *   - (#217) an entry with `macCheck: null` is refused until its Mac check is recorded.
@@ -268,6 +354,8 @@ export function creditFor(entry, now = new Date()) {
 export function assertCanAir({ entryId, url, probe }, { feeds = OFFICIAL_FEEDS, env = process.env, ignoreMacCheck = false } = {}) {
   const entry = feedById(entryId, feeds);
   if (!entry) throw new Error(`live feed refused: "${entryId}" is not on the official-feeds allow-list`);
+  // #223: a proposed entry is not on the list yet. DrJ approves it by removing `proposed`. No override.
+  if (isProposed(entry)) throw new Error(`live feed refused: "${entryId}" is proposed and awaiting DrJ's approval`);
   if (entry.nonCommercialOnly && streamMonetised(env)) {
     throw new Error(`live feed refused: "${entry.id}" allows non-commercial use only and RADIO_STREAM_MONETISED is on`);
   }
