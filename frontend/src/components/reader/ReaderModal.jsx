@@ -1,23 +1,23 @@
 /**
  * ReaderModal — distraction-free in-app article reader.
  *
- * Shows up as a full-screen overlay, fetches the Readability-extracted article
- * from /api/reader, renders the sanitized HTML with our typography, and lets
- * users bail to the source site if extraction fails or they want the full page.
+ * Summary-only (issue #176): headline, outlet, a short summary (max 3 sentences)
+ * and a prominent "Read at <publisher>" link. We never render a publisher's full text.
  */
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ExternalLink, Type, Sun, Bookmark, Share2, Languages, Loader2, ArrowRight } from "lucide-react";
+import { X, ExternalLink, Type, Sun, Bookmark, Share2, ArrowRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ScoopLogo } from "../mascot/ScoopMascot";
-import { useReaderStore, useReaderArticle, useTranslatedReader } from "../../hooks/useReader";
+import { useReaderStore, useReaderArticle } from "../../hooks/useReader";
+import { firstSentences } from "../../lib/summary";
 import { useNewsStore } from "../../store/newsStore";
 import { useSaveArticle } from "../../hooks/useSaveArticle";
 import { useAuth } from "../../hooks/useAuth";
 import { usePublicConfig } from "../../hooks/useNews";
 import { useEscapeKey, useBodyScrollLock, useFocusTrap } from "../../hooks/useModal";
-import { isRtl, langFont, nativeName, LANG_BY_CODE } from "../../lib/languages";
+import { isRtl, langFont } from "../../lib/languages";
 import { track, trackShare, trackOutboundClick, trackSave } from "../../lib/track";
 import TipJar from "../tips/TipJar";
 import NewsletterSignup, { readSubToken } from "../newsletter/NewsletterSignup";
@@ -46,13 +46,13 @@ const FONT_SIZES = [
 
 export default function ReaderModal() {
   const { article, open, closeReader, openReader } = useReaderStore();
-  const { language, autoLanguage, setAuthOpen } = useNewsStore();
+  const { setAuthOpen } = useNewsStore();
   const { toggle: toggleSave, isSaved: checkSaved } = useSaveArticle();
   const { isPremium } = useAuth();
   const { data: publicConfig } = usePublicConfig();
   const adSenseConfig = isPremium ? null : publicConfig?.adsense;
   const url = open ? article?.url : null;
-  const { data, isLoading, isError, error } = useReaderArticle(url);
+  const { data } = useReaderArticle(url);
 
   // Meter disabled — all readers have unlimited access.
 
@@ -68,17 +68,14 @@ export default function ReaderModal() {
   const relatedFiltered = related.filter((r) => r.id !== article?.id).slice(0, 3);
 
   const sourceLang = article?.language || data?.lang?.slice(0, 2) || "en";
-  // Target language: if user has picked an explicit language, translate to it
-  // unless it matches the article's source. "Auto" = show source language.
-  const targetLang = autoLanguage ? sourceLang : language;
-  const { html, title: translatedTitle, isTranslating } = useTranslatedReader(
-    data, targetLang, sourceLang
-  );
+  // Nothing is translated any more (#176: summary only), so the text is in the
+  // article's own language and there is no "Translated" badge.
+  const summary = firstSentences(data?.excerpt || article?.description);
 
   const [fontIdx, setFontIdx] = useState(1);
   const [sepia,   setSepia]   = useState(false);
-  const rtl = isRtl(targetLang);
-  const font = langFont(targetLang);
+  const rtl = isRtl(sourceLang);
+  const font = langFont(sourceLang);
 
   const isSaved = article ? checkSaved(article.id) : false;
 
@@ -173,18 +170,6 @@ export default function ReaderModal() {
               </Link>
 
               <div className="flex items-center gap-1">
-                {/* Translation indicator — small pill showing target language */}
-                {sourceLang !== targetLang && (
-                  <span
-                    className="flex items-center gap-1 px-2 py-1 rounded-full bg-electric-50 text-electric-600 text-[10px] font-bold uppercase tracking-wider"
-                    title={`Translated from ${nativeName(sourceLang)} to ${nativeName(targetLang)}`}
-                  >
-                    {isTranslating
-                      ? <Loader2 size={11} className="animate-spin" />
-                      : <Languages size={11} />}
-                    {LANG_BY_CODE[targetLang]?.flag} {targetLang.toUpperCase()}
-                  </span>
-                )}
                 <button
                   onClick={() => setFontIdx((i) => (i + 1) % FONT_SIZES.length)}
                   className="p-2 rounded-full hover:bg-[var(--color-surface2)]"
@@ -231,7 +216,7 @@ export default function ReaderModal() {
             <div
               className="overflow-y-auto flex-1 px-5 sm:px-10 py-8"
               style={{ fontSize: fontPx, fontFamily: font, direction: rtl ? "rtl" : "ltr", textAlign: rtl ? "right" : "left" }}
-              lang={targetLang}
+              lang={sourceLang}
             >
               {article.image_url && (
                 <SafeImage
@@ -246,7 +231,7 @@ export default function ReaderModal() {
                 {article.source_name} · {article.category}
               </p>
               <h1 className="text-2xl sm:text-3xl font-bold leading-tight mb-4">
-                {translatedTitle || data?.title || article.title}
+                {data?.title || article.title}
               </h1>
               {(data?.byline || article.author) && (
                 <p className="text-sm opacity-70 mb-6">
@@ -254,75 +239,32 @@ export default function ReaderModal() {
                 </p>
               )}
 
-              {isLoading && (
-                <div className="space-y-3 animate-pulse">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="h-4 rounded bg-[var(--color-surface2)]" style={{ width: `${80 + Math.random() * 20}%` }} />
-                  ))}
-                </div>
+              {summary && (
+                <p className="mb-6" style={{ lineHeight: 1.7 }}>{summary}</p>
               )}
 
-              {isError && (
-                <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-6 text-center space-y-3">
-                  <div className="text-3xl">🔒</div>
-                  <p className="font-semibold text-amber-900 dark:text-amber-200">
-                    {error?.message || "Couldn't extract this article"}
-                  </p>
-                  <p className="text-sm text-amber-700 dark:text-amber-400">
-                    {error?.hint || "This publisher restricts automated access. Read the full article directly."}
-                  </p>
-                  <a
-                    href={article.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={handleSourceClick}
-                    className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-full bg-electric-600 text-white text-sm font-semibold hover:bg-electric-700 transition-colors"
-                  >
-                    <ExternalLink size={13} />
-                    Read on {new URL(article.url).hostname}
-                  </a>
-                </div>
-              )}
+              <a
+                href={article.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={handleSourceClick}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-full bg-electric-600 text-white text-sm font-semibold hover:bg-electric-700 transition-colors"
+              >
+                <ExternalLink size={13} />
+                Read at {article.source_name || data?.siteName || new URL(article.url).hostname.replace(/^www\./, "")}
+              </a>
 
-              {/* Paywall preview banner — shown when backend fell back to meta-only */}
-              {data?.isMeta && (
-                <div className="flex items-start gap-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 mb-5 text-sm text-amber-800 dark:text-amber-300">
-                  <span className="text-base shrink-0">🔒</span>
-                  <div className="flex-1 min-w-0">
-                    <span className="font-semibold">Preview only</span>
-                    {" — "}this article is behind a paywall at{" "}
-                    <a
-                      href={article.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={handleSourceClick}
-                      className="underline font-medium"
-                    >
-                      {new URL(article.url).hostname.replace(/^www\./, "")}
-                    </a>
-                    . The summary below is from public metadata.
-                  </div>
-                </div>
-              )}
-
-              {html && (
-                <article
-                  className="reader-body"
-                  style={{ lineHeight: 1.7 }}
-                  dangerouslySetInnerHTML={{ __html: html }}
-                />
-              )}
-
-              {data?.length > 0 && (
-                <p className="text-xs opacity-50 mt-10 pt-6 border-t border-[var(--color-border)]">
-                  Extracted from {new URL(article.url).hostname} · approx {Math.max(1, Math.round(data.length / 1100))} min read ·{" "}
-                  <a href={article.url} target="_blank" rel="noopener noreferrer" onClick={handleSourceClick} className="underline">original</a>
+              {data?.eventSlug && (
+                <p className="mt-6 text-sm">
+                  <Link to={`/events/${data.eventSlug}`} onClick={closeReader} className="text-electric-600 font-semibold hover:underline">
+                    See the full story →
+                  </Link>
                 </p>
               )}
 
               {/* After-article AdSense unit — highest-viewability placement;
                   only shown to free users once article content has rendered. */}
-              {adSenseConfig?.enabled && html && (
+              {adSenseConfig?.enabled && summary && (
                 <div className="mt-8 pt-2">
                   <AdSenseUnit
                     slotName="inline"
@@ -385,7 +327,7 @@ export default function ReaderModal() {
               {article?.id && <RealityIndexPanel articleId={article.id} />}
 
               {/* AI Deep Dive — lazy analysis panel, only fires when expanded */}
-              {html && article && (
+              {summary && article && (
                 <ArticleDeepDive article={article} />
               )}
 
