@@ -789,7 +789,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
         })}`);
         insertEvent.run(eventId, slug, c.id, c.title, summary, c.category, "active", severity, hero, c.created_at, now,
           JSON.stringify({ title_cluster_size: linkIds.length }), now, now); // = clusterSize unless the #179 gate trimmed it
-        eventState.set(eventId, { id: eventId, slug, started_at: c.created_at, status: "active", ids: new Set(), centroid: cl.centroid, core: ENTITY_MIN > 0 ? loadEventCore(db, cl.aids, idfMap, catSpanMap) : null, titleClusterSize: clusterSize });
+        eventState.set(eventId, { id: eventId, slug, started_at: c.created_at, status: "active", ids: new Set(), centroid: cl.centroid, core: ENTITY_MIN > 0 ? loadEventCore(db, linkIds, idfMap, catSpanMap) : null, titleClusterSize: linkIds.length }); // #179: = cl.aids / clusterSize unless the gate trimmed
         promoted++;
         if (ENTITY_MIN > 0) {
           const core = eventState.get(eventId)?.core;
