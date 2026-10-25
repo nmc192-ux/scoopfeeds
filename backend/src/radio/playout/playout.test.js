@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { chooseBed, runPlayout, isFatalMuxError } from "./playout.js";
+import { chooseBed, runPlayout, isFatalMuxError, pauseFile } from "./playout.js";
 import { makeMusicLibrary } from "../musicTestLibrary.js";
 import { resolveTarget, rtmpAllowed, rtmpBase, redact, RTMP_BASE } from "./outputTarget.js";
 import { buildFfmpegArgs, buildFeederArgs, loudnessFilter, VIDEO, AUDIO, RTMP } from "./ffmpegArgs.js";
@@ -297,4 +297,10 @@ test("a muxer write error from ffmpeg is fatal at once; ordinary warnings are no
     "[flv @ 0x9c1028500] Failed to update header with correct filesize.",
     "",
   ]) assert.equal(isFatalMuxError(line), false, line);
+});
+
+test("#196/#208: the stream watch reads the same PAUSE file as autoair and the standing watchdog", () => {
+  assert.equal(pauseFile({}), path.join(os.homedir(), "scoopfeeds-radio", "PAUSE"));
+  assert.equal(pauseFile({ RADIO_BASE_DIR: "~/radio-test" }), path.join(os.homedir(), "radio-test", "PAUSE"));
+  assert.equal(pauseFile({ RADIO_BASE_DIR: "/srv/radio" }), "/srv/radio/PAUSE");
 });

@@ -6,7 +6,8 @@
  */
 import { parseArgs } from "node:util";
 import { runPlayout } from "./playout.js";
-import { redact } from "./outputTarget.js";
+import { redact, resolveTarget } from "./outputTarget.js";
+import { applyAutoQuality } from "../live/autoQuality.js";
 
 const { values: v } = parseArgs({
   options: {
@@ -21,6 +22,12 @@ const ac = new AbortController();
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => ac.abort());
 
 try {
+  // #196: live RTMP only - measure the upload once and drop to 720p for this run when it is weak (RADIO_AUTO_QUALITY=off to skip)
+  if (!v.out && !v["segments-dir"]) {
+    let outputs = 0;
+    try { const t = resolveTarget({ env: process.env }); outputs = t.kind === "multi" ? t.outputs.length : 1; } catch { /* runPlayout reports the missing gates */ }
+    if (outputs) await applyAutoQuality({ env: process.env, outputs, log: (m) => console.log(`📻 playout: ${m}`) });
+  }
   const res = await runPlayout({
     out: v.out, segmentsDir: v["segments-dir"], forceDaypartCycleSec: v["force-daypart-cycle"] ? Number(v["force-daypart-cycle"]) : 0, seconds: v.seconds ? Number(v.seconds) : undefined, musicDir: v["music-dir"],
     stateFile: v["state-file"], programmeDir: v.programme, segmentKeep: v["segment-keep"] ? Number(v["segment-keep"]) : undefined, baseUrl: v["base-url"], demoCycleSec: v["demo-cycle"] ? Number(v["demo-cycle"]) : 0,
