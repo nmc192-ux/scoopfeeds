@@ -29,6 +29,7 @@ import { notMachineEventSql } from "../realityIndex/dal/machineEvents.js";
 import { resolveSlugAlias } from "../realityIndex/dal/slugAliases.js";
 import { dossierCoherence } from "../realityIndex/intelligence/eventCoherence.js";
 import { reorderByCountry, parseCountry } from "../realityIndex/dal/countryAffinity.js";
+import { sourceEligibleSql, filterReaderEligible, readerEligibilityOn } from "../realityIndex/dal/readerEligibility.js";
 
 const router = express.Router();
 
@@ -256,13 +257,15 @@ router.get("/world-map", (req, res) => {
       WHERE status = 'active'
         AND geo_lat IS NOT NULL AND geo_lng IS NOT NULL
         AND severity >= ?
+        AND ${sourceEligibleSql("e")}
     `;
     const params = [minSeverity];
     if (category) { sql += " AND category = ?"; params.push(category); }
     sql += " ORDER BY severity DESC, last_activity_at DESC LIMIT ?";
     params.push(limit);
 
-    const rows = db.prepare(sql).all(...params);
+    // #243: single-source / one-outlet events are excluded in SQL above; incoherent ones here.
+    const rows = filterReaderEligible(db, db.prepare(sql).all(...params));
     res.json({ events: rows, count: rows.length });
   } catch (err) {
     logger.error(`GET /api/events/world-map error: ${err.message}`);
@@ -347,6 +350,9 @@ router.get("/", (req, res) => {
     if (!["1", "true"].includes(String(req.query.include_machine ?? ""))) {
       sql += ` AND ${notMachineEventSql("e")}`;
     }
+    // #243 reader eligibility: >= 3 named outlets and no outlet above 70% (SQL, before the
+    // LIMIT so pages stay full); the coherence rule runs on the returned rows below.
+    sql += ` AND ${sourceEligibleSql("e")}`;
 
     if (category) {
       // Accept a single category or a comma-separated list (super-category sections,
@@ -366,10 +372,15 @@ router.get("/", (req, res) => {
     sql += sort === "prominence"
       ? " ORDER BY prominence DESC, e.last_activity_at DESC"
       : " ORDER BY e.last_activity_at DESC";
+    // #243: the coherence rule can only run on returned rows, so over-fetch and trim back to
+    // `limit`. `offset` counts source-eligible events, so a page after a hidden incoherent
+    // event can repeat or skip at most the hidden ones' places — never show a hidden event.
+    const eligOn = readerEligibilityOn();
     sql += " LIMIT ? OFFSET ?";
-    params.push(limit, offset);
+    params.push(eligOn ? Math.min(limit * 2 + 10, 250) : limit, offset);
 
     let rows = db.prepare(sql).all(...params);
+    if (eligOn) rows = filterReaderEligible(db, rows).slice(0, limit);
     // #190 reader's country first. Only when ?country= is a valid ISO-2 code; otherwise
     // this block is skipped and the response is byte-identical to before.
     const country = parseCountry(req.query.country);

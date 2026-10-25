@@ -12,6 +12,7 @@
  */
 
 import { getDb } from "../../models/database.js";
+import { sourceEligibleSql } from "../dal/readerEligibility.js";
 import { marketOddsEnabled } from "../../config/marketOdds.js";
 
 const CALLOUT_TEMPLATES = {
@@ -55,7 +56,7 @@ export function realityIndexCallout(articleId) {
     SELECT e.id, e.slug
     FROM event_articles ea
     JOIN events e ON e.id = ea.event_id
-    WHERE ea.article_id = ? AND e.status = 'active'
+    WHERE ea.article_id = ? AND e.status = 'active' AND ${sourceEligibleSql("e")} -- #243
     ORDER BY e.last_activity_at DESC
     LIMIT 1
   `).get(String(articleId));

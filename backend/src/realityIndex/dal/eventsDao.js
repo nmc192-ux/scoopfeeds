@@ -68,6 +68,7 @@
 
 import { getDb } from "../../models/database.js";
 import { notMachineEventSql } from "./machineEvents.js";
+import { sourceEligibleSql, eventReaderEligibility, filterReaderEligible } from "./readerEligibility.js";
 
 // Env-tunable so the bar can be moved without a deploy, but defaulted to the
 // backtested values rather than to something permissive.
@@ -151,6 +152,10 @@ export function qualifiesForCarousel(eventId) {
   // incoherent" — the latter is the over-merged bucket and is the interesting
   // rejection to see in the logs.
   if (coherence.nKeys   < MIN_CORE_KEYS)   return { ok: false, reason: "incoherent_core", event, coverage, coherence };
+  // #243: the reader-eligibility rules every reader list shares (one outlet > 70%, or a
+  // #179 coherence score below its floor). Flag off → always eligible.
+  const elig = eventReaderEligibility(getDb(), eventId);
+  if (!elig.eligible)                      return { ok: false, reason: `reader_ineligible:${elig.reasons.join("+")}`, event, coverage, coherence };
   return { ok: true, reason: null, event, coverage, coherence };
 }
 
@@ -164,7 +169,8 @@ export function qualifiesForCarousel(eventId) {
  */
 export function listQualifyingEvents({ withinMs = 7 * 24 * 60 * 60 * 1000, limit = 500 } = {}) {
   const cutoff = Date.now() - withinMs;
-  return getDb().prepare(`
+  // #243: SQL takes the source rules; the coherence rule runs on the returned rows.
+  return filterReaderEligible(getDb(), getDb().prepare(`
     SELECT e.id, e.slug, e.title, e.summary, e.category, e.last_activity_at,
            (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id) AS articles,
            (SELECT COUNT(DISTINCT a.source_name)
@@ -184,9 +190,10 @@ export function listQualifyingEvents({ withinMs = 7 * 24 * 60 * 60 * 1000, limit
              FROM event_articles ea JOIN articles a ON a.id = ea.article_id
             WHERE ea.event_id = e.id) >= ?
       AND (SELECT COUNT(*) FROM json_each(COALESCE(s.keys, '[]'))) >= ?
+      AND ${sourceEligibleSql("e")}
     ORDER BY e.last_activity_at DESC
     LIMIT ?
-  `).all(cutoff, MIN_ARTICLES, MIN_SOURCES, MIN_CORE_KEYS, limit);
+  `).all(cutoff, MIN_ARTICLES, MIN_SOURCES, MIN_CORE_KEYS, limit));
 }
 
 /**

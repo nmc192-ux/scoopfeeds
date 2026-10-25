@@ -111,7 +111,13 @@ test("server: a browser user agent gets each dossier's own title and canonical; 
     assert.equal(canonicalOf(topic.text), "https://scoopfeeds.com/topic/world");
 
     const sm = (await get("/sitemap.xml")).text;
-    assert.ok(sm.includes("/events/senate-vote</loc>") && sm.includes("/events/port-strike</loc>"));
+    assert.ok(sm.includes("/events/senate-vote</loc>"));
+    // #243: port-strike has one outlet, so the reader-eligibility rules keep it out of the sitemap
+    // (its dossier still answers by URL, above). With the rules off it is listed as before.
+    assert.ok(!sm.includes("/events/port-strike</loc>"), "single-outlet events are not listed");
+    process.env.EVENT_READER_ELIGIBILITY = "false";
+    try { assert.ok((await get("/sitemap.xml")).text.includes("/events/port-strike</loc>")); }
+    finally { delete process.env.EVENT_READER_ELIGIBILITY; }
     assert.ok(!sm.includes("usgs-quake") && !sm.includes("old-slug"), "machine and merged events are not listed");
     assert.ok(!sm.includes("/article/"), "noindex article pages are not listed");
     const news = (await get("/sitemap-news.xml")).text;

@@ -31,12 +31,24 @@ function addEvent(id, slug, category, meta, summary = "A summary") {
   `).run(id, slug, `Title ${id}`, summary, category, NOW, NOW, meta, NOW, NOW);
 }
 
+// #243: a news event needs real coverage (>= 3 outlets) to reach a reader list.
+let artN = 0;
+function cover(eventId) {
+  for (const outlet of ["Outlet A", "Outlet B", "Outlet C"]) {
+    const aid = `me-a${++artN}`;
+    db.prepare("INSERT INTO articles (id, title, url, source_name, category, published_at, fetched_at) VALUES (?,?,?,?,?,?,?)")
+      .run(aid, `Art ${aid}`, `https://x.test/${aid}`, outlet, "world", NOW, NOW);
+    db.prepare("INSERT INTO event_articles (event_id, article_id, added_at) VALUES (?,?,?)").run(eventId, aid, NOW);
+  }
+}
+
 addEvent("news", "news-story", "world", null);
 // A news event may legitimately be slugged like a feed; it must NOT be treated as machine.
 addEvent("news-noaa-slug", "noaa-budget-cuts", "us", JSON.stringify({ note: "ordinary" }));
 addEvent("badmeta", "bad-meta", "world", "{not json");
 addEvent("quake", "usgs-abc", "geo", JSON.stringify({ source: "usgs", mag: 6.1 }));
 addEvent("alert", "noaa-xyz", "weather", JSON.stringify({ source: "noaa" }));
+for (const id of ["news", "news-noaa-slug", "badmeta"]) cover(id);
 
 test("notMachineEventSql keeps news events and drops usgs/noaa, even with bad meta", () => {
   const ids = db.prepare(`SELECT e.id FROM events e WHERE ${notMachineEventSql("e")} ORDER BY e.id`)

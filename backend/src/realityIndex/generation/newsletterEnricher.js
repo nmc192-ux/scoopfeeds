@@ -15,6 +15,7 @@
 import { topTruthGap } from "../dal/realityIndexDao.js";
 import { getDb } from "../../models/database.js";
 import { logger } from "../../services/logger.js";
+import { isReaderEligible } from "../dal/readerEligibility.js";
 
 const SITE_URL = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 const MAX_ITEMS = 3;
@@ -35,7 +36,9 @@ function gapStyle(gap) {
 function pickItems() {
   try {
     const all = topTruthGap({ windowMs: WINDOW_MS, limit: 12, direction: "both", scope: "event" });
-    const filtered = all.filter(r => Math.abs(r.truth_gap ?? 0) >= MIN_GAP).slice(0, MAX_ITEMS);
+    // #243: events a reader may not be shown in a list are not newsletter items either.
+    const db = getDb();
+    const filtered = all.filter(r => Math.abs(r.truth_gap ?? 0) >= MIN_GAP && isReaderEligible(db, r.scope_id)).slice(0, MAX_ITEMS);
     if (!filtered.length) return [];
 
     // Hydrate event title + slug — topTruthGap returns raw snapshot rows.

@@ -37,6 +37,7 @@ import { listMarkets as listPmMarkets, getMarketById, isMarketEligible, eligible
 import { topTruthGap, listAnomalies } from "../realityIndex/dal/realityIndexDao.js";
 import { listBriefs } from "../realityIndex/dal/briefsDao.js";
 import { notMachineEventSql } from "../realityIndex/dal/machineEvents.js";
+import { sourceEligibleSql, filterReaderEligible, readerEligibilityOn } from "../realityIndex/dal/readerEligibility.js";
 import { listMarkets as listSyntheticMarkets } from "../realityIndex/dal/syntheticMarketsDao.js";
 
 const router = Router();
@@ -100,13 +101,18 @@ router.get("/events", (req, res) => {
          FROM event_market_links eml JOIN prediction_markets pm ON pm.id = eml.market_id
          WHERE eml.event_id = e.id AND ${eligibleMarketSql("pm")} ORDER BY eml.rank LIMIT 1) AS top_probability
       FROM events e
-      WHERE status = ? AND ${notMachineEventSql("e")}
+      WHERE status = ? AND ${notMachineEventSql("e")} AND ${sourceEligibleSql("e")}
     `;
     const params = [status];
     if (category) { sql += " AND category = ?"; params.push(category); }
     sql += " ORDER BY last_activity_at DESC LIMIT ? OFFSET ?";
-    params.push(limit, offset);
-    res.json({ events: getDb().prepare(sql).all(...params), limit, offset });
+    // #243: over-fetch, drop incoherent events, trim back to `limit`.
+    const eligOn = readerEligibilityOn();
+    params.push(eligOn ? Math.min(limit * 2 + 10, 250) : limit, offset);
+    const db = getDb();
+    let rows = db.prepare(sql).all(...params);
+    if (eligOn) rows = filterReaderEligible(db, rows).slice(0, limit);
+    res.json({ events: rows, limit, offset });
   } catch (err) { fail(res, err); }
 });
 

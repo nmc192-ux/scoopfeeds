@@ -163,7 +163,7 @@ export function gateAttach(ctx, db, { existingIds, incomingIds, floor = coherenc
 // per request, so a few minutes' staleness changes no band.
 const CTX_TTL_MS = 10 * 60 * 1000;
 const ctxCache = new WeakMap(); // db → { ctx, at }
-function readCtx(db, now) {
+export function readCtx(db, now = Date.now()) {
   const hit = ctxCache.get(db);
   if (hit && now - hit.at < CTX_TTL_MS) return hit.ctx;
   const ctx = buildAffinityCtx(db);

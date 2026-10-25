@@ -358,6 +358,12 @@ function loadEventCore(db, ids, idfMap, catSpanMap, minFrac = CORE_FRAC, topK = 
  * available as an escape hatch, and the only value for which this cycle can
  * again monopolise the process.
  */
+/** #243: read at call time. Default ON; "false" / "0" / "off" turns it off. */
+export function singleSourceGuardOn() {
+  const v = String(process.env.PROMOTER_SINGLE_SOURCE_GUARD ?? "true").trim().toLowerCase();
+  return !(v === "false" || v === "0" || v === "off");
+}
+
 export function promoterYieldMs() {
   const raw = Number.parseInt(process.env.PROMOTER_YIELD_MS ?? "", 10);
   return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_YIELD_MS;
@@ -416,6 +422,33 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
     const nw = db.prepare("SELECT n_window FROM entity_idf LIMIT 1").get()?.n_window;
     fallbackIdf = (idfMap.size && nw) ? Math.log(nw) : 1; // unseen key → maximally rare; empty table → unweighted
   }
+
+  // #243 single-source guard — ON unless PROMOTER_SINGLE_SOURCE_GUARD=false. An event must
+  // not be CREATED from one outlet, and an event must not GROW while everything in it (its
+  // members plus the incoming articles) is still one outlet. Refusals change nothing at all:
+  // no row, no link, no activity bump. Every refusal is a 🧭 promoter-refuse-single-source line.
+  // Named outlets only: an article with no source_name is not a second voice. Merges between
+  // two existing events are not this guard's path (they are judged on storyAffinity alone).
+  const singleSourceGuard = singleSourceGuardOn();
+  let refusedSingleSource = 0;
+  const srcOf = db.prepare("SELECT source_name FROM articles WHERE id = ?");
+  const namedOutlets = (ids) => {
+    const out = new Set();
+    for (const id of ids) { const s = srcOf.get(id)?.source_name; if (s) out.add(s); }
+    return out;
+  };
+  const refuseSingleSource = (path, eventSlug, clusterId, existingIds, incomingIds) => {
+    if (!singleSourceGuard) return false;
+    const outlets = namedOutlets([...existingIds, ...incomingIds]);
+    if (outlets.size >= 2) return false;
+    refusedSingleSource++;
+    logDecision("promoter-refuse-single-source", {
+      path, event: eventSlug ? String(eventSlug).slice(0, 44) : null, cluster: String(clusterId).slice(0, 16),
+      existing: existingIds.length, incoming: incomingIds.length, outlets: outlets.size,
+      outlet: outlets.size ? String([...outlets][0]).slice(0, 40) : null,
+    });
+    return true;
+  };
 
   // ── 1. Eligible clusters (>= MIN_ARTICLES OR a bound market) ─────────────────
   const eligible = db.prepare(`
@@ -672,6 +705,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
         const tEv = eventState.get(target);
         if (tEv) {
           const keepIds = gate("absorb", tEv.slug, c.id, [...tEv.ids], cl.aids);
+          if (refuseSingleSource("absorb", tEv.slug, c.id, [...tEv.ids], keepIds)) return;
           for (const aid of keepIds) { linkArticle.run(target, aid, now); tEv.ids.add(aid); }
           for (const cm of eligibleClusterMarkets(db, c.id)) {
             linkMarket.run(target, cm.market_id, cm.weight, cm.rank, now);
@@ -692,6 +726,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
         const ev = eventState.get(eventId);
         if (ev && ev.status === "dormant") reactivated++;
         if (ev) linkIds = gate("match", ev.slug, c.id, [...ev.ids], cl.aids);
+        if (ev && refuseSingleSource("match", ev.slug, c.id, [...ev.ids], linkIds)) return;
         // #179: a cluster the gate trimmed is not the story this event is about,
         // so it must not rename it either (its title would describe the articles
         // that were just held out). gateHeld is always false with the gate off.
@@ -759,6 +794,8 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
           const ph = cl.aids.map(() => "?").join(",");
           const shares = db.prepare(`SELECT 1 FROM event_articles WHERE event_id = ? AND article_id IN (${ph}) LIMIT 1`).get(squatter.id, ...cl.aids);
           if (shares) {
+            const squatterIds = db.prepare("SELECT article_id FROM event_articles WHERE event_id = ?").all(squatter.id).map((r) => r.article_id);
+            if (refuseSingleSource("adopt", null, c.id, squatterIds, cl.aids)) return;
             updateKeepTitle.run(severity, hero, now, now, squatter.id);
             eventId = squatter.id;
             matched++;
@@ -776,6 +813,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
         // release so a cluster the gate empties changes nothing at all.
         linkIds = gate("create", slug, c.id, [], cl.aids);
         if (!linkIds.length) return; // every article held — counted in coherenceHeld
+        if (refuseSingleSource("create", slug, c.id, [], linkIds)) return; // #243: nothing minted, claim untouched
         if (squatter) db.prepare("UPDATE events SET cluster_id = NULL, updated_at = ? WHERE id = ?").run(now, squatter.id);
         // Wave 1 (2a): 🧭 decision log — one structured line per CREATED event stating
         // why no existing event took this cluster (grep 🧭 instead of doing archaeology).
@@ -837,6 +875,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
     reactivated, dormanted, closed, skippedStale, chained,
     prunedRefsDropped, emptyClustersSkipped,
     ...(cohGate ? { coherenceHeld } : {}),
+    ...(singleSourceGuard ? { refusedSingleSource } : {}),
     yields: yieldToLoop.count ? yieldToLoop.count() : null,
   };
   logger.info(`🗂️  eventPromoter done — ${JSON.stringify(stats)}`);

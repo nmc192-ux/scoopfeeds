@@ -112,6 +112,11 @@ test("no or malformed country leaves the rows untouched", () => {
 });
 
 test("route: ?country=GB re-orders the prominence list; no country is byte-identical", async () => {
+  // These fixture events carry one or two outlets on purpose (the affinity counts), which the
+  // #243 reader-eligibility rules would hide. This test is about ordering, so the rules are off
+  // here; readerEligibility.test.js covers them on the same route.
+  const prevElig = process.env.EVENT_READER_ELIGIBILITY;
+  process.env.EVENT_READER_ELIGIBILITY = "false";
   seed(getDb());
   const app = express();
   app.use("/api/events", eventsRouter);
@@ -136,6 +141,7 @@ test("route: ?country=GB re-orders the prominence list; no country is byte-ident
     assert.equal(gb.events.find((e) => e.id === "us1").country_affinity, 0);
   } finally {
     server.close();
+    if (prevElig === undefined) delete process.env.EVENT_READER_ELIGIBILITY; else process.env.EVENT_READER_ELIGIBILITY = prevElig;
   }
 });
 
