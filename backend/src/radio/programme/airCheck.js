@@ -12,11 +12,14 @@
  * Markets (#245): a Markets Now line that reads a closed (last-session) row as today's move fails the hour.
  * checkSegments drops such lines, so normally this never fires either; it is the second lock. If the hour has
  * Markets lines but pack.json is missing or was never checked for closed rows, that is unmeasured: a failure.
+ *
+ * Weather (#247): a kept weather line that says Fahrenheit, or whose text cannot be read, fails the hour.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { hasValidClearance } from "../safety/contentSafety.js";
 import { staleMarketLine } from "./marketsClock.js";
+import { weatherProblems } from "./weatherUnits.js";
 
 export const AIR_RULES = Object.freeze({
   minKeptShare: 0.6,       // at least 60 % of the written lines survived the fact checks
@@ -78,6 +81,7 @@ export function airCheck(dir, { hourStart, rules = AIR_RULES } = {}) {
   }
 
   if (kept) problems.push(...marketsProblems(kept, () => need("pack.json")));
+  if (kept) problems.push(...weatherProblems(kept));
 
   return { ok: problems.length === 0, problems, stats };
 }
