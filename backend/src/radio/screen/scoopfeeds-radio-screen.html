@@ -420,6 +420,9 @@ function marketsLine(){
 }
 
 /* ---------------- weather icons ---------------- */
+/* #247 (DrJ, 25 Oct 2026): one unit for every city, °C first and °F small beside it. */
+const fToC = f => Math.round((f-32)*5/9);
+const cOf = c => Number.isFinite(c.c) ? c.c : fToC(c.f);
 const ICON = {
   sun:'<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="24" cy="24" r="9"/><path d="M24 5v5M24 38v5M5 24h5M38 24h5M10.6 10.6l3.5 3.5M33.9 33.9l3.5 3.5M37.4 10.6l-3.5 3.5M14.1 33.9l-3.5 3.5"/></svg>',
   cloud:'<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"><path d="M14 36h21a8 8 0 0 0 0-16 11 11 0 0 0-21-1 8.5 8.5 0 0 0 0 17z"/></svg>',
@@ -509,8 +512,8 @@ function renderStatic(){
 
   const cities = !hasWeather() ? [] : STATE.southAsia ? STATE.weather.slice(0,7).concat(SA_CITIES) : STATE.weather;
   $('weather').innerHTML = cities.slice(0,10).map(c => `<div class="wx"><div><div class="c">${esc(c.city)}</div>${ICON[c.icon] || ICON.cloud}</div>
-    <div><div class="f num">${c.f}°F<small>${Math.round((c.f-32)*5/9)}°C</small></div><div class="cond">${esc(c.cond)}</div>
-    <div class="hl num">High ${c.hi}° Low ${c.lo}°</div></div></div>`).join('');
+    <div><div class="f num">${cOf(c)}°C<small>${c.f}°F</small></div><div class="cond">${esc(c.cond)}</div>
+    <div class="hl num">High ${fToC(c.hi)}° Low ${fToC(c.lo)}°</div></div></div>`).join('');
 
   $('nextText').innerHTML = !hasNext() ? '' : `<div class="when">Coming up at ${esc(STATE.next.start)}</div><h2>${esc(STATE.next.title)}</h2><p>${esc(STATE.next.blurb || '')}</p>`;
   $('nextSeries').textContent = hasNext() ? (STATE.next.series || '') : '';
@@ -589,7 +592,7 @@ function tickerContent(){
     modeHtml = `<b>Markets</b><span>${open.length ? open.length + (open.length === 1 ? ' exchange open' : ' exchanges open') : 'Exchanges closed'}${STATE.sample ? '' : ', delayed 15 min'}</span>`;
   } else {
     const cities = STATE.southAsia ? STATE.weather.concat(SA_CITIES) : STATE.weather;  // only reached when hasWeather()
-    cities.forEach(c => items += `<span class="ti num"><span class="n">${esc(c.city)}</span><span class="p">${c.f}°F</span><span class="g">${Math.round((c.f-32)*5/9)}°C, ${esc(c.cond)}</span></span>`);
+    cities.forEach(c => items += `<span class="ti num"><span class="n">${esc(c.city)}</span><span class="p">${cOf(c)}°C</span><span class="g">${c.f}°F, ${esc(c.cond)}</span></span>`);
     modeHtml = `<b>Weather</b><span>Updated hourly</span>`;
   }
   return { items, modeHtml };
