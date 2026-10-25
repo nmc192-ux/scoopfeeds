@@ -17,7 +17,7 @@
  * PAUSE appearing mid-hour (the standing watchdog) ends the hour and keeps the 24/7 radio off.
  *
  *   node src/radio/programme/autoair.mjs --hour next --out ~/scoopfeeds-radio/air/auto \
- *     --music-dir ~/scoopfeeds-radio/music [--film <file|dir>] [--feature <file>] [--feature-title "..."] [--thumbnail <jpg>]
+ *     --music-dir ~/scoopfeeds-radio/music [--film <file|dir>: only an eligible library Short, #216] [--feature <file>] [--feature-title "..."] [--thumbnail <jpg>]
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -26,6 +26,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { airCheck } from "./airCheck.js";
+import { resolveHourShort } from "../filmLibrary.js";
 import { makeYouTubeLive, liveConfigured, goLiveWhenActive } from "../live/youtubeLive.js";
 import { pickClearedFilm } from "../safety/filmClearance.js";
 import { factualTitle, xBroadcastText, withCredits } from "../safety/broadcastCopy.js";
@@ -69,6 +70,15 @@ export function newestVideo(p) {
   return vids.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0] || null;
 }
 
+/** #216 + #208: the file inside `arg` (a file or a folder) that is the library Short `libFile` (matched by realpath, since library files may be symlinks). */
+export function sourceFileFor(arg, libFile) {
+  const real = (f) => { try { return fs.realpathSync(f); } catch { return path.resolve(f); } };
+  if (!arg || !fs.existsSync(arg)) return null;
+  const want = real(libFile);
+  if (!fs.statSync(arg).isDirectory()) return real(arg) === want ? arg : null;
+  return fs.readdirSync(arg).map((n) => path.join(arg, n)).find((f) => real(f) === want) || null;
+}
+
 async function main() {
   const hourStart = v.hour === "next" ? nextHour(Date.now()) : Date.parse(v.hour);
   if (!Number.isFinite(hourStart)) { console.error("--hour must be 'next' or an ISO time"); process.exit(2); }
@@ -101,9 +111,24 @@ async function main() {
   // ── 1. produce ── films and episodes only when their copyright clearance is known (#208)
   stage("producing");
   const ytApi = liveConfigured(env) ? makeYouTubeLive({ env }) : null;
-  const film = await pickClearedFilm(tilde(v.film || env.RADIO_AUTOAIR_FILM), { yt: ytApi, log });
+  // #216: the film slot takes only a Short cut from a published long-form film (the newest eligible one in a
+  // folder); anything else, ScoopFeeds 60 included, leaves the slot to the normal programme, and says why.
+  // #208: that Short must ALSO pass copyright clearance (pickClearedFilm) on the file in the given folder.
+  const filmArg = tilde(v.film || env.RADIO_AUTOAIR_FILM);
+  let film = null;
+  if (filmArg) {
+    const r = resolveHourShort(filmArg, { env });
+    let reason = r.reason;
+    if (r.item) {
+      const src = sourceFileFor(filmArg, r.item.file);
+      film = src ? await pickClearedFilm(src, { yt: ytApi, log }) : null;
+      if (!film) reason = `${r.item.id}: ${src ? "not cleared for air (#208; see the 'film excluded' line above)" : "no matching file in " + filmArg}`;
+    }
+    status.film = film ? { id: r.item.id, parentFilm: r.item.parentFilm, file: path.basename(film) } : { id: null, reason }; saveStatus();
+    log(film ? `film slot: ${r.item.id} (Short from ${r.item.parentFilm})` : `film slot: no film this hour: ${reason}`);
+  }
   const feature = await pickClearedFilm(tilde(v.feature || env.RADIO_AUTOAIR_FEATURE), { yt: ytApi, log });
-  status.film = film ? path.basename(film) : null; status.feature = feature ? path.basename(feature) : null;
+  status.feature = feature ? path.basename(feature) : null; saveStatus();
   const ft = factualTitle(v["feature-title"] || env.RADIO_AUTOAIR_FEATURE_TITLE || null, null);
   if (ft.replaced) log(`feature title dropped (${ft.why.join(", ")})`);
   const featureTitle = ft.title;

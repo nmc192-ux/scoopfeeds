@@ -41,8 +41,10 @@ cd ~/work/scoopfeeds && git fetch && git checkout feat/radio-test-hour && git pu
 cd backend/src/radio/playout && npm ci && cd ../../..          # playwright-core for the playout
 ~/sixty/kokoro-start.sh &                                        # Kokoro on 127.0.0.1:8880 (leave running)
 ```
-Put the A-Eye #003 episode (the published 4K or 1080p file) and one approved ScoopFeeds 60 film in
-`~/scoopfeeds-radio/feature/` and `~/scoopfeeds-radio/film/`. The A-Eye file was hand-published from the VPS:
+Put the A-Eye #003 episode (the published 4K or 1080p file) in `~/scoopfeeds-radio/feature/`. The film slot
+(#216) takes only a Short cut from a published long-form film, imported into the film library with its parent
+(`node src/radio/filmCli.mjs import --file <short.mp4> --series a-eye --parent a-eye/<ep> ...`); ScoopFeeds 60
+never airs while `RADIO_ALLOW_SF60` is off, and with no eligible Short the slot is headlines and music. The A-Eye file was hand-published from the VPS:
 `ssh scoopfeeds-vps 'ls ~/publish'` to find it.
 
 **Rehearsal (10:00 am, for an 11:00 am hour, H = 06:00 UTC):**
