@@ -14,12 +14,18 @@
  * Markets lines but pack.json is missing or was never checked for closed rows, that is unmeasured: a failure.
  *
  * Weather (#247): a kept weather line that says Fahrenheit, or whose text cannot be read, fails the hour.
+ *
+ * Repeats (#249): a repeat airs the repeated hour's own Markets Now audio, which segments.json (the splice run's)
+ * does not hold. prepareRepeat re-checks those lines at the repeat's air time and cuts a stale slot to music; here
+ * every Markets slot still spoken is re-checked again from repeat-source-*.json. A repeat with no re-check record,
+ * or a slot whose lines or pack cannot be read, is unmeasured: a failure.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { hasValidClearance } from "../safety/contentSafety.js";
-import { staleMarketLine } from "./marketsClock.js";
 import { weatherProblems } from "./weatherUnits.js";
+import { staleMarketLine, recheckRepeatedMarkets, isMarketsSlot } from "./marketsClock.js";
+import { REPEAT_SOURCE_SEGMENTS, REPEAT_SOURCE_PACK } from "./repeat.js";
 
 export const AIR_RULES = Object.freeze({
   minKeptShare: 0.6,       // at least 60 % of the written lines survived the fact checks
@@ -82,6 +88,11 @@ export function airCheck(dir, { hourStart, rules = AIR_RULES } = {}) {
 
   if (kept) problems.push(...marketsProblems(kept, () => need("pack.json")));
   if (kept) problems.push(...weatherProblems(kept));
+  if (prog?.repeatOf) {
+    const r = repeatMarketsProblems(prog, kept, () => ({ segments: need(REPEAT_SOURCE_SEGMENTS), pack: need(REPEAT_SOURCE_PACK) }));
+    stats.repeatMarkets = r.stats;
+    problems.push(...r.problems);
+  }
 
   return { ok: problems.length === 0, problems, stats };
 }
@@ -98,4 +109,22 @@ export function marketsProblems(segments, loadPack) {
   if (!pack) return ["Markets Now lines cannot be checked for closed markets without pack.json"];
   if (!Number.isFinite(pack.marketsCheckedAt) || !Array.isArray(pack.markets)) return ["Markets Now: the pack was never checked for closed markets (unmeasured)"];
   return lines.map(({ id, line }) => { const why = staleMarketLine(line?.text, pack.markets); return why ? `${id}/${line?.id}: ${why}` : null; }).filter(Boolean);
+}
+
+/**
+ * #249: a repeat's Markets Now slots that still air the repeated hour's audio, re-checked at the repeat's air time.
+ * A slot produced fresh in the splice (in `kept`) is covered by marketsProblems instead.
+ */
+export function repeatMarketsProblems(prog, kept, loadSource) {
+  const rm = prog?.repeatMarkets;
+  if (!rm || !Number.isFinite(rm.checkedAt) || !Array.isArray(rm.slots) || !Array.isArray(prog.slots)) {
+    return { problems: ["repeat: the repeated hour's Markets Now lines were never re-checked at the repeat's air time (unmeasured)"], stats: { checked: 0, cut: 0, measured: false } };
+  }
+  const cut = rm.slots.filter((s) => s.action === "cut to music").length;
+  const onAir = prog.slots.filter((s) => isMarketsSlot(s) && s.kind === "spoken" && !(kept && Object.hasOwn(kept, s.id)));
+  if (!onAir.length) return { problems: [], stats: { checked: 0, cut, measured: true } };
+  const { segments, pack } = loadSource();
+  const problems = recheckRepeatedMarkets(onAir, segments, pack)
+    .flatMap((v) => (!v.measured ? [`repeat ${v.id}: ${v.why} (unmeasured)`] : v.stale.map((w) => `repeat ${v.id}/${w}`)));
+  return { problems, stats: { checked: onAir.length, cut, measured: true } };
 }

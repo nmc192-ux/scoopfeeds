@@ -306,7 +306,11 @@ export class RollingStation {
       const src = pickStrongest(this.airDir, H);
       if (!src) return fail("no produced hour in the last 18 h to repeat");
       this.status(H, { stage: "repeating", decision, repeatOf: path.basename(src.dir) });
-      try { prepareRepeat(src.dir, dir, H); } catch (e) { return fail(`repeat copy failed: ${e.message}`); }
+      let moved;
+      try { moved = prepareRepeat(src.dir, dir, H, { now: this.now() }); } catch (e) { return fail(`repeat copy failed: ${e.message}`); }
+      // #249: the repeated Markets Now, re-checked at this hour's air time
+      for (const m of moved.repeatMarkets?.slots || []) if (m.action !== "kept") this.log(`hour ${hourStamp(H)}: repeat ${m.id}: ${m.action} (${m.measured ? m.stale[0] : m.why})`);
+      this.status(H, { repeatMarkets: moved.repeatMarkets?.slots.map(({ id, action }) => ({ id, action })) || null });
       const code = await produceStep({ from: "the-hour", to: "markets-1", headlineWriter: !this.ledger.guard().ok }, "repeat-top");
       if (code !== 0) return fail(`fresh top of the hour for the repeat failed (exit ${code})`);
     }
