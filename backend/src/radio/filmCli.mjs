@@ -6,7 +6,7 @@
  *   node filmCli.mjs import --file <short.mp4> --series a-eye --parent a-eye/ep03 --title "..." --published 2026-10-19
  *                                                           # a Short cut from a long-form film (#216): --parent is required for it to air
  *   node filmCli.mjs list                                   # what the library holds, and what it skipped and why
- *   node filmCli.mjs plan [--day 2026-10-24] [--recent recent.json] [--out plan.json]
+ *   node filmCli.mjs plan [--day 2026-10-24] [--recent recent.json] [--out plan.json]   # cleared items only (#218)
  *   node filmCli.mjs rehearse --out rehearsal.mp4 [--film <id>] [--short <id> --short <id>]
  *   node filmCli.mjs rehearse --selftest --out selftest.mp4 # synthetic clips with flash+beep markers; measures A/V offset
  *
@@ -19,7 +19,8 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync, spawnSync } from "node:child_process";
 import { loadLibrary, importFilm, filmsDir } from "./filmLibrary.js";
-import { planDay, defaultSlots } from "./filmRotation.js";
+import { planDay, defaultSlots, clearedLibrary } from "./filmRotation.js";
+import { hasValidClearance } from "./safety/contentSafety.js";
 import { buildRehearsalArgs, rehearsalBoundaries, pairMarkers } from "./filmPlayout.js";
 
 const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
@@ -147,13 +148,14 @@ try {
     const lib = loadLibrary(dir);
     console.log(JSON.stringify({ dir, items: lib.items.map(({ id, kind, title, durationSec, publishedAt, parentFilm }) => ({ id, kind, title, durationSec, publishedAt: new Date(publishedAt).toISOString(), ...(parentFilm ? { parentFilm } : {}) })), skipped: lib.skipped }, null, 2));
   } else if (cmd === "plan") {
-    const lib = loadLibrary(dir);
+    // DrJ's media rule (#218): only content-safety-cleared films and Shorts are planned.
+    const lib = clearedLibrary(loadLibrary(dir), (f) => hasValidClearance(f));
     const day = v.day || easternToday();
     // --recent takes either [{id, at}] or yesterday's `plan --out` file as written
     const raw = v.recent ? JSON.parse(fs.readFileSync(v.recent, "utf8")) : [];
     const recent = Array.isArray(raw) ? raw : (raw.plan || []).filter((p) => p.type !== "promo").map((p) => ({ id: p.id, at: p.at }));
     const res = planDay(lib, { slots: defaultSlots(day), recent });
-    const out = { day, dir, libraryItems: lib.items.length, skipped: lib.skipped, ...res,
+    const out = { day, dir, libraryItems: lib.items.length, skipped: lib.skipped, notCleared: lib.notCleared, ...res,
       plan: res.plan.map((p) => ({ ...p, atIso: new Date(p.at).toISOString() })), empty: res.empty.map((e) => ({ ...e, atIso: new Date(e.at).toISOString() })) };
     const text = JSON.stringify(out, null, 2);
     if (v.out) fs.writeFileSync(v.out, text + "\n"); else console.log(text);
