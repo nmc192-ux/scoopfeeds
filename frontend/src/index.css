@@ -78,6 +78,26 @@
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
+  /* ── v2 page base (#188): html.sf-v2 is set by App.jsx while the v2 flag is on.
+     Paper and ink in light mode, ink and paper in dark mode; Schibsted Grotesk for
+     labels and UI, Newsreader for reading text. Flag off: none of this applies. */
+  html.sf-v2:not(.dark) {
+    --color-bg: var(--sf-paper);
+    --color-text: var(--sf-ink);
+  }
+  html.sf-v2.dark {
+    --color-bg: var(--sf-ink);
+    --color-text: var(--sf-paper);
+  }
+  html.sf-v2 body {
+    font-family: var(--sf-label);
+    font-feature-settings: normal;
+  }
+  html.sf-v2 main p,
+  html.sf-v2 .reader-body {
+    font-family: var(--sf-reading);
+  }
+
   /* Custom scrollbar */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -386,16 +406,8 @@
   transition: opacity 0.5s ease;
 }
 
-/* ─── v2 chrome tokens (five-door navigation; used by SiteChromeV2 only) ─── */
+/* ─── v2 chrome (five-door navigation). Tokens live in styles/tokens.css (#188). ─── */
 .v2-chrome {
-  --v2-ink: #090706;
-  --v2-paper: #F4EFE6;
-  --v2-lime: #DDE706;
-  --v2-live: #D7261E; /* reserved for "live"; #FF4A3D on dark */
-  --v2-radio: #0F2238;
-  --v2-display: "Anton", Impact, system-ui, sans-serif;
-  --v2-reading: "Newsreader", Georgia, serif;
-  --v2-label: "Schibsted Grotesk", system-ui, sans-serif;
   background: var(--v2-ink);
   color: var(--v2-paper);
 }

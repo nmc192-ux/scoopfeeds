@@ -4,7 +4,6 @@
  * Rendered only when the v2 flag is on (SITE_V2 or ?v2=1). English only: there
  * is deliberately no language switch here. Red is reserved for "live".
  */
-import { useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Search, Home, Newspaper, PenLine, LineChart, Radio, UserCircle } from "lucide-react";
 import { useNewsStore } from "../../store/newsStore";
@@ -13,9 +12,6 @@ import { useReaderStore } from "../../hooks/useReader";
 import { useGeo } from "../../hooks/useGeo";
 import { FEED_COUNTRIES, countryName } from "../../lib/feedCountries";
 import clsx from "clsx";
-
-const FONTS_HREF =
-  "https://fonts.googleapis.com/css2?family=Anton&family=Newsreader:ital,wght@0,400;0,600;1,400&family=Schibsted+Grotesk:wght@400;500;700&display=swap";
 
 export const DOORS = [
   { to: "/",         label: "Today",          icon: Home,      match: (p) => p === "/" },
@@ -81,13 +77,6 @@ export function HeaderV2() {
   const { setAuthOpen } = useNewsStore();
   const { isLoggedIn } = useAuth();
   const readerOpen = useReaderStore((s) => s.open);
-
-  useEffect(() => {
-    if (document.querySelector("link[data-v2-fonts]")) return;
-    const l = document.createElement("link");
-    l.rel = "stylesheet"; l.href = FONTS_HREF; l.dataset.v2Fonts = "1";
-    document.head.appendChild(l);
-  }, []);
 
   if (readerOpen) return null;
   const hideChips = pathname.startsWith("/scoop-ops");
