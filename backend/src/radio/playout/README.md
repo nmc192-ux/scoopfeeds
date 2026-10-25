@@ -53,6 +53,11 @@ node backend/src/radio/playout/cli.js --out test.mp4 --seconds 120 --music-dir <
   ended) gets a new broadcast, created and bound (at most one every 10 minutes). In a programme hour autoair.mjs owns
   the broadcast, so the watch only restarts. DrJ is alerted (Mac notification + email via `RADIO_ALERT_EMAIL`) only when
   a restart has not recovered within 5 minutes. A failed API call is skipped, never counted as "no data".
+  A broadcast it creates follows the #208 copy rules: the title goes through `factualTitle`, and the description carries
+  the 24/7 library's music credits (the `RADIO_MUSIC_CREDITS_URL` link when set, else every credit whole). If the credits
+  cannot be published complete, it creates **nothing**, logs `credits-failed` and alerts once. While
+  `~/scoopfeeds-radio/PAUSE` exists the watch does nothing: no restart, no new broadcast. It creates **public**
+  broadcasts by default, which is why it ships dark: switching it on is DrJ's call.
 - **720p fallback**: at the start of a live RTMP run the upload is measured once (`networkQuality`); below 6 Mbps per
   output the run uses `RADIO_PLAYOUT_QUALITY=720p`. A hand-set `RADIO_PLAYOUT_QUALITY` always wins; `RADIO_AUTO_QUALITY=off`
   skips the measurement; an unmeasured upload stays at 1080p and says so in the log.

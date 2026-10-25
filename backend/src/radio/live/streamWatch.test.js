@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createStreamWatch, makePlayoutAlert, reportsNoData, watchEnabled, WATCH } from "./streamWatch.js";
-import { pickBound } from "./youtubeLive.js";
+import { createStreamWatch, makePlayoutAlert, reportsNoData, watchEnabled, watchBroadcastCopy, WATCH, DEFAULT_TITLE } from "./streamWatch.js";
+import { pickBound, broadcastBody } from "./youtubeLive.js";
+import { creditsComplete } from "../safety/broadcastCopy.js";
 
 /** A fake YouTube whose stream health and bound broadcast the test sets. */
 function fakeYt({ health = "good", streamStatus = "active", bound = { id: "B1", lifeCycleStatus: "live" } } = {}) {
@@ -118,4 +119,71 @@ test("alerts: Mac notification and email when configured; a failing mailer is lo
   await b("x");
   assert.equal(spawned.length, 1, "no osascript off macOS");
   assert.ok(logs.some((l) => /alert email failed: smtp down/.test(l)));
+});
+
+// ── #208 copy rules for a broadcast the watch creates (review of 25 Oct) ──
+const CREDIT = (i) => `"Track ${i}" by Artist ${i} (https://example.org/t/${i}) licensed under CC BY 4.0 https://creativecommons.org/licenses/by/4.0/`;
+
+test("#208: a created broadcast has a factual title and the 24/7 credits as the link; YouTube receives exactly the checked copy", async () => {
+  const yt = fakeYt({ bound: null });
+  const credits = Array.from({ length: 80 }, (_, i) => CREDIT(i));
+  const env = { RADIO_STREAM_WATCH_TITLE: "BREAKING!! You won't believe this", RADIO_MUSIC_CREDITS_URL: "https://scoopfeeds.com/radio/music-credits" };
+  const r = rig(yt, { manageBroadcast: true, env, credits: () => credits });
+  await r.minute();
+  assert.equal(yt.created.length, 1);
+  const c = yt.created[0];
+  assert.equal(c.title, DEFAULT_TITLE, "a clickbait title is replaced by the default");
+  assert.ok(r.logs.some((m) => /title replaced/.test(m)));
+  assert.deepEqual(c.credits, credits);
+  assert.equal(c.creditsUrl, env.RADIO_MUSIC_CREDITS_URL);
+  assert.equal(c.listAll, false, "24/7 with a credits page: the link alone");
+  const sent = broadcastBody(c).snippet.description;
+  assert.equal(sent, watchBroadcastCopy({ env, credits }).full);
+  assert.match(sent, /Music credits: https:\/\/scoopfeeds\.com\/radio\/music-credits/);
+  assert.ok(creditsComplete(sent, credits, env.RADIO_MUSIC_CREDITS_URL));
+  assert.ok(sent.length <= 5000);
+});
+
+test("#208: without a credits page, a small library is listed whole; a library that does not fit refuses, alerts once, creates nothing", async () => {
+  const few = [CREDIT(1), CREDIT(2)];
+  const ok = fakeYt({ bound: null });
+  const r1 = rig(ok, { manageBroadcast: true, credits: () => few });
+  await r1.minute();
+  assert.equal(ok.created.length, 1);
+  const sent = broadcastBody(ok.created[0]).snippet.description;
+  for (const c of few) assert.ok(sent.includes(c), "every credit whole");
+
+  const yt = fakeYt({ bound: null });
+  const many = Array.from({ length: 80 }, (_, i) => CREDIT(i));
+  const r = rig(yt, { manageBroadcast: true, credits: () => many });
+  await r.minute(25);                       // three create attempts (every 10 min), all refused
+  assert.equal(yt.created.length, 0, "never publish incomplete attribution");
+  assert.equal(yt.binds.length, 0);
+  assert.equal(r.alerts.length, 1, "alerted once per outage, not every attempt");
+  assert.match(r.alerts[0], /RADIO_MUSIC_CREDITS_URL/);
+  assert.ok(r.logs.filter((m) => /refusing to create a broadcast.*credits-failed/.test(m)).length >= 1);
+});
+
+test("#208: a credits library that cannot be read refuses too (unknown credits are not 'no credits')", async () => {
+  const yt = fakeYt({ bound: null });
+  const r = rig(yt, { manageBroadcast: true, credits: () => { throw new Error("manifest.json is not valid JSON"); } });
+  await r.minute();
+  assert.equal(yt.created.length, 0);
+  assert.equal(r.alerts.length, 1);
+  assert.match(r.alerts[0], /manifest\.json/);
+});
+
+test("#208: PAUSE stops the watch: no new broadcast, no restart, however long YouTube reports no data", async () => {
+  const yt = fakeYt({ bound: null, streamStatus: "inactive", health: "noData" });
+  let paused = true;
+  const r = rig(yt, { manageBroadcast: true, paused: () => paused, credits: () => [] });
+  const got = await r.minute(15);
+  assert.ok(got.every((x) => x === "paused"));
+  assert.equal(yt.created.length, 0, "PAUSE means stay off air: nothing re-creates a broadcast");
+  assert.equal(r.restarts.length, 0);
+  assert.equal(r.alerts.length, 0);
+  assert.equal(r.logs.filter((m) => /PAUSE is set/.test(m)).length, 1, "logged once, not every minute");
+  paused = false;                            // DrJ removed PAUSE by hand
+  await r.minute();
+  assert.equal(yt.created.length, 1);
 });

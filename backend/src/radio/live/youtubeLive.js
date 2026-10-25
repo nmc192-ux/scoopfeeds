@@ -44,9 +44,9 @@ export const liveConfigured = (env = process.env) => { const c = liveCredentials
  * caller passes. YouTube's "altered or synthetic content" flag (containsSyntheticMedia) is deliberately never
  * sent (DrJ, 22 Oct 2026), and there is no disclosure sentence (DrJ, 23 Oct 2026).
  */
-export function broadcastBody({ title, description = "", startMs, privacy = "public", credits = [], creditsUrl = null }) {
+export function broadcastBody({ title, description = "", startMs, privacy = "public", credits = [], creditsUrl = null, listAll = true }) {
   return {
-    snippet: { title: String(title).slice(0, 100), description: withCredits(description, credits, { creditsUrl }), scheduledStartTime: new Date(startMs).toISOString() },
+    snippet: { title: String(title).slice(0, 100), description: withCredits(description, credits, { creditsUrl, listAll }), scheduledStartTime: new Date(startMs).toISOString() },
     status: { privacyStatus: privacy, selfDeclaredMadeForKids: false },
     contentDetails: { enableAutoStart: true, enableAutoStop: true, enableDvr: true, latencyPreference: "low", monitorStream: { enableMonitorStream: false } },
   };

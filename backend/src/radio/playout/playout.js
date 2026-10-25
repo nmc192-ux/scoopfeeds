@@ -17,7 +17,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { pickBed, daypartAt, easternMinutes, listBeds, listFiles, musicDir, bedCredit, DAYPARTS } from "../musicLibrary.js";
+import { pickBed, daypartAt, easternMinutes, listBeds, listFiles, musicDir, bedCredit, clearedTracks, DAYPARTS } from "../musicLibrary.js";
+import { creditLines } from "../musicManifest.js";
 import { ensureProceduralBed } from "../proceduralBed.js";
 import { buildFfmpegArgs, buildFeederArgs, buildLiveFeederArgs, buildMediaFrameArgs, splitJpegs, VIDEO } from "./ffmpegArgs.js";
 import { measureIntegrated } from "./loudness.js";
@@ -71,6 +72,9 @@ export async function showBedCredit(page, bed, dir) {
   try { await page?.evaluate((c) => window.setMusicCredit?.(c), credit); } catch { /* the page is reloading; the next swap sets it */ }
   return credit;
 }
+
+/** DrJ's kill switch (#208): while this file exists nothing goes on air, and nothing here removes it. */
+export const pauseFile = (env = process.env) => path.join(String(env.RADIO_BASE_DIR || "~/scoopfeeds-radio").replace(/^~(?=$|\/)/, os.homedir()), "PAUSE");
 
 /** RADIO_PROGRAMME_AV_DELAY_MS: how far programme sound is held back to meet the picture (default 300, measured per host). */
 export const avDelayMs = (env = process.env) => { const n = Number(env.RADIO_PROGRAMME_AV_DELAY_MS); return Number.isFinite(n) && n >= 0 && n <= 5000 ? n : 300; };
@@ -479,6 +483,9 @@ export async function runPlayout(o = {}) {
         yt: o.youtube || makeYouTubeLive({ env }),
         streamId: String(env.RADIO_YT_STREAM_ID || "").trim() || null,
         manageBroadcast: !progDir,   // a programme hour's broadcast belongs to autoair.mjs
+        // #208: a broadcast it creates carries the 24/7 library's credits; PAUSE (resume by hand) stops the watch
+        credits: () => creditLines(clearedTracks(dir)),
+        paused: () => fs.existsSync(pauseFile(env)),
         encoderRunning: () => Boolean(current.unit && current.alive && Date.now() - current.startedAt >= WATCH.WARMUP_MS),
         // several destinations: restart YouTube's relay only, so X stays up; one destination: the whole unit
         restart: async (why) => { const u = current.unit; if (!u) return; if (u.restartOutput?.("youtube")) return; await u.stop(`stream-watch: ${why}`); },
