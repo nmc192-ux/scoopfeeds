@@ -4,6 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { extractElectionPack } from "../programme/electionPack.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -377,8 +378,20 @@ test("election: checkSegments drops the unattributed line and keeps the attribut
     { id: "s3", story: "t1", text: "The vote was rigged." },
   ] } };
   const { segments, report } = checkSegments(raw, slots, pack);
-  assert.deepEqual(segments["the-hour"].lines.map((l) => l.id), ["s2"]);
-  assert.equal(report.filter((r) => /^election:/.test(r.drop)).length, 2);
+  // Merged with #197: a winner line must ALSO match an attributed projection in the election pack. This pack
+  // has none, so even the Reuters-attributed s2 is dropped (the stricter rule wins; on air, silence beats a
+  // wrong fact). The unattributed s1 and the fraud claim s3 are dropped by #208's rule.
+  assert.deepEqual(segments["the-hour"].lines.map((l) => l.id), []);
+  assert.equal(report.filter((r) => /^election/.test(r.drop)).length, 3);
+  assert.match(report.find((r) => r.line === "s3").drop, /fraud or rigging/);
+  // With a matching attributed projection in the pack, the attributed line airs.
+  const now = Date.parse("2026-11-04T03:00:00Z");
+  const election = extractElectionPack([{ source: "Reuters", title: "Reuters projects Smith wins the Ohio Senate race", description: "", published: now - 600_000, url: "u" }], { now });
+  const withPack = { ...pack, election };
+  // #197 also wants a projection verb ("projects", "called"), not just "reports": s2 stays dropped; s4 airs.
+  const raw2 = { "the-hour": { lines: [...raw["the-hour"].lines, { id: "s4", story: "t1", text: "Reuters projects Smith has won the Senate race in Ohio." }] } };
+  const kept = checkSegments(raw2, slots, withPack).segments["the-hour"].lines.map((l) => l.id);
+  assert.deepEqual(kept, ["s4"]);
 });
 
 // ── 7. factual titles ───────────────────────────────────────────────────────

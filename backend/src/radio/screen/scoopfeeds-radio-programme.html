@@ -91,6 +91,29 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 .s-known .lab{font-size:26px; color:var(--red2); margin-top:56px;}
 .s-known p.txt{font-family:'Bodoni Moda',serif; font-size:60px; line-height:1.15; margin:18px 0 0; max-width:1600px;}
 
+/* election board (#197): every called race says who projected it; bars count projections only. Paged (see
+   electionDesk.js boardPages): overview bars, latest projections, then the races three columns at a time. */
+.s-elec .pad{inset:40px 96px 36px 96px;}
+.s-elec h1.st{font-size:60px; line-height:1.05; margin:10px 0 0;}
+.s-elec .pg{position:absolute; right:0; top:2px; font-size:26px; color:var(--muted);}
+.eb{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:64px; margin-top:28px;}
+.eb .kicker{margin-bottom:14px;}
+.ebar{margin-bottom:26px;}
+.ebar .h{display:flex; justify-content:space-between; gap:16px; font-size:26px; color:var(--muted);}
+.ebar .track{position:relative; height:34px; background:var(--ink2); margin-top:8px; display:flex; overflow:hidden;}
+.ebar .track i{display:block; height:100%;} .ebar .track .D{background:#3A6FC4;} .ebar .track .R{background:#C8322B;} .ebar .track .I{background:#8A8A8A;}
+.ebar .maj{position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--paper);}
+.ebar .n{font-size:26px; margin-top:8px;} .ebar .src{font-size:26px; line-height:1.15; color:var(--muted); margin-top:4px;}
+.eline{font-size:26px; line-height:1.15; margin:0 0 12px; padding-left:14px; border-left:5px solid #333;}
+.eline.D{border-left-color:#3A6FC4;} .eline.R{border-left-color:#C8322B;} .eline.I{border-left-color:#8A8A8A;}
+.egrid{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-top:24px; align-items:start;}
+.egrid .col{display:flex; flex-direction:column; gap:8px; min-width:0;}
+.ecard{background:var(--ink2); padding:6px 12px 6px; border-left:5px solid #333;}
+.ecard.D{border-left-color:#3A6FC4;} .ecard.R{border-left-color:#C8322B;} .ecard.I{border-left-color:#8A8A8A;} .ecard.conflict{border-left-color:var(--paper); background:#2A2A2A;}
+.ecard b{display:block; font-size:26px; line-height:1.15;} .ecard span{display:block; font-size:26px; line-height:1.15; color:var(--muted); overflow-wrap:anywhere;}
+.eopen{margin-top:22px;} .eopen p{font-size:26px; line-height:1.15; color:var(--muted); margin:8px 0 0;}
+.elatest{margin-top:22px;} .elatest p{font-family:'Bodoni Moda',serif; font-size:26px; line-height:1.2; margin:0 0 20px;} .elatest p em{font-family:'Schibsted Grotesk',sans-serif; font-style:normal; font-size:26px; color:var(--muted); margin-left:10px;}
+
 /* music */
 .s-music .hcard{position:absolute; left:96px; right:96px; top:56px; opacity:0; transform:translateY(20px); transition:opacity .7s, transform .7s;}
 .s-music .hcard.on{opacity:1; transform:none;}
@@ -202,7 +225,9 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 
     <section class="scene s-compared" data-scene="compared"><div class="pad"><div class="kicker caps">The News, Compared</div><h2 id="cHead"></h2><div class="cmp" id="cGrid"></div></div></section>
 
-    <section class="scene s-known" data-scene="known"><div class="pad"><div class="kicker caps">The News, Compared</div><h2 class="serif" id="kHead" style="font-weight:500;font-size:44px;line-height:1.12;margin:16px 0 0;max-width:1600px;color:var(--muted)"></h2><div class="lab caps" id="kLab"></div><p class="txt" id="kTxt"></p></div></section>
+    <section class="scene s-known" data-scene="known"><div class="pad"><div class="kicker caps" id="kKick">The News, Compared</div><h2 class="serif" id="kHead" style="font-weight:500;font-size:44px;line-height:1.12;margin:16px 0 0;max-width:1600px;color:var(--muted)"></h2><div class="lab caps" id="kLab"></div><p class="txt" id="kTxt"></p></div></section>
+
+    <section class="scene s-elec" data-scene="election"><div class="pad"><div class="kicker caps" id="eKick">The Midterms</div><div class="pg num" id="ePg"></div><h1 class="st" id="eTitle"></h1><div id="eBody"></div></div></section>
 
     <section class="scene s-music" data-scene="music"><div id="hcards"></div><div class="eq" id="eq"></div><div class="strap" id="strap" hidden><b class="caps">Coming up</b><span id="strapTxt"></span></div><div class="mcredit" id="musicCredit" hidden></div></section>
 
@@ -314,7 +339,32 @@ const R = {
   compared(d){ $('cHead').textContent = d.headline || '';
     $('cGrid').innerHTML = (d.cards || []).map((c, i) => `<div class="o${i === d.active ? ' act' : ''}"><div class="s">${esc(c.source)}</div><p>${esc(c.title)}</p></div>`).join('');
     $('cGrid').classList.toggle('focus', d.active >= 0); show('compared'); },
-  known(d){ $('kHead').textContent = d.headline || ''; $('kLab').textContent = d.label || ''; $('kTxt').textContent = d.text || ''; show('known'); },
+  known(d){ $('kKick').textContent = d.kicker || 'The News, Compared'; $('kHead').textContent = d.headline || ''; $('kLab').textContent = d.label || ''; $('kTxt').textContent = d.text || '';
+    $('kTxt').style.fontSize = (d.text || '').length > 260 ? '38px' : (d.text || '').length > 160 ? '48px' : ''; show('known'); },
+  election(d){ const pg = d.page || {}, PARTY = { D: 'Democrats', R: 'Republicans', I: 'Independents' };
+    const bar = (label, seats, majority, counts, src) => { const w = (n) => `${(100 * (n || 0) / seats).toFixed(2)}%`;
+      return `<div class="ebar"><div class="h caps"><span>${esc(label)}</span><span>${majority} for a majority</span></div><div class="track">${['D', 'I'].map((p) => counts[p] ? `<i class="${p}" style="width:${w(counts[p])}"></i>` : '').join('')}<span style="flex:1"></span>${counts.R ? `<i class="R" style="width:${w(counts.R)}"></i>` : ''}<b class="maj" style="left:${(100 * majority / seats).toFixed(2)}%"></b></div>
+        <div class="n num">${['D', 'R', 'I'].filter((p) => counts[p]).map((p) => `${PARTY[p]} ${counts[p]}`).join(' · ') || 'No seats projected yet'}</div>${src ? `<div class="src">${esc(src)}</div>` : ''}</div>`; };
+    const ctl = (c) => `<p class="eline ${esc(c.party || '')}">${c.status === 'conflict' ? 'Outlets disagree. ' : ''}${esc(PARTY[c.party] || 'Control')}: projected by ${esc(c.outlet)}, reported by ${esc(c.source)}</p>`;
+    let title = '', body = '';
+    if (pg.kind === 'overview') {
+      title = 'Who controls Congress: projections only';
+      const hr = pg.house.reports || [], hc = pg.house.control || [];
+      const house = hr.length > 2 ? hr.map((h) => `<p class="eline">${esc(h.outlet)}: ${['D', 'R', 'I'].filter((p) => h.seats[p]).map((p) => `${PARTY[p]} ${h.seats[p]}`).join(' · ')} (reported by ${esc(h.source)})</p>`).join('')
+        : hr.map((h) => bar(`House seats projected by ${h.outlet}`, pg.house.seats, pg.house.majority, h.seats, `Reported by ${h.source}`)).join('');
+      body = `<div class="eb"><div><div class="kicker caps">Senate</div>${bar('Senate seats projected this year', pg.senate.seats, pg.senate.majority, pg.senate.projected, 'Counts only races a news organisation has projected. Seats not on the ballot are not shown.')}${(pg.senate.control || []).map(ctl).join('')}</div>
+        <div><div class="kicker caps">House</div>${house}${hc.map(ctl).join('')}${hr.length || hc.length ? '' : `<div class="ebar"><div class="h caps"><span>${pg.house.majority} seats for a majority</span></div><div class="n">Not yet called</div></div>`}</div></div>`;
+    } else if (pg.kind === 'latest') {
+      title = 'Latest projections, in the outlets\' words';
+      body = `<div class="elatest">${(pg.quotes || []).map((x) => `<p>${esc(x.quote)}<em>${esc(x.source)}${x.shortened ? ' (shortened)' : ''}</em></p>`).join('')}</div>`;
+    } else {
+      title = `${pg.view === 'governor' ? 'Governors' : 'Senate'}: projections, and who made them`;
+      const card = (r) => `<div class="ecard ${esc(r.status === 'called' ? (r.party || '') : r.status)}"><b>${esc(r.name)}</b>${(r.lines || []).map((t) => `<span>${esc(t)}</span>`).join('')}</div>`;
+      body = ((pg.cols || []).some((c) => c.length) ? `<div class="egrid">${pg.cols.map((c) => `<div class="col">${c.map(card).join('')}</div>`).join('')}</div>` : '')
+        + ((pg.open || []).length ? `<div class="eopen"><div class="kicker caps">Not yet called (${pg.open.length})</div><p>${esc(pg.open.join(', '))}</p></div>` : '');
+    }
+    $('eTitle').textContent = title; $('ePg').textContent = pg.of > 1 ? `${pg.n} of ${pg.of}` : ''; $('eBody').innerHTML = body;
+    show('election'); },
   music(d){ show('music'); const n = d.next && d.next.at > now();
     $('musicCredit').hidden = !d.credit; $('musicCredit').textContent = d.credit || '';
     $('strap').hidden = !n; if (n) $('strapTxt').textContent = `${hm(d.next.at, 'America/New_York')} New York · ${d.next.title}`; },

@@ -102,3 +102,22 @@ The playout stops by itself at 10:00:30 pm. Afterwards, reload the 24/7 agent:
 **Fallbacks.** No programme audio yet at a part's start: the bed keeps playing. A segment whose lines were all
 dropped: headlines and music. Producer failure: run it again (it is idempotent); if it cannot finish by 8:55 pm, run
 the 24/7 playout instead (visual radio, no voice).
+
+## The Midterms desk (#197)
+
+`RADIO_ELECTION_DESK=1` adds "The Midterms" (180 s at 14:00, the first half of music-1) to every produced hour from
+26 Oct to 6 Nov, New York time. `electionPack.js` reads tracked articles of the last 6 hours and keeps, sentence by
+sentence, only projections a NAMED organisation made ("AP projects ..."), withdrawn calls, projected House tallies,
+and counted shares the article states; polls, leads and unattributed "X won" are never items. Conflicting
+projections stay side by side. `checks.js` drops any line, in any segment, that says someone won without the
+organisation that projected it (and a matching item in the pack), reads a poll as a result, or gives a partial
+count without how much is in ("counting continues" otherwise). Until the first polls close on 3 Nov the desk also
+reads a mechanical "what's on the ballot" line set (Senate / governors / House, rotating by hour) from
+`../election/races2026.js` (shared with the #204 map). The board (`election` scene) shows only when the pack has
+at least one attributed item: control bars count projected races only, every called race says "Projected by
+<outlet>", the rest "Not yet called", and the latest projections are quoted verbatim with their outlet. At the
+26 px screen floor a full night cannot fit one screen, so the board is paged (`boardPages()` in `electionDesk.js`):
+an overview (Senate bar, House), the latest projections, then the called races three columns at a time with the
+uncalled ones listed by name. The pages share the desk from the first projection line to the slot's end, at least
+8 s each, and nothing else interrupts them. `screen/fontFloor.test.js` renders a worst-case full board
+(`screen/fixtures/sampleElection.mjs`) and fails on any text under 26 px or past the frame.
