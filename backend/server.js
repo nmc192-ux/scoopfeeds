@@ -64,6 +64,7 @@ import {
   adminRouteLimiter,
   analysisLimiter,
   apiGlobalLimiter,
+  footageUploadLimiter,
   highFreqLimiter,
   mutationLimiter,
   predictionsLimiter,
@@ -250,7 +251,7 @@ app.use("/api/tips",         mutationLimiter);
 app.use("/api/watchlists",   mutationLimiter);
 app.use("/api/meter",        mutationLimiter);
 app.use("/api/csp-report",   mutationLimiter);
-app.use("/api/footage",      mutationLimiter);
+app.use("/api/footage",      mutationLimiter, footageUploadLimiter); // #219: uploads are up to 500 MB, so writes get their own 10/hour cap
 
 // Routes
 app.use("/api/news",      cacheMiddleware("medium"), newsRouter);
