@@ -19,6 +19,15 @@ in the pack, any Pakistan-politics line, and any sentence about our own sourcing
 `checks.json`. On-screen text (headlines, outlet names, ledes) is always taken verbatim from articles, never from
 the model.
 
+## The channel grid (#200)
+
+`grid.js` is the 24-hour grid as data (dayparts, the fixed 9 pm ET film slot, the segment catalogue, the screen
+elements, the exchange sessions); `docs/radio/channel-grid.md` is the same grid in plain English, and `grid.test.js`
+fails when they disagree. `clock.js buildGridClock()` builds an hour as an instance of the grid; `produce.mjs --grid`
+(or `RADIO_GRID_ENABLED=1`) uses it, otherwise the running order above is unchanged. `grid.applyOverride()` cuts the
+segment on air for breaking news or a live event and resumes at the next segment boundary.
+`../screen/fontFloor.mjs --shots <dir>` measures every scene of both screens (26 px floor) and takes the screenshots.
+
 ## Unattended hours (auto-air)
 
 `autoair.mjs` runs a whole hour with nobody at the desk: produce, air check (`airCheck.js`), YouTube broadcast
