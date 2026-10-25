@@ -196,12 +196,16 @@ whether the index is mixed. `scripts/reembed.mjs` needs no cutover today — emb
 | `ENTITY_IDF_ENABLED` | `false` | default | yes | Maintain the rolling entity-IDF window that all rarity weighting depends on. |
 | `ENTITY_IDF_WINDOW_MS` | `30d` | default | yes | IDF rolling window. |
 | `ACTOR_EXTRACT_PER_CYCLE` | `25` | default | yes | Events per actor-extraction cycle (ledgered; see migration 016). |
+| `WHAT_WE_KNOW_ENABLED` | unset (**off**) | unset | yes (read per cycle) | #250. Hourly (`:31`) generator for the dossier's AI-written "What we know" block. On only when literally `"1"`. Coherence `"ok"` events only, never sensitive headlines, ≥3 outlets; ledgered like the actor extractor (migration 043). Do not switch on before `EVENT_COHERENCE_GATE` is on in prod. |
+| `WHAT_WE_KNOW_PER_CYCLE` | `10` | unset | yes | LLM calls per `whatWeKnow` cycle (skips do not count). Worst case 10 × 24 = 240 calls/day against `LLM_DAILY_CALL_CAP`; ≈ $0.11/day at Haiku prices. Lowered from the spec's 20 because current monthly spend could not be measured at build time. |
+| `WHAT_WE_KNOW_API` | `true` | unset (on) | yes (read per request) | Kill switch for `what_we_know` on `GET /api/ri/events/:slug`. Served only with a stored `ok` block AND a live coherence level of `"ok"`; nothing is served while no rows exist. |
 
 ## Frontend (build-time — `VITE_*` requires a rebuild)
 
 | Var | Default | Prod | Runtime-flip | Purpose |
 |---|---|---|---|---|
 | `VITE_SENTIMENT_ENABLED` | `false` (**hidden**) | default | **build** | Sentiment module. Hidden because it fails comprehensibility, not data sufficiency — see the architecture doc. |
+| `VITE_WHAT_WE_KNOW` | `false` (**dark**) | unset | **build** | #250 "What we know" dossier block. Dark: `?wwk=1` shows it per visit. Renders only when the API sends `what_we_know`. |
 
 ## Site flags (runtime — served to the SPA by `GET /api/site-config`)
 

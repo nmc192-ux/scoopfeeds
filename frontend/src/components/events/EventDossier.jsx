@@ -4,6 +4,10 @@
  * Section order, top to bottom:
  *   1. HEADER        title, hero, consolidation badge (N outlets · M articles · day D),
  *                    status (developing/dormant), mechanical badge line. NO LLM brief.
+ *   1b. WHAT WE KNOW #250, DARK behind ?wwk=1 or VITE_WHAT_WE_KNOW=true. AI-written,
+ *                    source-cited, with a visible disclosure line. A separate block, NOT
+ *                    the header (which stays mechanical). Earn-render: the API sends
+ *                    `what_we_know` only for a coherent event with a validated block.
  *   2. TIMELINE      latest development first, day-grouped. Mobile: latest-3 + expander.
  *   3. COVERAGE      member articles grouped BY OUTLET, one row per outlet. No cred scores.
  *   3b. THREADS      A5 facet shelf, DARK behind ?facets=1. Earn-render: >= 2 qualifying
@@ -23,7 +27,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   Clock, Newspaper, Users, BarChart3, MessageCircle, Activity, ChevronLeft,
-  ExternalLink, TrendingUp, TrendingDown, GitBranch, User, Building2, Globe, Layers,
+  ExternalLink, TrendingUp, TrendingDown, GitBranch, User, Building2, Globe, Layers, ListChecks,
 } from "lucide-react";
 import {
   useEventTimeline, useEventMarkets, useEventActors, useEventCoverage,
@@ -44,6 +48,9 @@ const SENTIMENT_VOLUME_FLOOR = 10;
 // article count; a reader can't interpret it. Flip true only when genuine
 // multi-source social sentiment exists to make it a real comparison.
 const SENTIMENT_ENABLED = String(import.meta.env.VITE_SENTIMENT_ENABLED ?? "false").toLowerCase() === "true";
+
+// #250: "What we know" ships dark. ?wwk=1 shows it per visit; this env flag is the flip.
+const WHAT_WE_KNOW_ENV = String(import.meta.env.VITE_WHAT_WE_KNOW ?? "false").toLowerCase() === "true";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -152,6 +159,51 @@ function DossierHeader({ event }) {
         </p>
       </div>
     </div>
+  );
+}
+
+// ─── 1b. WHAT WE KNOW (#250, dark) ──────────────────────────────────────────
+
+function WhatWeKnowSection({ block }) {
+  const facts = block?.facts ?? [];
+  if (facts.length === 0) return null;   // earn-render: no block, no section
+  const unknown = block.unknown ?? [];
+  return (
+    <section className="mb-8 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 sm:p-6">
+      <SectionHeader icon={ListChecks} label="What we know" />
+      <ul className="flex flex-col gap-3">
+        {facts.map((f, i) => (
+          <li key={i} className="text-sm leading-relaxed text-[var(--color-text)]">
+            {f.text}{" "}
+            <span className="inline-flex flex-wrap gap-x-2 text-[11px] text-[var(--color-text-secondary)]">
+              {(f.sources ?? []).filter((s) => /^https?:\/\//i.test(s.url ?? "")).map((s) => (
+                <a
+                  key={s.article_id}
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline decoration-dotted hover:text-[var(--color-accent)]"
+                >
+                  {s.source_name || hostname(s.url)}
+                </a>
+              ))}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {unknown.length > 0 && (
+        <div className="mt-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-2">Not yet confirmed</h3>
+          <ul className="flex flex-col gap-1.5">
+            {unknown.map((u, i) => (
+              <li key={i} className="text-sm leading-relaxed text-[var(--color-text-secondary)]">{u}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {/* The disclosure is visible text, never a tooltip. */}
+      <p className="mt-4 text-[11px] text-[var(--color-text-secondary)]">{block.disclosure}</p>
+    </section>
   );
 }
 
@@ -728,6 +780,7 @@ export default function EventDossier({ event }) {
   // is also immune to the event_timeline WRITER outage (empty legacy timelines on
   // newly-created events) — the flip is the user-facing fix for that defect.
   const tlLogOn  = searchParams.get("tl") !== "0";
+  const wwkOn    = WHAT_WE_KNOW_ENV || searchParams.get("wwk") === "1";
 
   const { data: tlData,   isLoading: loadingTimeline }  = useEventTimeline(slug, { limit: 60, enabled: !tlLogOn });
   const { data: covData,  isLoading: loadingCoverage }  = useEventCoverage(slug);
@@ -749,6 +802,7 @@ export default function EventDossier({ event }) {
         <ChevronLeft size={13} /> All events
       </Link>
       <DossierHeader event={event} />
+      {wwkOn && event.what_we_know && <WhatWeKnowSection block={event.what_we_know} />}
       {tlLogOn
         ? <OccurrenceTimelineSection slug={slug} occurrences={tlLogData?.occurrences ?? []} isLoading={loadingTlLog} />
         : <TimelineSection slug={slug} entries={timeline} isLoading={loadingTimeline} />}

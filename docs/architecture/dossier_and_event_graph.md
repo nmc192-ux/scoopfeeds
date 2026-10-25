@@ -18,7 +18,9 @@ Design rules that are easy to mistake for bugs:
 - **The header is mechanical only.** `N outlets · M articles · day D`, category, status
   (developing/dormant). No LLM-written text. The prose summary that used to sit here was
   removed deliberately — it was the vector for the 2e summary-contamination class (a Kannada
-  obituary event wearing a Zelensky summary).
+  obituary event wearing a Zelensky summary). The rule still holds for the header. "What
+  we know" (#250, below) is a separate, gated, disclosed block, not the header
+  (full-throttle.md §5 lifts the rule for that block only).
 - **Credibility scores are hidden** from the reader. Coverage groups by outlet with no score.
 - **Earn-render.** Every section below the header renders *only* when it has real data.
   **An absent section is correct, not broken.** There are no placeholders and no empty
@@ -47,6 +49,27 @@ now computed **read-time from `event_articles`** — one row per *occurrence*:
 
 Because it reads articles directly, this view is **immune to `event_timeline` writer
 outages** (§3). `?tl=0` and the standalone `/timeline/:slug` page still read the stored table.
+
+### #250 "What we know" — **DARK** behind `?wwk=1` (generator off: `WHAT_WE_KNOW_ENABLED`)
+
+3–5 AI-written sentences of what the coverage agrees on, between the header and the timeline,
+each with its outlet links, an optional "Not yet confirmed" list, and a visible disclosure line
+("Written by AI from the reports listed below. It can be wrong; check the sources.").
+
+- **Who gets one**: active events with articles, reader-eligible, `dossierCoherence` level
+  `"ok"` (never `"low"` or unmeasured), no sensitive headline, ≥3 outlets in the bundle.
+- **Generator** `realityIndex/generation/whatWeKnow.js`, hourly at `:31`, task `what-we-know`.
+  Bundle: up to 12 articles, round-robin over outlets, title + description only.
+- **Validation fails closed**: a fact citing an id outside the bundle, fewer than 2 outlets, or a
+  number not found verbatim (as a whole number) in a cited report is dropped. Fewer than 3 survive →
+  `status='refused'`, nothing served.
+- **Ledger** (`event_what_we_know`, migration 043): content hash of the article ids sent; an
+  unchanged hash with a good block is never re-paid; 3 attempts per hash at 0 / 6 h / 24 h; a
+  changed hash regenerates only once the good block is 6 h old. The row is the latest attempt, so
+  a refused attempt on new content withdraws the older block.
+- **Served** only when the row is `ok` AND the live coherence level is `"ok"` at request time.
+- 🧭 lines: `wwk-generate`, `wwk-skip` (reason), `wwk-refuse`.
+- **Flip order**: not before `EVENT_COHERENCE_GATE` is on in prod.
 
 ### A5 facet shelf — **DARK** behind `?facets=1`
 
@@ -252,6 +275,8 @@ most frequent are exactly Q794 (Iran), Q668 (India), Q21 (England).
 |---|---|
 | A dossier section is missing entirely | Earn-render. Absent ≠ broken. |
 | `coherence.level` is `null` on a small event | Fewer than 3 members carry entity keys: unmeasured, deliberately not "ok". |
+| "What we know" is missing on a big, well-covered story | It needs coherence `"ok"` *now*, ≥3 outlets, a non-sensitive headline and ≥3 facts that survived validation. A refused or withheld block is the designed outcome. |
+| The dossier has AI-written sentences despite "the header is mechanical only" | They are the separate, disclosed "What we know" block (#250), not the header. |
 | ANGLES shows ~1 sibling on a huge storyline | Wave 2 consolidated the angles into the macro-event as tombstones (§1). |
 | The facet shelf doesn't render on a big story | It needs ≥2 *qualifying* facets; a genuinely single-thread story correctly shows none. |
 | A single-outlet op-ed gets its own timeline row | It *is* a distinct occurrence. One row is its correct representation. |
