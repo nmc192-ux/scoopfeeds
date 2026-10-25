@@ -19,7 +19,6 @@
  *   FFMPEG_PATH     — path to ffmpeg binary (auto-detected via PATH if absent)
  *   OPENAI_API_KEY  — enables OpenAI TTS voice-over
  *   ELEVENLABS_API_KEY / ELEVENLABS_VOICE_ID — ElevenLabs TTS alternative
- *   GOOGLE_TTS_KEY  — Google Cloud TTS fallback
  */
 
 import satori from "satori";
