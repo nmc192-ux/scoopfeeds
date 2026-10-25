@@ -28,6 +28,20 @@ node backend/src/radio/playout/cli.js --out test.mp4 --seconds 120 --music-dir <
 - Known limitation: the RTMP URL, which contains the stream key, is an argument of the ffmpeg process, so other local processes of the same user can read it with `ps`. Logs are redacted; process listings are not.
 - Linux: run `run-playout.sh` from a systemd unit with `Restart=always` (drop the `caffeinate` line).
 
+## What is (and is not) the page on air (#246)
+
+- The picture is headless Chromium's own CDP screencast of the page, piped to ffmpeg; nothing from the Mac's desktop,
+  menu bar, notifications or the Chrome window frame can reach the stream. A macOS or Chrome overlay is therefore never
+  the cause of something seen on air.
+- Browser-only hints on the programme page (the "No sound? Tap the speaker to unmute" line on the countdown slate) are
+  hidden whenever the page is loaded with `media=encoder`, which `programmeUrl()` always adds. Pinned by
+  `../screen/unmuteHint.test.js`.
+- A round avatar-style badge in the bottom-right corner of the YouTube picture is not drawn by the page (checked on every
+  programme scene in playout mode, 25 Oct 2026) or by the encoder (no ffmpeg overlay filter). It is most likely YouTube's
+  own channel watermark (YouTube Studio > Customisation > Branding > Video watermark), which YouTube draws over the player.
+  To remove it: delete the video watermark there. To verify on the Mac / in Studio: record a rehearsal file with
+  `--out` (no RTMP) and check its bottom-right corner; if the file is clean, the badge is added by YouTube.
+
 ## YouTube + X together (#207)
 
 - Destinations are data: `../live/destinations.js` (YouTube and X, both primary; Facebook and Twitch deferred by DrJ on 22 Oct).

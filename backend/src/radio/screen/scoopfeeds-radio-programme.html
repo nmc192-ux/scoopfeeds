@@ -157,6 +157,9 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 .slate .cd{font-size:120px; font-weight:300; margin-top:30px;}
 .slate .unmute{display:inline-flex; align-items:center; gap:14px; margin-top:34px; padding:12px 26px; border:1px solid var(--red2); color:var(--paper); font-size:26px; letter-spacing:.04em;}
 .slate .unmute svg{flex:none;}
+/* the unmute hint is for someone opening this page in a browser; the playout (media=encoder) captures the page for
+   YouTube and X, where the stream's sound plays on its own, so the hint never goes on air (#246) */
+.on-air .slate .unmute{display:none;}
 
 /* ── right rail (#200): Coming up, markets, weather on the story and headline-break scenes. Earn-render: a block
    shows only with real data; with no block the rail is not drawn and the scene keeps the full width. ── */
@@ -278,6 +281,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;', '<'
 const params = new URLSearchParams(location.search);
 let OFFSET = Number(params.get('offset') || 0);
 const ENCODER_MEDIA = params.get('media') === 'encoder';   // the playout plays films itself: never decode video in this page        // rehearsal / test clock shift, ms
+if (ENCODER_MEDIA) document.documentElement.classList.add('on-air');   // playout capture: browser-only hints stay off air (#246)
 let FROZEN = null;                                      // renderAt() freezes the clock for screenshots
 const now = () => FROZEN ?? (Date.now() + OFFSET);
 
