@@ -1,0 +1,53 @@
+/*
+ * Shared design tokens: the ScoopFeeds site and ScoopFeeds Radio (#188, plan v7 Phase 1).
+ *
+ * This is the ONLY place in frontend/src where these colour values are written.
+ * Everything else reads the variables (or the Tailwind classes built on them:
+ * bg-ink, text-paper, text-lime, bg-live, font-display, font-reading, font-label).
+ *
+ * Shared by site and Radio: ink, paper, live red, Newsreader, Schibsted Grotesk.
+ * ScoopFeeds adds lime and Anton. Radio adds navy and Bodoni Moda.
+ * Red is reserved for "live". Contrast (WCAG 2.x, computed): ink on paper 17.6:1,
+ * lime on ink 14.8:1 — both pass AA (and AAA) for body text. Live red on paper is
+ * 4.4:1: fine for the bold "LIVE" label (large-text AA), not for body text.
+ *
+ * Radio's own screens (backend/src/radio/screen/*.html) are served as-is and cannot
+ * import this file; they inline the same values (see backend/src/radio/brand/README.md).
+ */
+:root {
+  /* shared */
+  --sf-ink: #090706;
+  --sf-paper: #F4EFE6;
+  --sf-live: #D7261E;        /* reserved for "live" */
+  --sf-live-on-dark: #FF4A3D;
+  --sf-reading: "Newsreader", Georgia, "Times New Roman", serif;
+  --sf-label: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+
+  /* ScoopFeeds */
+  --sf-lime: #DDE706;
+  --sf-display: "Anton", Impact, system-ui, sans-serif;
+
+  /* Radio */
+  --radio-navy: #0F2238;
+  --radio-display: "Bodoni Moda", Georgia, serif;
+
+  /* The site's display face: Bebas Neue on the flag-off site, Anton under v2
+     (html.sf-v2, set by App.jsx). Tailwind's font-display reads this. */
+  --font-display: "Bebas Neue", Impact, system-ui, sans-serif;
+}
+
+html.sf-v2 {
+  --font-display: var(--sf-display);
+}
+
+/* The #173 chrome's names, kept as aliases so SiteChromeV2 does not churn. */
+.v2-chrome {
+  --v2-ink: var(--sf-ink);
+  --v2-paper: var(--sf-paper);
+  --v2-lime: var(--sf-lime);
+  --v2-live: var(--sf-live);
+  --v2-radio: var(--radio-navy);
+  --v2-display: var(--sf-display);
+  --v2-reading: var(--sf-reading);
+  --v2-label: var(--sf-label);
+}

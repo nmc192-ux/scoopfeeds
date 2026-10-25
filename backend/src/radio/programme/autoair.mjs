@@ -26,8 +26,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { airCheck } from "./airCheck.js";
-import { hasValidClearance } from "../safety/contentSafety.js";
 import { resolveHourShort } from "../filmLibrary.js";
+import { hasValidClearance } from "../safety/contentSafety.js";
 import { makeYouTubeLive, liveConfigured, goLiveWhenActive } from "../live/youtubeLive.js";
 import { pickClearedFilm } from "../safety/filmClearance.js";
 import { factualTitle, xBroadcastText, withCredits } from "../safety/broadcastCopy.js";
@@ -123,8 +123,7 @@ async function main() {
   const ytApi = liveConfigured(env) ? makeYouTubeLive({ env }) : null;
   // #216: the film slot takes only a Short cut from a published long-form film (the newest eligible one in a
   // folder); anything else, ScoopFeeds 60 included, leaves the slot to the normal programme, and says why.
-  // #208: that Short must ALSO pass copyright clearance (pickClearedFilm) on the file in the given folder,
-  // and (#218) a valid content-safety clearance.
+  // #208: that Short must ALSO pass copyright clearance (pickClearedFilm) on the file in the given folder.
   const filmArg = tilde(v.film || env.RADIO_AUTOAIR_FILM);
   let film = null;
   if (filmArg) {
@@ -133,10 +132,8 @@ async function main() {
     if (r.item) {
       const src = sourceFileFor(filmArg, r.item.file);
       const copyrightOk = src ? await pickClearedFilm(src, { yt: ytApi, log }) : null;
-      film = await cleared("film", copyrightOk);
-      if (!film) reason = `${r.item.id}: ${!src ? "no matching file in " + filmArg
-        : !copyrightOk ? "not cleared for air (#208; see the 'film excluded' line above)"
-        : "no valid content-safety clearance (#218)"}`;
+      film = copyrightOk ? await cleared("film", copyrightOk) : null;
+      if (!film) reason = `${r.item.id}: ${!src ? "no matching file in " + filmArg : copyrightOk ? "no content-safety clearance (#218)" : "not cleared for air (#208; see the 'film excluded' line above)"}`;
     }
     status.film = film ? { id: r.item.id, parentFilm: r.item.parentFilm, file: path.basename(film) } : { id: null, reason }; saveStatus();
     log(film ? `film slot: ${r.item.id} (Short from ${r.item.parentFilm})` : `film slot: no film this hour: ${reason}`);

@@ -12,13 +12,18 @@
  *
  * priority: "primary" outputs are kept up first; under stress, "secondary" outputs are dropped first.
  * maxDurationSec: the platform's cap on one live video; the fan-out restarts that output at a segment
- *   boundary before the cap (null = no cap; X "start immediately" broadcasts have none).
+ *   boundary before the cap (null = no cap). YouTube: null. X: 86400 (#220). X Live Studio, which replaced
+ *   Media Studio Producer on 1 Jul 2026, caps one livestream at 24 hours ("Livestreams have a maximum duration
+ *   of 24hours", help.x.com/en/using-x/live-studio, read 24 Oct 2026). The old note here, that X "start
+ *   immediately" broadcasts have no cap, predates Live Studio and is wrong now.
+ *   A restart only reconnects the relay to the same Live Studio source; it does not create a new X livestream.
+ *   What X does on that reconnect is UNVERIFIED until the Mac rehearsal; see docs/radio/autonomous-newsroom.md (X).
  */
 export const YOUTUBE_RTMP_BASE = "rtmp://a.rtmp.youtube.com/live2";
 
 export const DESTINATIONS = Object.freeze([
   Object.freeze({ id: "youtube", label: "YouTube", priority: "primary", enabledVar: null, keyVar: "RADIO_STREAM_KEY", urlVar: null, maxDurationSec: null }),
-  Object.freeze({ id: "x", label: "X", priority: "primary", enabledVar: "RADIO_X_ENABLED", keyVar: "RADIO_X_STREAM_KEY", urlVar: "RADIO_X_RTMP_URL", maxDurationSec: null }),
+  Object.freeze({ id: "x", label: "X", priority: "primary", enabledVar: "RADIO_X_ENABLED", keyVar: "RADIO_X_STREAM_KEY", urlVar: "RADIO_X_RTMP_URL", maxDurationSec: 24 * 3600 }),
 ]);
 
 const str = (v) => String(v ?? "").trim();

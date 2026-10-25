@@ -101,6 +101,10 @@ export default function App() {
   useEffect(() => {
     if (v2 && language && language !== "en") setLanguage("en");
   }, [v2, language, setLanguage]);
+  // #188: the v2 page base (tokens, paper/ink, Schibsted + Newsreader) hangs off html.sf-v2.
+  useEffect(() => {
+    document.documentElement.classList.toggle("sf-v2", Boolean(v2));
+  }, [v2]);
   const { data: health, isError: isOffline } = useHealth();
   const { data: publicConfig } = usePublicConfig();
   const location = useLocation();

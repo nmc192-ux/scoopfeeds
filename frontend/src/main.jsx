@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // fires during initial render.
 import "./lib/api";
 import App from "./App.jsx";
+import "./styles/tokens.css";
 import "./index.css";
 
 const queryClient = new QueryClient({
