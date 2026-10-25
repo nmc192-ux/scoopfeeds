@@ -1,9 +1,9 @@
 /**
  * /api/reader?url=... — server-side article extraction using Mozilla Readability.
  *
- * Returns a clean article payload {title, byline, content, excerpt, siteName, length, url}
- * so the frontend can render a distraction-free in-app reader instead of bouncing to
- * the source site.
+ * Returns {title, byline, excerpt (<=3 sentences), siteName, publishedTime, lang, url}.
+ * The extracted body is NOT sent to clients (issue #176): readers get a summary and a
+ * link out to the publisher. See readerPayload.js.
  *
  * Caching: 12h per URL in memory.
  * Fetch strategy: tries up to 3 browser-like UA variants; classifies errors so
@@ -18,6 +18,8 @@ import axios from "axios";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import { logger } from "../services/logger.js";
+import { getDb } from "../models/database.js";
+import { toPublicReaderPayload } from "./readerPayload.js";
 
 const router = Router();
 
@@ -291,6 +293,19 @@ function parseWithReadability(html, url) {
   };
 }
 
+// The dossier this article belongs to, if any. Read-only; never fails the request.
+function findEventSlug(url) {
+  try {
+    const row = getDb().prepare(`
+      SELECT e.slug FROM articles a
+      JOIN event_articles ea ON ea.article_id = a.id
+      JOIN events e ON e.id = ea.event_id
+      WHERE a.url = ? ORDER BY ea.rowid DESC LIMIT 1
+    `).get(url);
+    return row?.slug || null;
+  } catch (err) { logger.warn(`reader: dossier lookup failed for ${url}: ${err.message}`); return null; }
+}
+
 // ─── Route ───────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   const url = String(req.query.url || "").trim();
@@ -300,7 +315,7 @@ router.get("/", async (req, res) => {
   }
 
   const cached = getCached(url);
-  if (cached) return res.json({ success: true, data: cached, cached: true });
+  if (cached) return res.json({ success: true, data: { ...cached, eventSlug: findEventSlug(url) }, cached: true });
 
   // ── Step 1: fetch the original URL ───────────────────────────────────────
   let html, contentType, fetchErr;
@@ -372,8 +387,10 @@ router.get("/", async (req, res) => {
     });
   }
 
-  setCached(url, payload);
-  return res.json({ success: true, data: payload, cached: false });
+  // Extraction is internal; only the summary-sized allow-list reaches the client (#176).
+  const publicPayload = toPublicReaderPayload(payload);
+  setCached(url, publicPayload);
+  return res.json({ success: true, data: { ...publicPayload, eventSlug: findEventSlug(url) }, cached: false });
 });
 
 export default router;

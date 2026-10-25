@@ -10,10 +10,10 @@ import { planToCues, cueAt, buildFilmFrameArgs, buildFilmAudioArgs, buildRehears
 const NOW = Date.parse("2026-10-23T12:00:00Z");
 const DAY = 86_400_000;
 
-function film(series, n, ageDays, durationSec = 480, kind = "film") {
+function film(series, n, ageDays, durationSec = 480, kind = "film", parentFilm) {
   return {
     id: `${series}/${n}`, series, seriesName: series, title: `${series} ${n}`, durationSec,
-    publishedAt: NOW - ageDays * DAY, file: `/x/${series}/${n}.mp4`, kind,
+    publishedAt: NOW - ageDays * DAY, file: `/x/${series}/${n}.mp4`, kind, ...(parentFilm ? { parentFilm } : {}),
   };
 }
 
@@ -40,7 +40,7 @@ test("easternInstant handles EDT and EST", () => {
 test("day plan: prime slots take new episodes, no film repeats within 6h", () => {
   const items = [
     film("a-eye", 5, 2), film("the-record", 9, 3), film("people", 1, 40), film("people", 2, 60),
-    film("scoopfeeds-60", 1, 1, 30, "short"), film("scoopfeeds-60", 2, 1, 40, "short"),
+    film("a-eye", "5-s1", 1, 30, "short", "a-eye/5"), film("the-record", "9-s1", 1, 40, "short", "the-record/9"),
   ];
   const slots = defaultSlots("2026-10-23");
   const { plan, empty } = planDay({ items }, { slots, now: NOW });
@@ -71,10 +71,10 @@ test("yesterday's airings seed the gap", () => {
 function tmpLibrary() {
   const src = fs.mkdtempSync(path.join(os.tmpdir(), "films-src-"));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "films-lib-"));
-  const add = (series, name, title, publishedAt, durationSec) => {
+  const add = (series, name, title, publishedAt, durationSec, parentFilm) => {
     const f = path.join(src, `${series}-${name}.mp4`);
     fs.writeFileSync(f, "");
-    return importFilm({ file: f, series, title, publishedAt, name, dir, probe: () => durationSec });
+    return importFilm({ file: f, series, title, publishedAt, name, dir, probe: () => durationSec, parentFilm });
   };
   return { src, dir, add };
 }
@@ -112,7 +112,9 @@ test("ACCEPTANCE: two days planned from a real library folder, nothing (film or 
   add("the-record", "e3", "Record 3", "2026-10-20", 600);
   add("people", "e1", "People 1", "2026-09-01", 480);
   add("peace-and-war", "e2", "PW 2", "2026-08-15", 510);
-  for (let i = 1; i <= 8; i++) add("scoopfeeds-60", `s${i}`, `Short ${i}`, "2026-10-10", 35 + i * 3);
+  // #216: Shorts cut from the long-form films above, linked to their parent
+  const parents = ["a-eye/e7", "the-record/e3", "people/e1", "peace-and-war/e2"];
+  for (let i = 1; i <= 8; i++) { const p = parents[i % 4]; add(p.split("/")[0], `s${i}`, `Short ${i}`, "2026-10-22", 35 + i * 3, p); }
   const lib = loadLibrary(dir, { now: NOW });
   assert.equal(lib.skipped.length, 0);
   const d1 = planDay(lib, { slots: defaultSlots("2026-10-23"), now: NOW });
@@ -199,9 +201,10 @@ test("review #203: a re-import from the library slot itself is refused, not dele
 test("review #203: every ScoopFeeds 60 item is a Short (even past 60 s); a sub-minute teaser never takes a film slot", () => {
   const { dir, add } = tmpLibrary();
   add("scoopfeeds-60", "long", "Long Short", "2026-10-10", 95);
-  add("a-eye", "teaser", "A-Eye teaser", "2026-10-10", 40);
+  add("a-eye", "teaser", "A-Eye teaser", "2026-10-10", 40, "a-eye/e1");
   add("a-eye", "e1", "A-Eye 1", "2026-10-10", 540);
-  const kinds = Object.fromEntries(loadLibrary(dir, { now: NOW }).items.map((i) => [i.id, i.kind]));
+  // with RADIO_ALLOW_SF60=1 (DrJ's call, #216) ScoopFeeds 60 is classed as before; off by default it is skipped
+  const kinds = Object.fromEntries(loadLibrary(dir, { now: NOW, env: { RADIO_ALLOW_SF60: "1" } }).items.map((i) => [i.id, i.kind]));
   assert.deepEqual(kinds, { "scoopfeeds-60/long": "short", "a-eye/teaser": "short", "a-eye/e1": "film" });
 });
 

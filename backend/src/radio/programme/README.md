@@ -19,6 +19,15 @@ in the pack, any Pakistan-politics line, and any sentence about our own sourcing
 `checks.json`. On-screen text (headlines, outlet names, ledes) is always taken verbatim from articles, never from
 the model.
 
+## The channel grid (#200)
+
+`grid.js` is the 24-hour grid as data (dayparts, the fixed 9 pm ET film slot, the segment catalogue, the screen
+elements, the exchange sessions); `docs/radio/channel-grid.md` is the same grid in plain English, and `grid.test.js`
+fails when they disagree. `clock.js buildGridClock()` builds an hour as an instance of the grid; `produce.mjs --grid`
+(or `RADIO_GRID_ENABLED=1`) uses it, otherwise the running order above is unchanged. `grid.applyOverride()` cuts the
+segment on air for breaking news or a live event and resumes at the next segment boundary.
+`../screen/fontFloor.mjs --shots <dir>` measures every scene of both screens (26 px floor) and takes the screenshots.
+
 ## Unattended hours (auto-air)
 
 `autoair.mjs` runs a whole hour with nobody at the desk: produce, air check (`airCheck.js`), YouTube broadcast
@@ -41,8 +50,10 @@ cd ~/work/scoopfeeds && git fetch && git checkout feat/radio-test-hour && git pu
 cd backend/src/radio/playout && npm ci && cd ../../..          # playwright-core for the playout
 ~/sixty/kokoro-start.sh &                                        # Kokoro on 127.0.0.1:8880 (leave running)
 ```
-Put the A-Eye #003 episode (the published 4K or 1080p file) and one approved ScoopFeeds 60 film in
-`~/scoopfeeds-radio/feature/` and `~/scoopfeeds-radio/film/`. The A-Eye file was hand-published from the VPS:
+Put the A-Eye #003 episode (the published 4K or 1080p file) in `~/scoopfeeds-radio/feature/`. The film slot
+(#216) takes only a Short cut from a published long-form film, imported into the film library with its parent
+(`node src/radio/filmCli.mjs import --file <short.mp4> --series a-eye --parent a-eye/<ep> ...`); ScoopFeeds 60
+never airs while `RADIO_ALLOW_SF60` is off, and with no eligible Short the slot is headlines and music. The A-Eye file was hand-published from the VPS:
 `ssh scoopfeeds-vps 'ls ~/publish'` to find it.
 
 **Rehearsal (10:00 am, for an 11:00 am hour, H = 06:00 UTC):**
