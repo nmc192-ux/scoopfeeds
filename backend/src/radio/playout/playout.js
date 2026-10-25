@@ -17,7 +17,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { pickBed, daypartAt, easternMinutes, listBeds, musicDir, DAYPARTS } from "../musicLibrary.js";
+import { pickBed, daypartAt, easternMinutes, listBeds, listFiles, musicDir, bedCredit, DAYPARTS } from "../musicLibrary.js";
+import { ensureProceduralBed } from "../proceduralBed.js";
 import { buildFfmpegArgs, buildFeederArgs, buildMediaFrameArgs, splitJpegs, VIDEO } from "./ffmpegArgs.js";
 import { measureIntegrated } from "./loudness.js";
 import { resolveTarget, redact } from "./outputTarget.js";
@@ -39,8 +40,11 @@ function loadPlaywright() {
   throw new Error("playwright-core is not installed; use the playout image (see Dockerfile.dev)");
 }
 
-/** Today's bed for `now`; if that daypart's folder is empty, any other daypart's bed, flagged as a fallback. */
-export function chooseBed(now = new Date(), { dir = musicDir(), random = Math.random } = {}) {
+/**
+ * Today's bed for `now`; if that daypart has no CLEARED bed, any other daypart's, flagged as a fallback; with
+ * none cleared anywhere, the procedural bed (#208: unmanifested files never air, not even as a last resort).
+ */
+export function chooseBed(now = new Date(), { dir = musicDir(), random = Math.random, procedural = ensureProceduralBed } = {}) {
   const daypart = daypartAt(now);
   const bed = pickBed(now, { dir, random });
   if (bed) return { bed, daypart, fallback: false };
@@ -48,7 +52,16 @@ export function chooseBed(now = new Date(), { dir = musicDir(), random = Math.ra
     const beds = listBeds(other, dir);
     if (beds.length) return { bed: beds[Math.floor(random() * beds.length) % beds.length], daypart, fallback: true };
   }
-  throw new Error(`no music bed found under ${dir}`);
+  if (!procedural) throw new Error(`no cleared music bed under ${dir}`);
+  const refused = DAYPARTS.reduce((n, d) => n + listFiles(d, dir).length, 0);
+  return { bed: procedural(dir), daypart, fallback: true, procedural: true, refused };
+}
+
+/** Put the airing bed's "Music: Artist – Track" credit on the screen's music scene (none for the procedural bed). */
+export async function showBedCredit(page, bed, dir) {
+  const credit = bed ? bedCredit(bed, dir) : null;
+  try { await page?.evaluate((c) => window.setMusicCredit?.(c), credit); } catch { /* the page is reloading; the next swap sets it */ }
+  return credit;
 }
 
 /** RADIO_PROGRAMME_AV_DELAY_MS: how far programme sound is held back to meet the picture (default 300, measured per host). */
@@ -286,9 +299,9 @@ export async function runPlayout(o = {}) {
   };
 
   const start = async () => {
-    const { bed, daypart, fallback } = chooseBed(clock(), { dir });
+    const { bed, daypart, fallback, procedural, refused } = chooseBed(clock(), { dir });
     const bedLufs = await measureIntegrated(bed, { ffmpeg: o.ffmpeg });
-    log(`daypart=${daypart}${fallback ? " (EMPTY - fell back to another daypart's bed)" : ""} bed=${path.basename(bed)} bedLufs=${bedLufs ?? "unmeasured (loudnorm fallback)"} target=${target.kind}`);
+    log(`daypart=${daypart}${procedural ? ` (NO CLEARED BED: procedural fallback; ${refused} file(s) refused for want of a manifest entry, see docs/radio/music.md)` : fallback ? " (EMPTY - fell back to another daypart's bed)" : ""} bed=${path.basename(bed)} bedLufs=${bedLufs ?? "unmeasured (loudnorm fallback)"} target=${target.kind}`);
     const feed = partNow();
     current = { daypart, feedFile: feed?.file || null };
     if (feed) log(`programme audio on air: ${path.basename(feed.file)} from ${((Date.now() - feed.from) / 1000).toFixed(1)} s`);
@@ -340,6 +353,7 @@ export async function runPlayout(o = {}) {
       if (!current.unit?.swapBed) throw new Error("unit cannot swap live");
       await current.unit.swapBed(next.bed, bedLufs);
       current.daypart = next.daypart;
+      showBedCredit(current.unit.page, next.bed, dir);
       current.unit.boundary?.();
       log(`daypart changed to ${next.daypart}${next.fallback ? " (EMPTY - fallback bed)" : ""}: bed swapped to ${path.basename(next.bed)} bedLufs=${bedLufs ?? "unmeasured"} (encoder and connection untouched)`);
     } catch (err) {
@@ -348,7 +362,7 @@ export async function runPlayout(o = {}) {
     } finally { swapping = false; }
   }, DAYPART_CHECK_MS) : null;
   const statsTimer = live ? setInterval(() => log(`stats ${JSON.stringify(stats)} rssMB=${Math.round(process.memoryUsage().rss / 1048576)}${current.unit?.outputs?.() ? ` outputs=${current.unit.outputs().map((x) => `${x.id}:${x.state}`).join(",")}` : ""}`), 60_000) : null;
-  const wrapped = async () => { const u = await start(); current.unit = u; return u; };
+  const wrapped = async () => { const u = await start(); current.unit = u; if (!current.feedFile) showBedCredit(u.page, u.bed, dir); return u; };
 
   try {
     const res = await supervise(wrapped, {
