@@ -72,10 +72,16 @@ export default function ArticlePage() {
     const prevDescEl = document.querySelector('meta[name="description"]');
     const prevDesc   = prevDescEl?.getAttribute("content");
     document.title = `${article.title} — Scoopfeeds`;
+    // Article pages are summary + link out (#176): keep them out of search indexes.
+    const robots = document.createElement("meta");
+    robots.name = "robots";
+    robots.content = "noindex,follow";
+    document.head.appendChild(robots);
     if (prevDescEl && article.description) {
       prevDescEl.setAttribute("content", article.description.slice(0, 160));
     }
     return () => {
+      robots.remove();
       document.title = prevTitle;
       if (prevDescEl && prevDesc) prevDescEl.setAttribute("content", prevDesc);
     };

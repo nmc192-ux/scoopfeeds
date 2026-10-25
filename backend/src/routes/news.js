@@ -16,6 +16,7 @@ import { getSchedulerStatus, triggerManualRefresh } from "../services/scheduler.
 import { triggerReclusterDebounced } from "../services/analysisService.js";
 import { TOPICS, TAB_CATEGORIES, COUNTRY_REGIONS } from "../config/sources.js";
 import { logger } from "../services/logger.js";
+import { toPublicArticle, toPublicArticles } from "./publicArticle.js";
 
 const router = express.Router();
 
@@ -143,7 +144,7 @@ router.get("/", (req, res) => {
 
     res.json({
       success: true,
-      data: articles,
+      data: toPublicArticles(articles),
       meta: {
         count: articles.length,
         limit: parseInt(limit),
@@ -163,7 +164,7 @@ router.get("/featured", (req, res) => {
   try {
     const { limit = 7 } = req.query;
     const articles = getFeaturedArticles(Math.min(parseInt(limit), 20));
-    res.json({ success: true, data: articles });
+    res.json({ success: true, data: toPublicArticles(articles) });
   } catch (err) {
     logger.error("Error fetching featured articles", { error: err.message });
     res.status(500).json({ success: false, error: "Failed to fetch featured articles" });
@@ -228,7 +229,7 @@ router.get("/:id", (req, res) => {
       ipHash: hashIp(req.ip),
     });
 
-    res.json({ success: true, data: article });
+    res.json({ success: true, data: toPublicArticle(article) });
   } catch (err) {
     logger.error("Error fetching article", { error: err.message });
     res.status(500).json({ success: false, error: "Failed to fetch article" });
