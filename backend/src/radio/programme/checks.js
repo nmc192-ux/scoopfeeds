@@ -11,11 +11,13 @@
  *             projected it, and match a projection in the election pack; polls are never results;
  *             a partial count says how much is in, as the source states it, or "counting continues".
  *             (#208) fraud/rigging or a winner, asserted without a named outlet or official, is dropped.
+ *   markets   (#245) a row from the last session (closed) is never read as today's move.
  */
 import { radioRulesVerdict, hasPakistanSignal } from "../radioRules.js";
 import { storyIndex } from "./factPack.js";
 import { electionText, canonOrg, ORGS, statesIn } from "./electionPack.js";
 import { electionClaimVerdict } from "../safety/electionClaims.js";
+import { staleMarketLine, stripCloseDates } from "./marketsClock.js";
 
 export const toSpoken = (t) => String(t || "").replace(/\s*%/g, " percent").replace(/\s+/g, " ").trim();
 
@@ -125,9 +127,10 @@ export function checkSegments(segments, slots, pack, { log = () => {} } = {}) {
         // #208: both rules apply; an election-pack outlet counts as a named source for an electoral line
         const election = electionClaimVerdict(text, { outlets: [...(story?.outlets || []).map((o) => o.source), ...(electoral ? [...elOutlets] : [])], outlet: line.outlet || null });
         if (election) return election;
+        if (slot.segment === "markets") { const m = staleMarketLine(text, pack.markets); if (m) return m; }
         const src = (story ? storyText(story) : "") + (electoral && elText ? ` \n ${elText}` : "");
         const pool = slot.segment === "markets" ? marketNums : slot.segment === "weather" ? weatherNums : slot.segment === "crypto" ? cryptoNums : numsIn(src, { all: true }).concat(marketNums);
-        const bad = numsIn(text).filter((n) => !backed(n, pool) && !src.includes(String(n)));
+        const bad = numsIn(slot.segment === "markets" ? stripCloseDates(text, pack.markets) : text).filter((n) => !backed(n, pool) && !src.includes(String(n)));
         if (bad.length) return `unbacked figure(s) ${bad.join(", ")}`;
         for (const q of text.match(/[“"]([^”"]{4,})[”"]/g) || []) {
           const inner = q.slice(1, -1).toLowerCase();

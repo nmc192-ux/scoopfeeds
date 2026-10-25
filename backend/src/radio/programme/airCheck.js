@@ -8,10 +8,15 @@
  * A film or feature in the hour needs a valid content-safety clearance (safety/contentSafety.js, #218).
  * autoair.mjs drops an uncleared film or feature before producing, so normally this never fires; it is
  * the second lock.
+ *
+ * Markets (#245): a Markets Now line that reads a closed (last-session) row as today's move fails the hour.
+ * checkSegments drops such lines, so normally this never fires either; it is the second lock. If the hour has
+ * Markets lines but pack.json is missing or was never checked for closed rows, that is unmeasured: a failure.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { hasValidClearance } from "../safety/contentSafety.js";
+import { staleMarketLine } from "./marketsClock.js";
 
 export const AIR_RULES = Object.freeze({
   minKeptShare: 0.6,       // at least 60 % of the written lines survived the fact checks
@@ -72,5 +77,21 @@ export function airCheck(dir, { hourStart, rules = AIR_RULES } = {}) {
     if (stats.hourStories < rules.minHourStories) problems.push(`The Hour has only ${stats.hourStories} checked stories`);
   }
 
+  if (kept) problems.push(...marketsProblems(kept, () => need("pack.json")));
+
   return { ok: problems.length === 0, problems, stats };
+}
+
+/**
+ * #245: every kept Markets Now line against the pack's closed rows. `loadPack` is called only when there are
+ * Markets lines; a missing or unchecked pack is a failure, never a pass.
+ */
+export function marketsProblems(segments, loadPack) {
+  const lines = Object.entries(segments || {}).filter(([id]) => /^markets/.test(id))
+    .flatMap(([id, seg]) => (Array.isArray(seg?.lines) ? seg.lines : []).map((l) => ({ id, line: l })));
+  if (!lines.length) return [];
+  const pack = loadPack();
+  if (!pack) return ["Markets Now lines cannot be checked for closed markets without pack.json"];
+  if (!Number.isFinite(pack.marketsCheckedAt) || !Array.isArray(pack.markets)) return ["Markets Now: the pack was never checked for closed markets (unmeasured)"];
+  return lines.map(({ id, line }) => { const why = staleMarketLine(line?.text, pack.markets); return why ? `${id}/${line?.id}: ${why}` : null; }).filter(Boolean);
 }

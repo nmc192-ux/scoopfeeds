@@ -98,15 +98,16 @@ async function yahooQuote(sym, opts) {
   if (!m || !Number.isFinite(m.regularMarketPrice)) throw new Error(`no quote for ${sym}`);
   const prev = m.chartPreviousClose ?? m.previousClose;
   const pct = Number.isFinite(m.regularMarketChangePercent) ? m.regularMarketChangePercent : (prev ? ((m.regularMarketPrice - prev) / prev) * 100 : null);
-  return { price: m.regularMarketPrice, pct, time: (m.regularMarketTime || 0) * 1000 };
+  // #245: no usable trade time is null (never "now"), so marketsClock treats the row as closed
+  return { price: m.regularMarketPrice, pct, time: Number(m.regularMarketTime) > 0 ? m.regularMarketTime * 1000 : null };
 }
 
 // CNBC's public quote feed: one request for every symbol. Primary since 13 Oct, when Yahoo answered the Mac with
 // HTTP 429 (rate limited) and the markets slots went out as music.
 const CNBC_SYMS = { "^GSPC": ".SPX", "^DJI": ".DJI", "^IXIC": ".IXIC", "^FTSE": ".FTSE", "^GDAXI": ".GDAXI", "BZ=F": "@LCO.1", "GC=F": "@GC.1" };
 const num = (v) => { const n = Number(String(v ?? "").replace(/[,%+\s]/g, "")); return Number.isFinite(n) ? n : null; };
-/** Parse CNBC's restQuote JSON into { [yahooSym]: { price, pct, time } }. "UNCH" is 0 %. */
-export function parseCnbc(d, now = Date.now()) {
+/** Parse CNBC's restQuote JSON into { [yahooSym]: { price, pct, time } }. "UNCH" is 0 %. No usable last_time is null (#245). */
+export function parseCnbc(d) {
   const back = Object.fromEntries(Object.entries(CNBC_SYMS).map(([y, c]) => [c, y]));
   const out = {};
   let list = d?.FormattedQuoteResult?.FormattedQuote ?? d?.QuickQuoteResult?.QuickQuote ?? [];
@@ -115,7 +116,7 @@ export function parseCnbc(d, now = Date.now()) {
     const y = back[q?.symbol]; const price = num(q?.last);
     if (!y || price == null || price <= 0) continue;
     const pct = /^unch/i.test(String(q.change_pct || "")) ? 0 : num(q.change_pct);
-    const t = Date.parse(q.last_time || ""); out[y] = { price, pct, time: Number.isFinite(t) ? t : now };
+    const t = Date.parse(q.last_time || ""); out[y] = { price, pct, time: Number.isFinite(t) ? t : null };
   }
   return out;
 }
