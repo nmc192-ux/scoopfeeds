@@ -16,7 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { OFFICIAL_FEEDS, feedById, entryForUrl, youtubeHandleOf } from "./officialFeeds.js";
+import { OFFICIAL_FEEDS, feedById, entryForUrl, youtubeHandleOf, isProposed } from "./officialFeeds.js";
 import { runCommand } from "./feedProbe.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -42,6 +42,7 @@ export function validateEvent(raw, { feeds = OFFICIAL_FEEDS, source = "manual" }
   if (!raw || typeof raw !== "object") return { error: "not an object" };
   const entry = feedById(raw.feed, feeds);
   if (!entry) return { error: `feed "${raw.feed}" is not on the allow-list` };
+  if (isProposed(entry)) return { error: `feed "${raw.feed}" is proposed and awaiting DrJ's approval` };
   const url = String(raw.url || "");
   const byUrl = entryForUrl(url, { feeds });
   if (byUrl ? byUrl.id !== entry.id : !isYouTubeWatch(url)) return { error: `${url || "(no url)"} is not a "${entry.id}" feed on the allow-list` };
@@ -101,6 +102,7 @@ export function parseUpcoming(json, entry, { now = Date.now() } = {}) {
 export async function fetchPublisherEvents({ feeds = OFFICIAL_FEEDS, run = runCommand, ytDlp = "yt-dlp", log = () => {}, now = Date.now() } = {}) {
   const events = [];
   for (const entry of feeds) {
+    if (isProposed(entry)) continue; // #223: not approved, so not even listed
     for (const handle of entry.youtube || []) {
       const url = `https://www.youtube.com/${handle}/streams`;
       const res = await run(ytDlp, ytStreamsArgs(url), { timeoutMs: 60_000 });

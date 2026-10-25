@@ -51,6 +51,17 @@ export const mutationLimiter = createLimiter({
   max: 60,
 });
 
+// FOOTAGE INTAKE tier (#219) — public video uploads of up to 500 MB each.
+// The mutation tier alone would let one IP store ~15 GB every 5 minutes.
+// 10 writes per hour = at most 5 submissions (POST + PUT each) per IP/hour.
+// Applied to POST/PUT only; GET /api/footage/status stays on the mutation tier.
+const footageWriteLimiter = createLimiter({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+});
+export const footageUploadLimiter = (req, res, next) =>
+  req.method === "POST" || req.method === "PUT" ? footageWriteLimiter(req, res, next) : next();
+
 // ─── Safety net + legacy per-route limiters ───────────────────────────────
 
 // Raised from 500/15min to 3000/15min as part of Phase S3. Now a safety

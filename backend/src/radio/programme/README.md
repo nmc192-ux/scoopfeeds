@@ -40,6 +40,21 @@ touch ~/scoopfeeds-radio/PAUSE                                      # skip hours
 Rehearsal unless `RADIO_AUTOAIR_ENABLED=1`. Settings: `docs/reference/env_reference.md` (RADIO_AUTOAIR_*, RADIO_YT_*,
 RADIO_ALERT_EMAIL). Plan and the standing-approval draft: `docs/radio/autonomous-newsroom.md`.
 
+## 24/7: every hour (rolling.mjs, #195)
+
+`rolling.mjs` is one process that owns the air around the clock: it prepares hour N+1 while hour N airs, refreshes
+hour N at :30 when the top story changed, and hands over at :59. The day clock (`dayClock.js`) decides produced vs
+overnight repeat; `repeat.js` retimes the strongest recent hour and `produce.mjs --from the-hour --to markets-1` splices
+a fresh top of the hour into it. A failed hour airs the 24/7 headline screen; `PAUSE` takes the stream off air within
+30 s (#208), never onto the headline screen. Films go through `pickClearedFilm()`, the title through `factualTitle()`,
+and the broadcast description and `~/scoopfeeds-radio/x-broadcast.txt` carry the music credits, as in autoair. Writer calls are counted in each hour's
+`writer.json` and `status.json` and in `~/scoopfeeds-radio/writer-calls/<date>.json`.
+```bash
+backend/src/radio/playout/deploy/macos/install-rolling.sh         # kept alive by launchd; rehearsal until both flags are 1
+tail -f ~/scoopfeeds-radio/logs/rolling.log
+```
+Gates, flags and the plan: `docs/radio/autonomous-newsroom.md` (Stage 2), `docs/reference/env_reference.md` (RADIO_ROLLING_*).
+
 ## Tuesday 13 October 2026 — test hour, 9:00 to 10:00 pm PKT (H = 16:00 UTC)
 
 All on the Mac Mini, in `~/work/scoopfeeds` on branch `feat/radio-test-hour`.

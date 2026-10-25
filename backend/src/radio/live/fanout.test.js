@@ -232,6 +232,29 @@ test("a primary down for more than 5 minutes raises one primary-down event; no k
   assert.deepEqual(JSON.parse(fs.readFileSync(statusFile, "utf8")).summary, { youtube: "off", x: "off" });
 });
 
+test("restart(id) restarts only that output (the #196 stream watch's YouTube restart); X is never touched", async () => {
+  const sp = fakeSpawnFactory(), clock = { t: 1e9 }, logs = [];
+  const fan = createFanout({ outputs: OUTS.slice(0, 2), spawn: sp, now: () => clock.t, log: (m) => logs.push(m) });
+  fan.write(Buffer.concat([flvHeader(), META, AVCSEQ, AACSEQ, KEY(0)]));
+  await tickUntil(fan, clock, 4000);
+  assert.deepEqual(fan.summary(), { youtube: "live", x: "live" });
+  const [yt1, x1] = sp.procs;
+  assert.equal(fan.restart("youtube"), true);
+  assert.equal(fan.restart("nope"), false);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(yt1.signalCode, "SIGINT", "YouTube's relay ended cleanly");
+  assert.equal(x1.signalCode, null, "X's relay untouched");
+  const yt2 = sp.live("rtmp://yt/live2/K1");
+  assert.equal(yt2.length, 1, "YouTube respawned at once (no backoff for a requested restart)");
+  fan.write(KEY(2000));
+  await tickUntil(fan, clock, 4000);
+  assert.deepEqual(fan.summary(), { youtube: "live", x: "live" });
+  assert.equal(sp.live("rtmps://x/x/K2")[0], x1);
+  assert.equal(fan.status().find((s) => s.id === "youtube").restarts, 1);
+  assert.ok(logs.some((l) => /YouTube: restart requested \(only this output\)/.test(l)));
+  await fan.stop();
+});
+
 // ── loopback: real ffmpeg encoder -> fan-out -> three real local RTMP sinks ──
 const hasFfmpeg = (() => {
   const r = spawnSync("ffmpeg", ["-hide_banner", "-encoders"], { encoding: "utf8" });

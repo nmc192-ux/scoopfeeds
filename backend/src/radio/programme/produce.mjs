@@ -10,6 +10,11 @@
  *
  * --from <slot id>  re-produce from that slot on (the 9:20 pm refresh): keeps earlier cues, adds a new
  *                   audio part that the playout switches to at that slot's start. Pick a music slot.
+ * --to <slot id>    with --from: stop before that slot and switch back to the audio that was there (the 24/7
+ *                   overnight repeat: a fresh The Hour over a repeated hour, --from the-hour --to markets-1).
+ * --weather 0|1     0: no weather this hour, the half-hour headlines take its time (the 24/7 day, dayClock.js). Default 1.
+ * --headline-writer reads headlines verbatim instead of calling Claude (the cost-guard fallback; same as --fake-writer).
+ * Every Claude call is counted in <out>/writer.json (calls, failures, whether a usage limit was hit).
  * Voice: Kokoro (VIDEO_TTS_PROVIDER=kokoro, VIDEO_TTS_KOKORO_URL=http://127.0.0.1:8880) unless --fake-voice.
  * Writer: `claude -p --model sonnet` on DrJ's subscription unless --fake-writer.
  */
@@ -18,7 +23,9 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { buildClock, buildGridClock, checkClock } from "./clock.js";
 import { buildFactPack } from "./factPack.js";
-import { writeSegments, claudeWriter } from "./writer.js";
+import { writeSegments, claudeWriter, isLimitError } from "./writer.js";
+import { sessionsAt } from "./dayClock.js";
+import { spliceProgramme } from "./repeat.js";
 import { checkSegments } from "./checks.js";
 import { buildElectionPack } from "./electionPack.js";
 import { deskOn, addDeskToClock, addBallotLines } from "./electionDesk.js";
@@ -33,6 +40,7 @@ const { values: v } = parseArgs({ options: {
   hour: { type: "string" }, out: { type: "string" }, "music-dir": { type: "string" }, film: { type: "string" },
   from: { type: "string" }, base: { type: "string" }, "fake-voice": { type: "boolean" }, "fake-writer": { type: "boolean" },
   model: { type: "string" }, feature: { type: "string" }, "feature-title": { type: "string" },
+  to: { type: "string" }, weather: { type: "string", default: "1" }, "headline-writer": { type: "boolean" },
   grid: { type: "boolean" },   // #200: build the hour from the channel grid (also RADIO_GRID_ENABLED=1)
 } });
 const log = (m) => console.log(`🎙 produce: ${m}`);
@@ -65,7 +73,7 @@ if (useGrid) {
   log(`grid: ${gridPlan.label}`);
   if (gridPlan.format === "repeat") log("grid: this is an overnight repeat hour; produce.mjs builds a full hour (the repeat itself is #195's rolling station)");
   if (gridPlan.featureDropped) log("grid: the feature airs only in its fixed slot (9 pm ET); this hour runs without it");
-} else clock = buildClock(hourStart, clockOpts);
+} else clock = buildClock(hourStart, { ...clockOpts, weather: v.weather !== "0" });   // #195: the grid decides weather itself
 const problems = checkClock(clock);
 if (problems.length) die(`clock is broken: ${problems.join("; ")}`);
 // The Midterms desk (#197): dark unless RADIO_ELECTION_DESK=1; hours from 26 Oct to 6 Nov (New York)
@@ -73,7 +81,10 @@ const midterms = deskOn(hourStart) ? addDeskToClock(clock, hourStart) : null;
 if (midterms && checkClock(clock).length) die(`clock is broken after adding the Midterms desk: ${checkClock(clock).join("; ")}`);
 const fromIdx = v.from ? clock.findIndex((s) => s.id === v.from) : 0;
 if (fromIdx < 0) die(`--from: no slot "${v.from}" (slots: ${clock.map((s) => s.id).join(", ")})`);
-const slots = clock.slice(fromIdx);
+const toIdx = v.to ? clock.findIndex((s) => s.id === v.to) : clock.length;
+if (toIdx < 0) die(`--to: no slot "${v.to}"`);
+if (v.to && (!v.from || toIdx <= fromIdx)) die("--to needs --from, and must come after it");
+const slots = clock.slice(fromIdx, toIdx);
 const t0 = Date.now();
 
 // ── beds (measured once) ── only beds the manifest clears (#208); with none, the procedural bed
@@ -132,12 +143,36 @@ const when = {
   hourLabel: `${spokenHour(hourStart, "America/New_York")} in New York`.replace(/^noon in/, "noon in"),
   cityTimes: `${spokenHour(hourStart, "Asia/Karachi")} in Karachi`,
   marketsAsOf: Object.fromEntries(slots.filter((s) => s.segment === "markets").map((s) => [s.id, asOf])),
+  // Markets Now by exchange session: the market groups whose exchange is trading when the slot airs
+  marketsLead: Object.fromEntries(slots.filter((s) => s.segment === "markets").map((s) => [s.id, [...new Set(sessionsAt(s.start + 60_000).flatMap((x) => x.groups))]])),
 };
 // grid hours: Markets Now leads with the exchanges in session (read by the markets prompt once #195 lands)
 if (useGrid) when.marketsLead = Object.fromEntries(slots.filter((s) => s.segment === "markets").map((s) => [s.id, s.marketsLead || []]));
 const spoken = slots.filter((s) => s.kind === "spoken");
-const write = v["fake-writer"] ? fakeWriter : claudeWriter({ model: v.model || "sonnet", log });
-const raw = await writeSegments(pack, spoken, when, { write, log });
+const usesClaude = !(v["fake-writer"] || v["headline-writer"]);
+const write = usesClaude ? claudeWriter({ model: v.model || "sonnet", log }) : fakeWriter;
+// Cost guard (#195): every Claude call and failure is counted, per run, in writer.json; the rolling orchestrator
+// adds them to the day's ledger and falls back to repeat hours when the day's budget or a usage limit is hit.
+const run = { at: Date.now(), from: slots[0].id, to: v.to || null, writer: usesClaude ? "claude" : "headlines", calls: 0, failures: 0, limitHit: false, errors: [] };
+const counted = async (system, prompt) => {
+  if (usesClaude) run.calls++;
+  try { return await write(system, prompt); }
+  catch (e) { if (usesClaude) { run.failures++; run.limitHit ||= isLimitError(e.message); run.errors.push(String(e.message).slice(0, 200)); } throw e; }
+};
+const saveWriterLog = () => {
+  const f = path.join(out, "writer.json");
+  let w = { runs: [] };
+  try { w = JSON.parse(fs.readFileSync(f, "utf8")); if (!Array.isArray(w.runs)) w = { runs: [] }; } catch { /* first run */ }
+  w.runs.push(run);
+  w.calls = w.runs.reduce((n, r) => n + (r.calls || 0), 0);
+  w.failures = w.runs.reduce((n, r) => n + (r.failures || 0), 0);
+  w.limitHit = w.runs.some((r) => r.limitHit);
+  fs.writeFileSync(f, JSON.stringify(w, null, 1));
+  log(`writer: ${run.calls} Claude call(s), ${run.failures} failure(s)${run.limitHit ? ", USAGE LIMIT hit" : ""}`);
+};
+let raw;
+try { raw = await writeSegments(pack, spoken, when, { write: counted, log }); }
+finally { saveWriterLog(); }
 fs.writeFileSync(path.join(out, "segments.raw.json"), JSON.stringify(raw, null, 1));
 if (midterms) addBallotLines(raw, hourStart);   // mechanical "what's on the ballot" lines, checked like the rest
 const { segments, report } = checkSegments(raw, spoken, pack, { log });
@@ -147,7 +182,8 @@ log(`checks: ${report.length} line(s) dropped`);
 
 // ── voice, mix, cues ──
 const voice = v["fake-voice"] ? fakeVoice(path.join(out, "fake-voice")) : await kokoroVoice();
-const partFile = `part-${slots[0].id}.wav`;
+// A partial run gets a fresh file name, so it never overwrites a part the playout may be reading.
+const partFile = fromIdx > 0 ? `part-${slots[0].id}-${Date.now().toString(36)}.wav` : `part-${slots[0].id}.wav`;
 const SERIES = [
   { series: "Peace & War", day: "Mondays" }, { series: "People", day: "Tuesdays" }, { series: "The Body Politic", day: "Wednesdays" },
   { series: "The Record", day: "Fridays" }, { series: "A-Eye", day: "Saturdays" }, { series: "The Invisible Hand", day: "Sundays" },
@@ -170,32 +206,44 @@ if (feature && slots.some((s) => s.kind === "feature") && !fresh("feature.webm")
   log("feature transcoded");
 }
 const { cues, report: mixReport } = await assemble({
-  slots, segments, pack, hourStart, bedFor, film, filmUrl: "/programme/film.webm", feature, voice, outWav: path.join(out, partFile), log, seriesCards: SERIES,
+  slots, segments, pack, hourStart, bedFor, film, filmUrl: "/programme/film.webm", feature, voice, outWav: path.join(out, partFile + ".tmp"), log, seriesCards: SERIES,
   creditFor: (file) => screenCredit(Object.values(beds).find((b) => b.file === file)?.entry || null),
 });
+// atomic: a part is never rewritten in place (the playout may be reading it, and a repeat hour may hard-link it)
+fs.renameSync(path.join(out, partFile + ".tmp"), path.join(out, partFile));
 
 // ── programme.json ──
 const pf = path.join(out, "programme.json");
 let prog = { version: 1, hourStart, endsAt: clock.at(-1).end, audio: [], cues: [], slots: [] };
 if (fromIdx > 0 && fs.existsSync(pf)) prog = JSON.parse(fs.readFileSync(pf, "utf8"));
 const cut = slots[0].start;
-prog.audio = prog.audio.filter((a) => a.from < cut).concat([{ file: partFile, from: cut }]);
-prog.cues = prog.cues.filter((c) => c.at < cut).concat(cues);
-prog.slots = clock.map(({ id, kind, start, end, title, elements }) => ({ id, kind, start, end, title: title || null, ...(elements ? { elements } : {}) }));
+if (v.to) {
+  // Splice [cut, resumeAt) into the existing programme. At resumeAt the playout switches back to whichever part was
+  // playing there, seeking from that part's own origin (`origin`), so the rest of the hour plays as before.
+  prog = spliceProgramme(prog, { cut, resumeAt: clock[toIdx].start, partFile, cues });
+} else {
+  prog.audio = prog.audio.filter((a) => a.from < cut).concat([{ file: partFile, from: cut }]);
+  prog.cues = prog.cues.filter((c) => c.at < cut).concat(cues);
+  prog.slots = clock.map(({ id, kind, start, end, title, elements }) => ({ id, kind, start, end, title: title || null, ...(elements ? { elements } : {}) }));
+}
 if (gridPlan) prog.grid = gridPlan;
 // the screen's right rail (#200): markets and weather, verbatim from the pack; each block renders only with data
 prog.rail = { markets: pack.markets, weather: pack.weather };
 prog.headlines = [...pack.top.map((s) => ({ h: s.headline, src: s.outlets.slice(0, 2).map((o) => o.source).join(" and ") })),
   ...Object.values(pack.desks).flat().map((s) => ({ h: s.headline, src: s.outlets.slice(0, 2).map((o) => o.source).join(" and ") }))]
   .filter((x, i, all) => all.findIndex((o) => o.h === x.h) === i).slice(0, 24);
-prog.film = film ? path.basename(film) : null;
-prog.feature = feature ? path.basename(feature) : null;
-prog.featurePath = feature;
-prog.filmPath = film;
-// #208: every track this hour airs, with the library's exact credit, for the broadcast description and X text
-prog.music = Object.values(beds).filter((b) => b.entry).map((b) => ({ file: b.entry.file, title: b.entry.title, artist: b.entry.artist, licence: b.entry.licence, credit: b.entry.credit }))
+if (!v.to) {   // a spliced run keeps the repeated hour's film and feature
+  prog.film = film ? path.basename(film) : null;
+  prog.feature = feature ? path.basename(feature) : null;
+  prog.featurePath = feature;
+  prog.filmPath = film;
+}
+// #208: every track this hour airs, with the library's exact credit, for the broadcast description and X text.
+// A spliced run (#195 repeat) keeps the repeated hour's tracks too: the rest of that hour still airs them.
+const runMusic = Object.values(beds).filter((b) => b.entry).map((b) => ({ file: b.entry.file, title: b.entry.title, artist: b.entry.artist, licence: b.entry.licence, credit: b.entry.credit }));
+prog.music = (v.to ? [...(prog.music || []), ...runMusic] : runMusic)
   .filter((m, i, all) => all.findIndex((x) => x.file === m.file) === i);
-prog.proceduralBed = Boolean(beds.procedural);
+prog.proceduralBed = Boolean(beds.procedural) || Boolean(v.to && prog.proceduralBed);
 prog.builtAt = Date.now();
 fs.writeFileSync(pf + ".tmp", JSON.stringify(prog, null, 1));
 fs.renameSync(pf + ".tmp", pf);   // atomic: the screen and playout never read half a file

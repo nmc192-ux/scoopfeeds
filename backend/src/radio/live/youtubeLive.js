@@ -40,15 +40,18 @@ export const liveConfigured = (env = process.env) => { const c = liveCredentials
 
 /**
  * The broadcast resource: public, auto-start and auto-stop on, no monitor stream (so "live" is one step), DVR on.
+ * `autoStop: false` is for the 24/7 continuous broadcast (#195): the hourly playout hand-over drops the encoder for
+ * a few seconds, and auto-stop must not end the broadcast then; the orchestrator completes it itself when it rolls.
  * #208: the description always ends with the music credits, whole (or a link to the full list), whatever the
- * caller passes. YouTube's "altered or synthetic content" flag (containsSyntheticMedia) is deliberately never
- * sent (DrJ, 22 Oct 2026), and there is no disclosure sentence (DrJ, 23 Oct 2026).
+ * caller passes (`listAll: false` with a `creditsUrl`: the link alone, for the 24/7 broadcast). YouTube's
+ * "altered or synthetic content" flag (containsSyntheticMedia) is deliberately never sent (DrJ, 22 Oct 2026),
+ * and there is no disclosure sentence (DrJ, 23 Oct 2026).
  */
-export function broadcastBody({ title, description = "", startMs, privacy = "public", credits = [], creditsUrl = null }) {
+export function broadcastBody({ title, description = "", startMs, privacy = "public", autoStop = true, credits = [], creditsUrl = null, listAll = true }) {
   return {
-    snippet: { title: String(title).slice(0, 100), description: withCredits(description, credits, { creditsUrl }), scheduledStartTime: new Date(startMs).toISOString() },
+    snippet: { title: String(title).slice(0, 100), description: withCredits(description, credits, { creditsUrl, listAll }), scheduledStartTime: new Date(startMs).toISOString() },
     status: { privacyStatus: privacy, selfDeclaredMadeForKids: false },
-    contentDetails: { enableAutoStart: true, enableAutoStop: true, enableDvr: true, latencyPreference: "low", monitorStream: { enableMonitorStream: false } },
+    contentDetails: { enableAutoStart: true, enableAutoStop: autoStop !== false, enableDvr: true, latencyPreference: "low", monitorStream: { enableMonitorStream: false } },
   };
 }
 
@@ -64,6 +67,12 @@ export function pickStream(items, wantedId) {
   if (reusable.length === 1) return reusable[0];
   if (!reusable.length) throw new Error("this channel has no reusable live stream; open YouTube Studio > Go live once to create the default stream key");
   throw new Error(`this channel has ${reusable.length} reusable streams; set RADIO_YT_STREAM_ID to one of: ${reusable.map((s) => `${s.id} (${s.snippet?.title || "untitled"})`).join(", ")}`);
+}
+
+/** The first broadcast in `items` bound to `streamId` that has not ended. */
+export function pickBound(items, streamId) {
+  const b = (items || []).find((x) => x?.id && x.contentDetails?.boundStreamId === streamId && !["complete", "revoked"].includes(x.status?.lifeCycleStatus));
+  return b ? { id: b.id, lifeCycleStatus: b.status?.lifeCycleStatus || null } : null;
 }
 
 export function makeYouTubeLive({ env = process.env, fetchImpl = fetch, now = Date.now } = {}) {
@@ -134,6 +143,20 @@ export function makeYouTubeLive({ env = process.env, fetchImpl = fetch, now = Da
     async broadcastState(id) {
       const b = await call("GET", `${API}/liveBroadcasts?part=status&id=${encodeURIComponent(id)}`);
       return b.items?.[0]?.status?.lifeCycleStatus || null;
+    },
+
+    /**
+     * The broadcast this stream is bound to right now, live or waiting for data (#196 stream watch), else null.
+     * Looks at active broadcasts first, then upcoming ones; persistent ("Stream now") broadcasts are included.
+     * @returns {Promise<{ id: string, lifeCycleStatus: string|null }|null>}
+     */
+    async boundBroadcast(streamId) {
+      for (const status of ["active", "upcoming"]) {
+        const b = await call("GET", `${API}/liveBroadcasts?part=id,status,contentDetails&broadcastStatus=${status}&broadcastType=all&maxResults=50`);
+        const hit = pickBound(b.items, streamId);
+        if (hit) return hit;
+      }
+      return null;
     },
 
     // ── #208 read-only standing checks (no writes; the youtube.force-ssl scope covers them) ──

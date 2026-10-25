@@ -17,7 +17,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { pickBed, daypartAt, easternMinutes, listBeds, listFiles, musicDir, bedCredit, DAYPARTS } from "../musicLibrary.js";
+import { pickBed, daypartAt, easternMinutes, listBeds, listFiles, musicDir, bedCredit, clearedTracks, DAYPARTS } from "../musicLibrary.js";
+import { creditLines } from "../musicManifest.js";
 import { ensureProceduralBed } from "../proceduralBed.js";
 import { buildFfmpegArgs, buildFeederArgs, buildLiveFeederArgs, buildMediaFrameArgs, splitJpegs, VIDEO } from "./ffmpegArgs.js";
 import { measureIntegrated } from "./loudness.js";
@@ -25,6 +26,8 @@ import { resolveTarget, redact } from "./outputTarget.js";
 import { startScreenServer, screenUrl, programmeUrl } from "./screenServer.js";
 import { supervise } from "./watchdog.js";
 import { createFanout } from "../live/fanout.js";
+import { createStreamWatch, makePlayoutAlert, watchEnabled, WATCH } from "../live/streamWatch.js";
+import { makeYouTubeLive, liveConfigured } from "../live/youtubeLive.js";
 import { startPictureHub } from "../live/pictureHub.js";
 import { createLiveDesk, liveEnabled, TICK_MS } from "../live/liveDesk.js";
 import { OFFICIAL_FEEDS } from "../live/officialFeeds.js";
@@ -70,11 +73,27 @@ export async function showBedCredit(page, bed, dir) {
   return credit;
 }
 
+/** DrJ's kill switch (#208): while this file exists nothing goes on air, and nothing here removes it. */
+export const pauseFile = (env = process.env) => path.join(String(env.RADIO_BASE_DIR || "~/scoopfeeds-radio").replace(/^~(?=$|\/)/, os.homedir()), "PAUSE");
+
 /** RADIO_PROGRAMME_AV_DELAY_MS: how far programme sound is held back to meet the picture (default 300, measured per host). */
 export const avDelayMs = (env = process.env) => { const n = Number(env.RADIO_PROGRAMME_AV_DELAY_MS); return Number.isFinite(n) && n >= 0 && n <= 5000 ? n : 300; };
 
 /** ffmpeg prints this when the output can no longer be written (dead RTMP socket, full disk). */
 export const isFatalMuxError = (text) => /Error (submitting a packet to the muxer|muxing a packet)/.test(String(text));
+
+/**
+ * The programme audio part on air at `t`: the last entry whose `from` has passed. `origin` is the instant the
+ * part's file starts (the feeder seeks to t - origin); it is `from` unless the entry resumes an earlier part
+ * after a spliced insert (produce.mjs --from/--to, the 24/7 overnight repeat).
+ */
+export function partAt(p, t) {
+  if (!p || !Array.isArray(p.audio) || t >= p.endsAt) return null;
+  const part = p.audio.filter((a) => a.from <= t).at(-1);
+  if (!part) return null;
+  const origin = Number.isFinite(part.origin) ? part.origin : part.from;
+  return { file: part.file, from: part.from, origin, key: `${part.file}@${origin}` };
+}
 
 /** Start one Chromium + ffmpeg unit. Resolves once both are running. */
 export async function startUnit(opts) {
@@ -287,7 +306,7 @@ export async function startUnit(opts) {
         page.evaluate((s) => window.ScoopRadio?.scene(s), DEMO_SCENES[++i % DEMO_SCENES.length]).catch(() => {});
       }, demoCycleSec * 1000);
     }
-    return { exited, stop, page, boundary: () => fanout?.boundary(), outputs: () => fanout?.status() ?? null, swapBed: audioPipe ? swapBed : undefined, setMedia, clearMedia, get mediaTag() { return media?.tag ?? null; },
+    return { exited, stop, page, boundary: () => fanout?.boundary(), restartOutput: fanout ? (id) => fanout.restart(id) : null, outputs: () => fanout?.status() ?? null, swapBed: audioPipe ? swapBed : undefined, setMedia, clearMedia, get mediaTag() { return media?.tag ?? null; },
       goLive: audioPipe ? goLive : undefined, endLive: audioPipe ? endLive : undefined,
       get bed() { return feeder?.bed ?? bedNow.bed; }, get live() { return !!feeder?.live; } };
   } catch (err) {
@@ -353,9 +372,8 @@ export async function runPlayout(o = {}) {
   };
   const partNow = (t = Date.now()) => {
     const p = progDir && readProgramme();
-    if (!p || !Array.isArray(p.audio) || t >= p.endsAt) return null;
-    const part = p.audio.filter((a) => a.from <= t).at(-1);
-    return part ? { file: path.join(progDir, part.file), lufs: AUDIO_TARGET, from: part.from } : null;
+    const part = partAt(p, t);
+    return part ? { file: path.join(progDir, part.file), lufs: AUDIO_TARGET, from: part.origin } : null;
   };
   const dir = o.musicDir || musicDir();
   let current = { daypart: null };
@@ -460,7 +478,36 @@ export async function runPlayout(o = {}) {
     } finally { swapping = false; }
   }, DAYPART_CHECK_MS) : null;
   const statsTimer = live ? setInterval(() => log(`stats ${JSON.stringify(stats)} rssMB=${Math.round(process.memoryUsage().rss / 1048576)}${current.unit?.outputs?.() ? ` outputs=${current.unit.outputs().map((x) => `${x.id}:${x.state}`).join(",")}` : ""}`), 60_000) : null;
-  const wrapped = async () => { const u = await start(); current.unit = u; if (!current.feedFile) showBedCredit(u.page, u.bed, dir); return u; };
+  const wrapped = async () => {
+    const u = await start();
+    Object.assign(current, { unit: u, alive: true, startedAt: Date.now() });
+    if (!current.feedFile) showBedCredit(u.page, u.bed, dir);
+    u.exited.then(() => { if (current.unit === u) current.alive = false; });
+    return u;
+  };
+
+  // #196 stream watch: is YouTube itself receiving? Off unless RADIO_STREAM_WATCH_ENABLED=true and the API credentials are set.
+  let watch = null;
+  if ((target.kind === "rtmp" || target.kind === "multi") && watchEnabled(env)) {
+    if (!liveConfigured(env)) log("stream watch: RADIO_STREAM_WATCH_ENABLED=true but no RADIO_YT_* API credentials; not watching");
+    else {
+      watch = (o.makeStreamWatch || createStreamWatch)({
+        yt: o.youtube || makeYouTubeLive({ env }),
+        streamId: String(env.RADIO_YT_STREAM_ID || "").trim() || null,
+        manageBroadcast: !progDir,   // a programme hour's broadcast belongs to autoair.mjs
+        // #208: a broadcast it creates carries the 24/7 library's credits; PAUSE (resume by hand) stops the watch
+        credits: () => creditLines(clearedTracks(dir)),
+        paused: () => fs.existsSync(pauseFile(env)),
+        encoderRunning: () => Boolean(current.unit && current.alive && Date.now() - current.startedAt >= WATCH.WARMUP_MS),
+        // several destinations: restart YouTube's relay only, so X stays up; one destination: the whole unit
+        restart: async (why) => { const u = current.unit; if (!u) return; if (u.restartOutput?.("youtube")) return; await u.stop(`stream-watch: ${why}`); },
+        alert: o.alerts === "off" ? (m) => log(`⚠ ${redact(m, env)}`) : makePlayoutAlert({ log: (m) => log(redact(m, env)), env }),
+        log: (m) => log(redact(m, env)), env,
+      });
+      watch.start();
+      log(`stream watch on: checks YouTube every ${WATCH.EVERY_MS / 1000} s${progDir ? " (programme mode: restarts only; autoair owns the broadcast)" : ""}`);
+    }
+  }
 
   try {
     const res = await supervise(wrapped, {
@@ -469,7 +516,7 @@ export async function runPlayout(o = {}) {
     });
     return { ...res, stats, target: target.kind === "file" ? target.path : target.kind === "segments" ? target.dir : target.kind === "multi" ? `rtmp x${target.outputs.length}` : "rtmp" };
   } finally {
-    clearInterval(dp); clearInterval(statsTimer); clearInterval(progTimer); clearInterval(deskTimer);
+    clearInterval(dp); clearInterval(statsTimer); clearInterval(progTimer); clearInterval(deskTimer); watch?.stop();
     await desk?.stop().catch(() => {});
     await pictureHub?.close();
     await server?.close();

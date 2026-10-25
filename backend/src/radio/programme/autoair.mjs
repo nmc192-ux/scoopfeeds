@@ -95,6 +95,8 @@ async function main() {
 
   // ── gate 0: kill switch, single run ──
   if (isPaused(BASE)) { log(`${path.join(BASE, "PAUSE")} exists: this hour is skipped`); stage("paused"); return; }
+  // the 24/7 loop (rolling.mjs) owns the air while it runs: a timed one-hour run must not start a second playout
+  try { const pid = Number(fs.readFileSync(path.join(BASE, "rolling.lock"), "utf8")); if (pid) { process.kill(pid, 0); log(`the 24/7 rolling loop (pid ${pid}) owns the air; this timed run is skipped`); stage("skipped-rolling"); return; } } catch { /* no live rolling loop */ }
   const lock = path.join(BASE, "autoair.lock");
   try { fs.writeFileSync(lock, String(process.pid), { flag: "wx" }); }
   catch {
