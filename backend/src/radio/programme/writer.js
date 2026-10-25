@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 import { wordBudget } from "./clock.js";
 
-export const SEGMENT_KINDS = ["the-hour", "markets", "compared", "desk", "half", "weather", "signoff"];
+export const SEGMENT_KINDS = ["the-hour", "markets", "compared", "desk", "half", "weather", "crypto", "signoff"];
 
 function fmtPct(p) { return p == null ? "n/a" : `${p > 0 ? "+" : ""}${p.toFixed(2)}%`; }
 
@@ -21,6 +21,7 @@ export function packText(pack) {
   for (const [desk, list] of Object.entries(pack.desks)) out.push("", `DESK: ${desk}`, ...list.map(story));
   out.push("", "MARKETS (price, % change on the day)", ...pack.markets.map((m) => `    ${m.key} (${m.group}): ${m.price} ${fmtPct(m.pct)}`));
   out.push("", "WEATHER NOW", ...pack.weather.map((w) => `    ${w.city}: ${w.c}°C / ${w.f}°F, ${w.condition}`));
+  if (pack.crypto?.length) out.push("", "CRYPTO (price in US dollars, % change over 24 hours)", ...pack.crypto.map((c) => `    ${c.key} (${c.sym}): ${c.price} ${fmtPct(c.pct)}`));
   return out.join("\n");
 }
 
@@ -66,6 +67,7 @@ export function buildPrompt(pack, slots, when) {
       case "desk": return `${base}: the ${s.desk} desk. Use stories from DESK: ${s.desk} (or TOP STORIES if clearly from that beat). Line "open" ("On the ${s.title}..." style, one sentence), then 2-3 story lines ("d1".., each with "story": id), then "close" (one short sentence).`;
       case "half": return `${base}: "Headlines at the half hour." Line "open", then ${s.stories} lines "h1".., 25-30 words each, each with "story": id; you may repeat The Hour's stories here (it is a recap) but prefer any newer TOP STORIES or desk stories not yet used.`;
       case "weather": return `${base}: lines "w1".. using only WEATHER NOW, US cities first, then Europe, the Gulf, South Asia, Tokyo; give °F for US cities and °C elsewhere.`;
+      case "crypto": return `${base}: lines "c1".. using only CRYPTO rows, bitcoin first, then ether, then at most three others; price and 24-hour change only. Never predict prices, never advise buying or selling, never call a coin safe or risky. "story": null.`;
       case "signoff": return `${base}: line "s1": "That was the first hour of ScoopFeeds Radio. Every newsroom, one stream." plus one sentence inviting listeners to subscribe to ScoopFeeds on YouTube.`;
       default: return base;
     }

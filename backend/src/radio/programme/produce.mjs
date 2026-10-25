@@ -21,7 +21,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { buildClock, checkClock } from "./clock.js";
+import { buildClock, buildGridClock, checkClock } from "./clock.js";
 import { buildFactPack } from "./factPack.js";
 import { writeSegments, claudeWriter, isLimitError } from "./writer.js";
 import { sessionsAt } from "./dayClock.js";
@@ -32,12 +32,14 @@ import { listBeds, listFiles, bedEntry, DAYPARTS } from "../musicLibrary.js";
 import { loadManifest, screenCredit } from "../musicManifest.js";
 import { ensureProceduralBed } from "../proceduralBed.js";
 import { measureIntegrated } from "../playout/loudness.js";
+import { resolveHourShort } from "../filmLibrary.js";
 
 const { values: v } = parseArgs({ options: {
   hour: { type: "string" }, out: { type: "string" }, "music-dir": { type: "string" }, film: { type: "string" },
   from: { type: "string" }, base: { type: "string" }, "fake-voice": { type: "boolean" }, "fake-writer": { type: "boolean" },
   model: { type: "string" }, feature: { type: "string" }, "feature-title": { type: "string" },
   to: { type: "string" }, weather: { type: "string", default: "1" }, "headline-writer": { type: "boolean" },
+  grid: { type: "boolean" },   // #200: build the hour from the channel grid (also RADIO_GRID_ENABLED=1)
 } });
 const log = (m) => console.log(`🎙 produce: ${m}`);
 const die = (m) => { console.error(`🎙 produce: ${m}`); process.exit(2); };
@@ -48,13 +50,28 @@ if (!v.out) die("--out is required");
 const out = path.resolve(v.out.replace(/^~/, process.env.HOME));
 fs.mkdirSync(out, { recursive: true });
 const musicDir = path.resolve((v["music-dir"] || path.join(process.env.HOME, "scoopfeeds-radio/music")).replace(/^~/, process.env.HOME));
-const film = v.film ? path.resolve(v.film.replace(/^~/, process.env.HOME)) : null;
-if (film && !fs.existsSync(film)) die(`film not found: ${film}`);
+// #216: the film slot takes only a Short cut from a published long-form film, checked against the film
+// library. Anything else (ScoopFeeds 60, an unlinked clip, a file outside the library) is logged and the
+// slot is filled by the normal programme.
+let film = null, filmTitle = null;
+if (v.film) {
+  const r = resolveHourShort(path.resolve(v.film.replace(/^~/, process.env.HOME)));
+  if (r.item) { film = r.item.file; filmTitle = `From ${r.item.seriesName}: ${r.item.title}`; log(`film slot: ${r.item.id} (Short from ${r.item.parentFilm})`); }
+  else log(`film slot: no film this hour (${r.reason}); the slot is filled by the normal programme`);
+}
 
 const feature = v.feature ? path.resolve(v.feature.replace(/^~/, process.env.HOME)) : null;
 if (feature && !fs.existsSync(feature)) die(`feature not found: ${feature}`);
 const featureSec = feature ? durationSecs(feature) + 2.6 + 1.0 : 0;   // sting + the episode + a breath
-const clock = buildClock(hourStart, { featureSec, featureTitle: v["feature-title"] || (feature ? path.basename(feature).replace(/\.[^.]+$/, "") : null), weather: v.weather !== "0" });
+const useGrid = v.grid || process.env.RADIO_GRID_ENABLED === "1";
+const clockOpts = { featureSec, featureTitle: v["feature-title"] || (feature ? path.basename(feature).replace(/\.[^.]+$/, "") : null), film: !!film, filmTitle };
+let gridPlan = null, clock;
+if (useGrid) {
+  ({ plan: gridPlan, slots: clock } = buildGridClock(hourStart, clockOpts));
+  log(`grid: ${gridPlan.label}`);
+  if (gridPlan.format === "repeat") log("grid: this is an overnight repeat hour; produce.mjs builds a full hour (the repeat itself is #195's rolling station)");
+  if (gridPlan.featureDropped) log("grid: the feature airs only in its fixed slot (9 pm ET); this hour runs without it");
+} else clock = buildClock(hourStart, { ...clockOpts, weather: v.weather !== "0" });   // #195: the grid decides weather itself
 const problems = checkClock(clock);
 if (problems.length) die(`clock is broken: ${problems.join("; ")}`);
 const fromIdx = v.from ? clock.findIndex((s) => s.id === v.from) : 0;
@@ -83,7 +100,7 @@ const bedFor = (d) => beds[d] || anyBed;
 log(`beds: ${Object.entries(beds).map(([d, b]) => `${d}=${path.basename(b.file)} ${b.lufs} LUFS`).join(", ")}`);
 
 // ── facts ──
-const pack = await buildFactPack({ base: v.base || "https://scoopfeeds.com", log });
+const pack = await buildFactPack({ base: v.base || "https://scoopfeeds.com", log, crypto: useGrid });
 fs.writeFileSync(path.join(out, "pack.json"), JSON.stringify(pack, null, 1));
 log(`fact pack: ${pack.top.length} top stories, desks ${Object.entries(pack.desks).map(([k, l]) => `${k}:${l.length}`).join(" ")}, ${pack.markets.length} market rows, ${pack.weather.length} cities, ${pack.dropped.length} articles dropped by Rule 0`);
 if (pack.top.length < 5) log(`WARNING: only ${pack.top.length} top stories`);
@@ -92,6 +109,10 @@ if (pack.top.length < 5) log(`WARNING: only ${pack.top.length} top stories`);
 if (pack.markets.length < 3) {
   for (const s of slots) if (s.segment === "markets") { s.kind = "music"; s.segment = null; s.title = null; }
   log(`WARNING: only ${pack.markets.length} market rows; Markets Now slots turned into headlines and music`);
+}
+if (slots.some((s) => s.segment === "crypto") && (pack.crypto || []).length < 2) {
+  for (const s of slots) if (s.segment === "crypto") { s.kind = "music"; s.segment = null; s.title = null; }
+  log(`WARNING: only ${(pack.crypto || []).length} crypto rows; the Crypto slot turned into headlines and music`);
 }
 if (pack.weather.length < 5) {
   for (const s of slots) if (s.segment === "weather") { s.kind = "music"; s.segment = null; s.title = null; }
@@ -115,6 +136,8 @@ const when = {
   // Markets Now by exchange session: the market groups whose exchange is trading when the slot airs
   marketsLead: Object.fromEntries(slots.filter((s) => s.segment === "markets").map((s) => [s.id, [...new Set(sessionsAt(s.start + 60_000).flatMap((x) => x.groups))]])),
 };
+// grid hours: Markets Now leads with the exchanges in session (read by the markets prompt once #195 lands)
+if (useGrid) when.marketsLead = Object.fromEntries(slots.filter((s) => s.segment === "markets").map((s) => [s.id, s.marketsLead || []]));
 const spoken = slots.filter((s) => s.kind === "spoken");
 const usesClaude = !(v["fake-writer"] || v["headline-writer"]);
 const write = usesClaude ? claudeWriter({ model: v.model || "sonnet", log }) : fakeWriter;
@@ -192,8 +215,11 @@ if (v.to) {
 } else {
   prog.audio = prog.audio.filter((a) => a.from < cut).concat([{ file: partFile, from: cut }]);
   prog.cues = prog.cues.filter((c) => c.at < cut).concat(cues);
-  prog.slots = clock.map(({ id, kind, start, end, title }) => ({ id, kind, start, end, title: title || null }));
+  prog.slots = clock.map(({ id, kind, start, end, title, elements }) => ({ id, kind, start, end, title: title || null, ...(elements ? { elements } : {}) }));
 }
+if (gridPlan) prog.grid = gridPlan;
+// the screen's right rail (#200): markets and weather, verbatim from the pack; each block renders only with data
+prog.rail = { markets: pack.markets, weather: pack.weather };
 prog.headlines = [...pack.top.map((s) => ({ h: s.headline, src: s.outlets.slice(0, 2).map((o) => o.source).join(" and ") })),
   ...Object.values(pack.desks).flat().map((s) => ({ h: s.headline, src: s.outlets.slice(0, 2).map((o) => o.source).join(" and ") }))]
   .filter((x, i, all) => all.findIndex((o) => o.h === x.h) === i).slice(0, 24);
@@ -225,6 +251,7 @@ async function fakeWriter() {
     else if (slot.segment === "half") { L.push({ id: "open", text: "Headlines at the half hour." }); top.forEach((st, i) => L.push(line(st, `h${i + 1}`))); }
     else if (slot.segment === "desk") { const d = pack.desks[slot.desk] || []; L.push({ id: "open", text: `On the ${slot.title}.` }); d.slice(0, 3).forEach((st, i) => L.push(line(st, `d${i + 1}`))); L.push({ id: "close", text: "That's the desk." }); }
     else if (slot.segment === "markets") pack.markets.forEach((m, i) => L.push({ id: `m${i + 1}`, story: null, text: `${m.key} at ${Math.round(m.price)}, ${m.pct >= 0 ? "up" : "down"} ${Math.abs(m.pct).toFixed(1)} percent.` }));
+    else if (slot.segment === "crypto") (pack.crypto || []).slice(0, 4).forEach((c, i) => L.push({ id: `c${i + 1}`, story: null, text: `${c.key} at ${Math.round(c.price)} dollars.` }));
     else if (slot.segment === "weather") pack.weather.forEach((w, i) => L.push({ id: `w${i + 1}`, story: null, text: `${w.city}, ${w.c} degrees, ${w.condition}.` }));
     else if (slot.segment === "signoff") L.push({ id: "s1", text: "That was the first hour of ScoopFeeds Radio. Every newsroom, one stream." });
     else if (slot.segment === "compared") {

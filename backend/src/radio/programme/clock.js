@@ -10,13 +10,15 @@
  *   ident    a Signal ident (visual + its sonic WAV), mode id | top
  *   spoken   a script read by the voice, over a ducked bed
  *   music    the bed at full level, rotating headline cards on screen
- *   film     one ScoopFeeds 60 film, played with its own sound
+ *   film     one Short cut from a published long-form film (#216), played with its own sound; with no
+ *            eligible Short the slot is music (headlines and the bed), never "ScoopFeeds 60"
  *   feature  a full episode (this week's A-Eye), played with its own sound
  *   series   "This week on ScoopFeeds" cards over the bed
  *   countdown / endcard   holding slates over the bed
  *
  * `sting: true` puts the 3 s Signal sting (visual + sonic) over the first 3 s of the slot.
  */
+import { planHour, applyPlan } from "./grid.js";
 
 export const PREROLL_SEC = 15 * 60;
 export const TAIL_SEC = 30;
@@ -31,7 +33,7 @@ const ORDER = [
   ["music-1", 840, 1200, "music", { sting: true, nextAt: 1200, nextTitle: "Middle East desk" }],
   ["desk-me", 1200, 1380, "spoken", { segment: "desk", desk: "middle-east", title: "Middle East desk", sting: true }],
   ["desk-us", 1380, 1560, "spoken", { segment: "desk", desk: "us", title: "US desk: politics and economy" }],
-  ["film", 1560, 1620, "film", { sting: true, title: "ScoopFeeds 60" }],
+  ["film", 1560, 1620, "film", { sting: true, title: "From the films" }],
   ["series", 1620, 1710, "series", { title: "This week on ScoopFeeds" }],
   ["music-2", 1710, 1792, "music", {}],
   ["ident-half", 1792, 1800, "ident", { mode: "id" }],
@@ -90,15 +92,37 @@ function withoutWeather(order) {
   return order.filter(([id]) => id !== "weather").map((row) => (row[0] === "half" ? [row[0], row[1], w[2], row[3], { ...row[4], stories: 7 }] : row));
 }
 
-export function buildClock(hourStartMs, { featureSec = 0, featureTitle = null, weather = true } = {}) {
+/**
+ * `film: false` (no eligible Short this hour, #216) turns the film slot into music; `filmTitle` labels it
+ * when there is one. `weather: false` (#195) drops the weather slot into the half-hour headlines.
+ */
+export function buildClock(hourStartMs, { featureSec = 0, featureTitle = null, film = true, filmTitle = null, weather = true } = {}) {
   if (!Number.isFinite(hourStartMs)) throw new Error("buildClock: hourStartMs must be a number");
   let order = featureSec > 0 ? withFeature(ORDER, featureSec, featureTitle) : ORDER;
   if (!weather) order = withoutWeather(order);
+  order = order.map((row) => {
+    if (row[0] !== "film") return row;
+    if (!film) return [row[0], row[1], row[2], "music", {}];
+    return filmTitle ? [row[0], row[1], row[2], row[3], { ...row[4], title: filmTitle }] : row;
+  });
   return order.map(([id, s, e, kind, extra]) => ({
     id, kind, startSec: s, endSec: e, lenSec: e - s,
     start: hourStartMs + s * 1000, end: hourStartMs + e * 1000,
     ...extra,
   }));
+}
+
+/**
+ * The hour as an instance of the channel grid (#200, grid.js): the base running order above, with the hour's
+ * plan applied (Crypto, weather every two hours, markets by open session, the film only in its fixed slot).
+ * A feature passed for an hour that is not the grid's feature slot is dropped; `plan.featureDropped` says so.
+ * @returns {{ plan, slots }}
+ */
+export function buildGridClock(hourStartMs, { featureSec = 0, ...opts } = {}) {
+  const plan = planHour(hourStartMs);
+  const useFeature = featureSec > 0 && Boolean(plan.feature);
+  const base = buildClock(hourStartMs, { ...opts, featureSec: useFeature ? featureSec : 0, featureTitle: opts.featureTitle || plan.feature?.title || null });
+  return { plan: { ...plan, featureDropped: featureSec > 0 && !useFeature }, slots: applyPlan(base, plan) };
 }
 
 /** Words the writer may use in a spoken slot: its length less a 4 s margin (sting, breaths), at WORDS_PER_SEC. */
