@@ -18,6 +18,10 @@ const FIXTURE = [
 
 async function setup(page, { v2 = true, events = FIXTURE, radio = null } = {}) {
   const calls = [];
+  // Catch-all first (Playwright tries the most recently added route first), so an
+  // unmocked call such as /api/health never reaches a missing backend and trips
+  // the app-wide "Backend Not Running" screen.
+  await page.route("**/api/**", r => r.fulfill({ json: {} }));
   await page.route("**/api/site-config", r => r.fulfill({ json: { marketOdds: false, v2 } }));
   await page.route("**/api/ri/events**", r => { calls.push(r.request().url()); return r.fulfill({ json: { events } }); });
   await page.route("**/api/radio/state.json", r =>
