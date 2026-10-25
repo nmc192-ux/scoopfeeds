@@ -33,13 +33,18 @@ function retryUnlessNotFound(failureCount, error) {
   return failureCount < 3;
 }
 
-export function useEvents({ category, status = "active", limit = 30, sort } = {}) {
+// `country` (#190, ISO-2): the reader's country first. Omitted → no param, so
+// callers that do not pass it send exactly the request they sent before.
+// `enabled` lets a caller wait for something it needs (the Today page waits for geo).
+export function useEvents({ category, status = "active", limit = 30, sort, country, enabled = true } = {}) {
   return useQuery({
-    queryKey: ["events-list", { category, status, limit, sort }],
+    queryKey: ["events-list", { category, status, limit, sort, ...(country ? { country } : {}) }],
+    enabled,
     queryFn: async () => {
       const params = new URLSearchParams({ status, limit: String(limit) });
       if (category) params.set("category", category);
       if (sort) params.set("sort", sort);
+      if (country) params.set("country", country);
       return unwrapOrThrow(await api.get(`/events?${params}`));
     },
     staleTime:       3 * 60 * 1000,
