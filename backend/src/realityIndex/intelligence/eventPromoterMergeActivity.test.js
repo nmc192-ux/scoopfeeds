@@ -52,8 +52,9 @@ test("after a merge, the survivor's last_activity_at is the merge time", async (
   // (pruned ids are dropped — see eventPromoterPrunedRefs.test.js).
   const insArt = db.prepare(`INSERT OR IGNORE INTO articles (id, title, url, source_name, category, published_at, fetched_at)
                              VALUES (?,?,?,?,?,?,?)`);
-  for (const id of ids) {
-    insArt.run(id, `Headline ${id}`, `https://x.test/${id}`, "Test", "world", now, now);
+  // Rotating outlets: the #243 single-source guard refuses one-outlet events.
+  for (const [i, id] of ids.entries()) {
+    insArt.run(id, `Headline ${id}`, `https://x.test/${id}`, `Outlet ${i % 3}`, "world", now, now);
     upsertEmbedding({ scope: "article", scope_id: id, model: "test-model", vector: vec });
     for (const q of ["Q9001", "Q9002", "Q9003"]) insEnt.run(id, q, q.toLowerCase(), q, "unknown", q, now);
   }

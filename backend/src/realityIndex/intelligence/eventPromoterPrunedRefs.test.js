@@ -35,7 +35,8 @@ test("only live articles are linked; a fully-pruned cluster is skipped and count
   const ins = db.prepare(`INSERT INTO articles (id, title, url, source_name, category, published_at, fetched_at)
                           VALUES (?,?,?,?,?,?,?)`);
   // Cluster LIVE names 6 ids, 3 of which still exist; cluster GONE names 5 that were all pruned.
-  for (const id of ["p-live-1", "p-live-2", "p-live-3"]) ins.run(id, `Headline ${id}`, `https://x.test/${id}`, "Test", "world", now, now);
+  // Distinct outlets: the #243 single-source guard refuses one-outlet events.
+  for (const [i, id] of ["p-live-1", "p-live-2", "p-live-3"].entries()) ins.run(id, `Headline ${id}`, `https://x.test/${id}`, `Outlet ${i}`, "world", now, now);
   insertCluster(db, "pruned-live", ["p-live-1", "p-live-2", "p-live-3", "p-gone-1", "p-gone-2", "p-gone-3"], now);
   insertCluster(db, "pruned-gone", ["p-gone-4", "p-gone-5", "p-gone-6", "p-gone-7", "p-gone-8"], now);
 

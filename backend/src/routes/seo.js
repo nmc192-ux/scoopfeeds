@@ -11,6 +11,7 @@ import {
   listRelatedStories,
   getRecentIgPosts,
 } from "../models/database.js";
+import { sourceEligibleSql } from "../realityIndex/dal/readerEligibility.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
@@ -83,11 +84,14 @@ Sitemap: ${SITE}/feed.xml
 // ── Dossiers for the sitemaps (#178) ─────────────────────────────────────
 // Events with real coverage only: machine events (USGS/NOAA) carry no articles (CLAUDE.md), and a
 // merged event's slug is an alias whose canonical is its survivor, so neither is listed.
+// #243: nor is a single-source or one-outlet-dominated event (SQL rules only; the coherence rule
+// is not applied here — scoring up to 5000 events per sitemap request costs too much).
 export function sitemapEvents(db, { sinceMs, limit = 5000 }) {
   return db.prepare(`
     SELECT e.slug, e.title, e.last_activity_at FROM events e
     WHERE e.last_activity_at >= ? AND e.status != 'merged'
       AND EXISTS (SELECT 1 FROM event_articles ea WHERE ea.event_id = e.id)
+      AND ${sourceEligibleSql("e")}
     ORDER BY e.last_activity_at DESC LIMIT ?
   `).all(sinceMs, limit);
 }

@@ -43,8 +43,11 @@ const VEC = {
 
 const insArt = db.prepare(`INSERT OR IGNORE INTO articles (id, title, url, source_name, category, published_at, fetched_at) VALUES (?,?,?,?,?,?,?)`);
 const insEnt = db.prepare(`INSERT OR IGNORE INTO article_entities (article_id, surface, surface_norm, qid, entity_type, label, created_at) VALUES (?,?,?,?,?,?,?)`);
+// Three rotating outlets: the #243 single-source guard refuses one-outlet events, and these
+// tests are about coherence, not sourcing.
+let artN = 0;
 function article(id, keys, { embed = true, dir = "u" } = {}) {
-  insArt.run(id, `Headline ${id}`, `https://x.test/${id}`, "Test", "world", NOW, NOW);
+  insArt.run(id, `Headline ${id}`, `https://x.test/${id}`, `Outlet ${artN++ % 3}`, "world", NOW, NOW);
   if (embed && isVecAvailable()) upsertEmbedding({ scope: "article", scope_id: id, model: "test-model", vector: VEC[dir] });
   for (const q of keys) insEnt.run(id, q, q.toLowerCase(), q, "unknown", q, NOW);
 }

@@ -139,6 +139,23 @@ keyed members → `0`.
 - **Calibrate before flipping**: `node scripts/coherence-report.mjs` (read-only) prints the
   distribution and the worst 20 on the live DB.
 
+### #243 reader eligibility — shipped **ON** (`EVENT_READER_ELIGIBILITY`, default true)
+
+`dal/readerEligibility.js`. Every reader list hides an event that has fewer than 3 named
+outlets, has one outlet supplying more than 70% of its articles, or scores below the #179
+coherence floor. The outlet rules are SQL (`sourceEligibleSql`, applied before the LIMIT);
+the coherence rule runs on returned rows (`filterReaderEligible`, list routes over-fetch and
+trim back to `limit`). **Hidden is not deleted**: no event row or link is changed, and the
+dossier page itself still answers by URL. Unmeasured coherence (`null`) does not hide;
+machine events are exempt. `scripts/reader-eligibility-report.mjs` (read-only) lists every
+hidden event with its reasons, for DrJ's later repair-or-delete call (stop-list item 1).
+An event that seems to have "vanished" from Today or /events is this rule working — check
+the report before "fixing" it.
+
+The promoter's matching guard (`PROMOTER_SINGLE_SOURCE_GUARD`, default true) stops new
+ones: no event is created from one outlet, and an event whose members plus incoming
+articles are one outlet does not grow (`🧭 promoter-refuse-single-source`).
+
 ### #179 slug follows headline — shipped **DARK** (`EVENT_SLUG_FOLLOWS_HEADLINE=false`)
 
 When the promoter adopts a new lead title whose slug shares under half its words with the
