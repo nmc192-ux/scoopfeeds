@@ -1,5 +1,5 @@
 /**
- * safety.test.js — #208 radio platform safety: disclosure, music provenance, the standing watchdog,
+ * safety.test.js — #208 radio platform safety: broadcast copy and credits, music provenance, the standing watchdog,
  * film clearance, election claims and factual titles. No network: every API is stubbed.
  */
 import { test } from "node:test";
@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { DISCLOSURE, STATION_ID_LINE, withDisclosure, xBroadcastText, withStationId, titleProblems, factualTitle } from "./disclosure.js";
+import { withCredits, xBroadcastText, creditsComplete, CreditsDoNotFit, YT_DESC_MAX, X_TEXT_MAX, titleProblems, factualTitle } from "./broadcastCopy.js";
 import { broadcastBody, makeYouTubeLive } from "../live/youtubeLive.js";
 import { entryProblems, isCcAttribution, loadManifest, clearBed, screenCredit, creditLines } from "../musicManifest.js";
 import { listBeds, listFiles, bedCredit, clearedTracks } from "../musicLibrary.js";
@@ -20,22 +20,31 @@ import { pickClearedFilm, recordProblem, apiProblem } from "./filmClearance.js";
 import { electionClaim, electionClaimVerdict } from "./electionClaims.js";
 import { checkSegments } from "../programme/checks.js";
 import { makeRadioAlert } from "./alert.js";
+import { creditsPageHtml } from "./creditsPage.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const tmp = (p = "radio-safety-") => fs.mkdtempSync(path.join(os.tmpdir(), p));
 
-// ── 1. disclosure on every broadcast ─────────────────────────────────────────
-test("every broadcast body carries the disclosure and the music credits, whatever the caller passes", () => {
+// ── 1. broadcast copy: credits whole, no disclosure sentence (DrJ, 23 + 25 Oct 2026) ──
+const OLD_DISCLOSURE = /produced automatically|synthetic voice|read by a synthetic/i;
+// a real YouTube Audio Library credit is several lines; about 180 characters each
+const libCredit = (i) => `Track ${i} by Artist ${i} is licensed under a Creative Commons Attribution 4.0 licence. https://creativecommons.org/licenses/by/4.0/\nSource: http://example.com/track-${i}\nArtist: http://example.com/artist-${i}`;
+const URL = "https://scoopfeeds.com/radio/music-credits";
+
+test("every broadcast body carries the music credits whole, whatever the caller passes, and no disclosure sentence", () => {
   const credits = ["Calm River by A. Artist (CC BY 4.0)"];
-  for (const description of ["", "One hour of world news.", "x".repeat(9000), `Already has it. ${DISCLOSURE}`]) {
-    const b = broadcastBody({ title: "ScoopFeeds Radio LIVE", description, startMs: Date.UTC(2026, 9, 30, 16), credits });
-    const d = b.snippet.description;
-    assert.ok(d.includes(DISCLOSURE), "disclosure present");
-    assert.equal(d.split(DISCLOSURE).length - 1, 1, "exactly once");
+  for (const description of ["", "One hour of world news.", "x".repeat(9000)]) {
+    const d = broadcastBody({ title: "ScoopFeeds Radio LIVE", description, startMs: Date.UTC(2026, 9, 30, 16), credits }).snippet.description;
     assert.ok(d.includes(credits[0]), "credit present");
-    assert.ok(d.length <= 5000);
+    assert.ok(d.length <= YT_DESC_MAX);
+    assert.equal(OLD_DISCLOSURE.test(d), false, "the disclosure sentence is gone (DrJ, 23 Oct 2026)");
   }
-  assert.ok(broadcastBody({ title: "t", startMs: 0 }).snippet.description.includes(DISCLOSURE), "no description at all still discloses");
+  assert.equal(broadcastBody({ title: "t", startMs: 0 }).snippet.description, "", "no body, no credits: nothing is added");
+});
+
+test("no radio source file still carries the removed disclosure sentence", () => {
+  const files = ["safety/broadcastCopy.js", "safety/broadcastText.mjs", "live/youtubeLive.js", "programme/autoair.mjs", "programme/produce.mjs", "programme/airCheck.js"];
+  for (const f of files) assert.equal(OLD_DISCLOSURE.test(fs.readFileSync(path.join(HERE, "..", f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "")), false, f);
 });
 
 test("YouTube's altered/synthetic setting is never ticked: the field is not sent (DrJ, 22 Oct 2026)", () => {
@@ -43,13 +52,39 @@ test("YouTube's altered/synthetic setting is never ticked: the field is not sent
   assert.equal(JSON.stringify(b).includes("containsSyntheticMedia"), false);
 });
 
-test("the description is idempotent and has no angle brackets (YouTube rejects them)", () => {
-  const once = withDisclosure("Body <b>text</b>", ["Song by X <https://x.example>"]);
-  assert.equal(withDisclosure(once, ["Song by X <https://x.example>"]), once);
-  assert.equal(/[<>]/.test(once), false);
+test("the description has no angle brackets (YouTube rejects them)", () => {
+  assert.equal(/[<>]/.test(withCredits("Body <b>text</b>", ["Song by X <https://x.example>"])), false);
 });
 
-test("the createBroadcast payload sent over the wire carries the disclosure", async () => {
+test("a 30-track library: the description stays within 5000, every listed credit is whole, and the link is there", () => {
+  const credits = Array.from({ length: 30 }, (_, i) => libCredit(i + 1));
+  const body = "ScoopFeeds Radio: world news around the clock, compared across outlets. https://scoopfeeds.com";
+  for (const listAll of [true, false]) {
+    const d = withCredits(body, credits, { creditsUrl: URL, listAll });
+    assert.ok(d.length <= YT_DESC_MAX, `${d.length} chars`);
+    assert.ok(d.includes(URL), "link to the full list");
+    assert.ok(d.startsWith(body), "body kept");
+    // every credit that appears at all appears whole: no credit is cut mid-way
+    for (const c of credits) {
+      const head = c.split("\n")[0];
+      if (d.includes(head)) assert.ok(d.includes(c), `credit cut: ${head}`);
+    }
+    assert.ok(creditsComplete(d, credits, URL));
+  }
+  assert.equal(withCredits(body, credits, { creditsUrl: URL, listAll: false }), `${body}\n\nMusic credits: ${URL}`);
+});
+
+test("credits that do not fit and no credits page: it refuses rather than publish a cut credit", () => {
+  const credits = Array.from({ length: 30 }, (_, i) => libCredit(i + 1));
+  assert.throws(() => withCredits("Body.", credits), CreditsDoNotFit);
+  assert.throws(() => xBroadcastText({ title: "t", credits }), CreditsDoNotFit);
+  // a small library still lists every credit with no link needed
+  const few = credits.slice(0, 3);
+  const d = withCredits("Body.", few);
+  for (const c of few) assert.ok(d.includes(c));
+});
+
+test("the createBroadcast payload sent over the wire carries the credits", async () => {
   let sent = null;
   const fetchImpl = async (url, init = {}) => {
     if (/oauth2.*token$/.test(url)) return { ok: true, status: 200, json: async () => ({ access_token: "A", expires_in: 3600 }) };
@@ -57,29 +92,53 @@ test("the createBroadcast payload sent over the wire carries the disclosure", as
     return { ok: false, status: 404, json: async () => ({}) };
   };
   const yt = makeYouTubeLive({ env: { RADIO_YT_CLIENT_ID: "c", RADIO_YT_CLIENT_SECRET: "s", RADIO_YT_REFRESH_TOKEN: "r" }, fetchImpl });
-  await yt.createBroadcast({ title: "ScoopFeeds Radio LIVE", description: "One hour.", startMs: Date.UTC(2026, 9, 30, 16), credits: ["Track by Artist, CC BY"] });
-  assert.ok(sent.snippet.description.includes(DISCLOSURE));
+  await yt.createBroadcast({ title: "ScoopFeeds Radio LIVE", description: "One hour.", startMs: Date.UTC(2026, 9, 30, 16), credits: ["Track by Artist, CC BY"], creditsUrl: URL });
   assert.ok(sent.snippet.description.includes("Track by Artist, CC BY"));
+  assert.ok(sent.snippet.description.includes(URL));
+  assert.equal(OLD_DISCLOSURE.test(sent.snippet.description), false);
 });
 
-test("the X broadcast text carries the disclosure, the credits, and stays within X's limit", () => {
+test("the X broadcast text carries the credits whole and stays within X's limit", () => {
   const t = xBroadcastText({ title: "ScoopFeeds Radio LIVE", credits: ["A by B", "C by D"] });
-  assert.ok(t.includes(DISCLOSURE) && t.includes("A by B") && t.includes("C by D"));
-  const long = xBroadcastText({ title: "ScoopFeeds Radio LIVE", credits: Array(400).fill("A very long credit line for a track by an artist"), watchUrl: "https://www.youtube.com/watch?v=B1", max: 4000 });
-  assert.ok(long.length <= 4000 && long.includes(DISCLOSURE) && long.includes("watch?v=B1"));
+  assert.ok(t.includes("A by B") && t.includes("C by D") && !OLD_DISCLOSURE.test(t));
+  const long = xBroadcastText({ title: "ScoopFeeds Radio LIVE", credits: Array.from({ length: 400 }, (_, i) => `A long credit line for track ${i} by an artist`), creditsUrl: URL });
+  assert.ok(long.length <= X_TEXT_MAX && long.includes(URL));
 });
 
-// ── 2. the spoken station ID, no AI badge ────────────────────────────────────
-test("the station-ID line goes into The Hour right after the open, word for word, once", () => {
-  const segs = { "the-hour": { lines: [{ id: "open", text: "It's noon in New York." }, { id: "s1", story: "t1", text: "x" }] }, half: { lines: [] } };
-  const out = withStationId(withStationId(segs));
-  const ids = out["the-hour"].lines.map((l) => l.id);
-  assert.deepEqual(ids, ["open", "station-id", "s1"]);
-  assert.equal(out["the-hour"].lines[1].text, STATION_ID_LINE);
-  assert.equal(STATION_ID_LINE, DISCLOSURE);
-  assert.deepEqual(out.half, segs.half);
+test("broadcastText.mjs end to end: 30 real-shaped credits, no URL -> exits 1 and writes nothing; with a URL -> link only; the page lists every credit verbatim", () => {
+  const long = (rel, body) => ccEntry(rel, body, { credit: libCredit(rel) });
+  const music = makeMusicLibrary({ morning: Array.from({ length: 10 }, (_, i) => `m${i}.mp3`), evening: Array.from({ length: 10 }, (_, i) => `e${i}.mp3`), overnight: Array.from({ length: 10 }, (_, i) => `o${i}.mp3`) }, { entry: long });
+  const base = tmp("radio-base-");
+  const script = path.join(HERE, "broadcastText.mjs");
+  const run = (env, args = []) => spawnSync(process.execPath, [script, "--music-dir", music, ...args], { env: { ...process.env, RADIO_BASE_DIR: base, RADIO_MUSIC_CREDITS_URL: "", ...env }, encoding: "utf8" });
+  const no = run({});
+  assert.equal(no.status, 1, no.stdout + no.stderr);
+  assert.match(no.stderr, /refusing to publish incomplete attribution/);
+  assert.equal(fs.existsSync(path.join(base, "youtube-247-description.txt")), false);
+  const page = path.join(tmp("radio-site-"), "radio", "music-credits.html");
+  const ok = run({ RADIO_MUSIC_CREDITS_URL: URL }, ["--site-page", page]);
+  assert.equal(ok.status, 0, ok.stderr);
+  const yt = fs.readFileSync(path.join(base, "youtube-247-description.txt"), "utf8");
+  const x = fs.readFileSync(path.join(base, "x-247-broadcast.txt"), "utf8");
+  assert.ok(yt.includes(`Music credits: ${URL}`) && x.includes(`Music credits: ${URL}`));
+  assert.ok(yt.length <= YT_DESC_MAX && !OLD_DISCLOSURE.test(yt + x));
+  const html = fs.readFileSync(page, "utf8");
+  const entries = JSON.parse(fs.readFileSync(path.join(music, "manifest.json"), "utf8")).tracks;
+  assert.equal(entries.length, 30);
+  // verbatim: the page's visible text (tags stripped) contains every credit, whole
+  const visible = html.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&");
+  for (const e of entries) assert.ok(visible.includes(e.credit), `missing or altered: ${e.credit.split("\n")[0]}`);
+  assert.match(html, /<meta name="robots" content="noindex">/);
 });
 
+test("credits page: verbatim, escaped, de-duplicated", () => {
+  const html = creditsPageHtml([{ title: "A <b>", artist: "B & C", credit: "A by B\nSource: https://x.example/a" }, { title: "dup", credit: "A by B\nSource: https://x.example/a" }]);
+  assert.ok(html.includes("A &lt;b&gt;") && html.includes("B &amp; C"));
+  assert.ok(html.includes('<a href="https://x.example/a" rel="noopener">https://x.example/a</a>'));
+  assert.equal(html.split("<li>").length - 1, 1);
+});
+
+// ── 2. no AI badge ───────────────────────────────────────────────────────────
 test("no screen shows an AI badge or label (both screens, every scene)", () => {
   const BADGE = /\b(ai[- ]?(generated|badge|label|made|produced)|made (with|by) ai|synthetic (media|content|voice)|artificial intelligence)\b/i;
   for (const f of ["scoopfeeds-radio-screen.html", "scoopfeeds-radio-programme.html"]) {

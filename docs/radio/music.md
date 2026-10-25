@@ -80,6 +80,9 @@ One entry per **downloaded** file (not per `.norm.mp3`):
   music breaks the screen shows a small "Music: Artist – Track" credit. This is a standard music credit, not
   an AI label. For the 24/7 stream (whose description is set by hand), run
   `node backend/src/radio/safety/broadcastText.mjs` after any library change and paste the two files it writes.
+- **A credit is never cut.** When the credits do not fit a platform's limit, whole credits give way to a link
+  to the full credits page (`RADIO_MUSIC_CREDITS_URL`); with no page, nothing is published. Setup steps:
+  `docs/radio/safety.md` §1.
 
 Code: `backend/src/radio/musicManifest.js` (the rules), `musicLibrary.js` (`listBeds` applies them),
 `playout/playout.js` (`chooseBed`, the credit), tests in `backend/src/radio/safety/safety.test.js`.

@@ -13,7 +13,7 @@
  * `fetchImpl` and `now` are injectable so the tests make no network calls.
  */
 import fs from "node:fs";
-import { withDisclosure } from "../safety/disclosure.js";
+import { withCredits } from "../safety/broadcastCopy.js";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const API = "https://www.googleapis.com/youtube/v3";
@@ -40,13 +40,13 @@ export const liveConfigured = (env = process.env) => { const c = liveCredentials
 
 /**
  * The broadcast resource: public, auto-start and auto-stop on, no monitor stream (so "live" is one step), DVR on.
- * #208: the description ALWAYS ends with the disclosure sentence and the music credits, whatever the caller
- * passes. YouTube's "altered or synthetic content" flag (containsSyntheticMedia) is deliberately never sent
- * (DrJ, 22 Oct 2026): the stream is kept free of anything that would require it.
+ * #208: the description always ends with the music credits, whole (or a link to the full list), whatever the
+ * caller passes. YouTube's "altered or synthetic content" flag (containsSyntheticMedia) is deliberately never
+ * sent (DrJ, 22 Oct 2026), and there is no disclosure sentence (DrJ, 23 Oct 2026).
  */
-export function broadcastBody({ title, description = "", startMs, privacy = "public", credits = [] }) {
+export function broadcastBody({ title, description = "", startMs, privacy = "public", credits = [], creditsUrl = null }) {
   return {
-    snippet: { title: String(title).slice(0, 100), description: withDisclosure(description, credits), scheduledStartTime: new Date(startMs).toISOString() },
+    snippet: { title: String(title).slice(0, 100), description: withCredits(description, credits, { creditsUrl }), scheduledStartTime: new Date(startMs).toISOString() },
     status: { privacyStatus: privacy, selfDeclaredMadeForKids: false },
     contentDetails: { enableAutoStart: true, enableAutoStop: true, enableDvr: true, latencyPreference: "low", monitorStream: { enableMonitorStream: false } },
   };

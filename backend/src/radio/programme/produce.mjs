@@ -24,7 +24,6 @@ import { assemble, fakeVoice, kokoroVoice, durationSecs } from "./assemble.js";
 import { listBeds, listFiles, bedEntry, DAYPARTS } from "../musicLibrary.js";
 import { loadManifest, screenCredit } from "../musicManifest.js";
 import { ensureProceduralBed } from "../proceduralBed.js";
-import { withStationId } from "../safety/disclosure.js";
 import { measureIntegrated } from "../playout/loudness.js";
 
 const { values: v } = parseArgs({ options: {
@@ -109,7 +108,7 @@ const raw = await writeSegments(pack, spoken, when, { write, log });
 fs.writeFileSync(path.join(out, "segments.raw.json"), JSON.stringify(raw, null, 1));
 const checked = checkSegments(raw, spoken, pack, { log });
 const report = checked.report;
-const segments = withStationId(checked.segments);   // #208: the disclosure line, mechanical, after the checks
+const segments = checked.segments;
 fs.writeFileSync(path.join(out, "segments.json"), JSON.stringify(segments, null, 1));
 fs.writeFileSync(path.join(out, "checks.json"), JSON.stringify(report, null, 1));
 log(`checks: ${report.length} line(s) dropped`);

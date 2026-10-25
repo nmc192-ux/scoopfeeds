@@ -13,7 +13,7 @@
  *   the playout's own RTMP gates               -> RADIO_PLAYOUT_ENABLED=true and RADIO_STREAM_KEY (never printed)
  * The scope of this unattended loop is DrJ's standing approval: see docs/radio/autonomous-newsroom.md.
  * Platform safety (#208, docs/radio/safety.md): films and episodes air only when cleared (filmClearance.js);
- * every broadcast description carries the disclosure and the music credits; the X text is written beside it;
+ * every broadcast description carries the music credits, whole or linked; the X text is written beside it;
  * PAUSE appearing mid-hour (the standing watchdog) ends the hour and keeps the 24/7 radio off.
  *
  *   node src/radio/programme/autoair.mjs --hour next --out ~/scoopfeeds-radio/air/auto \
@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 import { airCheck } from "./airCheck.js";
 import { makeYouTubeLive, liveConfigured, goLiveWhenActive } from "../live/youtubeLive.js";
 import { pickClearedFilm } from "../safety/filmClearance.js";
-import { factualTitle, xBroadcastText, withDisclosure } from "../safety/disclosure.js";
+import { factualTitle, xBroadcastText, withCredits } from "../safety/broadcastCopy.js";
 import { creditLines } from "../musicManifest.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -130,7 +130,7 @@ async function main() {
 
   // ── 3. YouTube broadcast ──
   let yt = null, broadcastId = null, streamId = null;
-  // #208: factual titles; disclosure + the exact music credits on YouTube and on X
+  // #208: factual titles; the exact music credits (whole, or a link to the full list) on YouTube and on X
   const defaultTitle = `ScoopFeeds Radio LIVE · The news, compared · ${fmtDate(hourStart)}`;
   const tt = factualTitle(v.title || env.RADIO_AUTOAIR_TITLE || defaultTitle, defaultTitle);
   if (tt.replaced) log(`title replaced with the default (${tt.why.join(", ")})`);
@@ -138,14 +138,16 @@ async function main() {
   const credits = creditLines(prog0().music || []);
   const body = ([`One hour of world news, compared across outlets. ${fmtPkt(hourStart)} Karachi · ${fmtNy(hourStart)} New York.`,
     feature && featureTitle ? `Also this hour: ${featureTitle}.` : "", "Every newsroom, one stream. https://scoopfeeds.com"].filter(Boolean).join("\n\n"));
-  status.description = withDisclosure(body, credits);   // exactly what broadcastBody() sends
+  const creditsUrl = String(env.RADIO_MUSIC_CREDITS_URL || "").trim() || null;
+  try { status.description = withCredits(body, credits, { creditsUrl }); }   // exactly what broadcastBody() sends
+  catch (e) { await alert(`the ${fmtPkt(hourStart)} hour did not air: ${e.message}`); stage("credits-failed"); process.exitCode = 1; return; }
   if (liveConfigured(env)) {
     stage("youtube-setup");
     try {
       yt = ytApi;
       await yt.checkScope();
       const stream = await yt.findStream(); streamId = stream.id;
-      const b = await yt.createBroadcast({ title, description: body, startMs: hourStart, privacy: env.RADIO_AUTOAIR_PRIVACY || "public", credits });
+      const b = await yt.createBroadcast({ title, description: body, startMs: hourStart, privacy: env.RADIO_AUTOAIR_PRIVACY || "public", credits, creditsUrl });
       broadcastId = b.id; status.broadcastId = broadcastId; status.watch = `https://www.youtube.com/watch?v=${broadcastId}`; saveStatus();
       await yt.bind(broadcastId, streamId);
       const thumb = tilde(v.thumbnail || env.RADIO_AUTOAIR_THUMBNAIL || path.join(BASE, "scoopfeeds-radio-live-thumbnail.jpg"));
@@ -156,7 +158,7 @@ async function main() {
       await alert(`YouTube setup failed (${e.message}). The programme will still stream at ${fmtPkt(hourStart - leadMs)}: go live by hand in YouTube Studio.`);
     }
   } else log("youtube: no API credentials (RADIO_YT_*); the stream goes out and YouTube Studio must be used to go live");
-  const xText = xBroadcastText({ title, credits, watchUrl: status.watch || null });
+  const xText = xBroadcastText({ title, credits, creditsUrl });
   for (const f of [path.join(out, "x-broadcast.txt"), path.join(BASE, "x-broadcast.txt")]) { try { fs.writeFileSync(f, xText + "\n"); } catch { /* best effort */ } }
   status.xText = path.join(BASE, "x-broadcast.txt"); saveStatus();
 
