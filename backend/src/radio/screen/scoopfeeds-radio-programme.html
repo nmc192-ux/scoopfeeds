@@ -94,19 +94,19 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 /* election board (#197): every called race says who projected it; bars count projections only */
 .s-elec .pad{inset:40px 96px 36px 96px;}
 .s-elec h1.st{font-size:60px;}
-.eb{display:grid; grid-template-columns:560px 1fr; gap:40px; margin-top:26px;}
+.eb{display:grid; grid-template-columns:560px minmax(0,1fr); gap:40px; margin-top:26px;}
 .ebar{margin-bottom:26px;}
-.ebar .h{display:flex; justify-content:space-between; font-size:18px; color:var(--muted);}
+.ebar .h{display:flex; justify-content:space-between; gap:16px; font-size:26px; color:var(--muted);}
 .ebar .track{position:relative; height:34px; background:var(--ink2); margin-top:8px; display:flex; overflow:hidden;}
 .ebar .track i{display:block; height:100%;} .ebar .track .D{background:#3A6FC4;} .ebar .track .R{background:#C8322B;} .ebar .track .I{background:#8A8A8A;}
 .ebar .maj{position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--paper);}
-.ebar .n{font-size:20px; margin-top:8px;} .ebar .src{font-size:16px; color:var(--muted); margin-top:4px;}
-.egrid{display:grid; grid-template-columns:repeat(5,1fr); gap:8px;}
-.egrid div{background:var(--ink2); padding:8px 10px 7px; border-left:5px solid #333; min-height:48px;}
+.ebar .n{font-size:26px; margin-top:8px;} .ebar .src{font-size:26px; line-height:1.15; color:var(--muted); margin-top:4px;}
+.egrid{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:6px;}
+.egrid div{min-width:0; background:var(--ink2); padding:5px 10px 4px; border-left:5px solid #333; }
 .egrid div.D{border-left-color:#3A6FC4;} .egrid div.R{border-left-color:#C8322B;} .egrid div.I{border-left-color:#8A8A8A;} .egrid div.conflict{border-left-color:var(--paper); background:#2A2A2A;}
-.egrid b{display:block; font-size:17px;} .egrid span{display:block; font-size:13px; color:var(--muted); margin-top:2px; line-height:1.2;}
+.egrid b{display:block; font-size:26px; line-height:1.05; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;} .egrid span{display:block; font-size:26px; color:var(--muted); margin-top:1px; line-height:1.05; overflow-wrap:anywhere;}
 .egrid div.open span{color:#6B6B6B;}
-.elatest{margin-top:8px;} .elatest p{font-family:'Bodoni Moda',serif; font-size:22px; line-height:1.2; margin:10px 0 0;} .elatest p em{font-family:'Schibsted Grotesk',sans-serif; font-style:normal; font-size:15px; color:var(--muted); margin-left:8px;}
+.elatest{margin-top:8px;} .elatest p{font-family:'Bodoni Moda',serif; font-size:26px; line-height:1.2; margin:10px 0 0;} .elatest p em{font-family:'Schibsted Grotesk',sans-serif; font-style:normal; font-size:26px; color:var(--muted); margin-left:8px;}
 
 /* music */
 .s-music .hcard{position:absolute; left:96px; right:96px; top:56px; opacity:0; transform:translateY(20px); transition:opacity .7s, transform .7s;}
@@ -222,7 +222,7 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
     <section class="scene s-known" data-scene="known"><div class="pad"><div class="kicker caps" id="kKick">The News, Compared</div><h2 class="serif" id="kHead" style="font-weight:500;font-size:44px;line-height:1.12;margin:16px 0 0;max-width:1600px;color:var(--muted)"></h2><div class="lab caps" id="kLab"></div><p class="txt" id="kTxt"></p></div></section>
 
     <section class="scene s-elec" data-scene="election"><div class="pad"><div class="kicker caps" id="eKick">The Midterms</div><h1 class="st" id="eTitle"></h1>
-      <div class="eb"><div><div id="eBars"></div><div class="kicker caps" style="font-size:16px">Latest projections</div><div class="elatest" id="eLatest"></div></div><div class="egrid" id="eGrid"></div></div></div></section>
+      <div class="eb"><div><div id="eBars"></div><div class="kicker caps" style="font-size:26px">Latest projections</div><div class="elatest" id="eLatest"></div></div><div class="egrid" id="eGrid"></div></div></div></section>
 
     <section class="scene s-music" data-scene="music"><div id="hcards"></div><div class="eq" id="eq"></div><div class="strap" id="strap" hidden><b class="caps">Coming up</b><span id="strapTxt"></span></div><div class="mcredit" id="musicCredit" hidden></div></section>
 
@@ -351,7 +351,7 @@ const R = {
       const sub = r.status === 'open' ? 'Not yet called' : r.status === 'conflict' ? r.calls.map((c) => `${esc(c.outlet)}: ${esc(c.candidate || c.party || '?')}`).join(' · ')
         : `${r.calls[0].candidate ? esc(r.calls[0].candidate) + ' · ' : ''}${esc(r.label)}`;
       return `<div class="${esc(cls)}"><b>${esc(r.name)}</b><span>${sub}</span></div>`; }).join('');
-    $('eLatest').innerHTML = (d.latest || []).map((x) => `<p>${esc(x.quote)}<em>${esc(x.source)}</em></p>`).join('');
+    $('eLatest').innerHTML = (d.latest || []).slice(0, 2).map((x) => `<p>${esc(x.quote)}<em>${esc(x.source)}</em></p>`).join('');
     show('election'); },
   music(d){ show('music'); const n = d.next && d.next.at > now();
     $('musicCredit').hidden = !d.credit; $('musicCredit').textContent = d.credit || '';
