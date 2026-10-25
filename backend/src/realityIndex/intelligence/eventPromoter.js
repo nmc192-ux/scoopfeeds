@@ -31,6 +31,7 @@ import { makeYielder, DEFAULT_YIELD_MS } from "../../utils/cooperativeYield.js";
 import {
   buildAffinityCtx, affinity, isIncoherent, BANDS, logDecision,
 } from "./storyAffinity.js";
+import { gateAttach, coherenceGateOn, coherenceFloor } from "./eventCoherence.js";
 import { logger } from "../../services/logger.js";
 import { eligibleMarketSql } from "../dal/marketsDao.js";
 
@@ -200,10 +201,58 @@ function slugify(str) {
 function uniqueSlug(db, base) {
   let slug = base;
   let i = 2;
-  while (db.prepare("SELECT 1 FROM events WHERE slug = ?").get(slug)) {
+  // A retired slug (#179 slug-follows-headline) still redirects to its event, so
+  // it is as taken as a live one. hasAliasTable is false only on a DB that never
+  // ran migration 042, which keeps this byte-identical there.
+  const aliasTaken = hasAliasTable(db) ? db.prepare("SELECT 1 FROM event_slug_aliases WHERE slug = ?") : null;
+  while (db.prepare("SELECT 1 FROM events WHERE slug = ?").get(slug) || aliasTaken?.get(slug)) {
     slug = `${base}-${i++}`;
   }
   return slug;
+}
+
+const aliasTableSeen = new WeakSet();
+function hasAliasTable(db) {
+  if (aliasTableSeen.has(db)) return true;
+  const ok = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_slug_aliases'").get();
+  if (ok) aliasTableSeen.add(db);
+  return ok;
+}
+
+// ── #179 slug follows headline (flag EVENT_SLUG_FOLLOWS_HEADLINE, default OFF) ──
+// A slug is frozen at creation, so an event whose lead headline moves to a
+// different story keeps a slug naming the old one (the audit found slugs naming
+// the wrong place). When the flag is on and the ADOPTED title's slug shares less
+// than SLUG_FOLLOW_MAX_OVERLAP of its words with the current slug, mint a new
+// slug and keep the old one as an alias that 301s. This is a word comparison of
+// two URL strings, not a story judgement — the story judgement already happened
+// (the cluster matched this event). Only the adopt branch calls this, and that
+// branch fires only when the incoming cluster is at least as big as the one that
+// named the event, so a small tail cannot rename it.
+export function slugFollowsHeadlineOn() {
+  return String(process.env.EVENT_SLUG_FOLLOWS_HEADLINE ?? "false").toLowerCase() === "true";
+}
+const SLUG_FOLLOW_MAX_OVERLAP = 0.5;
+const slugWords = (slug) => new Set(String(slug || "").replace(/-\d+$/, "").split("-").filter((w) => w.length > 2));
+export function slugOverlap(a, b) {
+  const A = slugWords(a), B = slugWords(b);
+  if (!A.size || !B.size) return 1; // nothing to compare → treat as unchanged
+  let inter = 0; for (const w of A) if (B.has(w)) inter++;
+  return inter / Math.min(A.size, B.size);
+}
+export function maybeFollowHeadline(db, eventId, currentSlug, newTitle, now) {
+  if (!slugFollowsHeadlineOn() || !hasAliasTable(db)) return null;
+  const base = slugify(newTitle || "");
+  if (!base) return null;
+  const overlap = slugOverlap(currentSlug, base);
+  if (overlap >= SLUG_FOLLOW_MAX_OVERLAP) return null;
+  const next = uniqueSlug(db, base);
+  db.prepare("INSERT OR IGNORE INTO event_slug_aliases (slug, event_id, created_at) VALUES (?,?,?)").run(currentSlug, eventId, now);
+  db.prepare("UPDATE events SET slug = ?, updated_at = ? WHERE id = ?").run(next, now, eventId);
+  // An alias that used to point at the slug we are leaving keeps resolving: the
+  // route resolves an alias by event_id, not by chaining slugs.
+  logDecision("slug-follow", { from: String(currentSlug).slice(0, 48), to: next.slice(0, 48), overlap: +overlap.toFixed(3) });
+  return next;
 }
 
 function firstImageFromCluster(db, articleIds) {
@@ -330,11 +379,34 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
   // protecting and are where the time actually goes.
   const yieldToLoop = _yielder || makeYielder({ everyMs: promoterYieldMs() });
 
+  // #179 coherence gate — OFF unless EVENT_COHERENCE_GATE=true. Off, `gate`
+  // returns its input untouched and the cycle is byte-identical to before.
+  const cohGate = coherenceGateOn();
+  const cohFloor = coherenceFloor();
+  let coherenceHeld = 0;
+
   // The unified affinity context: ONE measure, ONE hub filter, shared by qualifies,
   // tryMerge and the breaker (storyAffinity.js). This is the matcher's vocabulary.
   // NOTE: the durable SIGNATURE path below deliberately uses a different vocabulary —
   // see SIGNATURE_MAX_CATSPAN.
   const affCtx = buildAffinityCtx(db);
+
+  // #179: which of `incomingIds` may be linked into the event. Held articles are
+  // simply not linked this cycle; nothing is deleted or rewritten, and a later
+  // cycle may still place them elsewhere. Every hold is a 🧭 coherence-hold line.
+  const gate = (path, eventSlug, clusterId, existingIds, incomingIds) => {
+    if (!cohGate) return incomingIds;
+    const g = gateAttach(affCtx, db, { existingIds, incomingIds, floor: cohFloor });
+    if (g.held.length) {
+      coherenceHeld += g.held.length;
+      logDecision("coherence-hold", {
+        path, event: String(eventSlug).slice(0, 44), cluster: String(clusterId).slice(0, 16),
+        incoming: incomingIds.length, held: g.held.length, kept: g.keep.length,
+        before: g.before, projected: g.projected, after: g.after, floor: cohFloor,
+      });
+    }
+    return g.keep;
+  };
 
   // Entity gate (step 3): preload the windowed-IDF map once. Empty table → fallbackIdf = 1 so the
   // overlap degrades to UNWEIGHTED rather than blocking every match. Only when the gate is ON.
@@ -589,6 +661,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
       const hero     = firstImageFromCluster(db, cl.aids.slice(0, 10));
       const clusterSize = cl.aids.length;
       let eventId = assignment.get(ci);
+      let linkIds = cl.aids; // #179: narrowed by the coherence gate when it is on
       if (!eventId && bestQual.has(ci)) {
         // Wave 1 (2a no-shells): this cluster QUALIFIED against an event but lost the
         // 1-to-1 race (another cluster of the same story won it). Absorb: link this
@@ -598,7 +671,8 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
         const target = find(bestQual.get(ci).eventId);
         const tEv = eventState.get(target);
         if (tEv) {
-          for (const aid of cl.aids) { linkArticle.run(target, aid, now); tEv.ids.add(aid); }
+          const keepIds = gate("absorb", tEv.slug, c.id, [...tEv.ids], cl.aids);
+          for (const aid of keepIds) { linkArticle.run(target, aid, now); tEv.ids.add(aid); }
           for (const cm of eligibleClusterMarkets(db, c.id)) {
             linkMarket.run(target, cm.market_id, cm.weight, cm.rank, now);
           }
@@ -617,12 +691,18 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
       if (eventId) {
         const ev = eventState.get(eventId);
         if (ev && ev.status === "dormant") reactivated++;
+        if (ev) linkIds = gate("match", ev.slug, c.id, [...ev.ids], cl.aids);
+        // #179: a cluster the gate trimmed is not the story this event is about,
+        // so it must not rename it either (its title would describe the articles
+        // that were just held out). gateHeld is always false with the gate off.
+        const gateHeld = linkIds.length < cl.aids.length;
         const prevTitleSize = ev?.titleClusterSize || 0;
-        if (clusterSize >= prevTitleSize) {
+        if (clusterSize >= prevTitleSize && !gateHeld) {
           // strong continuation → adopt the new anchor title and record its cluster size
           updateNewTitle.run(c.title, summary, severity, hero, now, now,
             JSON.stringify({ title_cluster_size: clusterSize }), eventId); // preserves id, slug, started_at
           if (ev) ev.titleClusterSize = clusterSize;
+          if (ev) { const moved = maybeFollowHeadline(db, eventId, ev.slug, c.title, now); if (moved) ev.slug = moved; }
           // 🧭 matched-summary log — the adopt branch is the ONLY path that rewrites an
           // event's summary (updateKeepTitle protects it). "adopt" = incoming summary
           // stamped; "keep-null" = incoming was null so COALESCE preserved the prior. Makes
@@ -691,6 +771,11 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
             return;
           }
         }
+        // #179: a new event is minted without the cluster's own outliers. The core
+        // is the cluster's own (there is no event yet). Placed before the squatter
+        // release so a cluster the gate empties changes nothing at all.
+        linkIds = gate("create", slug, c.id, [], cl.aids);
+        if (!linkIds.length) return; // every article held — counted in coherenceHeld
         if (squatter) db.prepare("UPDATE events SET cluster_id = NULL, updated_at = ? WHERE id = ?").run(now, squatter.id);
         // Wave 1 (2a): 🧭 decision log — one structured line per CREATED event stating
         // why no existing event took this cluster (grep 🧭 instead of doing archaeology).
@@ -703,7 +788,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
           best_rejected: br ? { slug: br.slug.slice(0, 48), cos: +br.cos.toFixed(3), ent: +br.ent.toFixed(3), shared_article: br.shared, band: br.band ?? null } : null,
         })}`);
         insertEvent.run(eventId, slug, c.id, c.title, summary, c.category, "active", severity, hero, c.created_at, now,
-          JSON.stringify({ title_cluster_size: clusterSize }), now, now);
+          JSON.stringify({ title_cluster_size: linkIds.length }), now, now); // = clusterSize unless the #179 gate trimmed it
         eventState.set(eventId, { id: eventId, slug, started_at: c.created_at, status: "active", ids: new Set(), centroid: cl.centroid, core: ENTITY_MIN > 0 ? loadEventCore(db, cl.aids, idfMap, catSpanMap) : null, titleClusterSize: clusterSize });
         promoted++;
         if (ENTITY_MIN > 0) {
@@ -719,7 +804,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
           }
         }
       }
-      for (const aid of cl.aids) linkArticle.run(eventId, aid, now);
+      for (const aid of linkIds) linkArticle.run(eventId, aid, now);
       for (const cm of eligibleClusterMarkets(db, c.id)) {
         linkMarket.run(eventId, cm.market_id, cm.weight, cm.rank, now);
       }
@@ -751,6 +836,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
     eligible: eligible.length, promoted, matched, absorbed, held, merged: merges.length,
     reactivated, dormanted, closed, skippedStale, chained,
     prunedRefsDropped, emptyClustersSkipped,
+    ...(cohGate ? { coherenceHeld } : {}),
     yields: yieldToLoop.count ? yieldToLoop.count() : null,
   };
   logger.info(`🗂️  eventPromoter done — ${JSON.stringify(stats)}`);
