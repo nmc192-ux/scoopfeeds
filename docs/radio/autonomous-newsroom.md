@@ -76,3 +76,5 @@ Going on air unattended is an external post, so it has an explicit, scoped excep
 - **Never covered:** code merges outside the engine's normal gates, prod deploys of the web app outside autodeploy,
   new formats, changing the clock or the Rule 0 layer, credentials, or any other channel. Those stay human-approved.
 - **Playout host:** the Mac mini now; the design must allow a cloud host later.
+
+Platform safety (music provenance, film clearance, the standing watchdog, election claims): `docs/radio/safety.md` (#208).
