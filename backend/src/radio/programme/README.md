@@ -1,0 +1,78 @@
+# ScoopFeeds Radio — produced programme hours
+
+A **programme** is one produced hour of ScoopFeeds Radio: a fixed clock (`clock.js`), scripts written from the live
+feed, voiced by Kokoro "George", mixed with the beds and the Signal idents into one audio file, plus a cue sheet the
+programme screen (`../screen/scoopfeeds-radio-programme.html`, Signal identity) plays by its own clock.
+The 24/7 playout is unchanged unless it is started with `--programme`.
+
+```
+produce.mjs   facts (factPack.js) -> scripts (writer.js, claude -p sonnet) -> checks.js -> voice + mix + cues (assemble.js)
+              writes <out>/programme.json + part-<slot>.wav (+ film.webm, feature.webm)
+playout       cli.js --programme <out>: serves the programme screen, swaps its audio feeder onto each part at its start
+              (seeking to "now"), and stops at the programme's end (60:30)
+```
+
+**Facts.** Only what is in `pack.json` may be said: top stories from the radio feed with every outlet that covered
+them, four desks, markets (Yahoo chart API + CoinGecko) and weather (scoopfeeds.com). Every article passes the
+radio's Rule 0 layer before the writer sees it. `checks.js` then drops any line with a figure, outlet or quote not
+in the pack, any Pakistan-politics line, and any sentence about our own sourcing. Dropped lines are listed in
+`checks.json`. On-screen text (headlines, outlet names, ledes) is always taken verbatim from articles, never from
+the model.
+
+## Unattended hours (auto-air)
+
+`autoair.mjs` runs a whole hour with nobody at the desk: produce, air check (`airCheck.js`), YouTube broadcast
+(`../live/youtubeLive.js`), hand-over from the 24/7 radio, playout, stream watch, wrap-up. Fired by launchd:
+```bash
+backend/src/radio/playout/deploy/macos/install-autoair.sh 20:14     # 8:14 pm Mac time -> the 9 pm hour
+tail -f ~/scoopfeeds-radio/air/<hour>/autoair.log                   # each hour has its own folder + status.json
+touch ~/scoopfeeds-radio/PAUSE                                      # skip hours until removed
+```
+Rehearsal unless `RADIO_AUTOAIR_ENABLED=1`. Settings: `docs/reference/env_reference.md` (RADIO_AUTOAIR_*, RADIO_YT_*,
+RADIO_ALERT_EMAIL). Plan and the standing-approval draft: `docs/radio/autonomous-newsroom.md`.
+
+## Tuesday 13 October 2026 — test hour, 9:00 to 10:00 pm PKT (H = 16:00 UTC)
+
+All on the Mac Mini, in `~/work/scoopfeeds` on branch `feat/radio-test-hour`.
+
+**Once:**
+```bash
+cd ~/work/scoopfeeds && git fetch && git checkout feat/radio-test-hour && git pull
+cd backend/src/radio/playout && npm ci && cd ../../..          # playwright-core for the playout
+~/sixty/kokoro-start.sh &                                        # Kokoro on 127.0.0.1:8880 (leave running)
+```
+Put the A-Eye #003 episode (the published 4K or 1080p file) and one approved ScoopFeeds 60 film in
+`~/scoopfeeds-radio/feature/` and `~/scoopfeeds-radio/film/`. The A-Eye file was hand-published from the VPS:
+`ssh scoopfeeds-vps 'ls ~/publish'` to find it.
+
+**Rehearsal (10:00 am, for an 11:00 am hour, H = 06:00 UTC):**
+```bash
+launchctl bootout gui/$(id -u)/com.scoopfeeds.radio 2>/dev/null   # the 24/7 agent must not run at the same time
+export VIDEO_TTS_PROVIDER=kokoro VIDEO_TTS_KOKORO_URL=http://127.0.0.1:8880
+node src/radio/programme/produce.mjs --hour 2026-10-13T06:00:00Z --out ~/scoopfeeds-radio/rehearsal \
+  --music-dir ~/scoopfeeds-radio/music --film ~/scoopfeeds-radio/film/<film>.mp4 \
+  --feature ~/scoopfeeds-radio/feature/<a-eye-003>.mp4 --feature-title "A-Eye #003: The AI boom is running on borrowed money"
+# start the playout before 10:45 (the countdown); it records the whole hour and stops itself at 12:00:30
+RADIO_PLAYOUT_CHROME=system node src/radio/playout/cli.js --programme ~/scoopfeeds-radio/rehearsal \
+  --segments-dir ~/scoopfeeds-radio/rehearsal-seg --segment-keep 80 --music-dir ~/scoopfeeds-radio/music
+```
+Check: `checks.json` (what was dropped), the ping on 11:00:00 in the recording, speech above the bed, A/V sync in an
+ident (set `RADIO_PROGRAMME_AV_DELAY_MS` to the measured picture lag, default 300).
+
+**Air (Tuesday evening):**
+```bash
+# 8:30 pm — produce (takes ~10 min)
+node src/radio/programme/produce.mjs --hour 2026-10-13T16:00:00Z --out ~/scoopfeeds-radio/air ...same flags...
+# 8:40 pm — check ~/scoopfeeds-radio/air/checks.json and programme.json exist
+# 8:45 pm, on DrJ's "go" — RTMP needs BOTH gates from ~/.scoopfeeds-radio.env (never print the key)
+set -a; . ~/.scoopfeeds-radio.env; set +a
+RADIO_PLAYOUT_CHROME=system node src/radio/playout/cli.js --programme ~/scoopfeeds-radio/air --music-dir ~/scoopfeeds-radio/music
+# 9:20 pm (optional refresh of the second half; switches at the 9:27 music block)
+node src/radio/programme/produce.mjs --hour 2026-10-13T16:00:00Z --out ~/scoopfeeds-radio/air --from series ...same flags...
+```
+The playout stops by itself at 10:00:30 pm. Afterwards, reload the 24/7 agent:
+`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.scoopfeeds.radio.plist`.
+
+**Fallbacks.** No programme audio yet at a part's start: the bed keeps playing. A segment whose lines were all
+dropped: headlines and music. Producer failure: run it again (it is idempotent); if it cannot finish by 8:55 pm, run
+the 24/7 playout instead (visual radio, no voice).

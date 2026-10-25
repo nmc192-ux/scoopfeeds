@@ -63,6 +63,7 @@ not merged until DrJ says so. Everything not on this list ships automatically.
    (new model tiers, higher call caps, more sources than the plan's current step).
 4. **New public surfaces**: a new social channel, a new kind of automated post, email to a
    new audience, or anything that publishes where ScoopFeeds did not publish before.
+   (The radio auto-air loop below is the only scoped exception to this item.)
 5. **Editorial and legal**: changes to editorial guardrails (Rule 0, sensitive-topic rules,
    the Pakistan-related rules), the AI-disclosure chain, privacy, terms or other legal pages.
 6. **Market odds**: switching Reality Index / Truth Gap / market-implied probabilities back
@@ -76,6 +77,16 @@ not merged until DrJ says so. Everything not on this list ships automatically.
    or Bluesky, and a flag-flip PR touching any of these. DrJ switched the automated Shorts
    loop off in production because it may have caused the YouTube account suspension. Shorts
    made through the `/video-factory` skill, which DrJ approves one by one, are not affected.
+
+**Scoped exception to item 4 — radio auto-air loop (DrJ, 2026-10-22, #193).**
+It covers only `programme/autoair.mjs` airing a programme hour produced by `produce.mjs`
+that passed `airCheck`, on the main ScoopFeeds YouTube channel and the ScoopFeeds X account
+(X Live), at times installed on the Mac. It is off unless `RADIO_AUTOAIR_ENABLED` is literally
+`1`, and `~/scoopfeeds-radio/PAUSE` stops it. It never covers: code merges outside the
+engine's normal gates, prod deploys of the web app outside autodeploy, new formats, changing
+the clock or the Rule 0 layer, credentials, or any other channel. The playout host is the Mac
+mini now, and the design must allow a cloud host later. See `docs/radio/autonomous-newsroom.md`.
+This records DrJ's decision; it does not widen it.
 
 ## 4. Sources
 

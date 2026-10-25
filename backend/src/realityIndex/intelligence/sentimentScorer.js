@@ -20,6 +20,7 @@ import { logger } from "../../services/logger.js";
 import { aggregateScores } from "./simpleSentiment.js";
 import { upsertSentimentSnapshot } from "../dal/sentimentDao.js";
 import { formatSnapshotWriteStats } from "../dal/writeOnChange.js";
+import { notMachineEventSql } from "../dal/machineEvents.js";
 import { buildQuery } from "../ingest/social/baseSocialFetcher.js";
 
 import * as bluesky  from "../ingest/social/blueskyFetcher.js";
@@ -132,7 +133,7 @@ export async function runSentimentCycle({ limit = EVENTS_PER_CYCLE } = {}) {
   const db = getDb();
   const events = db.prepare(`
     SELECT id FROM events
-    WHERE status='active'
+    WHERE status='active' AND ${notMachineEventSql("events")}
     ORDER BY last_activity_at DESC
     LIMIT ?
   `).all(limit);
