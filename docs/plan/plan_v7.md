@@ -37,11 +37,11 @@ Specced directly as issues on 14 Oct; see the GitHub backlog (label `phase:0`).
 - [spec #190] lane:website — Location-aware feeds: country from the request (existing geo lookup), menu override, country-first ordering on Today and News, US/UK/Europe first
 - [queued] lane:website — News page (all tracked stories: developing, long-running, settled, trackers) replacing /events and the six category pages
 - [queued] lane:website — Dossier v2 layout per the canvas, including "Since your last visit" from the timeline
-- [queued] lane:graph — "What we know" AI block on dossiers with disclosure line, gated on the coherence gate verdict
+- [spec #250] lane:graph — "What we know" AI block on dossiers with disclosure line, gated on the coherence gate verdict
 - [queued] lane:website — Pencil layer: three characters as SVG components, margin-note component, sensitivity switch reused from editorialSensitivity
 - [queued] lane:website — Server-render the first screen of Today and dossiers for crawlers; NewsArticle markup; sitemap-events.xml
 - [queued] lane:website — "How we group stories" methodology page and rewritten About (remove claims that are not true)
-- [queued] lane:sources — Source step 1: grow to 200 active English-language sources, batches of 50 above the quality floor, list each batch in the daily report
+- [spec #251] lane:sources — Source step 1: grow to 200 active English-language sources, batches of 50 above the quality floor, list each batch in the daily report
 
 ## Phase 2 — new doors (19 Nov–9 Dec 2026)
 
