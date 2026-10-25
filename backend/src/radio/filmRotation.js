@@ -8,12 +8,31 @@
  *    newest episode of each series while it is under NEW_DAYS old.
  *  - No film repeats within MIN_GAP_MS of its last airing (`recent` seeds this from yesterday).
  *    When nothing eligible is left a slot is left EMPTY and reported, not filled with a repeat.
- *  - Shorts fill the break after each film slot, up to BREAK_SEC, never repeating within the gap.
+ *  - Shorts fill the break after each film slot, up to BREAK_SEC, never repeating within the gap. Only
+ *    Shorts cut from a long-form film in this library qualify (#216): a parentFilm naming one of the
+ *    library's films. loadLibrary() already drops the rest; this re-checks so a hand-built library cannot
+ *    slip a ScoopFeeds 60 Short (or an unlinked clip) into a break.
  *  - A slot that would start while the previous film or its break is still on air is left empty.
  *  - A promo ("New episode of X, Sunday") is produced from metadata for each film in the plan
  *    that is under NEW_DAYS old, placed PROMO_LEAD_MS before its slot.
  */
 import { easternMinutes } from "./musicLibrary.js";
+import { shortIneligibility } from "./filmLibrary.js";
+
+/**
+ * DrJ's media rule (#218): only items with a valid content-safety clearance may be planned. `isCleared(file)`
+ * is safety/contentSafety.js hasValidClearance in production; injected so this stays pure. The ones left out
+ * are returned with the reason, never dropped silently.
+ */
+export function clearedLibrary(library, isCleared) {
+  if (typeof isCleared !== "function") throw new Error("clearedLibrary needs isCleared(file)");
+  const items = [], notCleared = [];
+  for (const it of library.items) {
+    const c = isCleared(it.file);
+    if (c?.ok === true) items.push(it); else notCleared.push({ id: it.id, why: c?.why || "not cleared" });
+  }
+  return { ...library, items, notCleared };
+}
 
 export const MIN_GAP_MS = 6 * 3600_000;
 export const NEW_DAYS = 7;
@@ -50,9 +69,10 @@ export function promoText(film, airAt) {
  * @param {{items: object[]}} library
  * @param {{ slots: {at: Date, prime?: boolean}[], recent?: {id: string, at: number}[], now?: number }} o
  */
-export function planDay(library, { slots, recent = [], now = Date.now() }) {
+export function planDay(library, { slots, recent = [], now = Date.now(), env = process.env }) {
   const films = library.items.filter((i) => i.kind === "film");
-  const shorts = library.items.filter((i) => i.kind === "short");
+  const filmIds = new Set(films.map((f) => f.id));
+  const shorts = library.items.filter((i) => i.kind === "short" && !shortIneligibility(i, { filmIds, env }));
   const lastAir = new Map(recent.map((r) => [r.id, r.at]));
   const eligible = (item, at) => {
     const prev = lastAir.get(item.id);

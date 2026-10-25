@@ -26,12 +26,12 @@ body{font-family:'Schibsted Grotesk',Arial,sans-serif; color:var(--paper);}
 #top .mark{display:flex; align-items:center; gap:18px;}
 #top .word{font-family:'Bodoni Moda',serif; font-size:38px; font-weight:500; letter-spacing:-.005em;}
 #top .word i{color:var(--red2);}
-#live{display:flex; align-items:center; gap:10px; margin-left:30px; font-size:18px; padding:7px 14px 6px; border:1px solid rgba(255,74,61,.6); color:var(--paper);}
+#live{display:flex; align-items:center; gap:10px; margin-left:30px; font-size:26px; padding:5px 14px 4px; border:1px solid rgba(255,74,61,.6); color:var(--paper);}
 #live b{width:11px; height:11px; border-radius:50%; background:var(--red2); animation:pulse 1.6s ease-in-out infinite;}
 @keyframes pulse{0%,100%{opacity:1} 50%{opacity:.25}}
 #clocks{margin-left:auto; display:flex; gap:38px;}
-.clk{display:flex; flex-direction:column; align-items:flex-end; line-height:1.05;}
-.clk span{font-size:14px; color:var(--muted);}
+.clk{display:flex; flex-direction:column; align-items:flex-end; line-height:1.02;}
+.clk span{font-size:26px; color:var(--muted);}
 .clk b{font-size:30px; font-weight:400;}
 
 /* ── main ── */
@@ -39,7 +39,7 @@ body{font-family:'Schibsted Grotesk',Arial,sans-serif; color:var(--paper);}
 .scene{position:absolute; inset:0; opacity:0; visibility:hidden; transition:opacity .5s ease, visibility 0s linear .5s;}
 .scene.on{opacity:1; visibility:visible; transition:opacity .5s ease;}
 .pad{position:absolute; inset:56px 96px 48px 96px;}
-.kicker{font-size:20px; color:var(--red2);}
+.kicker{font-size:26px; color:var(--red2);}
 
 /* title */
 .s-title h1{font-family:'Bodoni Moda',serif; font-weight:500; font-size:120px; line-height:1; margin:18px 0 0; letter-spacing:-.01em;}
@@ -51,24 +51,24 @@ body{font-family:'Schibsted Grotesk',Arial,sans-serif; color:var(--paper);}
 /* story: a paper card */
 .s-story .card{position:absolute; left:96px; right:96px; top:56px; bottom:48px; background:var(--paper); color:var(--ink); padding:64px 80px; box-sizing:border-box; display:flex; flex-direction:column;}
 .s-story .card .kicker{color:var(--red);}
-.s-story .count{position:absolute; right:80px; top:58px; font-size:22px; color:#6B6B6B;}
+.s-story .count{position:absolute; right:80px; top:58px; font-size:26px; color:#6B6B6B;}
 .s-story h2{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-height:1.06; margin:36px 0 0; letter-spacing:-.01em; max-width:1500px;}
 .s-story .by{margin-top:auto; display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
-.s-story .by span.l{font-size:18px; color:#6B6B6B; margin-right:6px;}
-.chip{font-size:22px; font-weight:600; background:var(--navy); color:var(--paper); padding:9px 16px 8px;}
+.s-story .by span.l{font-size:26px; color:#6B6B6B; margin-right:6px;}
+.chip{font-size:26px; font-weight:600; background:var(--navy); color:var(--paper); padding:9px 16px 8px;}
 .s-story .bar{position:absolute; left:0; right:0; bottom:0; height:8px; background:var(--paper2);}
 .s-story .bar i{display:block; height:100%; background:var(--red);}
 
 /* markets */
 .board{display:grid; grid-template-columns:repeat(4,1fr); gap:24px; margin-top:40px;}
 .tile{background:var(--ink2); border-top:3px solid var(--navy2); padding:26px 28px 24px;}
-.tile .g{font-size:15px; color:var(--muted);}
+.tile .g{font-size:26px; color:var(--muted);}
 .tile .n{font-family:'Bodoni Moda',serif; font-size:40px; margin-top:6px;}
 .tile .p{font-size:46px; font-weight:400; margin-top:14px;}
 .tile .c{font-size:26px; font-weight:700; margin-top:6px;}
 .up{color:var(--paper);} .up::before{content:'▲ '; font-size:.7em; color:#8FB996;}
 .down{color:var(--red2);} .down::before{content:'▼ '; font-size:.7em;}
-.asof{font-size:18px; color:var(--muted); margin-top:28px;}
+.asof{font-size:26px; color:var(--muted); margin-top:28px;}
 h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-height:1; margin:14px 0 0;}
 
 /* weather */
@@ -76,19 +76,19 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 .wx div{background:var(--ink2); padding:24px 24px 22px; border-top:3px solid var(--navy2);}
 .wx .c{font-family:'Bodoni Moda',serif; font-size:34px;}
 .wx .t{font-size:58px; font-weight:300; margin-top:10px;}
-.wx .t small{font-size:24px; color:var(--muted); margin-left:6px;}
-.wx .d{font-size:20px; color:var(--muted); margin-top:4px; text-transform:capitalize;}
+.wx .t small{font-size:26px; color:var(--muted); margin-left:6px;}
+.wx .d{font-size:26px; color:var(--muted); margin-top:4px; text-transform:capitalize;}
 
 /* compared */
 .s-compared h2{font-family:'Bodoni Moda',serif; font-weight:500; font-size:52px; line-height:1.1; margin:16px 0 0; max-width:1600px;}
 .cmp{display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-top:40px;}
 .cmp .o{background:var(--paper); color:var(--ink); padding:30px 34px 32px; min-height:200px; border-top:6px solid var(--paper2); transition:opacity .4s, border-color .4s;}
-.cmp .o .s{font-size:20px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#555;}
+.cmp .o .s{font-size:26px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#555;}
 .cmp .o p{font-family:'Bodoni Moda',serif; font-size:38px; line-height:1.15; margin:12px 0 0;}
 .cmp.focus .o{opacity:.35;}
 .cmp.focus .o.act{opacity:1; border-top-color:var(--red);}
 .cmp.focus .o.act .s{color:var(--red);}
-.s-known .lab{font-size:24px; color:var(--red2); margin-top:56px;}
+.s-known .lab{font-size:26px; color:var(--red2); margin-top:56px;}
 .s-known p.txt{font-family:'Bodoni Moda',serif; font-size:60px; line-height:1.15; margin:18px 0 0; max-width:1600px;}
 
 /* election board (#197): every called race says who projected it; bars count projections only */
@@ -112,14 +112,14 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 .s-music .hcard{position:absolute; left:96px; right:96px; top:56px; opacity:0; transform:translateY(20px); transition:opacity .7s, transform .7s;}
 .s-music .hcard.on{opacity:1; transform:none;}
 .s-music .hcard p{font-family:'Bodoni Moda',serif; font-weight:500; font-size:88px; line-height:1.06; margin:22px 0 0; max-width:1600px;}
-.s-music .hcard .src{font-size:22px; color:var(--muted); margin-top:26px;}
+.s-music .hcard .src{font-size:26px; color:var(--muted); margin-top:26px;}
 .eq{position:absolute; left:96px; bottom:56px; display:flex; gap:7px; align-items:flex-end; height:60px;}
 .eq i{width:8px; background:var(--red2); animation:eq 1.2s ease-in-out infinite; height:100%; transform-origin:bottom;}
 @keyframes eq{0%,100%{transform:scaleY(.2)} 50%{transform:scaleY(1)}}
-.mcredit{position:absolute; left:96px; bottom:20px; font-size:20px; color:var(--muted); letter-spacing:.02em;}
+.mcredit{position:absolute; left:96px; bottom:20px; font-size:26px; color:var(--muted); letter-spacing:.02em;}
 .mcredit[hidden]{display:none;}
-.strap{position:absolute; right:96px; bottom:52px; display:flex; align-items:center; gap:16px; font-size:24px;}
-.strap b{background:var(--red); color:#fff; padding:8px 14px 7px; font-size:18px; letter-spacing:.14em;}
+.strap{position:absolute; right:96px; bottom:52px; display:flex; align-items:center; gap:16px; font-size:26px;}
+.strap b{background:var(--red); color:#fff; padding:8px 14px 7px; font-size:26px; letter-spacing:.14em;}
 
 /* film */
 .s-film video{position:absolute; left:50%; top:20px; height:calc(100% - 40px); aspect-ratio:9/16; transform:translateX(-50%); background:#000; object-fit:cover;}
@@ -133,14 +133,14 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 #feat.on{display:block;}
 #feat video{width:100%; height:100%; object-fit:contain; background:#000;}
 #feat .bug{position:absolute; left:40px; top:34px; display:flex; align-items:center; gap:14px; background:rgba(17,17,17,.72); padding:10px 16px 10px 12px;}
-#feat .bug span{font-family:'Bodoni Moda',serif; font-size:24px;}
+#feat .bug span{font-family:'Bodoni Moda',serif; font-size:26px;}
 #feat .bug span i{color:var(--red2);}
 
 /* series */
 .ser{display:grid; grid-template-columns:repeat(3,1fr); gap:24px; margin-top:44px;}
 .ser div{background:var(--navy); padding:34px 34px 30px;}
 .ser .n{font-family:'Bodoni Moda',serif; font-size:46px; line-height:1.05;}
-.ser .d{font-size:22px; color:var(--red2); margin-top:12px;}
+.ser .d{font-size:26px; color:var(--red2); margin-top:12px;}
 
 /* slates: countdown, signoff, endcard */
 .slate{position:absolute; inset:0; background:var(--navy); display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;}
@@ -152,14 +152,33 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 .slate .unmute{display:inline-flex; align-items:center; gap:14px; margin-top:34px; padding:12px 26px; border:1px solid var(--red2); color:var(--paper); font-size:26px; letter-spacing:.04em;}
 .slate .unmute svg{flex:none;}
 
+/* ── right rail (#200): Coming up, markets, weather on the story and headline-break scenes. Earn-render: a block
+   shows only with real data; with no block the rail is not drawn and the scene keeps the full width. ── */
+#rail{position:absolute; right:56px; top:56px; bottom:48px; width:480px; display:none; flex-direction:column; gap:22px; z-index:2;}
+#main.railed #rail{display:flex;}
+#main.railed .s-story .card{right:568px;}
+#main.railed .s-music .hcard{right:568px;}
+#main.railed .s-music .strap{right:568px;}
+#main.railed .s-music .hcard p{font-size:76px;}
+#main.railed .s-story h2{font-size:72px;}
+.rb{background:var(--ink2); border-top:3px solid var(--navy2); padding:20px 24px 18px;}
+.rb[hidden]{display:none;}
+.rb h4{margin:0 0 10px; font-size:26px; color:var(--red2); font-weight:700; text-transform:uppercase; letter-spacing:.16em;}
+.rb .r{display:grid; grid-template-columns:auto 1fr auto; gap:14px; align-items:baseline; font-size:26px; line-height:1.3; padding:4px 0;}
+.rb .r .k{color:var(--muted);}
+.rb .r .v{text-align:right;}
+.rb-up .r{grid-template-columns:96px 1fr;}
+.rb .w{display:grid; grid-template-columns:1fr auto; font-size:26px; line-height:1.35; padding:3px 0;}
+.rb .w b{font-weight:400;}
+
 /* ── bottom strip ── */
 #strip{position:absolute; left:0; right:0; bottom:0; height:76px; display:grid; grid-template-columns:auto 1fr; background:var(--ink2); border-top:1px solid var(--line); z-index:5;}
-#seg{display:flex; align-items:center; padding:0 28px 0 56px; background:var(--red); color:#fff; font-size:20px; white-space:nowrap;}
+#seg{display:flex; align-items:center; padding:0 28px 0 56px; background:var(--red); color:#fff; font-size:26px; white-space:nowrap;}
 #tickwrap{overflow:hidden; display:flex; align-items:center;}
 #track{display:flex; white-space:nowrap; will-change:transform; animation:tick var(--dur,300s) linear infinite;}
 @keyframes tick{from{transform:translateX(0)} to{transform:translateX(-50%)}}
 .ti{font-size:26px; padding:0 34px; border-left:1px solid var(--line);}
-.ti em{font-style:normal; color:var(--muted); font-size:18px; margin-left:12px;}
+.ti em{font-style:normal; color:var(--muted); font-size:26px; margin-left:12px;}
 
 /* ── full-screen overlays: idents and the sting ── */
 .ov{position:absolute; inset:0; z-index:20; display:none;}
@@ -177,6 +196,7 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
   </div>
 
   <div id="main">
+    <aside id="rail"><div class="rb rb-up" id="rUp" hidden></div><div class="rb" id="rMk" hidden></div><div class="rb" id="rWx" hidden></div></aside>
     <section class="scene" data-scene="countdown"><div class="slate">
       <svg width="220" height="220" viewBox="-100 -100 200 200"><circle r="96" fill="#F4EFE6"/><circle r="54" fill="none" stroke="#0F2238" stroke-width="9"/><circle r="22" fill="#D7261E"/></svg>
       <div class="w">ScoopFeeds <i>Radio</i></div><div class="rule"></div>
@@ -193,7 +213,7 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
       <div class="by" id="sBy"></div>
       <div class="bar"><i id="sBar"></i></div></div></section>
 
-    <section class="scene" data-scene="markets"><div class="pad"><div class="kicker caps">Markets Now</div><h1 class="st">The markets, as of <span id="mAsOf"></span></h1><div class="board" id="mBoard"></div><div class="asof" id="mNote">Prices from Yahoo Finance and CoinGecko. Indices delayed.</div></div></section>
+    <section class="scene" data-scene="markets"><div class="pad"><div class="kicker caps" id="mKick">Markets Now</div><h1 class="st">The markets, as of <span id="mAsOf"></span></h1><div class="board" id="mBoard"></div><div class="asof" id="mNote">Prices from Yahoo Finance and CoinGecko. Indices delayed.</div></div></section>
 
     <section class="scene" data-scene="weather"><div class="pad"><div class="kicker caps">Weather around the world</div><h1 class="st">Right now</h1><div class="wx" id="wGrid"></div></div></section>
 
@@ -207,9 +227,9 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
     <section class="scene s-music" data-scene="music"><div id="hcards"></div><div class="eq" id="eq"></div><div class="strap" id="strap" hidden><b class="caps">Coming up</b><span id="strapTxt"></span></div><div class="mcredit" id="musicCredit" hidden></div></section>
 
     <section class="scene s-film" data-scene="film">
-      <div class="side l"><div class="w">ScoopFeeds <i>60</i></div><div class="caps" style="font-size:20px;margin-top:22px;color:var(--muted)">A story in sixty seconds</div></div>
+      <div class="side l"><div class="caps" style="font-size:26px;color:var(--red2)">From the films</div><div class="serif" id="filmTitle" style="font-size:44px;line-height:1.1;margin-top:14px"></div></div>
       <video id="film" muted playsinline preload="auto"></video>
-      <div class="side r"><div class="caps" style="font-size:20px;color:var(--red2)">Watch more</div><div class="serif" style="font-size:34px;margin-top:12px">YouTube</div><div style="font-size:26px;margin-top:8px">@scoopfeedsnews</div></div></section>
+      <div class="side r"><div class="caps" style="font-size:26px;color:var(--red2)">Watch more</div><div class="serif" style="font-size:34px;margin-top:12px">YouTube</div><div style="font-size:26px;margin-top:8px">@scoopfeedsnews</div></div></section>
 
     <section class="scene" data-scene="series"><div class="pad"><div class="kicker caps">This week on ScoopFeeds</div><h1 class="st">Our weekly films</h1><div class="ser" id="serGrid"></div></div></section>
 
@@ -272,12 +292,12 @@ let PROG = { cues: [], headlines: [] }, progBuilt = null;
 async function loadProgramme(){
   const url = params.get('programme'); if (!url) return;
   try { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) return; const p = await r.json();
-    if (p.builtAt !== progBuilt){ PROG = p; progBuilt = p.builtAt; buildTicker(); lastKey = null; } } catch (_) {}
+    if (p.builtAt !== progBuilt){ PROG = p; progBuilt = p.builtAt; buildTicker(); lastKey = null; railKey = null; } } catch (_) {}
 }
 window.ScoopProgramme = {
-  set(p){ PROG = p; progBuilt = p.builtAt; buildTicker(); lastKey = null; tick(); },
+  set(p){ PROG = p; progBuilt = p.builtAt; buildTicker(); lastKey = null; railKey = null; tick(); },
   offset(ms){ OFFSET = ms; },
-  renderAt(ms){ FROZEN = ms; lastKey = null; tick(); },
+  renderAt(ms){ FROZEN = ms; lastKey = null; railKey = null; tick(); },
   release(){ FROZEN = null; lastKey = null; },
 };
 
@@ -300,11 +320,11 @@ const R = {
   title(d){ $('tKick').textContent = d.kicker || ''; $('tTitle').textContent = d.title || ''; $('tItems').innerHTML = (d.items || []).map((h) => `<li>${esc(h)}</li>`).join('');
     document.querySelector('.s-title').classList.toggle('next', d.kicker === 'Next'); show('title'); },
   story(d){ $('sKick').textContent = d.kicker || ''; $('sCount').textContent = d.of > 1 ? `${d.n} of ${d.of}` : ''; $('sHead').textContent = d.headline || '';
-    $('sLede').innerHTML = d.lede ? `${esc(d.lede.text)} <span style="color:#8A8A8A;font-size:22px;white-space:nowrap">— ${esc(d.lede.source)}</span>` : '';
+    $('sLede').innerHTML = d.lede ? `${esc(d.lede.text)} <span style="color:#8A8A8A;font-size:26px;white-space:nowrap">— ${esc(d.lede.source)}</span>` : '';
     $('sBy').innerHTML = (d.outlets || []).length ? `<span class="l caps">Reported by</span>` + d.outlets.map((o) => `<span class="chip">${esc(o)}</span>`).join('') : '';
     $('sBar').style.width = d.of ? `${(d.n / d.of) * 100}%` : '0'; show('story'); },
   markets(d){ const t = d.asOf ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(new Date(d.asOf)) + ' New York' : '';
-    $('mAsOf').textContent = t;
+    $('mAsOf').textContent = t; $('mKick').textContent = d.title || 'Markets Now'; $('mNote').textContent = d.note || 'Prices from Yahoo Finance and CoinGecko. Indices delayed.';
     const f = (r) => r.price >= 1000 ? Math.round(r.price).toLocaleString('en-US') : r.price.toLocaleString('en-US', { maximumFractionDigits: 2 });
     $('mBoard').innerHTML = (d.rows || []).map((r) => `<div class="tile"><div class="g caps">${esc(r.group)}</div><div class="n">${esc(r.key)}</div><div class="p num">${f(r)}</div>${r.pct == null ? '' : `<div class="c num ${r.pct >= 0 ? 'up' : 'down'}">${Math.abs(r.pct).toFixed(2)}%</div>`}</div>`).join('');
     show('markets'); },
@@ -335,8 +355,8 @@ const R = {
     show('election'); },
   music(d){ show('music'); const n = d.next && d.next.at > now();
     $('musicCredit').hidden = !d.credit; $('musicCredit').textContent = d.credit || '';
-    $('strap').hidden = !n; if (n) $('strapTxt').textContent = `${hm(d.next.at, 'Asia/Karachi')} PKT · ${d.next.title}`; },
-  film(d){ show('film'); if (ENCODER_MEDIA) return; const v = $('film'); if (!v.src.endsWith(d.src)) v.src = d.src;
+    $('strap').hidden = !n; if (n) $('strapTxt').textContent = `${hm(d.next.at, 'America/New_York')} New York · ${d.next.title}`; },
+  film(d){ $('filmTitle').textContent = String(d.title || '').replace(/^From /, ''); show('film'); if (ENCODER_MEDIA) return; const v = $('film'); if (!v.src.endsWith(d.src)) v.src = d.src;
     const pos = Math.max(0, (now() - d.t0) / 1000); try { v.currentTime = pos; } catch (_) {} v.play().catch(() => {}); },
   series(d){ $('serGrid').innerHTML = (d.cards || []).map((c) => `<div><div class="n">${esc(c.series)}</div><div class="d caps">${esc(c.day)}</div></div>`).join(''); show('series'); },
   signoff(){ show('signoff'); },
@@ -345,6 +365,33 @@ const R = {
   feature(d){ show('music'); if (ENCODER_MEDIA) return; const v = $('featv'); if (!v.src.endsWith(d.src)) v.src = d.src; $('feat').classList.add('on');
     try { v.currentTime = Math.max(0, (now() - d.t0) / 1000); } catch (_) {} v.play().catch(() => {}); },
 };
+
+/* right rail: Coming up (the next titled slots), markets (verbatim pack rows), weather (three cities at a time, by
+   the clock). Each block earns its place; no block, no rail. */
+const RAIL_SCENES = new Set(['story', 'music']);
+let railKey = null;
+function renderRail(t, scene){
+  const on = RAIL_SCENES.has(scene);
+  const key = on ? `${scene}|${Math.floor(t / 8000)}|${progBuilt}` : 'off';
+  if (key === railKey) return; railKey = key;
+  if (!on){ $('main').classList.remove('railed'); return; }
+  const ny = (ms) => hm(ms, 'America/New_York');
+  const up = (PROG.slots || []).filter((s) => s.start > t && s.title && !['ident', 'countdown', 'endcard'].includes(s.kind))
+    .filter((s, i, all) => all.findIndex((o) => o.title === s.title) === i).slice(0, 3);
+  $('rUp').hidden = !up.length;
+  $('rUp').innerHTML = up.length ? `<h4>Coming up</h4>` + up.map((s) => `<div class="r"><span class="k num">${ny(s.start)}</span><span>${esc(s.title)}</span></div>`).join('') : '';
+  const mk = (PROG.rail?.markets || []).filter((r) => Number.isFinite(r.price)).slice(0, 5);
+  const f = (r) => r.price >= 1000 ? Math.round(r.price).toLocaleString('en-US') : r.price.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  $('rMk').hidden = !mk.length;
+  $('rMk').innerHTML = mk.length ? `<h4>Markets</h4>` + mk.map((r) => `<div class="r num"><span>${esc(r.key)}</span><span class="v">${f(r)}</span>${r.pct == null ? '<span></span>' : `<span class="${r.pct >= 0 ? 'up' : 'down'}">${Math.abs(r.pct).toFixed(2)}%</span>`}</div>`).join('') : '';
+  const wx = PROG.rail?.weather || [];
+  const us = new Set(['New York', 'Washington']);
+  const start = wx.length ? (Math.floor(t / 8000) * 3) % wx.length : 0;
+  const three = wx.length ? [0, 1, 2].map((i) => wx[(start + i) % wx.length]).filter((w, i, all) => all.indexOf(w) === i) : [];
+  $('rWx').hidden = !three.length;
+  $('rWx').innerHTML = three.length ? `<h4>Weather</h4>` + three.map((w) => `<div class="w"><b>${esc(w.city)}</b><span class="num">${us.has(w.city) ? `${w.f}°F` : `${w.c}°C`}</span></div>`).join('') : '';
+  $('main').classList.toggle('railed', !$('rUp').hidden || !$('rMk').hidden || !$('rWx').hidden);
+}
 
 /* music scene: rotate headline cards every 12 s by the clock (no timers to drift) */
 function musicCards(t){
@@ -366,7 +413,7 @@ const PAL = { id: { bg:'#0F2238', disc:'#F4EFE6', ring:'#0F2238', ink:'#F4EFE6',
 const TT = { id: { S: 0.4, k: 1.0, E: 8.0 }, top: { S: 4.5, k: 0.85, E: 10.0 }, sting: { S: 0.05, k: 0.55, E: 3.0 } };
 const RC = 2 * Math.PI * 52; $('ring').setAttribute('stroke-dasharray', RC);
 const KZ = [['New York','America/New_York'],['London','Europe/London'],['Dubai','Asia/Dubai'],['Karachi','Asia/Karachi']];
-$('kgrid').innerHTML = KZ.map(([c], i) => `<div><div class="caps" style="font-size:24px;color:#9A9A9A">${c}</div><div id="k${i}" style="font-size:96px;font-weight:300;color:#F4EFE6;margin-top:4px"></div></div>`).join('');
+$('kgrid').innerHTML = KZ.map(([c], i) => `<div><div class="caps" style="font-size:26px;color:#9A9A9A">${c}</div><div id="k${i}" style="font-size:96px;font-weight:300;color:#F4EFE6;margin-top:4px"></div></div>`).join('');
 let ovMode = null;
 function drawOverlay(mode, t, t0){
   const P = PAL[mode], T = TT[mode], at = (x) => T.S + x * T.k;
@@ -420,6 +467,7 @@ function tick(){
     if (cue.scene === 'music') musicCards(t);
   } else if (lastKey !== 'none'){ lastKey = 'none'; show('music'); }
   if (!cue || cue.scene === 'music') musicCards(t);
+  renderRail(t, cue ? (cue.scene === 'feature' ? 'feature' : cue.scene) : 'music');
 }
 function loop(){ if (FROZEN == null) tick(); requestAnimationFrame(loop); }
 loadProgramme(); setInterval(loadProgramme, 5000);

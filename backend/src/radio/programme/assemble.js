@@ -9,7 +9,7 @@
  *            silent under idents and the film, faded out at the end
  *   voice    each line normalised to -16 LUFS, placed at its computed start
  *   sonic    Signal idents and stings from brand/sonic, at -16 LUFS-ish (-2 dB)
- *   film     the ScoopFeeds 60 film's own sound in its slot
+ *   film     the Short's own sound in its slot (a Short cut from a published long-form film, #216)
  * Screen: cues [{ at, scene, data }] with absolute epoch-ms times; the screen plays them
  * by its own clock (see screen/scoopfeeds-radio-programme.html).
  */
@@ -130,7 +130,7 @@ class WavWriter {
  * @param {object} o.pack         fact pack
  * @param {number} o.hourStart    epoch ms of H
  * @param {(daypart:string)=>{file:string,lufs:number}} o.bedFor
- * @param {string|null} o.film    path to a ScoopFeeds 60 film (mp4) or null
+ * @param {string|null} o.film    path to an eligible Short (filmLibrary.resolveHourShort) or null
  * @param {Function} o.voice      (text) => {path, durationSecs}
  * @param {string} o.outWav
  */
@@ -178,6 +178,7 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
         if (!lines.length) { cues.push({ at: at(t0), scene: "music", data: md(s) }); break; }   // nothing survived: headlines and music
         const storyLines = lines.filter((l) => l.story && !l.outlet);
         if (s.segment === "markets") { cues.push({ at: at(t0), scene: "markets", data: { title: s.title, rows: pack.markets, asOf: pack.builtAt } }); break; }
+        if (s.segment === "crypto") { cues.push({ at: at(t0), scene: "markets", data: { title: s.title, rows: pack.crypto || [], asOf: pack.builtAt, note: "Prices from CoinGecko. 24-hour change." } }); break; }
         if (s.segment === "weather") { cues.push({ at: at(t0), scene: "weather", data: { title: s.title, cities: pack.weather } }); break; }
         if (s.segment === "signoff") { cues.push({ at: at(t0), scene: "signoff", data: {} }); break; }
         if (s.segment === "compared") {
