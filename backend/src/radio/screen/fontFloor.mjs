@@ -25,10 +25,11 @@ export async function launch() {
 }
 
 /** Every visible element with its own text, with its rendered font size in 1080p stage pixels. */
-async function measure(page, rootSel) {
-  return page.evaluate(({ rootSel }) => {
+async function measure(page, rootSel, frameSel) {
+  return page.evaluate(({ rootSel, frameSel }) => {
     const root = document.querySelector(rootSel);
     const scale = root.getBoundingClientRect().width / 1920;
+    const frame = (frameSel && document.querySelector(frameSel) || root).getBoundingClientRect();
     const out = [];
     for (const el of root.querySelectorAll("*")) {
       const own = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim();
@@ -37,10 +38,13 @@ async function measure(page, rootSel) {
       const r = el.getBoundingClientRect(); if (!r.width || !r.height) continue;
       let o = 1; for (let e = el; e && e !== document.body; e = e.parentElement) o *= Number(getComputedStyle(e).opacity);
       if (o < 0.5) continue;   // a card fading out, not text on screen
-      out.push({ text: own.slice(0, 50), px: Math.round(parseFloat(getComputedStyle(el).fontSize) * 100) / 100, cls: el.className || el.tagName.toLowerCase(), scale });
+      // overflow (#197 review): text that runs past the scene frame is clipped off air without any error
+      const inScene = !!el.closest(".scene.on");   // the ticker scrolls and the header sits above #main by design
+      const off = !frameSel || !inScene ? 0 : Math.max(0, r.bottom - frame.bottom, r.right - frame.right, frame.top - r.top, frame.left - r.left) / scale;
+      out.push({ text: own.slice(0, 50), px: Math.round(parseFloat(getComputedStyle(el).fontSize) * 100) / 100, cls: el.className || el.tagName.toLowerCase(), scale, off: Math.round(off) });
     }
     return out;
-  }, { rootSel });
+  }, { rootSel, frameSel });
 }
 
 /** @returns {Promise<{screen, scene, smallest, under: object[]}[]>} */
@@ -68,7 +72,7 @@ export async function measureAll(browser, { shots = null } = {}) {
     await page.evaluate((t) => window.ScoopProgramme.renderAt(t), c.at);
     await page.waitForTimeout(900);
     await page.evaluate((t) => window.ScoopProgramme.renderAt(t), c.at + 1);   // music cards fade in over 0.7 s
-    const m = await measure(page, "#stage");
+    const m = await measure(page, "#stage", "#main");
     results.push(summary("programme", name, m));
     if (shots) await page.screenshot({ path: path.join(shots, `programme-${name}.jpg`), quality: 85 });
   }
@@ -89,7 +93,8 @@ export async function measureAll(browser, { shots = null } = {}) {
 
 function summary(screen, scene, m) {
   const under = m.filter((x) => x.px < FLOOR_PX);
-  return { screen, scene, count: m.length, smallest: m.length ? Math.min(...m.map((x) => x.px)) : null, under };
+  const overflow = m.filter((x) => x.off > 1);
+  return { screen, scene, count: m.length, smallest: m.length ? Math.min(...m.map((x) => x.px)) : null, under, overflow };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -99,6 +104,6 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const b = await launch();
   const res = await measureAll(b, { shots });
   await b.close();
-  for (const r of res) console.log(`${r.under.length ? "✗" : "✓"} ${r.screen.padEnd(9)} ${r.scene.padEnd(10)} ${String(r.count).padStart(3)} text elements, smallest ${r.smallest} px${r.under.length ? "  UNDER: " + r.under.map((u) => `${u.px}px "${u.text}" (${u.cls})`).join("; ") : ""}`);
-  process.exitCode = res.some((r) => r.under.length) ? 1 : 0;
+  for (const r of res) console.log(`${r.under.length ? "✗" : "✓"} ${r.screen.padEnd(9)} ${r.scene.padEnd(10)} ${String(r.count).padStart(3)} text elements, smallest ${r.smallest} px${r.overflow?.length ? "  OVERFLOW: " + r.overflow.map((u) => `${u.off}px "${u.text}"`).join("; ") : ""}${r.under.length ? "  UNDER: " + r.under.map((u) => `${u.px}px "${u.text}" (${u.cls})`).join("; ") : ""}`);
+  process.exitCode = res.some((r) => r.under.length || (r.overflow || []).length) ? 1 : 0;
 }

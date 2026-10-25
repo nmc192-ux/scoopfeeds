@@ -115,4 +115,9 @@ count without how much is in ("counting continues" otherwise). Until the first p
 reads a mechanical "what's on the ballot" line set (Senate / governors / House, rotating by hour) from
 `../election/races2026.js` (shared with the #204 map). The board (`election` scene) shows only when the pack has
 at least one attributed item: control bars count projected races only, every called race says "Projected by
-<outlet>", the rest "Not yet called", and the latest projections are quoted verbatim with their outlet.
+<outlet>", the rest "Not yet called", and the latest projections are quoted verbatim with their outlet. At the
+26 px screen floor a full night cannot fit one screen, so the board is paged (`boardPages()` in `electionDesk.js`):
+an overview (Senate bar, House), the latest projections, then the called races three columns at a time with the
+uncalled ones listed by name. The pages share the desk from the first projection line to the slot's end, at least
+8 s each, and nothing else interrupts them. `screen/fontFloor.test.js` renders a worst-case full board
+(`screen/fixtures/sampleElection.mjs`) and fails on any text under 26 px or past the frame.

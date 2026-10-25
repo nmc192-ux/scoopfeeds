@@ -4,6 +4,7 @@
  * scene so a test can freeze the programme screen on each.
  */
 import { buildGridClock } from "../../programme/clock.js";
+import { electionScenes } from "./sampleElection.mjs";
 
 export function sampleProgramme(hourStart = Date.parse("2026-10-27T14:00:00Z")) {   // 10:00 ET, a Tuesday
   const { slots } = buildGridClock(hourStart);
@@ -34,6 +35,7 @@ export function sampleProgramme(hourStart = Date.parse("2026-10-27T14:00:00Z")) 
     series: { at: at("series"), scene: "series", data: { title: "This week on ScoopFeeds", cards: [{ series: "A-Eye", day: "Saturdays" }, { series: "The Record", day: "Fridays" }, { series: "People", day: "Tuesdays" }] } },
     signoff: { at: at("signoff"), scene: "signoff", data: {} },
     countdown: { at: hourStart - 600_000, scene: "countdown", data: { target: hourStart } },
+    ...electionScenes(at("music-1", 60)),   // #197: every page of a worst-case full election board
   };
   const cues = Object.values(scenes).sort((a, b) => a.at - b.at);
   return {

@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { extractElectionPack, itemsFromSentence, electionText, candidateOf } from "./electionPack.js";
 import { checkSegments, electionReason } from "./checks.js";
 import { buildClock, checkClock } from "./clock.js";
-import { deskOn, addDeskToClock, ballotLines, addBallotLines, boardData, DESK_FROM, DESK_UNTIL, EXPLAINER_UNTIL } from "./electionDesk.js";
+import { deskOn, addDeskToClock, ballotLines, addBallotLines, boardData, boardPages, racePages, latestPages, QUOTE_MAX, DESK_FROM, DESK_UNTIL, EXPLAINER_UNTIL } from "./electionDesk.js";
 import { buildPrompt } from "./writer.js";
 
 const NOW = Date.parse("2026-11-04T03:00:00Z");
@@ -191,8 +191,53 @@ test("rehearsal: a desk hour on fixture data has the desk and the board, with at
   const title = cues.find((c) => c.scene === "title");
   assert.equal(title.data.title, "The Midterms");
   const board = cues.filter((c) => c.scene === "election");
-  assert.deepEqual(board.map((c) => c.data.view), ["senate", "governor"]);
-  assert.equal(board[0].data.senate.rows.find((r) => r.state === "NC").calls.map((c) => c.outlet).sort().join(","), "AP,Fox News");
-  assert.ok(board[0].at >= H + 840_000 && board[0].at < H + 1020_000);
+  assert.deepEqual(board.map((c) => `${c.data.page.kind}${c.data.page.view ? ":" + c.data.page.view : ""}`), ["overview", "latest", "races:senate", "races:governor"]);
+  const nc = board[2].data.page.cols.flat().find((r) => r.state === "NC");
+  assert.equal(nc.calls.map((c) => c.outlet).sort().join(","), "AP,Fox News");
+  assert.equal(nc.lines[0], "Outlets disagree");
+  assert.ok(board[0].at >= H + 840_000 && board.at(-1).at < H + 1020_000);
+  // the board holds the screen from its first page to the end of the desk: no other card interrupts it
+  const deskCues = cues.filter((c) => c.at >= board[0].at && c.at < H + 1020_000);
+  assert.deepEqual(deskCues.map((c) => c.scene), board.map(() => "election"));
+  for (let i = 1; i < board.length; i++) assert.ok(board[i].at - board[i - 1].at >= 8_000, "each page stays up at least 8 s");
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ── #197 review (25 Oct): the board is paged so a full election night fits the 26 px screen ──
+import { fullBoard, partialBoard } from "../screen/fixtures/sampleElection.mjs";
+
+test("board pages: every race appears exactly once, every called race names who projected it", () => {
+  for (const b of [fullBoard(), partialBoard(), boardData(ep())]) {
+    const pages = boardPages(b);
+    assert.equal(pages[0].kind, "overview");
+    for (const view of ["senate", "governor"]) {
+      const ps = pages.filter((p) => p.kind === "races" && p.view === view);
+      const gov = b.governor.rows.some((r) => r.status !== "open");
+      if (view === "governor" && !gov) { assert.equal(ps.length, 0); continue; }
+      const rows = b[view].rows;
+      const shown = ps.flatMap((p) => [...p.cols.flat().map((r) => r.name), ...p.open]);
+      assert.deepEqual([...shown].sort(), rows.map((r) => r.name).sort(), `${view}: every race once`);
+      for (const r of ps.flatMap((p) => p.cols.flat())) {
+        assert.notEqual(r.status, "open");
+        if (r.status === "called") assert.match(r.lines.at(-1), /^Projected by /);
+        else assert.deepEqual(r.lines.slice(1), r.calls.map((c) => `${c.outlet}: ${c.candidate || c.party || "?"}`));
+      }
+      ps.forEach((p, i) => { assert.equal(p.n, i + 1); assert.equal(p.of, ps.length); assert.ok(p.cols.length <= 3); });
+    }
+  }
+});
+
+test("board pages: latest projections are quoted whole, paged rather than dropped; an over-long sentence is marked shortened", () => {
+  const b = fullBoard();
+  const lp = latestPages(b.latest);
+  assert.deepEqual(lp.flatMap((p) => p.quotes.map((q) => q.quote)), b.latest.map((x) => x.quote));
+  const huge = { outlet: "AP", quote: "AP projects " + "a very long clause, ".repeat(60) + "end.", source: "Wire", at: "2026-11-04T04:00:00Z" };
+  const [q] = latestPages([huge])[0].quotes;
+  assert.ok(q.shortened && q.quote.length <= QUOTE_MAX + 1 && q.quote.endsWith("…") && huge.quote.startsWith(q.quote.slice(0, -1)));
+});
+
+test("board pages: a full night still fits the desk with every page up at least 8 s", () => {
+  const pages = boardPages(fullBoard());
+  assert.ok(pages.length * 8 <= 180 - 20, `${pages.length} pages`);
+  assert.deepEqual(racePages([], "senate"), []);
 });

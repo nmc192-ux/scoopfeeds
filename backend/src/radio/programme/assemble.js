@@ -18,9 +18,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { storyIndex } from "./factPack.js";
-import { boardData } from "./electionDesk.js";
+import { boardData, boardPages } from "./electionDesk.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+export const BOARD_PAGE_MIN_SEC = 8;   // #197: shortest time one election-board page stays up
 export const SONIC_DIR = path.join(HERE, "../brand/sonic");
 export const RATE = 44100;
 
@@ -193,15 +194,19 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
           break;
         }
         if (s.segment === "midterms") {   // #197: title, ballot cards, story cards, then the board (earn-render: only with an attributed item)
-          const board = boardData(pack.election);
+          const board = boardData(pack.election), mark = cues.length;
           cues.push({ at: at(t0), scene: "title", data: { kicker: "ScoopFeeds Radio", title: s.title, items: storyLines.map((l) => headline(l.story)).filter(Boolean) } });
           for (const l of lines.filter((x) => /^b\d+$/.test(x.id || ""))) cues.push({ at: at(l.atSec), scene: "known", data: { kicker: s.title, title: s.title, headline: "What's on the ballot, 3 November", label: "On the ballot", text: l.text } });
           storyLines.forEach((l, i) => cues.push({ at: at(l.atSec), scene: "story", data: { kicker: s.title, n: i + 1, of: storyLines.length, headline: headline(l.story), outlets: outletsOf(l.story).slice(0, 4), lede: ledeOf(l.story) } }));
-          if (board) {
+          if (board) {   // the board is paged (26 px floor): every page gets an equal share from the first projection line to the slot's end
             const first = lines.find((l) => /^p\d+$/.test(l.id || "")) || lines.find((l) => l.id === "close") || lines.at(-1);
-            cues.push({ at: at(first.atSec), scene: "election", data: { ...board, view: "senate" } });
-            const gov = board.governor.rows.some((r) => r.status !== "open"), t2 = first.atSec + 20;
-            if (gov && t2 < s.endSec - 5) cues.push({ at: at(t2), scene: "election", data: { ...board, view: "governor" } });
+            const pages = boardPages(board), end = s.endSec - 1;
+            const start = Math.max(t0 + 6, Math.min(first.atSec, end - pages.length * BOARD_PAGE_MIN_SEC));
+            const step = (end - start) / pages.length;
+            if (step < BOARD_PAGE_MIN_SEC) console.warn(`⚠ election board: ${pages.length} pages get ${step.toFixed(1)} s each (under ${BOARD_PAGE_MIN_SEC} s)`);
+            // the board holds the screen to the end of the slot: a story card after it starts would hide a page
+            for (let k = cues.length - 1; k >= mark; k--) if (cues[k].at >= at(start)) cues.splice(k, 1);
+            pages.forEach((pg, i) => cues.push({ at: at(start + i * step), scene: "election", data: { page: pg, builtAt: board.builtAt } }));
           }
           const lastEnd = lines.at(-1).endSec;
           const nextSlot = slots.slice(slots.indexOf(s) + 1).find((x) => x.title);

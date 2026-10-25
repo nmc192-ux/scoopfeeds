@@ -98,3 +98,75 @@ export function boardData(ep) {
     builtAt: ep.builtAt,
   };
 }
+
+/*
+ * Board pages (#197 review, 25 Oct). At DrJ's 26 px floor a grid of every race cannot fit one 1080p screen
+ * (35 Senate + 36 governor rows), so the board is paged, and the pages run one after another in the desk slot:
+ *   1. "overview": Senate control bar, House bars or calls, and the latest projections quoted word for word.
+ *   2. "races" pages per view (Senate, then governors when any governor race is called): called and conflicting
+ *      races as cards in three columns, each card naming who projected it; the races nobody has called are listed
+ *      by name under "Not yet called" on the view's last page. No race is dropped: a full board just has more pages.
+ * Page fill is estimated from text length with deliberately pessimistic sizes; the rendered test in
+ * screen/fontFloor.test.js renders a worst-case full board and fails if anything runs past the frame.
+ */
+export const PAGE = { colH: 640, line: 31, card: 20, cpl: 30, openCpl: 95, openHead: 46, cols: 3 };
+const lines = (s, cpl) => Math.max(1, Math.ceil(String(s || "").length / cpl));
+
+/** The text lines of one race card (what the screen prints under the state name). */
+export function cardLines(r) {
+  if (r.status === "conflict") return ["Outlets disagree", ...r.calls.map((c) => `${c.outlet}: ${c.candidate || c.party || "?"}`)];
+  const c = r.calls[0];
+  return [...(c.candidate ? [`${c.candidate}${c.party ? ` (${c.party})` : ""}`] : c.party ? [{ D: "Democrats", R: "Republicans", I: "Independent" }[c.party] || c.party] : []), r.label];
+}
+const cardH = (r) => PAGE.card + PAGE.line * (lines(r.name, PAGE.cpl) + cardLines(r).reduce((n, t) => n + lines(t, PAGE.cpl), 0));
+const openH = (names) => (names.length ? PAGE.openHead + PAGE.line * lines(names.join(", "), PAGE.openCpl) : 0);
+
+/** Split one view's rows into pages of three columns. Called and conflicting races first, newest call first. */
+export function racePages(rows, view) {
+  const newest = (r) => Math.max(...r.calls.map((c) => Date.parse(c.at) || 0));
+  const called = rows.filter((r) => r.status !== "open").sort((a, b) => newest(b) - newest(a) || a.name.localeCompare(b.name));
+  const open = rows.filter((r) => r.status === "open").map((r) => r.name);
+  const pages = [];
+  let cols = [[]], used = [0];
+  const flush = () => { pages.push({ cols }); cols = [[]]; used = [0]; };
+  for (const r of called) {
+    const h = cardH(r);
+    if (used.at(-1) + h > PAGE.colH && cols.at(-1).length) {
+      if (cols.length === PAGE.cols) flush(); else { cols.push([]); used.push(0); }
+    }
+    cols.at(-1).push(r); used[used.length - 1] += h;
+  }
+  if (cols[0].length) flush();
+  // the "Not yet called" list goes under the last page's columns, or on a page of its own when it does not fit
+  const last = pages.at(-1);
+  if (open.length) {
+    const tallest = last ? Math.max(...last.cols.map((c) => c.reduce((n, r) => n + cardH(r), 0))) : 0;
+    if (last && tallest + openH(open) <= PAGE.colH) last.open = open; else pages.push({ cols: [], open });
+  }
+  // each card carries the exact lines the screen prints (one source for the fill estimate and the render)
+  const card = (r) => ({ state: r.state, name: r.name, status: r.status, party: r.status === "called" ? r.calls[0].party || null : null, lines: cardLines(r), calls: r.calls });
+  return pages.map((p, i) => ({ kind: "races", view, n: i + 1, of: pages.length, cols: p.cols.map((c) => c.map(card)), open: p.open || [] }));
+}
+
+export const QUOTE_MAX = 600;   // a quoted sentence longer than this is cut and marked "(shortened)" on screen
+/** Latest projections, quoted word for word, paged full width. */
+export function latestPages(latest) {
+  const pages = []; let cur = [], used = 0;
+  for (const x of latest || []) {
+    const q = x.quote.length > QUOTE_MAX ? { ...x, quote: `${x.quote.slice(0, QUOTE_MAX).replace(/\s+\S*$/, "")}…`, shortened: true } : x;
+    const h = PAGE.card + PAGE.line * lines(`${q.quote} ${q.source}${q.shortened ? " (shortened)" : ""}`, 80);
+    if (used + h > PAGE.colH && cur.length) { pages.push(cur); cur = []; used = 0; }
+    cur.push(q); used += h;
+  }
+  if (cur.length) pages.push(cur);
+  return pages.map((quotes, i) => ({ kind: "latest", n: i + 1, of: pages.length, quotes }));
+}
+
+/** Every page of the board, in airing order. [] when there is no board (earn-render). */
+export function boardPages(board) {
+  if (!board) return [];
+  const overview = { kind: "overview", senate: { seats: board.senate.seats, majority: board.senate.majority, projected: board.senate.projected, control: board.senate.control },
+    house: { seats: board.house.seats, majority: board.house.majority, reports: board.house.reports, control: board.house.control } };
+  const gov = board.governor.rows.some((r) => r.status !== "open");
+  return [overview, ...latestPages(board.latest), ...racePages(board.senate.rows, "senate"), ...(gov ? racePages(board.governor.rows, "governor") : [])];
+}
