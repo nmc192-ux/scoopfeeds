@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { firstSentences } from "./readerPayload.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import { readFileSync, existsSync } from "fs";
@@ -79,18 +80,31 @@ Sitemap: ${SITE}/feed.xml
   );
 });
 
-// ── sitemap.xml — homepage, categories, latest articles (up to 10k) ──────
+// ── Dossiers for the sitemaps (#178) ─────────────────────────────────────
+// Events with real coverage only: machine events (USGS/NOAA) carry no articles (CLAUDE.md), and a
+// merged event's slug is an alias whose canonical is its survivor, so neither is listed.
+export function sitemapEvents(db, { sinceMs, limit = 5000 }) {
+  return db.prepare(`
+    SELECT e.slug, e.title, e.last_activity_at FROM events e
+    WHERE e.last_activity_at >= ? AND e.status != 'merged'
+      AND EXISTS (SELECT 1 FROM event_articles ea WHERE ea.event_id = e.id)
+    ORDER BY e.last_activity_at DESC LIMIT ?
+  `).all(sinceMs, limit);
+}
+
+// ── sitemap.xml — homepage, doors, hubs, dossiers of the last 30 days ─────
+// Article pages are noindex since #176, so they are not listed. Nor is "/?topic=…": its canonical
+// is the homepage, and the /topic/:slug hubs are the indexable version.
 router.get("/sitemap.xml", (_req, res) => {
   const db = getDb();
-  const rows = db.prepare(
-    `SELECT id, published_at FROM articles ORDER BY published_at DESC LIMIT 10000`
-  ).all();
+  const events = sitemapEvents(db, { sinceMs: Date.now() - 30 * 24 * 60 * 60 * 1000 });
 
   const now = new Date().toISOString();
   const urls = [];
   urls.push(`<url><loc>${SITE}/</loc><lastmod>${now}</lastmod><changefreq>hourly</changefreq><priority>1.0</priority></url>`);
-  for (const cat of CATEGORIES) {
-    urls.push(`<url><loc>${SITE}/?topic=${cat}</loc><changefreq>hourly</changefreq><priority>0.8</priority></url>`);
+  // The doors (plan v7): News, Originals, Markets, Watch & Listen.
+  for (const door of ["events", "briefs", "markets", "live-tv"]) {
+    urls.push(`<url><loc>${SITE}/${door}</loc><changefreq>hourly</changefreq><priority>0.8</priority></url>`);
   }
   // E-E-A-T pages — required for Google News / Discover eligibility.
   for (const slug of ["about", "editorial-policy", "corrections", "contact", "privacy"]) {
@@ -100,9 +114,8 @@ router.get("/sitemap.xml", (_req, res) => {
   for (const slug of ["ai", "cars", "science", "politics", "pakistan", "international", "health", "sports"]) {
     urls.push(`<url><loc>${SITE}/topic/${slug}</loc><changefreq>daily</changefreq><priority>0.7</priority></url>`);
   }
-  for (const r of rows) {
-    const lastmod = new Date(r.published_at).toISOString();
-    urls.push(`<url><loc>${SITE}/article/${xmlEscape(r.id)}</loc><lastmod>${lastmod}</lastmod><priority>0.6</priority></url>`);
+  for (const e of events) {
+    urls.push(`<url><loc>${SITE}/events/${xmlEscape(encodeURIComponent(e.slug))}</loc><lastmod>${new Date(e.last_activity_at).toISOString()}</lastmod><changefreq>hourly</changefreq><priority>0.7</priority></url>`);
   }
 
   res.type("application/xml").send(
@@ -174,22 +187,19 @@ router.get("/feed/:category.xml", (req, res) => {
   }));
 });
 
-// ── Google News sitemap — last 48 hours only ─────────────────────────────
+// ── Google News sitemap — dossiers active in the last 48 hours only (#178) ──
+// Article pages are noindex (#176); the dossier is the page we publish.
 router.get("/sitemap-news.xml", (_req, res) => {
   const db = getDb();
-  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
-  const rows = db.prepare(
-    `SELECT id, title, published_at, source_name FROM articles
-     WHERE published_at >= ? ORDER BY published_at DESC LIMIT 1000`
-  ).all(cutoff);
+  const rows = sitemapEvents(db, { sinceMs: Date.now() - 48 * 60 * 60 * 1000, limit: 1000 });
 
   const urls = rows.map(r => {
-    const pub = new Date(r.published_at).toISOString();
+    const pub = new Date(r.last_activity_at).toISOString();
     return `<url>
-  <loc>${SITE}/article/${xmlEscape(r.id)}</loc>
+  <loc>${SITE}/events/${xmlEscape(encodeURIComponent(r.slug))}</loc>
   <news:news>
     <news:publication>
-      <news:name>Scoop</news:name>
+      <news:name>Scoopfeeds</news:name>
       <news:language>en</news:language>
     </news:publication>
     <news:publication_date>${pub}</news:publication_date>
@@ -203,9 +213,46 @@ router.get("/sitemap-news.xml", (_req, res) => {
   );
 });
 
+// ── llms.txt (#178) — the doors and the 50 most recent dossiers, for AI crawlers ──
+// Built on request and kept for an hour: a cheap static file in effect.
+let llmsCache = { at: 0, text: "" };
+export function buildLlmsTxt(db, now = Date.now()) {
+  const events = sitemapEvents(db, { sinceMs: now - 30 * 24 * 60 * 60 * 1000, limit: 50 });
+  const lines = [
+    "# Scoopfeeds",
+    "",
+    "> Scoopfeeds groups every outlet's coverage of a story into one event dossier: the timeline, which outlets covered it, and how their angles differ. Each dossier links out to the original reporting.",
+    "",
+    "## Doors",
+    "",
+    `- [Today](${SITE}/): the lead story, developing stories and today's top coverage`,
+    `- [News](${SITE}/events): every developing story as a dossier`,
+    `- [Originals](${SITE}/briefs): ScoopFeeds' own analysis briefs`,
+    `- [Markets](${SITE}/markets): markets and macro indicators`,
+    `- [Watch & Listen](${SITE}/live-tv): ScoopFeeds Radio and live news channels`,
+    "",
+    "## Recent dossiers",
+    "",
+    ...events.map((e) => `- [${String(e.title).replace(/[\[\]\n]/g, " ").trim()}](${SITE}/events/${encodeURIComponent(e.slug)}): updated ${new Date(e.last_activity_at).toISOString().slice(0, 16).replace("T", " ")} UTC`),
+    "",
+    "## About",
+    "",
+    `- [About](${SITE}/about)`,
+    `- [Editorial policy](${SITE}/editorial-policy)`,
+    `- [Sitemap](${SITE}/sitemap.xml)`,
+    "",
+  ];
+  return lines.join("\n");
+}
+router.get("/llms.txt", (_req, res) => {
+  const now = Date.now();
+  if (!llmsCache.text || now - llmsCache.at > 60 * 60 * 1000) llmsCache = { at: now, text: buildLlmsTxt(getDb(), now) };
+  res.type("text/plain").set("Cache-Control", "public, max-age=3600").send(llmsCache.text);
+});
+
 // ── Article detail page — SSR shell with rich meta tags ──────────────────
 // Returns a standalone HTML page so crawlers and social unfurlers see full
-// metadata. Humans see: headline + image + key-takeaways + body preview +
+// metadata. Humans see: headline + image + summary +
 // cross-source "also covered by" + related stories + CTA to original source.
 // The synthesis + cross-source layer is what turns this from "scraped rewrite"
 // into aggregation with independent editorial value — critical for avoiding
@@ -225,18 +272,8 @@ router.get("/article/:id", ssrForBots((req, res) => {
   const desc = (article.description || article.title || "").slice(0, 300);
   const title = `${article.title} — Scoop`;
   const published = new Date(article.published_at).toISOString();
-  const hasFullContent = article.content && article.content.length > 500;
-  // Strip leading site chrome (share/save buttons, bylines glued to body)
-  // before splitting into paragraphs — same cleanup the takeaway extractor
-  // does, applied to the visible body too. Keeps the SSR page free of "Share
-  // Save Add as preferred on Google Lina SinjabCorrespondent, Beirut" lede.
-  const articleBody = hasFullContent
-    ? _stripLeadingChrome(article.content)
-    : desc;
-  const paragraphs = articleBody
-    ? articleBody.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
-    : [];
-  const takeaways = extractTakeaways(article);
+  // Summary only (#176): the stored article body is never rendered or put in JSON-LD, and no
+  // "key takeaways" are lifted from it (they were verbatim publisher sentences).
   const alternates = (() => { try { return listAlternateCoverage(article, 4); } catch { return []; } })();
   const related = (() => { try { return listRelatedStories(article, 5); } catch { return []; } })();
   const whyItMatters = categoryFraming(article.category);
@@ -260,7 +297,6 @@ router.get("/article/:id", ssrForBots((req, res) => {
     "mainEntityOfPage": { "@type": "WebPage", "@id": canonical },
     "articleSection": article.category,
     "url": article.url,
-    ...(hasFullContent ? { "articleBody": article.content } : {}),
   };
 
   res.type("html").send(`<!DOCTYPE html>
@@ -270,6 +306,7 @@ router.get("/article/:id", ssrForBots((req, res) => {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${xmlEscape(title)}</title>
 <meta name="description" content="${xmlEscape(desc)}">
+<meta name="robots" content="noindex,follow">
 <link rel="canonical" href="${canonical}">
 <link rel="alternate" hreflang="en" href="${canonical}">
 <link rel="alternate" hreflang="ur" href="${canonical}?lang=ur">
@@ -314,11 +351,6 @@ router.get("/article/:id", ssrForBots((req, res) => {
   .cta:hover { background: #b91c1c; }
   .secondary { margin-left: 12px; font-size: 14px; color: #666; text-decoration: none; }
   .brand { font-weight: 700; font-size: 18px; color: #2563EB; text-decoration: none; }
-  .takeaways { margin: 20px 0 24px; padding: 16px 20px; background: rgba(37,99,235,0.04); border: 1px solid rgba(37,99,235,0.15); border-radius: 12px; }
-  .takeaways h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #2563EB; margin: 0 0 10px; font-weight: 700; }
-  .takeaways ul { margin: 0; padding-left: 20px; }
-  .takeaways li { font-size: 15px; line-height: 1.5; margin-bottom: 6px; color: #222; }
-  @media (prefers-color-scheme: dark) { .takeaways { background: rgba(37,99,235,0.08); border-color: rgba(37,99,235,0.25); } .takeaways li { color: #d4d4d4; } }
   .why-matters { font-size: 14px; color: #555; font-style: italic; margin: 0 0 24px; padding: 10px 14px; border-left: 3px solid #aaa; background: rgba(0,0,0,0.02); border-radius: 0 8px 8px 0; }
   @media (prefers-color-scheme: dark) { .why-matters { color: #aaa; background: rgba(255,255,255,0.02); } }
   .coverage { margin: 32px 0 20px; }
@@ -344,7 +376,6 @@ router.get("/article/:id", ssrForBots((req, res) => {
   @media (prefers-color-scheme: dark) { .eeat-foot { border-top-color: #222; } }
   .eeat-foot a { color: #888; text-decoration: underline; }
   html[dir="rtl"] body { text-align: right; }
-  html[dir="rtl"] .takeaways ul { padding-left: 0; padding-right: 20px; }
 </style>
 </head>
 <body>
@@ -357,18 +388,9 @@ router.get("/article/:id", ssrForBots((req, res) => {
         <h1>${xmlEscape(article.title)}</h1>
         <div class="meta">${xmlEscape(article.source_name || "")} · ${new Date(article.published_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}${alternates.length > 0 ? ` · Also reported by ${alternates.length} other source${alternates.length === 1 ? "" : "s"}` : ""}</div>
 
-        ${takeaways.length >= 2 ? `
-        <section class="takeaways" aria-label="Key takeaways">
-          <h2>Key takeaways</h2>
-          <ul>${takeaways.map(t => `<li>${xmlEscape(t)}</li>`).join("")}</ul>
-        </section>` : ""}
-
         ${whyItMatters ? `<p class="why-matters">${xmlEscape(whyItMatters)}</p>` : ""}
 
-        ${hasFullContent
-          ? `<div class="content">${paragraphs.slice(0, 3).map(p => `<p>${xmlEscape(p)}</p>`).join("")}</div>
-             <div class="source-note">Article preview — originally published by <strong>${xmlEscape(article.source_name || "")}</strong>. Full story at the source.</div>`
-          : (desc ? `<p class="desc">${xmlEscape(desc)}</p>` : "")}
+        ${desc ? `<p class="desc">${xmlEscape(firstSentences(desc))}</p>` : ""}
 
         <a class="cta" href="${xmlEscape(article.url)}" target="_blank" rel="noopener noreferrer">Read full story on ${xmlEscape(article.source_name || "source")} →</a>
         <a class="secondary" href="/">More top stories</a>
@@ -415,7 +437,7 @@ router.get("/article/:id", ssrForBots((req, res) => {
 // Google ("AI news", "Pakistan news") with substantive editorial framing,
 // the day's top stories, and the month's archive. CollectionPage JSON-LD
 // gives Google a structured signal that this is a topical hub, not thin SEO.
-const TOPIC_HUBS = {
+export const TOPIC_HUBS = {
   ai: {
     title: "AI News",
     intro:
@@ -475,11 +497,13 @@ const TOPIC_SLUG_TO_CATEGORY = {
   sports: "sports",
 };
 
-router.get("/topic/:slug", ssrForBots((req, res) => {
+router.get("/topic/:slug", ssrForBots((req, res, next) => {
   const slug = String(req.params.slug || "").toLowerCase();
   const meta = TOPIC_HUBS[slug];
   const category = TOPIC_SLUG_TO_CATEGORY[slug];
-  if (!meta || !category) return res.status(404).send(renderNotFound());
+  // #178: a topic without an SSR hub (/topic/world, /topic/business, …) is still a real SPA page:
+  // fall through to the shell with its own head tags instead of telling crawlers it is a 404.
+  if (!meta || !category) return next();
 
   const db = getDb();
   // Last 30 days, credibility-gated, recency-ordered.
@@ -672,228 +696,6 @@ function humanAgo(ts) {
   if (h < 24)  return `${h}h ago`;
   const d = Math.round(diff / 86400000);
   return `${d}d ago`;
-}
-
-// Extract up to 3 "key takeaway" bullets from the article body.
-//
-// Goals (vs. the previous naive "first sentence of first 3 paragraphs, slice
-// at 180" version):
-//   1. Strip site-chrome that scrapers concatenate onto the article body —
-//      e.g. BBC inserts "ShareSaveAdd as preferred on Google" before the lede,
-//      and bylines like "Lina SinjabCorrespondent, Beirut" follow. Without
-//      this, the first bullet ends up being page furniture, not editorial.
-//   2. Always emit COMPLETE sentences. Mid-sentence "…" cuts make the page
-//      feel auto-generated and broken; better to skip an over-long sentence
-//      and try the next one than to truncate it.
-//   3. Reject candidates that look like bylines, captions, or chrome.
-//
-// Still no LLM call — keeps the article SSR path fast and free.
-const TAKEAWAY_CHROME_TOKENS = [
-  "share", "save", "subscribe", "sign in", "sign up", "sign-in", "sign-up",
-  "log in", "login", "follow", "comment", "comments", "print", "email",
-  "whatsapp", "facebook", "twitter", "linkedin", "telegram", "reddit",
-  "bookmark", "listen", "watch live", "watch now", "read more", "read full",
-  "read also", "advertisement", "advertorial", "sponsored content",
-  "related article", "more from", "you might also like", "newsletter",
-  "preferred on google", "preferred source", "add as preferred",
-  "trending now", "most read", "skip to", "back to top", "show captions",
-  "play video", "image caption", "image source", "media caption",
-  "video caption", "getty images", "associated press", "agence france",
-  "all rights reserved", "copyright", "follow on x", "follow us",
-  "tap to copy", "copy link", "copied",
-];
-
-const TAKEAWAY_BYLINE_RE =
-  /^(?:by\s+|reporting by\s+|written by\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}(?:correspondent|reporter|editor|writer|columnist|contributor|staff)/i;
-
-// "Lina SinjabCorrespondent, Beirut" — capital letter glued to lowercase
-// (no space), followed by a role + city. Common when scrapers strip <span>s.
-const TAKEAWAY_GLUED_BYLINE_RE =
-  /[a-z][A-Z][a-z]+(?:Correspondent|Reporter|Editor|Writer|Columnist|Contributor)\b/;
-
-function _looksLikeChrome(text) {
-  if (!text) return true;
-  const lo = text.toLowerCase();
-  // Very short snippets (≤ 30 chars) are almost always captions, labels, or
-  // navigation crumbs — never a real takeaway. Length checks above this
-  // (e.g. minimum sentence length) are enforced by the caller.
-  if (text.length < 30) return true;
-  // Multiple chrome tokens piling up = page furniture.
-  let chromeHits = 0;
-  for (const t of TAKEAWAY_CHROME_TOKENS) {
-    if (lo.includes(t)) chromeHits++;
-    if (chromeHits >= 2) return true;
-  }
-  if (TAKEAWAY_BYLINE_RE.test(text)) return true;
-  if (TAKEAWAY_GLUED_BYLINE_RE.test(text)) return true;
-  return false;
-}
-
-// Strip leading site chrome — e.g. "ShareSaveAdd as preferred on GoogleLina
-// SinjabCorrespondent, BeirutReutersAtef Najib, former head of Political…"
-// becomes "Atef Najib, former head of Political…".
-//
-// The signature failure mode of HTML-stripping scrapers is that adjacent
-// inline elements (a button label, a span, a byline) become concatenated
-// without spaces — producing "ShareSaveAdd as preferred on GoogleLina
-// SinjabCorrespondent". So step 1 is to re-introduce word boundaries at
-// every lowercase→uppercase transition in the first ~500 chars (where this
-// glue usually lives). After that, ordinary leading-chrome stripping works.
-function _stripLeadingChrome(text) {
-  if (!text) return "";
-  // Operate on the head only — middle-of-article transitions like "iPhone"
-  // or "eBay" stay untouched.
-  const headLen = Math.min(500, text.length);
-  let head = text.slice(0, headLen);
-  const tail = text.slice(headLen);
-
-  // Insert a space at every camelCase glue point: "ShareSave" → "Share Save",
-  // "GoogleLina" → "Google Lina", "handcuffsThe" → "handcuffs The".
-  // We DO NOT touch ALLCAPS→Capital (e.g. "BBCNews" stays — that's intentional
-  // brand merging in many feeds and the next step strips known acronyms).
-  head = head.replace(/([a-z])([A-Z])/g, "$1 $2");
-
-  // Insert a period before common sentence-start words that look like they
-  // were glued onto a previous sentence (e.g. "handcuffs The highly charged
-  // scenes…" → "handcuffs. The highly charged scenes…"). This restores
-  // sentence boundaries that the scraper lost, so the takeaway picker can
-  // surface a sensible-length lede instead of a 300-char monolith.
-  head = head.replace(
-    /([a-z]{4,})\s+(The|A|An|This|That|These|Those|It|They|She|He|Officials|Lawmakers|However|Meanwhile)\s+([a-z])/g,
-    "$1. $2 $3",
-  );
-
-  let t = (head + tail).trim();
-
-  // Now repeatedly strip leading chrome tokens / bylines until stable.
-  let changed = true;
-  let safety = 30;
-  while (changed && t.length > 0 && safety-- > 0) {
-    changed = false;
-    const lo = t.toLowerCase();
-    for (const tok of TAKEAWAY_CHROME_TOKENS) {
-      if (lo.startsWith(tok)) {
-        t = t.slice(tok.length).replace(/^[\s,:;\-–—]+/, "");
-        changed = true;
-        break;
-      }
-    }
-    if (changed) continue;
-
-    // Strip a leading byline + location + wire-source attribution.
-    // After camelCase split this is normal prose. The pattern is:
-    //   "[Author Name] [Role][, optional location words] [optional wire]"
-    // e.g. "Lina Sinjab Correspondent, Beirut Reuters" → all stripped, leaving
-    // just the article body that follows.
-    const bylineMatch = t.match(
-      /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\s+(?:Correspondent|Reporter|Editor|Writer|Columnist|Contributor)(?:[\s,;\-–—]+[A-Z][a-z]+){0,2}[\s,;\-–—]+(?=[A-Z])/,
-    );
-    if (bylineMatch) {
-      t = t.slice(bylineMatch[0].length).replace(/^[\s,:;\-–—]+/, "");
-      changed = true;
-      continue;
-    }
-
-    // Strip a leading "By Author Name" byline.
-    const byMatch = t.match(/^By\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\s+/);
-    if (byMatch) {
-      t = t.slice(byMatch[0].length);
-      changed = true;
-      continue;
-    }
-
-    // Strip a leading wire-source attribution: "Reuters", "AP", "AFP",
-    // "BBC News" sitting alone at the start.
-    const wireMatch = t.match(
-      /^(?:Reuters|AP|AFP|Associated Press|Agence France(?:-Presse)?|BBC(?:\s+News)?|CNN|Bloomberg|Al Jazeera|Dawn|The Guardian|The Times)\s+(?=[A-Z])/,
-    );
-    if (wireMatch) {
-      t = t.slice(wireMatch[0].length);
-      changed = true;
-      continue;
-    }
-
-    // Strip a leading dangling preposition + brand/proper-noun.
-    // After stripping "Add as preferred" the text is "on Google Lina
-    // Sinjab Correspondent…"; consuming "on Google" lets the next pass
-    // byline-strip "Lina Sinjab Correspondent". Greedy consumption would
-    // eat the byline name too — keep it tight at one capitalised word.
-    const prepMatch = t.match(
-      /^(?:on|at|in|from|for|via|with|by)\s+[A-Z][a-z]+\s+(?=[A-Z])/,
-    );
-    if (prepMatch) {
-      t = t.slice(prepMatch[0].length);
-      changed = true;
-    }
-  }
-
-  // If the lead still doesn't start with a capital letter, fast-forward to
-  // the next sentence-like break.
-  if (t && !/^[A-Z"'(]/.test(t)) {
-    const nextSentence = t.search(/[.!?]\s+[A-Z]/);
-    if (nextSentence > 0) t = t.slice(nextSentence + 2);
-  }
-
-  return t.trim();
-}
-
-// Try to surface a full sentence (or short two-sentence run) that fits in
-// the bullet budget. Never truncates mid-word.
-function _pickSentence(paragraph, minLen = 50, maxLen = 220) {
-  if (!paragraph) return null;
-  // Split on sentence terminators while preserving them.
-  const sentences = paragraph
-    .split(/(?<=[.!?])\s+(?=[A-Z"'(])/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  for (const s of sentences) {
-    if (s.length >= minLen && s.length <= maxLen && !_looksLikeChrome(s)) {
-      return s;
-    }
-  }
-  // No single sentence fit. Try the first one if it's at least readable
-  // and trim at the last clause boundary (";" or ", " ) within budget.
-  const first = sentences[0];
-  if (!first || _looksLikeChrome(first)) return null;
-  if (first.length <= maxLen) return first;
-
-  const slice = first.slice(0, maxLen);
-  const lastBreak = Math.max(slice.lastIndexOf(". "), slice.lastIndexOf("; "));
-  if (lastBreak >= minLen) return slice.slice(0, lastBreak + 1).trim();
-
-  // Last resort: fall back to the previous sentence if any, else skip.
-  return null;
-}
-
-function extractTakeaways(article) {
-  // Use whichever source has more substance. Some feeds give us a long
-  // `description` and a tiny `content`; others vice-versa. Pick the longer
-  // one rather than gating on a fixed length threshold.
-  const c = article.content || "";
-  const d = article.description || "";
-  const rawSource = c.length >= d.length ? c : d;
-  if (!rawSource || rawSource.length < 120) return [];
-
-  const cleanedHead = _stripLeadingChrome(rawSource);
-  const paragraphs = cleanedHead
-    .split(/\n\n+/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-
-  const out = [];
-  const seen = new Set();
-  for (const p of paragraphs) {
-    if (out.length >= 3) break;
-    if (_looksLikeChrome(p)) continue;
-    const s = _pickSentence(p);
-    if (!s) continue;
-    const key = s.slice(0, 60).toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(s);
-  }
-  return out;
 }
 
 // Category-aware framing sentence — gives the reader context for why a story

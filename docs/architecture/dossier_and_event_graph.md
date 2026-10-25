@@ -114,6 +114,39 @@ ent floor, so the condition is always-true and the floor degenerates into blocki
 thin-sided merge (including the R1 newborn continuation). Recalibrate on the decision-time
 corpus the 🧭 merge line now emits.
 
+### #179 coherence gate — shipped **DARK** (`EVENT_COHERENCE_GATE=false`)
+
+`intelligence/eventCoherence.js`. **Coherence** of an event = the share of its members
+(with entity keys) that are not FOREIGN, on `storyAffinity`'s measure, to the event's core
+(`coreSet`, keys in ≥ `EVENT_ENTITY_CORE_FRAC` of members). No second similarity measure.
+Too few keyed members (< 3) → `null` (unmeasured, never "ok"); an empty core over enough
+keyed members → `0`.
+
+- **Gate** (flag on): before the match, absorb and create paths link a cluster's articles,
+  the event's core is taken from its EXISTING members and the projected coherence of
+  existing ∪ incoming is computed. Below `EVENT_COHERENCE_FLOOR` (default `0.60`, the
+  audit's figure, NOT yet calibrated) the incoming articles that are FOREIGN to the core are
+  not linked this cycle; articles without keys are kept. A trimmed cluster also does not
+  rename the event. Each hold is a `🧭 coherence-hold` line with before / projected / after
+  / floor. Merges and the squatter-adopt path are not gated. Nothing existing is
+  re-processed.
+- **Dossier API**: `GET /api/ri/events/:slug` carries `coherence: {score, level, floor,
+  measured, members}`; `level: "low"` is the switch later blocks ("What we know", Originals
+  tooling) read to stay hidden. Kill switch `EVENT_COHERENCE_API=false`.
+- **Known limit**: an event already split ~50/50 between two stories has both stories in its
+  core and reads coherent. Stopping that mix forming is the gate's job; splitting one that
+  formed is the breaker's.
+- **Calibrate before flipping**: `node scripts/coherence-report.mjs` (read-only) prints the
+  distribution and the worst 20 on the live DB.
+
+### #179 slug follows headline — shipped **DARK** (`EVENT_SLUG_FOLLOWS_HEADLINE=false`)
+
+When the promoter adopts a new lead title whose slug shares under half its words with the
+current slug, it mints a new slug and stores the old one in `event_slug_aliases`
+(migration 042, additive). `/api/ri/events/<old>` and the page `/events/<old>` answer 301 to
+the current slug; aliases resolve through `event_id`, so a twice-renamed event still answers
+in one hop. `uniqueSlug` never hands a retired slug to another event. 🧭 `slug-follow`.
+
 ### A5 facet persistence — migrations 018 + 019
 
 `event_facets` / `event_facet_articles`, written by the breaker behind `EVENT_FACETS_PERSIST`
@@ -201,6 +234,7 @@ most frequent are exactly Q794 (Iran), Q668 (India), Q21 (England).
 | Observation | Why it's correct |
 |---|---|
 | A dossier section is missing entirely | Earn-render. Absent ≠ broken. |
+| `coherence.level` is `null` on a small event | Fewer than 3 members carry entity keys: unmeasured, deliberately not "ok". |
 | ANGLES shows ~1 sibling on a huge storyline | Wave 2 consolidated the angles into the macro-event as tombstones (§1). |
 | The facet shelf doesn't render on a big story | It needs ≥2 *qualifying* facets; a genuinely single-thread story correctly shows none. |
 | A single-outlet op-ed gets its own timeline row | It *is* a distinct occurrence. One row is its correct representation. |

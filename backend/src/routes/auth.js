@@ -39,6 +39,7 @@ import { validate } from "../middleware/validate.js";
 import { sendMail, getTransport } from "../services/mailer.js";
 import { logger } from "../services/logger.js";
 import { sendError, sendSuccess, sendUnauthorized, sendValidationError } from "../utils/apiResponse.js";
+import { toPublicArticles } from "./publicArticle.js";
 
 const router = Router();
 
@@ -218,7 +219,7 @@ router.put("/prefs", requireAuth, (req, res) => {
 // DELETE /api/auth/saves/:id    → unsave an article
 router.get("/saves", requireAuth, (req, res) => {
   const articles = getSavedArticlesForUser(req.user.id);
-  res.json({ success: true, articles });
+  res.json({ success: true, articles: toPublicArticles(articles) });
 });
 
 router.post("/saves/:id", requireAuth, (req, res) => {

@@ -112,7 +112,10 @@ export function buildAffinityCtx(db) {
     return denom ? inter / denom : 0;
   };
 
-  return { idfMap, catSpanMap, fallbackIdf, entitySet, coreSet, weightedOverlap };
+  /** The hub filter itself, for callers that build per-member sets in one batch (#179). */
+  const keepKey = (k) => (catSpanMap.get(k) ?? 1) <= MAX_CATSPAN;
+
+  return { idfMap, catSpanMap, fallbackIdf, entitySet, coreSet, weightedOverlap, keepKey };
 }
 
 // ── The judgment ───────────────────────────────────────────────────────────

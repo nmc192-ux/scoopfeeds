@@ -18,6 +18,7 @@ import marketRouter    from "./src/routes/market.js";
 import weatherRouter    from "./src/routes/weather.js";
 import liveStreamRouter from "./src/routes/liveStream.js";
 import seoRouter         from "./src/routes/seo.js";
+import { spaShellHandler } from "./src/routes/spaHead.js";
 import tiktokCallbackRouter from "./src/routes/tiktokCallback.js";
 import geoRouter         from "./src/routes/geo.js";
 import readerRouter      from "./src/routes/reader.js";
@@ -42,6 +43,7 @@ import meterRouter       from "./src/routes/meter.js";
 import analysisRouter    from "./src/routes/analysis.js";
 import predictionsRouter from "./src/routes/predictions.js";
 import eventsRouter      from "./src/routes/events.js";
+import eventSlugAliasRouter from "./src/routes/eventSlugAlias.js";
 import trackersRouter    from "./src/routes/trackers.js";
 import realityIndexRouter from "./src/routes/realityIndex.js";
 import watchlistsRouter  from "./src/routes/watchlists.js";
@@ -85,6 +87,7 @@ import { getPipelineHealth } from "./src/services/pipelineHealth.js";
 import { RSS_SOURCES, YOUTUBE_SOURCES } from "./src/config/sources.js";
 import { assertRedisStartup, getRedisStatus } from "./src/jobs/redis.js";
 import { sendError, sendInternalError, sendNotFound } from "./src/utils/apiResponse.js";
+import { marketOddsEnabled } from "./src/config/marketOdds.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -337,7 +340,7 @@ app.get("/api/health", (req, res) => {
 app.get("/api/site-config", (_req, res) => {
   res.set("Cache-Control", "public, max-age=60");
   res.json({
-    marketOdds: process.env.SITE_MARKET_ODDS === "true",
+    marketOdds: marketOddsEnabled(),   // one definition: src/config/marketOdds.js (#205)
     v2: process.env.SITE_V2 === "true",
   });
 });
@@ -475,6 +478,9 @@ app.get("/ads.txt", (req, res, next) => {
 // ── SEO routes (sitemaps, robots.txt, article detail SSR) ───────────────
 // Must be mounted BEFORE the SPA catch-all so crawlers get XML/HTML, not index.html.
 app.use("/", seoRouter);
+// #179: a retired dossier slug answers 301 to the event's current slug. Above the
+// SPA catch-all for the same reason as seoRouter; a live slug falls straight through.
+app.use("/", eventSlugAliasRouter);
 // Must sit above the SPA catch-all, same as seoRouter: /tiktok/callback needs to
 // render the authorisation code server-side, and the catch-all would otherwise
 // answer it with index.html.
@@ -497,6 +503,8 @@ app.use("/", tiktokCallbackRouter);
 const distDir = path.join(__dirname, "../frontend/dist");
 if (existsSync(distDir)) {
   app.use(express.static(distDir, {
+    // #178: "/" is answered by the SPA catch-all below (its own head tags), not by static's index.html.
+    index: false,
     // Serve `/legal/tiktok-terms` from `legal/tiktok-terms.html`. Without this
     // the SPA catch-all below answers every extensionless path with index.html,
     // so a static legal page would return 200 and render the React app — which
@@ -530,10 +538,9 @@ if (existsSync(distDir)) {
   // SPA catch-all — serve index.html for any non-/api route. Explicit
   // must-revalidate so LiteSpeed / CDNs / browsers never freeze on a stale
   // entry HTML for SPA routes (/article/..., /category/..., etc.).
-  app.get(/^(?!\/api)/, (req, res) => {
-    res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
-    res.sendFile(path.join(distDir, "index.html"));
-  });
+  // #178: every user agent gets this route's own title / description / canonical in the shell
+  // (src/routes/spaHead.js). The body is the unchanged SPA. SEO_SPA_HEAD=false serves index.html as is.
+  app.get(/^(?!\/api)/, spaShellHandler({ indexFile: path.join(distDir, "index.html"), getDb, log: logger }));
 }
 // API 404
 app.use((req, res) => sendNotFound(res, req, `Route ${req.path} not found 🤷`));

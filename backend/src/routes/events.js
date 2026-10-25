@@ -26,6 +26,8 @@ import { groupTopEvents } from "../realityIndex/intelligence/eventGrouping.js";
 import { buildOccurrenceTimeline } from "../realityIndex/intelligence/eventTimelineLog.js";
 import { eligibleMarketSql } from "../realityIndex/dal/marketsDao.js";
 import { notMachineEventSql } from "../realityIndex/dal/machineEvents.js";
+import { resolveSlugAlias } from "../realityIndex/dal/slugAliases.js";
+import { dossierCoherence } from "../realityIndex/intelligence/eventCoherence.js";
 
 const router = express.Router();
 
@@ -383,7 +385,14 @@ router.get("/:slug", (req, res) => {
   try {
     const db  = getDb();
     const ev  = getEventBySlug(db, req.params.slug);
-    if (!ev) return res.status(404).json({ error: "Event not found" });
+    if (!ev) {
+      // #179: a slug the event carried before its headline moved → 301 to the current one.
+      const current = resolveSlugAlias(db, req.params.slug);
+      if (current) {
+        return res.status(301).set("Location", `/api/ri/events/${current}`).json({ redirect: current, status: "renamed" });
+      }
+      return res.status(404).json({ error: "Event not found" });
+    }
     // Phase 4 durable identity: a merged event's old slug is an alias for its survivor.
     // Redirect to the survivor instead of serving the stale merged row. 302 + Location for
     // HTTP clients; the {redirect} body lets the SPA replace its route to the canonical slug.
@@ -401,7 +410,13 @@ router.get("/:slug", (req, res) => {
     let related = [];
     try { related = getRelatedEvents(db, ev.id); }
     catch (e) { logger.warn(`related lookup failed for ${ev.slug}: ${e.message}`); }
-    res.json({ ...publicEvent(ev), related });
+    // #179: does this event hold one story? `level: "low"` is the switch later
+    // dossier blocks ("What we know", Originals tooling) read to stay hidden.
+    // A failure here must never break the dossier, and is not reported as "ok".
+    let coherence;
+    try { coherence = dossierCoherence(db, ev.id); }
+    catch (e) { logger.warn(`coherence lookup failed for ${ev.slug}: ${e.message}`); coherence = { score: null, level: null }; }
+    res.json({ ...publicEvent(ev), related, ...(coherence ? { coherence } : {}) });
   } catch (err) {
     logger.error(`GET /api/events/:slug error: ${err.message}`);
     res.status(500).json({ error: "Internal server error" });
