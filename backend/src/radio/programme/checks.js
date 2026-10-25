@@ -7,9 +7,11 @@
  *   outlet    a Compared line must name an outlet that actually covered that story
  *   numbers   every figure must appear in the pack (story text, market row or weather row)
  *   quotes    quoted words must appear verbatim in the pack
+ *   election  fraud/rigging or a winner, asserted without a named outlet or official (#197, #208)
  */
 import { radioRulesVerdict, hasPakistanSignal } from "../radioRules.js";
 import { storyIndex } from "./factPack.js";
+import { electionClaimVerdict } from "../safety/electionClaims.js";
 
 export const toSpoken = (t) => String(t || "").replace(/\s*%/g, " percent").replace(/\s+/g, " ").trim();
 
@@ -69,6 +71,8 @@ export function checkSegments(segments, slots, pack, { log = () => {} } = {}) {
         const story = line.story ? idx.get(line.story) : segStory;
         if (line.story && !story) return `story "${line.story}" not in pack`;
         if (line.outlet && (!story || !story.outlets.some((o) => o.source === line.outlet))) return `outlet "${line.outlet}" did not cover this story`;
+        const election = electionClaimVerdict(text, { outlets: (story?.outlets || []).map((o) => o.source), outlet: line.outlet || null });
+        if (election) return election;
         const src = story ? storyText(story) : "";
         const pool = slot.segment === "markets" ? marketNums : slot.segment === "weather" ? weatherNums : numsIn(src, { all: true }).concat(marketNums);
         const bad = numsIn(text).filter((n) => !backed(n, pool) && !src.includes(String(n)));

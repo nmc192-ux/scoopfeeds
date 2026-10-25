@@ -13,6 +13,7 @@
  * `fetchImpl` and `now` are injectable so the tests make no network calls.
  */
 import fs from "node:fs";
+import { withCredits } from "../safety/broadcastCopy.js";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const API = "https://www.googleapis.com/youtube/v3";
@@ -37,10 +38,15 @@ export function liveCredentials(env = process.env) {
 }
 export const liveConfigured = (env = process.env) => { const c = liveCredentials(env); return Boolean(c.clientId && c.clientSecret && c.refreshToken); };
 
-/** The broadcast resource: public, auto-start and auto-stop on, no monitor stream (so "live" is one step), DVR on. */
-export function broadcastBody({ title, description = "", startMs, privacy = "public" }) {
+/**
+ * The broadcast resource: public, auto-start and auto-stop on, no monitor stream (so "live" is one step), DVR on.
+ * #208: the description always ends with the music credits, whole (or a link to the full list), whatever the
+ * caller passes. YouTube's "altered or synthetic content" flag (containsSyntheticMedia) is deliberately never
+ * sent (DrJ, 22 Oct 2026), and there is no disclosure sentence (DrJ, 23 Oct 2026).
+ */
+export function broadcastBody({ title, description = "", startMs, privacy = "public", credits = [], creditsUrl = null }) {
   return {
-    snippet: { title: String(title).slice(0, 100), description: String(description).slice(0, 5000), scheduledStartTime: new Date(startMs).toISOString() },
+    snippet: { title: String(title).slice(0, 100), description: withCredits(description, credits, { creditsUrl }), scheduledStartTime: new Date(startMs).toISOString() },
     status: { privacyStatus: privacy, selfDeclaredMadeForKids: false },
     contentDetails: { enableAutoStart: true, enableAutoStop: true, enableDvr: true, latencyPreference: "low", monitorStream: { enableMonitorStream: false } },
   };
@@ -148,6 +154,40 @@ export function makeYouTubeLive({ env = process.env, fetchImpl = fetch, now = Da
         if (hit) return hit;
       }
       return null;
+    },
+
+    // ── #208 read-only standing checks (no writes; the youtube.force-ssl scope covers them) ──
+
+    /** The channel's own status block, or { found:false }. Errors propagate with .status/.reason. */
+    async channelStatus() {
+      const b = await call("GET", `${API}/channels?part=id,status&mine=true`);
+      const c = b.items?.[0];
+      return c ? { found: true, id: c.id, privacyStatus: c.status?.privacyStatus || null, longUploadsStatus: c.status?.longUploadsStatus || null, isLinked: c.status?.isLinked ?? null } : { found: false };
+    },
+
+    /** The channel's broadcasts in a state: "active" (live now) by default. [{ id, title, life }] */
+    async listBroadcasts(state = "active") {
+      const b = await call("GET", `${API}/liveBroadcasts?part=id,snippet,status&broadcastStatus=${encodeURIComponent(state)}&broadcastType=all&maxResults=50`);
+      return (b.items || []).map((x) => ({ id: x.id, title: x.snippet?.title || "", life: x.status?.lifeCycleStatus || null }));
+    },
+
+    /**
+     * Status of uploaded videos (a broadcast is a video too). { [id]: { found, uploadStatus, rejectionReason,
+     * failureReason, privacyStatus, regionBlocked: string[] } }. A missing id comes back { found:false }.
+     * The Data API does NOT expose Content ID claims or strikes: callers treat those as unknown.
+     */
+    async videoStatus(ids) {
+      const list = [...new Set((ids || []).filter(Boolean))];
+      const out = Object.fromEntries(list.map((id) => [id, { found: false }]));
+      for (let i = 0; i < list.length; i += 50) {
+        const b = await call("GET", `${API}/videos?part=id,status,contentDetails&id=${list.slice(i, i + 50).map(encodeURIComponent).join(",")}`);
+        for (const v of b.items || []) {
+          out[v.id] = { found: true, uploadStatus: v.status?.uploadStatus || null, rejectionReason: v.status?.rejectionReason || null,
+            failureReason: v.status?.failureReason || null, privacyStatus: v.status?.privacyStatus || null,
+            regionBlocked: v.contentDetails?.regionRestriction?.blocked || [] };
+        }
+      }
+      return out;
     },
 
     /** Transition; "already there" (redundantTransition) is success. */

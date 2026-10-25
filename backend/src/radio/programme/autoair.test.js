@@ -16,7 +16,7 @@ function produced({ hourStart = H, kept = 10, written = 12, hourStories = 5, par
   fs.writeFileSync(path.join(d, "programme.json"), JSON.stringify({ hourStart, cues: Array(30).fill({}), audio: [{ file: "part-the-hour.wav", from: H }], headlines: [] }));
   const lines = (n, story) => Array.from({ length: n }, (_, i) => ({ id: `s${i + 1}`, story }));
   fs.writeFileSync(path.join(d, "segments.raw.json"), JSON.stringify({ "the-hour": { lines: lines(written, "t1") } }));
-  fs.writeFileSync(path.join(d, "segments.json"), JSON.stringify({ "the-hour": { lines: lines(Math.min(kept, hourStories), "t1").concat(lines(Math.max(0, kept - hourStories), null)) } }));
+  fs.writeFileSync(path.join(d, "segments.json"), JSON.stringify({ "the-hour": { lines: [].concat(lines(Math.min(kept, hourStories), "t1"), lines(Math.max(0, kept - hourStories), null)) } }));
   return d;
 }
 
@@ -29,6 +29,11 @@ test("air check: wrong hour, short audio, heavy fact-check losses and a thin Hou
   assert.match(airCheck(produced({ partBytes: 10 }), { hourStart: H }).problems.join(), /only 10 bytes/);
   assert.match(airCheck(produced({ kept: 5, written: 12 }), { hourStart: H }).problems.join(), /passed the fact checks/);
   assert.match(airCheck(produced({ hourStories: 2 }), { hourStart: H }).problems.join(), /only 2 checked stories/);
+});
+test("air check: 7 of 12 lines kept (58 %) is under the 60 % bar; there is no spoken disclosure line any more (DrJ, 23 Oct 2026)", () => {
+  assert.equal(airCheck(produced(), { hourStart: H }).problems.some((p) => /disclosure|station-ID/i.test(p)), false);
+  assert.match(airCheck(produced({ kept: 7, written: 12 }), { hourStart: H }).problems.join(), /passed the fact checks/);
+  assert.equal(airCheck(produced({ kept: 7, written: 12 }), { hourStart: H }).stats.linesKept, 7);
 });
 test("air check: an empty directory is a failure, not a pass", () => {
   const r = airCheck(fs.mkdtempSync(path.join(os.tmpdir(), "air-")), { hourStart: H });
@@ -100,7 +105,9 @@ test("gate: the rehearsal return comes before any YouTube or playout step in the
   const body = src.slice(src.indexOf("async function main()"));
   const rehearsal = body.indexOf("if (!live) {");
   assert.ok(rehearsal > 0, "rehearsal gate not found");
-  for (const later of ['stage("youtube-setup")', "makeYouTubeLive(", 'stage("waiting")', "launchctl"]) {
+  // #208: a read-only YouTube client (ytApi) is built before the gate for the film clearance status check
+  // (videos.list); every write (createBroadcast, bind, transition) and the playout still come after it.
+  for (const later of ['stage("youtube-setup")', "createBroadcast(", "yt = ytApi", 'stage("waiting")', "launchctl"]) {
     const at = body.indexOf(later);
     assert.ok(at > rehearsal, `${later} must come after the rehearsal gate`);
   }
