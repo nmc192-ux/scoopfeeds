@@ -9,6 +9,7 @@
 import { spawn } from "node:child_process";
 import { wordBudget } from "./clock.js";
 import { electionText } from "./electionPack.js";
+import { closedRows, isCrypto } from "./marketsClock.js";
 
 export const SEGMENT_KINDS = ["the-hour", "markets", "compared", "desk", "half", "weather", "crypto", "signoff"];
 
@@ -20,7 +21,9 @@ export function packText(pack) {
     ...s.outlets.map((o) => `    - ${o.source}: "${o.title}"${o.description ? ` — ${o.description}` : ""}`)].join("\n");
   const out = ["TOP STORIES", ...pack.top.map(story)];
   for (const [desk, list] of Object.entries(pack.desks)) out.push("", `DESK: ${desk}`, ...list.map(story));
-  out.push("", "MARKETS (price, % change on the day)", ...pack.markets.map((m) => `    ${m.key} (${m.group}): ${m.price} ${fmtPct(m.pct)}`));
+  // #245: a row marked closed is the last session's figure, not today's (marketsClock.labelMarkets)
+  const head = closedRows(pack.markets).length ? "MARKETS (price, % change on the day of its last trade; a row marked closed is NOT today's move)" : "MARKETS (price, % change on the day)";
+  out.push("", head, ...pack.markets.map((m) => `    ${m.key} (${m.group}): ${m.price} ${fmtPct(m.pct)}${m.closed ? ` (${m.closed.label})` : ""}`));
   out.push("", "WEATHER NOW", ...pack.weather.map((w) => `    ${w.city}: ${w.c}°C / ${w.f}°F, ${w.condition}`));
   if (pack.election) out.push("", electionText(pack.election));   // the Midterms desk (#197)
   if (pack.crypto?.length) out.push("", "CRYPTO (price in US dollars, % change over 24 hours)", ...pack.crypto.map((c) => `    ${c.key} (${c.sym}): ${c.price} ${fmtPct(c.pct)}`));
@@ -63,7 +66,16 @@ export function buildPrompt(pack, slots, when) {
       case "markets": {
         const lead = when.marketsLead?.[s.id];   // groups whose exchange is in session at air time (dayClock.sessionsAt)
         const order = lead?.length ? `lead with the ${lead.join(" and ")} rows (their exchanges are trading now), then the other indices, then oil, gold, bitcoin` : "lead with the US indices, then Europe, then oil, gold, bitcoin";
-        return `${base}: lines "m1".. using only MARKETS rows; ${order}. Say "as of" the time given here: ${when.marketsAsOf[s.id] || "the latest figures"}. "story": null.`;
+        // #245: closed exchanges and last-session rows are said as such, never as today's move
+        const shut = when.marketsClosed?.[s.id];
+        const closed = closedRows(pack.markets);
+        const allClosed = closed.length > 0 && pack.markets.filter((m) => !isCrypto(m)).every((m) => m.closed);
+        const notes = [];
+        if (shut) notes.push(`The exchanges are closed now${shut === "weekend" ? " for the weekend" : ""}: the first line says so (${shut === "weekend" ? "\"Markets are closed for the weekend.\"" : "\"The stock markets are closed at this hour.\""}).`);
+        if (closed.length) notes.push(`Rows marked closed are from their last session, not today: say so in every line that reads one ("On Friday, the Dow closed up 0.4 percent"), and never say "is up", "is down", "today", "now" or "this afternoon" about them. Bitcoin is live.`);
+        const asOf = allClosed ? `Do not say "as of" a time today: each closed row is as of its last close, named in its label.`
+          : `Say "as of" the time given here${closed.length ? " for the rows not marked closed" : ""}: ${when.marketsAsOf[s.id] || "the latest figures"}.`;
+        return `${base}: lines "m1".. using only MARKETS rows; ${order}. ${notes.length ? `${notes.join(" ")} ` : ""}${asOf} "story": null.`;
       }
       case "compared": return `${base}: pick ONE story with 3 or more outlets (a different one for each Compared segment, give its id in "story" at segment level and "outlets": the 3-4 source names you compare, exactly as written in the pack). Lines: "intro" (the story in two sentences), then one line per outlet ("o1".."o4", each with "outlet": name) on how THAT outlet framed it — its headline's emphasis and the words it chose, "gap" (what some leave out), "agree" (what all agree on), "watch" (what to watch next, only if the pack supports it), "close" ("That was the news, compared.").`;
       case "desk": return `${base}: the ${s.desk} desk. Use stories from DESK: ${s.desk} (or TOP STORIES if clearly from that beat). Line "open" ("On the ${s.title}..." style, one sentence), then 2-3 story lines ("d1".., each with "story": id), then "close" (one short sentence).`;

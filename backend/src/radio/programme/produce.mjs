@@ -25,6 +25,7 @@ import { buildClock, buildGridClock, checkClock } from "./clock.js";
 import { buildFactPack } from "./factPack.js";
 import { writeSegments, claudeWriter, isLimitError } from "./writer.js";
 import { sessionsAt } from "./dayClock.js";
+import { labelMarkets, marketsShutAt } from "./marketsClock.js";
 import { spliceProgramme } from "./repeat.js";
 import { checkSegments } from "./checks.js";
 import { buildElectionPack } from "./electionPack.js";
@@ -111,6 +112,9 @@ if (midterms) {
   pack.desks.midterms = pack.election.stories;
   log(`election pack: ${pack.election.items.length} attributed item(s), ${pack.election.races.filter((r) => r.status === "conflict").length} conflict(s), ${pack.election.refused.length} refused, ${pack.election.stories.length} stories`);
 }
+// #245: mark every market row whose last trade is not from the day the first Markets Now airs (weekend, holiday,
+// before the open). The writer is told, checkSegments drops a closed row read as today's, airCheck re-checks.
+labelMarkets(pack, (slots.find((s) => s.segment === "markets")?.start ?? hourStart) + 60_000);
 fs.writeFileSync(path.join(out, "pack.json"), JSON.stringify(pack, null, 1));
 log(`fact pack: ${pack.top.length} top stories, desks ${Object.entries(pack.desks).map(([k, l]) => `${k}:${l.length}`).join(" ")}, ${pack.markets.length} market rows, ${pack.weather.length} cities, ${pack.dropped.length} articles dropped by Rule 0`);
 if (pack.top.length < 5) log(`WARNING: only ${pack.top.length} top stories`);
@@ -145,6 +149,8 @@ const when = {
   marketsAsOf: Object.fromEntries(slots.filter((s) => s.segment === "markets").map((s) => [s.id, asOf])),
   // Markets Now by exchange session: the market groups whose exchange is trading when the slot airs
   marketsLead: Object.fromEntries(slots.filter((s) => s.segment === "markets").map((s) => [s.id, [...new Set(sessionsAt(s.start + 60_000).flatMap((x) => x.groups))]])),
+  // #245: no exchange in session when the slot airs -> the markets prompt says the markets are closed
+  marketsClosed: Object.fromEntries(slots.filter((s) => s.segment === "markets").map((s) => [s.id, marketsShutAt(s.start + 60_000)])),
 };
 // grid hours: Markets Now leads with the exchanges in session (read by the markets prompt once #195 lands)
 if (useGrid) when.marketsLead = Object.fromEntries(slots.filter((s) => s.segment === "markets").map((s) => [s.id, s.marketsLead || []]));
@@ -259,7 +265,9 @@ async function fakeWriter() {
     if (slot.segment === "the-hour") { L.push({ id: "open", text: `It's ${when.hourLabel}, ${when.cityTimes}. This is ScoopFeeds Radio, the news, compared.` }); top.forEach((st, i) => L.push(line(st, `s${i + 1}`))); L.push({ id: "close", text: "Markets Now, after this." }); }
     else if (slot.segment === "half") { L.push({ id: "open", text: "Headlines at the half hour." }); top.forEach((st, i) => L.push(line(st, `h${i + 1}`))); }
     else if (slot.segment === "desk") { const d = pack.desks[slot.desk] || []; L.push({ id: "open", text: `On the ${slot.title}.` }); d.slice(0, 3).forEach((st, i) => L.push(line(st, `d${i + 1}`))); L.push({ id: "close", text: "That's the desk." }); }
-    else if (slot.segment === "markets") pack.markets.forEach((m, i) => L.push({ id: `m${i + 1}`, story: null, text: `${m.key} at ${Math.round(m.price)}, ${m.pct >= 0 ? "up" : "down"} ${Math.abs(m.pct).toFixed(1)} percent.` }));
+    else if (slot.segment === "markets") pack.markets.forEach((m, i) => L.push({ id: `m${i + 1}`, story: null, text: m.closed
+      ? `${m.closed.weekday ? `On ${m.closed.weekday}, ` : "At its last close, "}${m.key} closed at ${Math.round(m.price)}, ${m.pct >= 0 ? "up" : "down"} ${Math.abs(m.pct).toFixed(1)} percent.`
+      : `${m.key} at ${Math.round(m.price)}, ${m.pct >= 0 ? "up" : "down"} ${Math.abs(m.pct).toFixed(1)} percent.` }));
     else if (slot.segment === "crypto") (pack.crypto || []).slice(0, 4).forEach((c, i) => L.push({ id: `c${i + 1}`, story: null, text: `${c.key} at ${Math.round(c.price)} dollars.` }));
     else if (slot.segment === "weather") pack.weather.forEach((w, i) => L.push({ id: `w${i + 1}`, story: null, text: `${w.city}, ${w.c} degrees, ${w.condition}.` }));
     else if (slot.segment === "midterms") {
