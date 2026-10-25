@@ -5,7 +5,7 @@
  * and a prominent "Read at <publisher>" link. We never render a publisher's full text.
  */
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ExternalLink, Type, Sun, Bookmark, Share2, Languages, ArrowRight } from "lucide-react";
+import { X, ExternalLink, Type, Sun, Bookmark, Share2, ArrowRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -17,7 +17,7 @@ import { useSaveArticle } from "../../hooks/useSaveArticle";
 import { useAuth } from "../../hooks/useAuth";
 import { usePublicConfig } from "../../hooks/useNews";
 import { useEscapeKey, useBodyScrollLock, useFocusTrap } from "../../hooks/useModal";
-import { isRtl, langFont, nativeName, LANG_BY_CODE } from "../../lib/languages";
+import { isRtl, langFont } from "../../lib/languages";
 import { track, trackShare, trackOutboundClick, trackSave } from "../../lib/track";
 import TipJar from "../tips/TipJar";
 import NewsletterSignup, { readSubToken } from "../newsletter/NewsletterSignup";
@@ -46,7 +46,7 @@ const FONT_SIZES = [
 
 export default function ReaderModal() {
   const { article, open, closeReader, openReader } = useReaderStore();
-  const { language, autoLanguage, setAuthOpen } = useNewsStore();
+  const { setAuthOpen } = useNewsStore();
   const { toggle: toggleSave, isSaved: checkSaved } = useSaveArticle();
   const { isPremium } = useAuth();
   const { data: publicConfig } = usePublicConfig();
@@ -68,15 +68,14 @@ export default function ReaderModal() {
   const relatedFiltered = related.filter((r) => r.id !== article?.id).slice(0, 3);
 
   const sourceLang = article?.language || data?.lang?.slice(0, 2) || "en";
-  // Target language: if user has picked an explicit language, translate to it
-  // unless it matches the article's source. "Auto" = show source language.
-  const targetLang = autoLanguage ? sourceLang : language;
+  // Nothing is translated any more (#176: summary only), so the text is in the
+  // article's own language and there is no "Translated" badge.
   const summary = firstSentences(data?.excerpt || article?.description);
 
   const [fontIdx, setFontIdx] = useState(1);
   const [sepia,   setSepia]   = useState(false);
-  const rtl = isRtl(targetLang);
-  const font = langFont(targetLang);
+  const rtl = isRtl(sourceLang);
+  const font = langFont(sourceLang);
 
   const isSaved = article ? checkSaved(article.id) : false;
 
@@ -171,16 +170,6 @@ export default function ReaderModal() {
               </Link>
 
               <div className="flex items-center gap-1">
-                {/* Translation indicator — small pill showing target language */}
-                {sourceLang !== targetLang && (
-                  <span
-                    className="flex items-center gap-1 px-2 py-1 rounded-full bg-electric-50 text-electric-600 text-[10px] font-bold uppercase tracking-wider"
-                    title={`Translated from ${nativeName(sourceLang)} to ${nativeName(targetLang)}`}
-                  >
-                    <Languages size={11} />
-                    {LANG_BY_CODE[targetLang]?.flag} {targetLang.toUpperCase()}
-                  </span>
-                )}
                 <button
                   onClick={() => setFontIdx((i) => (i + 1) % FONT_SIZES.length)}
                   className="p-2 rounded-full hover:bg-[var(--color-surface2)]"
@@ -227,7 +216,7 @@ export default function ReaderModal() {
             <div
               className="overflow-y-auto flex-1 px-5 sm:px-10 py-8"
               style={{ fontSize: fontPx, fontFamily: font, direction: rtl ? "rtl" : "ltr", textAlign: rtl ? "right" : "left" }}
-              lang={targetLang}
+              lang={sourceLang}
             >
               {article.image_url && (
                 <SafeImage

@@ -303,7 +303,7 @@ function findEventSlug(url) {
       WHERE a.url = ? ORDER BY ea.rowid DESC LIMIT 1
     `).get(url);
     return row?.slug || null;
-  } catch { return null; }
+  } catch (err) { logger.warn(`reader: dossier lookup failed for ${url}: ${err.message}`); return null; }
 }
 
 // ─── Route ───────────────────────────────────────────────────────────────────
