@@ -18,6 +18,7 @@ import marketRouter    from "./src/routes/market.js";
 import weatherRouter    from "./src/routes/weather.js";
 import liveStreamRouter from "./src/routes/liveStream.js";
 import seoRouter         from "./src/routes/seo.js";
+import { spaShellHandler } from "./src/routes/spaHead.js";
 import tiktokCallbackRouter from "./src/routes/tiktokCallback.js";
 import geoRouter         from "./src/routes/geo.js";
 import readerRouter      from "./src/routes/reader.js";
@@ -492,6 +493,8 @@ app.use("/", tiktokCallbackRouter);
 const distDir = path.join(__dirname, "../frontend/dist");
 if (existsSync(distDir)) {
   app.use(express.static(distDir, {
+    // #178: "/" is answered by the SPA catch-all below (its own head tags), not by static's index.html.
+    index: false,
     // Serve `/legal/tiktok-terms` from `legal/tiktok-terms.html`. Without this
     // the SPA catch-all below answers every extensionless path with index.html,
     // so a static legal page would return 200 and render the React app — which
@@ -525,10 +528,9 @@ if (existsSync(distDir)) {
   // SPA catch-all — serve index.html for any non-/api route. Explicit
   // must-revalidate so LiteSpeed / CDNs / browsers never freeze on a stale
   // entry HTML for SPA routes (/article/..., /category/..., etc.).
-  app.get(/^(?!\/api)/, (req, res) => {
-    res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
-    res.sendFile(path.join(distDir, "index.html"));
-  });
+  // #178: every user agent gets this route's own title / description / canonical in the shell
+  // (src/routes/spaHead.js). The body is the unchanged SPA. SEO_SPA_HEAD=false serves index.html as is.
+  app.get(/^(?!\/api)/, spaShellHandler({ indexFile: path.join(distDir, "index.html"), getDb, log: logger }));
 }
 // API 404
 app.use((req, res) => sendNotFound(res, req, `Route ${req.path} not found 🤷`));
