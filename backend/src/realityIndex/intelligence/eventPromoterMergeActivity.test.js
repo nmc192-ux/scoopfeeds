@@ -48,7 +48,12 @@ test("after a merge, the survivor's last_activity_at is the merge time", async (
   const ids = ["m-a1", "m-a2", "m-b1", "m-b2", "m-x1", "m-x2", "m-x3"];
   const insEnt = db.prepare(`INSERT OR IGNORE INTO article_entities
     (article_id, surface, surface_norm, qid, entity_type, label, created_at) VALUES (?,?,?,?,?,?,?)`);
+  // Real article rows: the promoter links only articles that still exist
+  // (pruned ids are dropped — see eventPromoterPrunedRefs.test.js).
+  const insArt = db.prepare(`INSERT OR IGNORE INTO articles (id, title, url, source_name, category, published_at, fetched_at)
+                             VALUES (?,?,?,?,?,?,?)`);
   for (const id of ids) {
+    insArt.run(id, `Headline ${id}`, `https://x.test/${id}`, "Test", "world", now, now);
     upsertEmbedding({ scope: "article", scope_id: id, model: "test-model", vector: vec });
     for (const q of ["Q9001", "Q9002", "Q9003"]) insEnt.run(id, q, q.toLowerCase(), q, "unknown", q, now);
   }

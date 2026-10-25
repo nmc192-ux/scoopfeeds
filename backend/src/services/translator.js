@@ -4,8 +4,11 @@
  *   1. LibreTranslate — free & unlimited when self-hosted (Docker).
  *                       Public endpoints also supported; set LIBRETRANSLATE_URL.
  *   2. DeepL          — best grammar.   Needs DEEPL_API_KEY.
- *   3. Google Cloud   — strong quality. Needs GOOGLE_TRANSLATE_KEY.
- *   4. MyMemory       — free fallback, rate-limited, weaker quality.
+ *   3. MyMemory       — free fallback, rate-limited, weaker quality.
+ *
+ * Google Cloud Translation was removed (DrJ, 2026-10-22): Google is kept for
+ * embeddings only, to keep paid Google usage to one line on the bill.
+ * GOOGLE_TRANSLATE_KEY now does nothing.
  *
  * Each provider returns the raw translation; callers run the shared
  * `polishText` pass afterwards to fix common grammatical glitches that tend
@@ -22,7 +25,6 @@
  *                           mirror if you don't want to run your own
  *   LIBRETRANSLATE_API_KEY  optional; required by some public instances
  *   DEEPL_API_KEY           optional (enables DeepL tier)
- *   GOOGLE_TRANSLATE_KEY    optional (enables Google tier)
  *   MYMEMORY_EMAIL          optional registered email — gives 10k words/day
  */
 import axios from "axios";
@@ -31,7 +33,6 @@ import { logger } from "./logger.js";
 const LIBRE_URL   = (process.env.LIBRETRANSLATE_URL || "http://127.0.0.1:5000").replace(/\/+$/, "");
 const LIBRE_KEY   = process.env.LIBRETRANSLATE_API_KEY || "";
 const DEEPL_KEY   = process.env.DEEPL_API_KEY         || "";
-const GOOGLE_KEY  = process.env.GOOGLE_TRANSLATE_KEY  || "";
 const MYMEMORY_EMAIL = process.env.MYMEMORY_EMAIL     || "khabari.app@gmail.com";
 
 // Circuit-breaker for LibreTranslate: if a call fails, stop trying for a
@@ -93,16 +94,6 @@ async function translateDeepL(text, target, source) {
   return data?.translations?.[0]?.text || null;
 }
 
-async function translateGoogle(text, target, source) {
-  if (!GOOGLE_KEY) return null;
-  const { data } = await axios.post(
-    `https://translation.googleapis.com/language/translate/v2?key=${GOOGLE_KEY}`,
-    { q: text, target, source: source && source !== "auto" ? source : undefined, format: "text" },
-    { timeout: 15000 }
-  );
-  return data?.data?.translations?.[0]?.translatedText || null;
-}
-
 async function translateMyMemory(text, target, source) {
   const langpair = `${source || "en"}|${target}`;
   const { data } = await axios.get("https://api.mymemory.translated.net/get", {
@@ -154,7 +145,6 @@ export function polishText(text, target) {
 const PROVIDERS = [
   { name: "libretranslate", fn: translateLibre,    enabled: () => !!LIBRE_URL  },
   { name: "deepl",          fn: translateDeepL,    enabled: () => !!DEEPL_KEY  },
-  { name: "google",         fn: translateGoogle,   enabled: () => !!GOOGLE_KEY },
   { name: "mymemory",       fn: translateMyMemory, enabled: () => true         },
 ];
 
