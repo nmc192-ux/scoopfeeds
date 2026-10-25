@@ -1,0 +1,115 @@
+# ScoopFeeds Radio — the channel grid
+
+**What this is.** ScoopFeeds Radio runs like a TV news channel, on the Bloomberg and Al Jazeera model (DrJ, 22 Oct
+2026): a fixed 24-hour grid, a catalogue of segments, and a set of screen elements that are always on. Some
+programmes are live, most are produced, some are pre-recorded. This page is the grid in plain English. The same grid
+is code in `backend/src/radio/programme/grid.js`, and a test (`grid.test.js`) reads this page and fails if the two
+disagree, so change both together. (#200; it feeds #195, the 24/7 hours.)
+
+**Status.** Built and tested, **not on air**. The producer builds an hour from the grid only when it is started with
+`--grid` or `RADIO_GRID_ENABLED=1`. Without that, every hour is today's running order, unchanged.
+
+## How an hour is built
+
+Every produced hour keeps today's running order (`clock.js`): the top ident and ping on :00:00, The Hour, Markets
+Now, The News, Compared, the desks, a Short from a ScoopFeeds film, the half-hour ident and headlines, sign-off. The
+grid then changes four things for the hour:
+
+1. **Crypto.** The first 90 seconds of the first music break become the Crypto segment (prices from CoinGecko).
+2. **Weather every two hours**, on even New York hours. In the other hours its 90 seconds go to the half-hour
+   headlines, which then read seven stories instead of five.
+3. **Business follows the open exchange.** Markets Now and the Business desk are titled by the stock exchanges
+   trading at that moment ("Markets Now: New York, London and Frankfurt trading") and lead with those markets. Only
+   exchanges we carry figures for are named in the title (US and Europe today).
+4. **The film airs at a fixed time**, 9 pm New York, every day, so it can be promoted as "tonight at 9 ET". A film
+   offered for any other hour is held back for its slot.
+
+**Breaking news and live events override the grid.** The segment on air is cut where the override starts. When the
+override ends, the grid picks up at the start of the next segment, never in the middle of one; any time in between
+is headlines and music.
+
+## The 24 hours (New York time)
+
+London, Dubai and Karachi times are for a day in US summer time (until 1 November); after that the US clock moves
+back an hour, and so do these columns. The grid itself is always set in New York time.
+
+| ET hour | Daypart | Format | Audience | Weather | Crypto | Film | London | Dubai | Karachi |
+|---|---|---|---|---|---|---|---|---|---|
+| 00:00 | Overnight: Middle East morning | repeat | middle-east-morning | yes | no | no | 04:00 | 08:00 | 09:00 |
+| 01:00 | Overnight: Middle East morning | repeat | middle-east-morning | no | no | no | 05:00 | 09:00 | 10:00 |
+| 02:00 | Overnight: UK and Europe morning | repeat | uk-europe-morning | yes | no | no | 06:00 | 10:00 | 11:00 |
+| 03:00 | Overnight: UK and Europe morning | repeat | uk-europe-morning | no | no | no | 07:00 | 11:00 | 12:00 |
+| 04:00 | Overnight: UK and Europe morning | repeat | uk-europe-morning | yes | no | no | 08:00 | 12:00 | 13:00 |
+| 05:00 | Overnight: UK and Europe morning | repeat | uk-europe-morning | no | no | no | 09:00 | 13:00 | 14:00 |
+| 06:00 | US morning | produced | us | yes | yes | no | 10:00 | 14:00 | 15:00 |
+| 07:00 | US morning | produced | us | no | yes | no | 11:00 | 15:00 | 16:00 |
+| 08:00 | US morning | produced | us | yes | yes | no | 12:00 | 16:00 | 17:00 |
+| 09:00 | US morning | produced | us | no | yes | no | 13:00 | 17:00 | 18:00 |
+| 10:00 | US daytime, markets open | produced | us | yes | yes | no | 14:00 | 18:00 | 19:00 |
+| 11:00 | US daytime, markets open | produced | us | no | yes | no | 15:00 | 19:00 | 20:00 |
+| 12:00 | US daytime, markets open | produced | us | yes | yes | no | 16:00 | 20:00 | 21:00 |
+| 13:00 | US daytime, markets open | produced | us | no | yes | no | 17:00 | 21:00 | 22:00 |
+| 14:00 | US daytime, markets open | produced | us | yes | yes | no | 18:00 | 22:00 | 23:00 |
+| 15:00 | US daytime, markets open | produced | us | no | yes | no | 19:00 | 23:00 | 00:00 |
+| 16:00 | US evening | produced | us | yes | yes | no | 20:00 | 00:00 | 01:00 |
+| 17:00 | US evening | produced | us | no | yes | no | 21:00 | 01:00 | 02:00 |
+| 18:00 | US evening | produced | us | yes | yes | no | 22:00 | 02:00 | 03:00 |
+| 19:00 | US evening | produced | us | no | yes | no | 23:00 | 03:00 | 04:00 |
+| 20:00 | US evening | produced | us | yes | yes | no | 00:00 | 04:00 | 05:00 |
+| 21:00 | Prime time: the ScoopFeeds film | produced | us | no | yes | yes | 01:00 | 05:00 | 06:00 |
+| 22:00 | Late US evening, South Asia morning | produced | south-asia-morning | yes | yes | no | 02:00 | 06:00 | 07:00 |
+| 23:00 | Late US evening, South Asia morning | produced | south-asia-morning | no | yes | no | 03:00 | 07:00 | 08:00 |
+
+- **Produced** (6 am to midnight New York): a full hour written from the live feed.
+- **Repeat** (overnight New York): the strongest recent produced hour again, with freshly written top-of-hour
+  headlines. Midnight to 2 am is timed for the Middle East morning, 2 am to 6 am for the UK and Europe morning. The
+  repeat itself is built by #195's rolling station; the grid only says which hours are repeats.
+- **South Asia** gets its own slot, 10 pm to midnight New York (7 to 9 am Karachi in US summer time, 8 to 10 am in
+  winter). It is a produced hour; Rule 0 and the Pakistan-politics rules apply to it like every other hour.
+
+## The segment catalogue
+
+Each segment is a format with its own fact pack, writer prompt, checks and screen layout. Every spoken line is
+checked against its fact pack before it is voiced: no figure, quote or outlet that is not in the pack airs (the same
+Rule 0, figure, quote and outlet checks as every other segment).
+
+| Segment | id | Kind | When | Status |
+|---|---|---|---|---|
+| Top-of-hour headlines | the-hour | produced | every hour at :00, after the top ident and ping | on-air |
+| Half-hour headlines | half | produced | every hour at :30 | on-air |
+| The News, Compared | compared | produced | twice an hour | on-air |
+| Business & Markets | markets | produced + live data | twice an hour, led by the exchanges in session | on-air |
+| Desks: Middle East, US, Tech and AI, Business | desk | produced | once an hour each | on-air |
+| Crypto | crypto | produced + live data | once an hour | on-air |
+| Weather | weather | produced + live data | every 2 hours (even New York hours) | on-air |
+| ScoopFeeds showcase | showcase | pre-recorded | a Short every hour; the film at 9 ET | on-air |
+| Developing and emerging stories | developing | live-produced | breaks into the grid | #201 |
+| The Midterms / election desk | midterms | produced | election season | #197 |
+| Live events | live | live | breaks into the grid | #202 |
+
+"on-air" means the grid places it today. The last three are catalogued here and placed by their own issues; until
+they land, they do not air from the grid.
+
+**Crypto** reads only the CRYPTO rows of the pack (Bitcoin first, then Ether, then at most three others): price and
+24-hour change. It never predicts prices or advises buying or selling. With fewer than two crypto rows the slot is
+headlines and music.
+
+## Screen elements (always on, earn-render)
+
+All in the Signal identity. An element is drawn only when it has real data; there are no placeholders.
+
+| Element | id | Shows when |
+|---|---|---|
+| LIVE bug | live-bug | always |
+| Channel clock: New York, London, Dubai, Karachi | clocks | always |
+| Programme name | programme-name | the slot has a title |
+| Headline ticker | headline-ticker | there are headlines |
+| Markets ticker by open session | markets-ticker | there are market figures |
+| Weather scroller of major capitals | weather-scroller | there is weather |
+| Lower third: headline and outlet, verbatim from articles | lower-third | a story is on screen |
+| Coming up next | coming-up | something is coming up |
+
+The programme screen and the 24/7 headline screen share one frame: the same top bar (logo, LIVE, the four clocks)
+and the same bottom ticker, so a failed hour falling back to the 24/7 screen does not look like a different
+channel. The story and headline-break scenes carry a right-hand rail (Coming up, markets, weather). No text on either
+screen is smaller than the ticker text, 26 px at 1080p.
