@@ -13,7 +13,7 @@
  * Optional env:
  *   BATCH_SIZE         — how many jobs to render this run (default 5, max 10)
  *   DRY_RUN=true       — render but don't upload (debug)
- *   OPENAI_API_KEY / ELEVENLABS_API_KEY / GOOGLE_TTS_KEY — enables TTS (optional)
+ *   OPENAI_API_KEY / ELEVENLABS_API_KEY — enables TTS (optional)
  *
  * Exit codes: 0 on success (any number processed, including zero), 1 on
  * unrecoverable errors (auth, network, all renders failed).
