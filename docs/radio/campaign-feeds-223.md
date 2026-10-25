@@ -19,31 +19,37 @@ in a browser before approving: UNVERIFIED beyond that.** Nothing comes from memo
 X accounts are listed for reference only. The allow-list cannot match an X stream yet, and whether
 each campaign streams on X was not checked.
 
-## Proposed (18)
+## Proposed (11)
 
 | id | Race | YouTube handle | Source page (handle linked there) | X (reference) |
 |---|---|---|---|---|
 | moody-campaign | FL Senate special, R (inc.) | @AshleyMoodyFL | https://ashleymoody.com/about/ | x.com/AshleyMoodyFL |
 | nixon-campaign | FL Senate special, D | @AngieForFL | https://angienixon.com/state-rep-angie-nixon-launchescampaign-for-u-s-senate/ | twitter.com/AngieNixon |
-| turek-campaign | IA Senate, D | @JoshTurek4Iowa | https://turek4iowa.com/ | x.com/Turek4Iowa |
 | collins-me-campaign | ME Senate, R (inc.) | @susancollins4senator | https://susancollins.com/ | x.com/SenSusanCollins |
 | jackson-me-campaign | ME Senate, D | @troyjacksonformaine | https://www.jacksonformaine.com/ | x.com/troyjackson207 |
-| rogers-mi-campaign | MI Senate, R | @MikeRogersForMI | https://rogersforsenate.com/meet-mike | x.com/MikeRogersForMI |
 | alme-campaign | MT Senate, R | @almeforsenate | https://almeforsenate.com/ | x.com/kurtalme |
 | bankhead-campaign | MT Senate, D | @montanamatters | https://alaniformt.com/press-kit ("the campaign's YouTube channel, youtube.com/@montanamatters") | none on site |
 | bodnar-campaign | MT Senate, independent | @SethForMontana | https://www.sethformontana.com/ | x.com/SethBodnarForMT |
-| ricketts-campaign | NE Senate, R (inc.) | @rickettsforsenate | https://petericketts.com/news/ (homepage not read) | twitter.com/PeteRicketts |
 | sununu-campaign | NH Senate, R | @sununusenator | https://www.sununusenator.com/ | x.com/sununusenator |
 | pappas-campaign | NH Senate, D | @ChrisPappasNH | https://chrispappas.org/ | x.com/chrispappasnh |
-| husted-campaign | OH Senate special, R (inc.) | @jonhustedforsenate | https://www.jonhustedforsenate.com/author/hustedohsenate/ (homepage not read) | x.com/TeamHusted |
-| talarico-campaign | TX Senate, D | @JamesTalaricoTX | https://jamestalarico.com/ | x.com/jamestalarico |
-| becerra-campaign | CA governor, D | @becerraforgovernor | https://www.xavierbecerra2026.com/bio/ | x.com/XavierBecerra |
 | sand-campaign | IA governor, D | @robsandia | https://robsand.com/about/ | x.com/robsandia |
 | lahn-campaign | IA governor, R | @ZachLahnforGovernor | https://zachlahn.com/ | x.com/ZachLahn |
-| benson-campaign | MI governor, D | @BensonforGovernor | https://www.jocelynbenson.com/ | x.com/JocelynBenson |
 
 Judgment call: **@montanamatters** is the only channel not named for the candidate. Her own press
 kit names it as the campaign's channel, so it is proposed; strike it if in doubt.
+
+
+**DrJ's fairness rule (25 Oct 2026): a race is proposed only when every main candidate in it has a verified channel.**
+Five races qualify: FL Senate special, ME Senate, MT Senate, NH Senate, IA governor. These seven entries were
+dropped because the other main candidate's channel could not be verified by @handle (see "Left out" below):
+
+- `turek-campaign` (IA Senate, D, @JoshTurek4Iowa)
+- `rogers-mi-campaign` (MI Senate, R, @MikeRogersForMI)
+- `ricketts-campaign` (NE Senate, R (inc.), @rickettsforsenate)
+- `husted-campaign` (OH Senate special, R (inc.), @jonhustedforsenate)
+- `talarico-campaign` (TX Senate, D, @JamesTalaricoTX)
+- `becerra-campaign` (CA governor, D, @becerraforgovernor)
+- `benson-campaign` (MI governor, D, @BensonforGovernor)
 
 ## Left out (not proposed)
 

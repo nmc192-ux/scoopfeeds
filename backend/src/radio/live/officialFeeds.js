@@ -84,12 +84,6 @@ export const OFFICIAL_FEEDS = Object.freeze([
     addedBy: PROPOSED_223,
   },
   {
-    id: "turek-campaign", publisher: "Josh Turek campaign", proposed: true,
-    youtube: ["@JoshTurek4Iowa"], pages: [],
-    why: "Iowa Senate, Democratic nominee. Handle linked from the campaign's own site: https://turek4iowa.com/ (Meet Josh, footer).",
-    addedBy: PROPOSED_223,
-  },
-  {
     id: "collins-me-campaign", publisher: "Susan Collins campaign", proposed: true,
     youtube: ["@susancollins4senator"], pages: [],
     why: "Maine Senate, Republican incumbent. Handle linked from the campaign's own site: https://susancollins.com/ (header and footer).",
@@ -99,12 +93,6 @@ export const OFFICIAL_FEEDS = Object.freeze([
     id: "jackson-me-campaign", publisher: "Troy Jackson campaign", proposed: true,
     youtube: ["@troyjacksonformaine"], pages: [],
     why: "Maine Senate, Democratic nominee. Handle linked from the campaign's own site: https://www.jacksonformaine.com/ (header, footer).",
-    addedBy: PROPOSED_223,
-  },
-  {
-    id: "rogers-mi-campaign", publisher: "Mike Rogers campaign", proposed: true,
-    youtube: ["@MikeRogersForMI"], pages: [],
-    why: "Michigan Senate, Republican nominee. Handle linked from the campaign's own site: https://rogersforsenate.com/meet-mike (header, menu, footer).",
     addedBy: PROPOSED_223,
   },
   {
@@ -126,12 +114,6 @@ export const OFFICIAL_FEEDS = Object.freeze([
     addedBy: PROPOSED_223,
   },
   {
-    id: "ricketts-campaign", publisher: "Pete Ricketts campaign", proposed: true,
-    youtube: ["@rickettsforsenate"], pages: [],
-    why: "Nebraska Senate, Republican incumbent. Handle linked from the campaign's own site: https://petericketts.com/news/ (footer; homepage not read).",
-    addedBy: PROPOSED_223,
-  },
-  {
     id: "sununu-campaign", publisher: "John Sununu campaign", proposed: true,
     youtube: ["@sununusenator"], pages: [],
     why: "New Hampshire Senate, Republican nominee. Handle linked from the campaign's own site: https://www.sununusenator.com/ (header and footer).",
@@ -144,24 +126,6 @@ export const OFFICIAL_FEEDS = Object.freeze([
     addedBy: PROPOSED_223,
   },
   {
-    id: "husted-campaign", publisher: "Jon Husted campaign", proposed: true,
-    youtube: ["@jonhustedforsenate"], pages: [],
-    why: "Ohio Senate (special), Republican incumbent. Handle linked from the campaign's own site: https://www.jonhustedforsenate.com/author/hustedohsenate/ (sitewide social row; homepage not read).",
-    addedBy: PROPOSED_223,
-  },
-  {
-    id: "talarico-campaign", publisher: "James Talarico campaign", proposed: true,
-    youtube: ["@JamesTalaricoTX"], pages: [],
-    why: "Texas Senate, Democratic nominee. Handle linked from the campaign's own site: https://jamestalarico.com/ (footer).",
-    addedBy: PROPOSED_223,
-  },
-  {
-    id: "becerra-campaign", publisher: "Xavier Becerra campaign", proposed: true,
-    youtube: ["@becerraforgovernor"], pages: [],
-    why: "California governor, Democrat (top-two). Handle linked from the campaign's own site: https://www.xavierbecerra2026.com/bio/ (header and footer).",
-    addedBy: PROPOSED_223,
-  },
-  {
     id: "sand-campaign", publisher: "Rob Sand campaign", proposed: true,
     youtube: ["@robsandia"], pages: [],
     why: "Iowa governor, Democratic nominee. Handle linked from the campaign's own site: https://robsand.com/about/.",
@@ -171,12 +135,6 @@ export const OFFICIAL_FEEDS = Object.freeze([
     id: "lahn-campaign", publisher: "Zach Lahn campaign", proposed: true,
     youtube: ["@ZachLahnforGovernor"], pages: [],
     why: "Iowa governor, Republican nominee. Handle linked from the campaign's own site: https://zachlahn.com/ (Follow Zach footer).",
-    addedBy: PROPOSED_223,
-  },
-  {
-    id: "benson-campaign", publisher: "Jocelyn Benson campaign", proposed: true,
-    youtube: ["@BensonforGovernor"], pages: [],
-    why: "Michigan governor, Democratic nominee. Handle linked from the campaign's own site: https://www.jocelynbenson.com/.",
     addedBy: PROPOSED_223,
   },
 ]);
