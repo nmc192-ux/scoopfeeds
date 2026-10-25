@@ -21,6 +21,7 @@ import { useQuery } from "@tanstack/react-query";
 import EventCard from "../components/events/EventCard";
 import { useEvents } from "../hooks/useEvents";
 import LoadingCard from "../components/ui/LoadingCard";
+import CollapsingImage from "../components/ui/CollapsingImage";
 import TimeoutNotice, { useTimedOut } from "../components/ui/TimeoutNotice";
 import ScoopMascot from "../components/mascot/ScoopMascot";
 import { useGeo } from "../hooks/useGeo";
@@ -112,11 +113,14 @@ function MetaLine({ ev }) {
 function LeadStory({ ev }) {
   return (
     <Link to={`/events/${ev.slug}`} className="group block" data-testid="today-lead" data-event-id={ev.id}>
-      {ev.hero_image_url && (
-        <div className="aspect-[16/9] rounded-xl overflow-hidden bg-[var(--color-surface2)] mb-4">
-          <img src={ev.hero_image_url} alt="" className="w-full h-full object-cover" />
-        </div>
-      )}
+      {/* #242: a photo the publisher refuses (hotlink block) collapses the slot; the eyebrow and
+          headline below are the typographic lead. There is no server-side image health to pick a
+          lead by, so the prominence order is kept and the fallback is client-side only. */}
+      <CollapsingImage
+        src={ev.hero_image_url}
+        className="aspect-[16/9] rounded-xl overflow-hidden bg-[var(--color-surface2)] mb-4"
+        imgClassName="w-full h-full object-cover"
+      />
       <MetaLine ev={ev} />
       <h2
         className="mt-2 text-3xl sm:text-4xl font-semibold leading-tight text-[var(--color-text)] group-hover:text-[var(--color-accent)] transition-colors"

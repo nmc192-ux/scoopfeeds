@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { ArrowRight, Check, Globe2, Sparkles } from "lucide-react";
 import { useNewsStore } from "../../store/newsStore";
 import { useGeo } from "../../hooks/useGeo";
+import { useSiteConfig } from "../../hooks/useSiteConfig";
 import ScoopMascot from "../mascot/ScoopMascot";
 import Modal, { ModalFooter } from "../ui/Modal";
 
@@ -46,7 +47,41 @@ const LANGUAGE_OPTIONS = [
   { code: "ja", flag: "🇯🇵", native: "日本語" },
 ];
 
+// Class sets. CLASSIC is the flag-off look, character for character. V2 (#242) uses the #188
+// tokens: an ink header band with the Anton wordmark, lime for the selected state and the main
+// button, Newsreader for the step questions, Schibsted Grotesk for labels. Behaviour is identical.
+const CLASSIC = {
+  header: "px-6 pt-6 pb-4 flex items-center gap-3 border-b border-[var(--color-border)]",
+  title: "text-lg font-bold",
+  sub: "text-xs text-[var(--color-text-tertiary)]",
+  dotOn: "bg-electric-600", dotOff: "bg-[var(--color-border)]",
+  icon: "text-electric-600",
+  h3: "font-semibold",
+  ring: "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40",
+  on: "border-electric-500 bg-electric-50 text-electric-900",
+  onSub: "text-electric-700",
+  chipOn: "bg-electric-600 text-white border-electric-600",
+  primary: "bg-electric-600 text-white hover:bg-electric-700",
+  primaryRing: "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/50",
+};
+const V2 = {
+  header: "px-6 pt-6 pb-4 flex items-center gap-3 bg-ink text-paper font-label",
+  title: "font-display text-2xl tracking-wide uppercase leading-none",
+  sub: "text-xs text-paper opacity-70 mt-1",
+  dotOn: "bg-lime", dotOff: "bg-paper opacity-30",
+  icon: "text-[var(--color-text)]",
+  h3: "font-reading text-lg font-semibold",
+  ring: "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text)]",
+  on: "border-ink bg-lime text-ink",
+  onSub: "text-ink opacity-70",
+  chipOn: "bg-lime text-ink border-ink",
+  primary: "bg-lime text-ink hover:opacity-90 font-label uppercase tracking-wider",
+  primaryRing: "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-text)] focus-visible:ring-offset-2",
+};
+
 export default function OnboardingModal() {
+  const { v2 } = useSiteConfig();
+  const T = v2 ? V2 : CLASSIC;
   const {
     onboardingComplete, completeOnboarding,
     language, setLanguage,
@@ -98,11 +133,11 @@ export default function OnboardingModal() {
       panelClassName="overflow-hidden"
     >
       {/* Header */}
-      <div className="px-6 pt-6 pb-4 flex items-center gap-3 border-b border-[var(--color-border)]">
+      <div className={T.header} data-testid="onboarding-header">
         <ScoopMascot size="md" animated />
         <div>
-          <h2 className="text-lg font-bold">Welcome to Scoopfeeds</h2>
-          <p className="text-xs text-[var(--color-text-tertiary)]">
+          <h2 className={T.title}>{v2 ? <>Welcome to Scoop<span className="text-lime">*</span>Feeds</> : "Welcome to Scoopfeeds"}</h2>
+          <p className={T.sub}>
             Intelligent news, curated — takes 20 seconds to personalise
           </p>
         </div>
@@ -111,7 +146,7 @@ export default function OnboardingModal() {
             <span
               key={i}
               className={`w-2 h-2 rounded-full transition-colors ${
-                i <= step ? "bg-electric-600" : "bg-[var(--color-border)]"
+                i <= step ? T.dotOn : T.dotOff
               }`}
             />
           ))}
@@ -123,8 +158,8 @@ export default function OnboardingModal() {
         {step === 0 && (
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <Globe2 size={16} className="text-electric-600" />
-              <h3 className="font-semibold">Where are you based?</h3>
+              <Globe2 size={16} className={T.icon} />
+              <h3 className={T.h3}>Where are you based?</h3>
             </div>
             <p className="text-xs text-[var(--color-text-tertiary)] mb-4">
               We detected <b>{country || "your region"}</b>. Confirm or pick another — this tailors markets, weather and local news.
@@ -137,21 +172,21 @@ export default function OnboardingModal() {
                   aria-label={r.label}
                   aria-pressed={r.code === countryCode}
                   className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-sm text-left transition
-                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40
+                    ${T.ring}
                     ${r.code === countryCode
-                      ? "border-electric-500 bg-electric-50 text-electric-900"
+                      ? T.on
                       : "border-[var(--color-border)] hover:bg-[var(--color-surface2)]"}`}
                 >
                   <span className="text-xl">{r.flag}</span>
                   <span className="flex-1 truncate">{r.label}</span>
-                  <span className={`text-[10px] ${r.code === countryCode ? "text-electric-700" : "text-[var(--color-text-tertiary)]"}`}>{r.currency}</span>
+                  <span className={`text-[10px] ${r.code === countryCode ? T.onSub : "text-[var(--color-text-tertiary)]"}`}>{r.currency}</span>
                 </button>
               ))}
             </div>
             <button
               onClick={() => setStep(1)}
-              className="w-full mt-3 text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text)] py-2
-                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 rounded"
+              className={`w-full mt-3 text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text)] py-2
+                         ${T.ring} rounded`}
             >
               Skip — use auto-detection
             </button>
@@ -161,8 +196,8 @@ export default function OnboardingModal() {
         {step === 1 && (
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <Sparkles size={16} className="text-electric-600" />
-              <h3 className="font-semibold">Choose your language</h3>
+              <Sparkles size={16} className={T.icon} />
+              <h3 className={T.h3}>Choose your language</h3>
             </div>
             <p className="text-xs text-[var(--color-text-tertiary)] mb-4">
               Articles show in their original language by default. Pick one to translate everything, or keep Auto. You can change this anytime from the header.
@@ -171,14 +206,14 @@ export default function OnboardingModal() {
               onClick={() => { setAutoLanguage(true); setStep(2); }}
               aria-pressed={autoLanguage}
               className={`w-full px-4 py-3 rounded-xl border text-left mb-2 transition
-                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 ${
+                ${T.ring} ${
                 autoLanguage
-                  ? "border-electric-500 bg-electric-50 text-electric-900"
+                  ? T.on
                   : "border-[var(--color-border)] hover:bg-[var(--color-surface2)]"
               }`}
             >
               <div className="font-semibold text-sm">🌐 Auto — article's language</div>
-              <div className={`text-[11px] ${autoLanguage ? "text-electric-700" : "text-[var(--color-text-tertiary)]"}`}>Recommended — original grammar and nuance preserved</div>
+              <div className={`text-[11px] ${autoLanguage ? T.onSub : "text-[var(--color-text-tertiary)]"}`}>Recommended — original grammar and nuance preserved</div>
             </button>
             <div className="grid grid-cols-3 gap-2">
               {LANGUAGE_OPTIONS.map((l) => {
@@ -190,9 +225,9 @@ export default function OnboardingModal() {
                     aria-label={l.native}
                     aria-pressed={on}
                     className={`px-2 py-2 rounded-xl border text-left transition
-                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 ${
+                      ${T.ring} ${
                       on
-                        ? "border-electric-500 bg-electric-50 text-electric-900"
+                        ? T.on
                         : "border-[var(--color-border)] hover:bg-[var(--color-surface2)]"
                     }`}
                   >
@@ -211,8 +246,8 @@ export default function OnboardingModal() {
         {step === 2 && (
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <Sparkles size={16} className="text-electric-600" />
-              <h3 className="font-semibold">Pick what you like</h3>
+              <Sparkles size={16} className={T.icon} />
+              <h3 className={T.h3}>Pick what you like</h3>
             </div>
             <p className="text-xs text-[var(--color-text-tertiary)] mb-4">
               We'll boost these in your feed. Pick as many as you want — skip to see everything.
@@ -226,9 +261,9 @@ export default function OnboardingModal() {
                     onClick={() => togglePick(t.id)}
                     aria-pressed={on}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border transition
-                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 ${
+                      ${T.ring} ${
                       on
-                        ? "bg-electric-600 text-white border-electric-600"
+                        ? T.chipOn
                         : "bg-[var(--color-surface2)] border-[var(--color-border)] hover:bg-[var(--color-border)]"
                     }`}
                   >
@@ -246,26 +281,26 @@ export default function OnboardingModal() {
       <ModalFooter>
         <button
           onClick={completeOnboarding}
-          className="text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text)]
-                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/40 rounded px-2 py-1"
+          className={`text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text)]
+                     ${T.ring} rounded px-2 py-1`}
         >
           Skip all
         </button>
         {step < 2 ? (
           <button
             onClick={() => setStep(step + 1)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 text-white text-sm font-semibold
-                       hover:bg-electric-700 transition-colors
-                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/50"
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-full ${T.primary} text-sm font-semibold
+                       transition-colors
+                       ${T.primaryRing}`}
           >
             Next <ArrowRight size={14} />
           </button>
         ) : (
           <button
             onClick={finish}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-electric-600 text-white text-sm font-semibold
-                       hover:bg-electric-700 transition-colors
-                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-electric-500/50"
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-full ${T.primary} text-sm font-semibold
+                       transition-colors
+                       ${T.primaryRing}`}
           >
             Start reading <ArrowRight size={14} />
           </button>

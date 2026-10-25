@@ -8,7 +8,8 @@ import { Activity, FileText, Clock } from "lucide-react";
 import ProbabilityBar from "../predictions/ProbabilityBar";
 import TruthGapBadge  from "../predictions/TruthGapBadge";
 import AnomalyChip    from "../predictions/AnomalyChip";
-import { useMarketOdds } from "../../hooks/useSiteConfig";
+import { useSiteConfig } from "../../hooks/useSiteConfig";
+import CollapsingImage from "../ui/CollapsingImage";
 
 const CATEGORY_COLORS = {
   politics:    "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
@@ -20,6 +21,20 @@ const CATEGORY_COLORS = {
   climate:     "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
   geopolitics: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
 };
+
+/**
+ * The card's hero image. Classic site: the plain <img>, unchanged. SITE_V2 (#242): the slot
+ * collapses when the publisher refuses the image, so a card never shows an empty frame.
+ */
+function HeroImage({ v2, src, className, imgClassName }) {
+  if (!src) return null;
+  if (v2) return <CollapsingImage src={src} loading="lazy" className={className} imgClassName={imgClassName} />;
+  return (
+    <div className={className}>
+      <img src={src} alt="" loading="lazy" className={imgClassName} />
+    </div>
+  );
+}
 
 function severityColor(severity) {
   if (severity >= 0.7) return "bg-red-500";
@@ -64,7 +79,7 @@ function avatarColor(name = "") {
 }
 
 export default function EventCard({ event, variant = "default", featured = false }) {
-  const oddsOn = useMarketOdds();
+  const { marketOdds: oddsOn, v2 } = useSiteConfig();
   const {
     slug, title, summary, category, severity = 0,
     article_count = 0, source_count = 0, top_sources = [], market_count = 0,
@@ -123,12 +138,9 @@ export default function EventCard({ event, variant = "default", featured = false
       return (
         <Link to={`/events/${slug}`}
           className="group flex flex-col sm:flex-row rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[var(--color-accent)] hover:shadow-md transition-all overflow-hidden">
-          {hero_image_url && (
-            <div className="sm:w-2/5 lg:w-1/2 aspect-video overflow-hidden bg-[var(--color-surface2)] flex-shrink-0">
-              <img src={hero_image_url} alt="" loading="lazy"
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-            </div>
-          )}
+          <HeroImage v2={v2} src={hero_image_url}
+            className="sm:w-2/5 lg:w-1/2 aspect-video overflow-hidden bg-[var(--color-surface2)] flex-shrink-0"
+            imgClassName="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
           <div className="flex flex-col gap-2.5 p-4 sm:p-5 flex-1 min-w-0">
             {header}
             <h3 className="font-bold text-[var(--color-text)] text-base sm:text-lg leading-snug line-clamp-3 group-hover:text-[var(--color-accent)] transition-colors">
@@ -144,12 +156,9 @@ export default function EventCard({ event, variant = "default", featured = false
     return (
       <Link to={`/events/${slug}`}
         className="group flex flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[var(--color-accent)] hover:shadow-md transition-all overflow-hidden">
-        {hero_image_url && (
-          <div className="aspect-video overflow-hidden bg-[var(--color-surface2)]">
-            <img src={hero_image_url} alt="" loading="lazy"
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-          </div>
-        )}
+        <HeroImage v2={v2} src={hero_image_url}
+          className="aspect-video overflow-hidden bg-[var(--color-surface2)]"
+          imgClassName="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
         <div className="flex flex-col gap-2.5 p-4 flex-1">
           {header}
           <h3 className="font-semibold text-[var(--color-text)] text-sm leading-snug line-clamp-3 group-hover:text-[var(--color-accent)] transition-colors">
@@ -167,16 +176,9 @@ export default function EventCard({ event, variant = "default", featured = false
       className="group flex flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[var(--color-accent)] hover:shadow-md transition-all overflow-hidden"
     >
       {/* Hero image */}
-      {hero_image_url && (
-        <div className="aspect-video overflow-hidden bg-[var(--color-surface2)]">
-          <img
-            src={hero_image_url}
-            alt=""
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-            loading="lazy"
-          />
-        </div>
-      )}
+      <HeroImage v2={v2} src={hero_image_url}
+        className="aspect-video overflow-hidden bg-[var(--color-surface2)]"
+        imgClassName="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
 
       <div className="flex flex-col gap-3 p-4 flex-1">
         {/* Header row: category badge + truth-gap + severity dot */}
