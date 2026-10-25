@@ -41,9 +41,9 @@ const CALL_FORM = new RegExp([
   String.raw`\b(call(s|ed)?|declare[sd]?)\b[^.;]*\b(race|seat|contest)\b[^.;]*\bfor\b`,
 ].join("|"), "i");
 /** A call that did not happen, or was withdrawn. Refused whatever else the quote says. */
-const NEGATED = /\b(not (yet )?(been )?(called|projected|declared)|too (early|close|soon) to (call|project|declare)|yet to (be )?(call(ed)?|project(ed)?|declare[d]?)|no (call|projection|winner)s?( has been| yet)?|(un|not )called|can(not|'t|’t) (yet )?(call|project)|(has|have|had)n['’]?t (yet )?(been )?(called|projected)|withdr(ew|awn|aw)|retract(s|ed|ion)?|rescind(s|ed)?)\b/i;
+const NEGATED = /\b(not (yet )?(been )?(called|projected|declared)|too (early|close|soon) to (call|project|declare)|yet to (be )?(call(ed)?|project(ed)?|declare[d]?)|no (call|projection|winner)s?( has been| yet)?|(un|not )called|can(not|'t|’t) (yet )?(call|project)|(has|have|had)n['’]?t (yet )?(been )?(called|projected)|withdr(ew|awn|aw)|retract(s|ed|ion)?|rescind(s|ed)?|(declin|refus)(e[sd]?|ing) to (call|project|declare)|(will|would|could|did)( not|n['’]t) (yet )?(call|project|declare)|revers(e|ed|es|al)|walk(s|ed)? back)\b/i;
 /** Polls, forecasts, leads and partial counts. */
-const NOT_A_RESULT = /\b(polls?|polling|pollsters?|survey(s|ed)?|forecast(s|er|ers)?|model(s|led)?|odds|ratings?|toss-?up|likely|lean(s|ing)?|favou?red|expected to|on track|leads?|leading|ahead|trails?|trailing|edge|early (returns|results|count)|partial|so far|preliminary|with \d+(\.\d+)?% (of|in)|\d+(\.\d+)?% (of (the )?)?(vote|votes|precincts|expected vote|ballots)( (in|counted|reporting))?|(precincts|votes|ballots) (counted|reporting|in))\b/i;
+const NOT_A_RESULT = /\b(polls?|polling|pollsters?|survey(s|ed)?|forecast(s|er|ers)?|model(s|led)?|odds|ratings?|toss-?up|likely|lean(s|ing)?|favou?red|expected to|on track|if (current |these |the )?trends|(could|may|might) (win|hold|keep|flip)|leads?|leading|ahead|trails?|trailing|edge|early (returns|results|count)|partial|so far|preliminary|with \d+(\.\d+)?% (of|in)|\d+(\.\d+)?% (of (the )?)?(vote|votes|precincts|expected vote|ballots)( (in|counted|reporting))?|(precincts|votes|ballots) (counted|reporting|in))\b/i;
 const POLLS_CLOSED = /\bpolls? (have |had )?(closed|close[sd]?|closing)\b/gi;
 
 export const PARTY_NAMES = Object.freeze({ D: "Democrats", R: "Republicans", I: "Independent" });

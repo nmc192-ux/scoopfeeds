@@ -111,6 +111,13 @@ test("review 23 Oct: polls, leads and negated calls that say 'project' or 'call'
     "AP projects Cooper wins with 52% of the vote counted": "poll-or-lead", // count words → refused (safe side)
     "AP withdrew its call for Cooper": "negated-call",
     "Cooper's campaign says he won": "no-call-form",
+    // review 25 Oct: refusals and reversals that still contain a call form
+    "AP declined to call the race for Cooper": "negated-call",
+    "Fox News refused to project the race for Whatley": "negated-call",
+    "AP will not call the race for Cooper tonight": "negated-call",
+    "AP projected Cooper would win, then reversed": "negated-call",
+    "NBC News projects Whatley will win if trends hold": "poll-or-lead",
+    "AP projects Cooper could win the seat": "poll-or-lead",
   };
   for (const [quote, reason] of Object.entries(cases)) {
     assert.equal(refuseReason(P({ quote })), reason, quote);
