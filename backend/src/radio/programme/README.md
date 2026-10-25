@@ -36,7 +36,9 @@ RADIO_ALERT_EMAIL). Plan and the standing-approval draft: `docs/radio/autonomous
 `rolling.mjs` is one process that owns the air around the clock: it prepares hour N+1 while hour N airs, refreshes
 hour N at :30 when the top story changed, and hands over at :59. The day clock (`dayClock.js`) decides produced vs
 overnight repeat; `repeat.js` retimes the strongest recent hour and `produce.mjs --from the-hour --to markets-1` splices
-a fresh top of the hour into it. A failed hour airs the 24/7 headline screen. Writer calls are counted in each hour's
+a fresh top of the hour into it. A failed hour airs the 24/7 headline screen; `PAUSE` takes the stream off air within
+30 s (#208), never onto the headline screen. Films go through `pickClearedFilm()`, the title through `factualTitle()`,
+and the broadcast description and `~/scoopfeeds-radio/x-broadcast.txt` carry the music credits, as in autoair. Writer calls are counted in each hour's
 `writer.json` and `status.json` and in `~/scoopfeeds-radio/writer-calls/<date>.json`.
 ```bash
 backend/src/radio/playout/deploy/macos/install-rolling.sh         # kept alive by launchd; rehearsal until both flags are 1

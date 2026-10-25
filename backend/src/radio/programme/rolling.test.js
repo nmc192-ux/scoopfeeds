@@ -226,7 +226,7 @@ function rig({ start, forceFail = [], paused = false, ledgerMax = 96, top = { id
   const station = new RollingStation({
     airDir, produce, check, playout, ledger, now: clock.now, sleep: clock.sleep,
     topStory: async () => top, log: (m) => logs.push(m), alert: async (m) => { alerts.push(m); },
-    isPaused: () => paused, forceFail: new Set(forceFail.map(hourStamp)),
+    isPaused: () => (typeof paused === "function" ? paused(clock.now()) : paused), forceFail: new Set(forceFail.map(hourStamp)),
   });
   return { clock, airDir, calls, plays, alerts, logs, ledger, station };
 }
@@ -318,11 +318,35 @@ test("station: with nothing to repeat and no budget, the hour falls back rather 
   assert.deepEqual(hours.map((h) => [h.aired, h.reason]), [["247", "no produced hour in the last 18 h to repeat"]]);
 });
 
-test("station: PAUSE prepares nothing and keeps the 24/7 screen, without alerts", async () => {
+test("station: PAUSE at start-up puts nothing on air, not even the headline screen (#208)", async () => {
   const r = rig({ start: utc("2026-10-27T13:20:00Z"), paused: true });
   const hours = await r.clock.drive(r.station.run({ hours: 3 }));
-  assert.deepEqual(hours.map((h) => h.aired), ["247", "247", "247"]);
-  assert.equal(r.calls.length, 0); assert.equal(r.alerts.length, 0);
+  assert.deepEqual(hours, []);
+  assert.equal(r.plays.length, 0); assert.equal(r.calls.length, 0); assert.equal(r.alerts.length, 0);
+  assert.ok(r.station.offAir);
+});
+
+test("station: PAUSE in the middle of an hour takes the stream off air within 30 s and completes the broadcast (#208)", async () => {
+  const H1 = utc("2026-10-27T14:00:00Z");
+  const pauseAt = H1 + HOUR + 20 * MIN + 7_000;   // 11:20:07 ET, mid-hour, while hour 2 is on air
+  const r = rig({ start: utc("2026-10-27T13:20:00Z"), paused: (now) => now >= pauseAt });
+  const ytCalls = [];
+  const yt = {
+    checkScope: async () => {}, findStream: async () => ({ id: "S" }),
+    createBroadcast: async () => ({ id: "B1" }), bind: async () => {}, transition: async (id, to) => { ytCalls.push([to, id, r.clock.now()]); },
+  };
+  r.station.broadcast = continuousBroadcast({ yt, goLive: async () => {} });
+  const hours = await r.clock.drive(r.station.run({ hours: 6 }));
+  assert.deepEqual(hours.map((h) => h.aired), ["programme", "programme"], "no hand-over after PAUSE");
+  const last = r.plays.at(-1);
+  assert.equal(last.kind, "programme", "the hour on air is stopped; no headline screen is started after it");
+  assert.ok(last.stoppedAt >= pauseAt && last.stoppedAt - pauseAt <= 30_000, `stopped ${(last.stoppedAt - pauseAt) / 1000} s after PAUSE`);
+  assert.deepEqual(ytCalls.map(([to, id]) => [to, id]), [["complete", "B1"]]);
+  assert.ok(ytCalls[0][2] - pauseAt <= 30_000);
+  assert.equal(r.station.offAir.hour, hourStamp(H1 + HOUR));
+  const st = JSON.parse(fs.readFileSync(path.join(r.airDir, hourStamp(H1 + HOUR), "status.json"), "utf8"));
+  assert.equal(st.stage, "paused-off-air");
+  assert.ok(!r.calls.some((c) => c.at > pauseAt), "nothing is produced after PAUSE");
 });
 
 test("station: the continuous YouTube broadcast rolls over at a quiet hand-over, before 12 hours", async () => {
@@ -337,7 +361,8 @@ test("station: the continuous YouTube broadcast rolls over at a quiet hand-over,
   r.station.broadcast = continuousBroadcast({ yt, goLive: async ({ broadcastId }) => { ytCalls.push(["live", broadcastId]); } });
   const hours = await r.clock.drive(r.station.run({ hours: 8 }));
   assert.deepEqual(hours.filter((h) => h.rolled).map((h) => h.hour), ["2026-10-27T20"]);   // the 16:00 ET hand-over
-  assert.deepEqual(ytCalls, [["create", false], ["bind", "B1"], ["live", "B1"], ["create", false], ["bind", "B2"], ["complete", "B1"], ["live", "B2"]]);
+  assert.deepEqual(ytCalls, [["create", false], ["bind", "B1"], ["live", "B1"], ["create", false], ["bind", "B2"], ["complete", "B1"], ["live", "B2"], ["complete", "B2"]],
+    "when the loop stops, it completes its broadcast (auto-stop is off)");
 });
 
 test("disk: hour folders older than the keep window go, by the hour in their name; rehearsal keeps the newest", async () => {
@@ -349,4 +374,64 @@ test("disk: hour folders older than the keep window go, by the hour in their nam
   const r = tmp("seg-");
   for (const n of ["2026-10-27T10-programme", "2026-10-27T11-247", "2026-10-27T12-programme"]) fs.mkdirSync(path.join(r, n));
   assert.deepEqual(pruneOld(r, { keepNewest: 2 }), ["2026-10-27T10-programme"]);
+});
+
+// ── #208 platform safety on the 24/7 loop ──
+import { filmFor, broadcastCopy } from "./rolling.mjs";
+import { CreditsDoNotFit } from "../safety/broadcastCopy.js";
+
+test("#208 film: a produced hour takes only a cleared film; none cleared means no --film (music fills the slot)", async () => {
+  const seen = [];
+  const cleared = async (p) => { seen.push(p); return "/films/cleared.mp4"; };
+  const none = async () => null;
+  assert.deepEqual(await filmFor({ out: "/nowhere", filmSrc: "/films", pick: cleared }), { ok: true, film: "/films/cleared.mp4" });
+  assert.deepEqual(seen, ["/films"]);
+  assert.deepEqual(await filmFor({ out: "/nowhere", filmSrc: "/films", pick: none }), { ok: true, film: null });
+  assert.deepEqual(await filmFor({ out: "/nowhere", filmSrc: null, pick: cleared }), { ok: true, film: null });
+  // the real check, end to end: a folder with an unrecorded film clears nothing
+  const d = tmp("films-"); fs.writeFileSync(path.join(d, "a.mp4"), "x");
+  assert.deepEqual(await filmFor({ out: "/nowhere", filmSrc: d, yt: null }), { ok: true, film: null });
+});
+
+test("#208 film: a repeat keeps its hour's film only while that film is still cleared", async () => {
+  const out = tmp("rep-");
+  const write = (p) => fs.writeFileSync(path.join(out, "programme.json"), JSON.stringify(p));
+  write({ film: "ep4.mp4", filmPath: "/films/ep4.mp4" });
+  assert.deepEqual(await filmFor({ out, to: "markets-1", pick: async (p) => p }), { ok: true, film: null });
+  const no = await filmFor({ out, to: "markets-1", pick: async () => null });
+  assert.equal(no.ok, false); assert.match(no.why, /ep4\.mp4 is not cleared now/);
+  write({ film: "ep4.mp4" });
+  assert.equal((await filmFor({ out, to: "markets-1", pick: async (p) => p })).ok, false, "a film whose path is unknown cannot be checked: refused");
+  write({ film: null });
+  assert.deepEqual(await filmFor({ out, to: "markets-1", pick: async () => null }), { ok: true, film: null });
+});
+
+test("#208 copy: factual title, credits listed in full or linked, never cut", () => {
+  const credits = ["Track A by X\nCC BY 4.0 https://example.com/a", "Track B by Y\nCC BY 4.0 https://example.com/b"];
+  const full = broadcastCopy({ env: {}, credits });
+  assert.equal(full.title, "ScoopFeeds Radio LIVE 24/7 · The news, compared");
+  assert.equal(full.listAll, true);
+  for (const c of credits) { assert.ok(full.description.includes(c)); assert.ok(full.xText.includes(c)); }
+  const url = "https://scoopfeeds.com/radio/music-credits";
+  const linked = broadcastCopy({ env: { RADIO_MUSIC_CREDITS_URL: url, RADIO_ROLLING_TITLE: "BREAKING!! Shocking news 24/7" }, credits });
+  assert.equal(linked.title, "ScoopFeeds Radio LIVE 24/7 · The news, compared", "clickbait title replaced");
+  assert.equal(linked.listAll, false);
+  assert.ok(linked.description.endsWith(`Music credits: ${url}`)); assert.ok(linked.xText.includes(url));
+  assert.ok(!linked.description.includes("Track A"), "a multi-hour broadcast links the full list");
+  const huge = Array.from({ length: 80 }, (_, i) => `Track ${i} by Artist ${i}\nMusic provided by a library under CC BY 4.0 https://example.com/track-${i}`);
+  assert.throws(() => broadcastCopy({ env: {}, credits: huge }), CreditsDoNotFit, "no link and too long: refused, not cut");
+  assert.ok(broadcastCopy({ env: { RADIO_MUSIC_CREDITS_URL: url }, credits: huge }).description.includes(url));
+});
+
+test("#208 copy: the continuous broadcast sends the credits it was given, as a link when listAll is off", async () => {
+  const bodies = [];
+  const yt = { findStream: async () => ({ id: "S" }), bind: async () => {}, createBroadcast: async (o) => { bodies.push(broadcastBody(o)); return { id: "B1" }; } };
+  const url = "https://scoopfeeds.com/radio/music-credits";
+  const b = continuousBroadcast({ yt, goLive: async () => {}, description: "World news.", credits: ["Track A by X"], creditsUrl: url, listAll: false });
+  await b.create(utc("2026-10-27T14:00:00Z"));
+  assert.equal(bodies[0].snippet.description, `World news.\n\nMusic credits: ${url}`);
+  assert.equal(bodies[0].contentDetails.enableAutoStop, false);
+  const b2 = continuousBroadcast({ yt, goLive: async () => {}, description: "World news.", credits: ["Track A by X"] });
+  await b2.create(utc("2026-10-27T14:00:00Z"));
+  assert.match(bodies[1].snippet.description, /Music:\nTrack A by X$/);
 });

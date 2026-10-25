@@ -44,7 +44,14 @@ If YouTube setup fails, the stream still goes out and DrJ is alerted to go live 
 | Mac wrapper | env file, Kokoro, caffeinate, notification hook; stands down the 24/7 music radio agent and the one-hour timer while it runs | `playout/deploy/macos/install-rolling.sh`, `run-rolling.sh` |
 
 **Gates.** Streams only when `RADIO_AUTOAIR_ENABLED=1` AND `RADIO_ROLLING_ENABLED=1`; otherwise each hour plays to
-`~/scoopfeeds-radio/rehearsal-seg/`. `PAUSE` stops hours being prepared (the headline screen airs). The standing
+`~/scoopfeeds-radio/rehearsal-seg/`. `PAUSE` takes the stream **off air** within 30 s, mid-hour included (#208): the
+playout stops, the YouTube broadcast is completed and the loop exits; on restart it holds until PAUSE is removed by
+hand (the standing watchdog also unloads `com.scoopfeeds.radio.rolling`, so after an incident re-run
+`install-rolling.sh`). The #208 layer applies as in autoair: films only through `pickClearedFilm()` (none cleared:
+music fills the slot; a repeat whose film is no longer cleared falls back), `factualTitle()` on the title, and the
+music credits of every track that may air, or the `RADIO_MUSIC_CREDITS_URL` link, in the description and in
+`~/scoopfeeds-radio/x-broadcast.txt` (`xBroadcastText`). Credits that cannot be published complete keep the loop in
+rehearsal, with an alert. The standing
 approval below names `autoair.mjs` only, and DrJ gated 24/7 airing on #208: switching the 24/7 loop on air is DrJ's call.
 
 **Rehearsal (6 hours, nothing streamed):** `bash backend/src/radio/playout/deploy/macos/install-rolling.sh`, or by hand

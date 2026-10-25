@@ -5,11 +5,15 @@
  * The loop itself is rollingStation.js; this file wires real processes, files and YouTube into it.
  *
  * Gates (same as the one-hour auto-air, plus one):
- *   ~/scoopfeeds-radio/PAUSE        -> no hours are prepared; the 24/7 headline screen airs until it is removed
+ *   ~/scoopfeeds-radio/PAUSE        -> OFF AIR (#208): checked at least every 30 s, mid-hour too; the playout stops,
+ *     the YouTube broadcast is completed and the loop exits. At start-up it holds until PAUSE is removed by hand.
  *   REHEARSAL unless BOTH RADIO_AUTOAIR_ENABLED and RADIO_ROLLING_ENABLED are literally "1": every playout
  *     writes segments to disk under ~/scoopfeeds-radio/rehearsal-seg/<hour>/ and nothing is streamed
  *   live: the playout's own RTMP gates (RADIO_PLAYOUT_ENABLED=true + RADIO_STREAM_KEY) still apply
- * Going on air 24/7 also waits for #208 (platform safety) to be merged: DrJ, 22 Oct 2026.
+ * #208 platform safety, as in autoair.mjs: a film airs only when pickClearedFilm() clears it (else music fills the
+ * slot; a repeat whose film is no longer cleared falls back); the broadcast title goes through factualTitle(); the
+ * description and the X text carry the music credits of every track that may air, or the RADIO_MUSIC_CREDITS_URL
+ * link; credits that cannot be published complete keep the loop in REHEARSAL.
  *
  *   node src/radio/programme/rolling.mjs [--hours 6] [--force-fail 2026-10-27T15] [--force-top-change]
  *        [--music-dir DIR] [--film FILE|DIR] [--fake-voice] [--fake-writer]
@@ -22,6 +26,11 @@ import { spawn, spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { airCheck } from "./airCheck.js";
+import { makeYouTubeLive, liveConfigured, goLiveWhenActive } from "../live/youtubeLive.js";
+import { pickClearedFilm } from "../safety/filmClearance.js";
+import { factualTitle, withCredits, xBroadcastText } from "../safety/broadcastCopy.js";
+import { clearedTracks } from "../musicLibrary.js";
+import { creditLines } from "../musicManifest.js";
 import { RollingStation, WriterLedger, continuousBroadcast, hourStamp } from "./rollingStation.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -35,12 +44,38 @@ export function rollingLive(e = process.env) {
 }
 export const numEnv = (v, dflt, min = 0) => { const n = Number(v); return v !== undefined && v !== "" && Number.isFinite(n) && n >= min ? n : dflt; };
 
-/** A file, or the newest video in a directory. */
-function newestVideo(p) {
-  if (!p || !fs.existsSync(p)) return null;
-  if (!fs.statSync(p).isDirectory()) return p;
-  const vids = fs.readdirSync(p).filter((f) => /\.(mp4|mov|m4v|webm)$/i.test(f)).map((f) => path.join(p, f));
-  return vids.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0] || null;
+/**
+ * #208: the film for a producer run, through the same copyright clearance as autoair.mjs. A produced hour gets the
+ * newest CLEARED film from `filmSrc` (none cleared: no --film, and music fills the slot). A repeat keeps the
+ * repeated hour's film, so that film must still be cleared now, or the repeat is refused ({ ok: false }).
+ */
+export async function filmFor({ out, to, filmSrc, yt, log = () => {}, pick = pickClearedFilm }) {
+  if (to) {
+    let prog = {};
+    try { prog = JSON.parse(fs.readFileSync(path.join(out, "programme.json"), "utf8")) || {}; } catch { /* no programme: no film */ }
+    const fp = prog.filmPath || null;
+    if (!fp && prog.film) return { ok: false, why: `the repeated hour's film ${prog.film} has no recorded path, so its clearance cannot be checked` };
+    if (!fp) return { ok: true, film: null };
+    return (await pick(fp, { yt, log })) ? { ok: true, film: null } : { ok: false, why: `the repeated hour's film ${path.basename(fp)} is not cleared now` };
+  }
+  return { ok: true, film: filmSrc ? await pick(filmSrc, { yt, log }) : null };
+}
+
+/**
+ * #208: the words around the continuous broadcast. It spans many hours, so its credits are every track that may
+ * air (the cleared library), or the link to the full list when RADIO_MUSIC_CREDITS_URL is set. Throws
+ * CreditsDoNotFit rather than return an incomplete attribution.
+ */
+export function broadcastCopy({ env = process.env, credits = [], log = () => {} } = {}) {
+  const defaultTitle = "ScoopFeeds Radio LIVE 24/7 · The news, compared";
+  const tt = factualTitle(env.RADIO_ROLLING_TITLE || defaultTitle, defaultTitle);
+  if (tt.replaced) log(`title replaced with the default (${tt.why.join(", ")})`);
+  const creditsUrl = String(env.RADIO_MUSIC_CREDITS_URL || "").trim() || null;
+  const listAll = !creditsUrl;
+  const body = "World news around the clock, compared across outlets. Every newsroom, one stream. https://scoopfeeds.com";
+  const description = withCredits(body, credits, { creditsUrl, listAll });   // exactly what broadcastBody() sends
+  const xText = xBroadcastText({ title: tt.title, credits, creditsUrl, listAll });
+  return { title: tt.title, body, description, xText, credits, creditsUrl, listAll };
 }
 
 /**
@@ -102,7 +137,14 @@ async function main() {
   if (!takeLock(lock)) { log(`another rolling loop (pid ${fs.readFileSync(lock, "utf8")}) owns the air; exiting`); process.exit(75); }
   process.on("exit", () => { try { if (Number(fs.readFileSync(lock, "utf8")) === process.pid) fs.unlinkSync(lock); } catch { /* */ } });
 
-  const live = rollingLive(env);
+  // #208: PAUSE means off air. Hold here (no spin under launchd's KeepAlive); removing it by hand resumes.
+  if (fs.existsSync(path.join(BASE, "PAUSE"))) {
+    log(`${path.join(BASE, "PAUSE")} exists: holding off air until it is removed by hand`);
+    while (fs.existsSync(path.join(BASE, "PAUSE"))) await new Promise((r) => setTimeout(r, 30_000));
+    log("PAUSE removed: starting");
+  }
+
+  let live = rollingLive(env);
   log(live ? "LIVE: hours stream through the playout's RTMP gates" : "REHEARSAL: every playout writes segments to disk; nothing is streamed (needs RADIO_AUTOAIR_ENABLED=1 and RADIO_ROLLING_ENABLED=1 to air)");
 
   const alert = async (msg) => {
@@ -114,13 +156,30 @@ async function main() {
     }
   };
 
-  const film = newestVideo(tilde(v.film || env.RADIO_ROLLING_FILM || env.RADIO_AUTOAIR_FILM));
-  const produce = ({ hourStart, out, from, to, weather, headlineWriter, deadline }) => {
+  // #208: the broadcast's title, description and X text, checked before anything goes out
+  let copy = null;
+  if (live) {
+    try {
+      copy = broadcastCopy({ env, credits: creditLines(clearedTracks(musicDir)), log });
+      for (const f of [path.join(BASE, "x-broadcast.txt"), path.join(BASE, "logs", "x-broadcast-247.txt")]) { try { fs.writeFileSync(f, copy.xText + "\n"); } catch { /* best effort */ } }
+      log(`broadcast copy: "${copy.title}"; ${copy.credits.length} music credit(s) ${copy.listAll ? "listed in full" : `linked (${copy.creditsUrl})`}; X text in ${path.join(BASE, "x-broadcast.txt")}`);
+    } catch (e) {
+      await alert(`the 24/7 loop cannot go on air: ${e.message}. Running as a REHEARSAL (nothing streams) until that is fixed.`);
+      live = false;
+    }
+  }
+
+  const ytApi = liveConfigured(env) ? makeYouTubeLive({ env }) : null;
+  const filmSrc = tilde(v.film || env.RADIO_ROLLING_FILM || env.RADIO_AUTOAIR_FILM);
+  const produce = async ({ hourStart, out, from, to, weather, headlineWriter, deadline }) => {
+    const f = await filmFor({ out, to, filmSrc, yt: ytApi, log: (m) => log(`${hourStamp(hourStart)}: ${m}`) });
+    if (!f.ok) { log(`hour ${hourStamp(hourStart)}: ${f.why}; not airing it`); return 1; }
+    const film = f.film;
     const args = [path.join(HERE, "produce.mjs"), "--hour", new Date(hourStart).toISOString(), "--out", out, "--music-dir", musicDir, "--weather", weather === false ? "0" : "1"];
     if (from) args.push("--from", from);
     if (to) args.push("--to", to);
     if (headlineWriter) args.push("--headline-writer");
-    if (film && !to) args.push("--film", film);
+    if (film) args.push("--film", film);
     if (v["fake-voice"]) args.push("--fake-voice");
     if (v["fake-writer"]) args.push("--fake-writer");
     const { ch, done } = spawnLogged(process.execPath, args, { cwd: BACKEND, logFile: path.join(out, "produce.log") });
@@ -158,14 +217,12 @@ async function main() {
 
   let broadcast = null;
   if (live) {
-    const { makeYouTubeLive, liveConfigured, goLiveWhenActive } = await import("../live/youtubeLive.js");
-    if (liveConfigured(env)) {
-      const yt = makeYouTubeLive({ env });
+    if (ytApi) {
+      const yt = ytApi;
       broadcast = continuousBroadcast({
         yt, log, alert, privacy: env.RADIO_AUTOAIR_PRIVACY || "public",
         goLive: (o) => goLiveWhenActive(yt, { ...o, timeoutMs: 4 * 60_000 }),
-        title: () => env.RADIO_ROLLING_TITLE || "ScoopFeeds Radio LIVE 24/7 · The news, compared",
-        description: "World news around the clock, compared across outlets. Every newsroom, one stream. https://scoopfeeds.com",
+        title: () => copy.title, description: copy.body, credits: copy.credits, creditsUrl: copy.creditsUrl, listAll: copy.listAll,
       });
     } else log("youtube: no API credentials (RADIO_YT_*); the stream goes out and YouTube Studio must be used to go live");
   }
@@ -193,6 +250,7 @@ async function main() {
   const hours = await station.run({ hours: v.hours ? Number(v.hours) : Infinity, signal: ac.signal });
   clearInterval(pruneTimer);
   fs.writeFileSync(path.join(BASE, "logs", `rolling-summary-${hourStamp(Date.now())}.json`), JSON.stringify(hours, null, 1));
+  if (station.offAir) log(`PAUSE took the stream off air at ${new Date(station.offAir.at).toISOString()}; exiting (resume: remove PAUSE by hand)`);
   log(`summary: ${hours.map((h) => `${h.hour} ${h.aired}${h.reason ? ` (${h.reason})` : ""}`).join(" | ")}`);
 }
 

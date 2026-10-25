@@ -6,7 +6,8 @@
 # Restart=always would run `node src/radio/programme/rolling.mjs` with the same env instead.
 # Streams ONLY when ~/.scoopfeeds-radio.env sets BOTH RADIO_AUTOAIR_ENABLED=1 and RADIO_ROLLING_ENABLED=1;
 # otherwise every hour is a rehearsal written to ~/scoopfeeds-radio/rehearsal-seg/. `touch ~/scoopfeeds-radio/PAUSE`
-# stops hours being prepared (the 24/7 headline screen airs until it is removed).
+# takes the stream OFF AIR within 30 s (#208): the loop ends its playout and broadcast and exits, and on restart
+# rolling.mjs holds off air until PAUSE is removed by hand.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="${RADIO_ENV_FILE:-$HOME/.scoopfeeds-radio.env}"

@@ -7,8 +7,12 @@
  *   H-30 min  REFRESH the hour on air: if the top story changed since it was written, re-produce it from the
  *             first music slot at least 12 min away (produce.mjs --from), queued behind any prepare job.
  *   H-60 s    HAND OVER: stop the playout of the hour ending, start hour H's programme playout. If H was not
- *             ready (producer or air check failed, PAUSE), the 24/7 headline screen + music bed airs instead:
+ *             ready (producer or air check failed), the 24/7 headline screen + music bed airs instead:
  *             air never goes dark, and the next hour tries again. DrJ is alerted only when 2 hours in a row fail.
+ *
+ * PAUSE (#208): ~/scoopfeeds-radio/PAUSE, written by the standing watchdog or by DrJ, takes the stream OFF AIR,
+ * not onto the headline screen. It is checked at least every 30 s, mid-hour included: the playout is stopped, the
+ * YouTube broadcast is completed and the loop stops. Nothing airs again until PAUSE is removed by hand.
  *
  * Cost guard: every Claude writer call is counted per hour (status.json) and per day (WriterLedger). Over the
  * day's budget, or after a usage-limit error (then for a cool-down), produced hours become repeats with a
@@ -119,12 +123,17 @@ export function writerRunCount(dir) {
  * A continuous YouTube broadcast over the hourly hand-overs, rolled over at a quiet slot before 12 hours.
  * `yt` is youtubeLive.makeYouTubeLive(); `goLive` is goLiveWhenActive bound to it.
  */
-export function continuousBroadcast({ yt, goLive, title = (ms) => `ScoopFeeds Radio LIVE · The news, compared`, description = "", privacy = "public", log = () => {}, alert = async () => {} }) {
+/**
+ * #208: the description ends with the music credits. One broadcast spans many hours, so it carries every track
+ * that may air (the cleared library), or with `listAll: false` the link to the full list (RADIO_MUSIC_CREDITS_URL);
+ * broadcastBody() throws rather than publish incomplete credits, and then no broadcast is created.
+ */
+export function continuousBroadcast({ yt, goLive, title = (ms) => `ScoopFeeds Radio LIVE · The news, compared`, description = "", credits = [], creditsUrl = null, listAll = true, privacy = "public", log = () => {}, alert = async () => {} }) {
   const b = {
     current: null, startedAt: NaN, next: null, streamId: null,
     async create(at) {
       if (!b.streamId) b.streamId = (await yt.findStream()).id;
-      const r = await yt.createBroadcast({ title: title(at), description, startMs: at, privacy, autoStop: false });
+      const r = await yt.createBroadcast({ title: title(at), description, startMs: at, privacy, autoStop: false, credits, creditsUrl, listAll });
       await yt.bind(r.id, b.streamId);
       log(`youtube: broadcast ${r.id} created and bound to stream ${b.streamId}`);
       return r.id;
@@ -143,6 +152,13 @@ export function continuousBroadcast({ yt, goLive, title = (ms) => `ScoopFeeds Ra
       const old = b.current;
       if (old) await yt.transition(old, "complete").then(() => log(`youtube: broadcast ${old} complete (rolled at 12 h)`)).catch((e) => log(`youtube: completing ${old} failed: ${e.message}`));
       b.current = b.next; b.next = null; b.startedAt = at;
+    },
+    /** Off air (PAUSE, or the loop stopping): complete the broadcast; auto-stop is off, so nothing else would. */
+    async end(why = "stopping") {
+      for (const id of [b.current, b.next].filter(Boolean)) {
+        await yt.transition(id, "complete").then(() => log(`youtube: broadcast ${id} complete (${why})`)).catch((e) => log(`youtube: completing ${id} failed: ${e.message}`));
+      }
+      b.current = null; b.next = null;
     },
     goLive() {
       if (!b.current) return Promise.resolve(null);
@@ -176,9 +192,28 @@ export class RollingStation {
     this.streak = 0;             // hours in a row that fell back because they failed
     this.hours = [];             // per-hour summary (for the rehearsal report and tests)
     this.stopping = false;
+    this.offAir = null;          // { at, hour } once PAUSE took the stream off air
   }
 
-  async sleepUntil(t) { while (!this.stopping && this.now() < t) await this.sleep(Math.min(30_000, t - this.now())); }
+  /** Sleep until `t`, looking for PAUSE at least every 30 s (#208: it takes the stream off air, mid-hour too). */
+  async sleepUntil(t) {
+    while (!this.stopping && this.now() < t) {
+      if (this.isPaused()) { await this.goOffAir(); break; }
+      await this.sleep(Math.min(30_000, t - this.now()));
+    }
+  }
+
+  /** PAUSE: stop the playout (no headline screen), complete the broadcast, stop the loop. Resume is by hand. */
+  async goOffAir() {
+    if (this.offAir) return;
+    const air = this.onAir;
+    this.offAir = { at: this.now(), hour: air?.hourStart ? hourStamp(air.hourStart) : null };
+    this.stopping = true;
+    this.log("PAUSE: taking the stream OFF AIR (no headline screen); nothing airs until PAUSE is removed by hand");
+    if (air) { air.retired = true; await air.handle?.stop(); if (air.hourStart) this.status(air.hourStart, { stage: "paused-off-air", pausedAt: this.now() }); }
+    this.onAir = null;
+    if (this.broadcast) await this.broadcast.end("PAUSE");
+  }
   dirFor(h) { return path.join(this.airDir, hourStamp(h)); }
 
   status(h, patch) {
@@ -194,6 +229,7 @@ export class RollingStation {
   async run({ hours = Infinity, signal } = {}) {
     signal?.addEventListener("abort", () => { this.stopping = true; }, { once: true });
     fs.mkdirSync(this.airDir, { recursive: true });
+    if (this.isPaused()) { this.offAir = { at: this.now(), hour: null }; this.log("PAUSE is set: not going on air"); return this.hours; }
     if (this.broadcast) await this.broadcast.open(this.now());
     await this.handover(null);   // until the first prepared hour, the 24/7 screen is on air
     if (this.broadcast) this.broadcast.goLive();
@@ -214,9 +250,11 @@ export class RollingStation {
     }
     if (!this.stopping && Number.isFinite(hours) && hours > 0) await this.sleepUntil(H - this.opts.handoverLeadSec * 1000);   // let the last hour play out
     this.stopping = true;
+    if (this.onAir) this.onAir.retired = true;
+    await this.onAir?.handle?.stop();   // off air first; a producer still running cannot air anything now
+    if (this.broadcast) await this.broadcast.end(this.offAir ? "PAUSE" : "the loop stopped");
     await Promise.allSettled(jobs);
-    await this.onAir?.handle?.stop();
-    this.log(`stopped after ${this.hours.length} hour(s)`);
+    this.log(`stopped after ${this.hours.length} hour(s)${this.offAir ? " (PAUSE: off air)" : ""}`);
     return this.hours;
   }
 
@@ -310,8 +348,8 @@ export class RollingStation {
 
   /** Switch the air to hour H (null: the 24/7 screen, at start-up). */
   async handover(H) {
-    let r = H === null ? null : this.ready.get(H) || { fallback: "not prepared in time", failed: true, plan: this.grid(H) };
-    if (H !== null && r.dir && this.isPaused()) r = { fallback: "PAUSE file present", failed: false, plan: r.plan };
+    if (this.isPaused()) return this.goOffAir();   // #208: PAUSE is off air, never the headline screen
+    const r = H === null ? null : this.ready.get(H) || { fallback: "not prepared in time", failed: true, plan: this.grid(H) };
     const want = r?.dir ? { kind: "programme", dir: r.dir } : { kind: "247" };
 
     if (H !== null) {

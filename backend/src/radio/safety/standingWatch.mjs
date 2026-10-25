@@ -23,7 +23,8 @@ const env = process.env;
 const HOME = os.homedir();
 const BASE = path.resolve(String(env.RADIO_BASE_DIR || "~/scoopfeeds-radio").replace(/^~/, HOME));
 const UID = process.getuid?.() ?? 501;
-const AGENTS = [env.RADIO_AUTOAIR_247_LABEL || "com.scoopfeeds.radio"];
+// the 24/7 music radio, and the 24/7 rolling loop (#195), which also goes off air by itself within 30 s of PAUSE
+const AGENTS = [env.RADIO_AUTOAIR_247_LABEL || "com.scoopfeeds.radio", env.RADIO_ROLLING_LABEL || "com.scoopfeeds.radio.rolling"];
 
 const log = (m) => { const line = `${new Date().toISOString()} 🛡 standing: ${m}`; console.log(line); try { fs.mkdirSync(path.join(BASE, "logs"), { recursive: true }); fs.appendFileSync(path.join(BASE, "logs", "standing.log"), line + "\n"); } catch { /* */ } };
 
