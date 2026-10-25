@@ -10,6 +10,8 @@ import { Search, Home, Newspaper, PenLine, LineChart, Radio, UserCircle } from "
 import { useNewsStore } from "../../store/newsStore";
 import { useAuth } from "../../hooks/useAuth";
 import { useReaderStore } from "../../hooks/useReader";
+import { useGeo } from "../../hooks/useGeo";
+import { FEED_COUNTRIES, countryName } from "../../lib/feedCountries";
 import clsx from "clsx";
 
 const FONTS_HREF =
@@ -47,6 +49,33 @@ function Wordmark() {
   );
 }
 
+// #190: "Showing stories for: <country>". Writes through useGeo().setOverride, so
+// the choice persists (localStorage) and every page reading useGeo follows it.
+// "" = detect automatically (clears the override).
+export function CountryControl() {
+  const { countryCode, country, isOverridden, setOverride } = useGeo();
+  const value = isOverridden ? countryCode : "";
+  const onChange = (e) => {
+    const code = e.target.value;
+    if (!code) return setOverride(null);
+    setOverride({ countryCode: code, country: countryName(code), currency: null, timezone: null, city: null });
+  };
+  return (
+    <label className="flex items-center gap-1.5 text-xs font-bold" style={{ fontFamily: "var(--v2-label)", color: "var(--v2-paper)" }}>
+      <span className="sr-only lg:not-sr-only whitespace-nowrap">Showing stories for:</span>
+      <select value={value} onChange={onChange} data-testid="v2-country"
+              aria-label="Showing stories for"
+              className={clsx("h-9 max-w-[8.5rem] sm:max-w-[11rem] rounded px-2 text-xs font-bold bg-transparent", FOCUS)}
+              style={{ color: "var(--v2-paper)", border: "1px solid rgba(244,239,230,0.3)" }}>
+        <option value="" style={{ color: "#111" }}>{countryName(countryCode, isOverridden ? null : country)} (auto)</option>
+        {FEED_COUNTRIES.map((c) => (
+          <option key={c.code} value={c.code} style={{ color: "#111" }}>{c.name}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function HeaderV2() {
   const { pathname } = useLocation();
   const { setAuthOpen } = useNewsStore();
@@ -80,6 +109,7 @@ export function HeaderV2() {
           })}
         </nav>
         <div className="flex items-center gap-1 ml-auto sm:ml-0">
+          <CountryControl />
           <Link to="/search" aria-label="Search" className={clsx("w-10 h-10 rounded-full flex items-center justify-center", FOCUS)}
                 style={{ color: "var(--v2-paper)" }}>
             <Search size={18} />

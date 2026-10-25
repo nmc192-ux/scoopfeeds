@@ -23,11 +23,14 @@ import { useEvents } from "../hooks/useEvents";
 import LoadingCard from "../components/ui/LoadingCard";
 import TimeoutNotice, { useTimedOut } from "../components/ui/TimeoutNotice";
 import ScoopMascot from "../components/mascot/ScoopMascot";
+import { useGeo } from "../hooks/useGeo";
+import { feedCountryParam, countryName } from "../lib/feedCountries";
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 const FETCH_LIMIT = 40; // the endpoint caps at 100 (routes events.js)
 const TODAY_MAX = 18;
+const LOCAL_MAX = 6;
 
 const READING = 'var(--sf-reading, "Newsreader", Georgia, "Times New Roman", serif)';
 const LABEL = 'var(--sf-label, "Schibsted Grotesk", system-ui, sans-serif)';
@@ -49,20 +52,37 @@ const plural = (n, w) => `${n} ${w}${n !== 1 ? "s" : ""}`;
 
 /**
  * Split one prominence list into the page's blocks; each event id appears at most once.
+ * `local` (#190) holds the events the server marked as covered by the reader's own
+ * country's outlets (`country_affinity >= 1`) that the lead and strip did not take.
+ * It is empty when no `country` was sent (no affinity field) or under the fallback.
  * Exported for tests.
  */
 export function layoutToday(events) {
   const lead = events[0] ?? null;
   const developing = events.filter(ev => ev.id !== lead?.id && isDeveloping(ev)).slice(0, 8);
   const placed = new Set([lead, ...developing].filter(Boolean).map(ev => ev.id));
+  const local = [];
   const today = [];
   for (const ev of events) {
-    if (today.length >= TODAY_MAX) break;
+    if (local.length + today.length >= TODAY_MAX) break;
     if (placed.has(ev.id)) continue;
     placed.add(ev.id); // also guards against a duplicate id inside the list itself
-    today.push(ev);
+    if ((ev.country_affinity ?? 0) >= 1 && local.length < LOCAL_MAX) local.push(ev);
+    else today.push(ev);
   }
-  return { lead, developing, today };
+  return { lead, developing, local, today };
+}
+
+function StoryGrid({ events }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {events.map(ev => (
+        <div key={ev.id} data-event-id={ev.id}>
+          <EventCard event={ev} variant="news" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function useRadioState() {
@@ -162,11 +182,19 @@ function RadioCard({ state }) {
 }
 
 export default function TodayPage() {
-  const { data, isLoading, isError, isSuccess, refetch } = useEvents({ sort: "prominence", limit: FETCH_LIMIT });
+  // #190: the reader's country (override → /api/geo → US) orders the list. Wait for
+  // geo so the page makes ONE events request, not a US one and then the real one.
+  const geo = useGeo();
+  const country = feedCountryParam(geo.countryCode);
+  const { data, isLoading: eventsLoading, isError, isSuccess, refetch } = useEvents({
+    sort: "prominence", limit: FETCH_LIMIT, country, enabled: !geo.isLoading,
+  });
+  const isLoading = geo.isLoading || eventsLoading;
   const [timedOut, restartTimer] = useTimedOut(isLoading);
   const { data: radio } = useRadioState();
   const events = data?.events ?? [];
-  const { lead, developing, today } = layoutToday(events);
+  const { lead, developing, local, today } = layoutToday(events);
+  const localName = country ? countryName(country, geo.isOverridden ? null : geo.country) : null;
   const radioOn = !!(radio && typeof radio.headline === "string" && radio.headline.trim());
 
   return (
@@ -204,6 +232,15 @@ export default function TodayPage() {
 
           {developing.length > 0 && <DevelopingStrip events={developing} />}
 
+          {local.length > 0 && localName && (
+            <section aria-labelledby="today-local" data-testid="today-local">
+              <h2 id="today-local" className="text-xl font-bold tracking-tight text-[var(--color-text)] mb-4">
+                From {localName}
+              </h2>
+              <StoryGrid events={local} />
+            </section>
+          )}
+
           {today.length > 0 && (
             <section aria-labelledby="today-stories" data-testid="today-stories">
               <div className="flex items-baseline justify-between mb-4 gap-3">
@@ -214,13 +251,7 @@ export default function TodayPage() {
                   See all stories →
                 </Link>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {today.map(ev => (
-                  <div key={ev.id} data-event-id={ev.id}>
-                    <EventCard event={ev} variant="news" />
-                  </div>
-                ))}
-              </div>
+              <StoryGrid events={today} />
             </section>
           )}
         </>
