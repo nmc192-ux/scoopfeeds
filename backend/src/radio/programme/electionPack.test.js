@@ -114,7 +114,11 @@ test("checks: ordinary news lines are not election lines", () => {
   const p = { top: [{ id: "t1", headline: "x", count: 1, outlets: [{ source: "Reuters", title: "Oil demand is projected to rise as Japan's ruling party won the election and the Senate votes on the budget", description: "" }] }], desks: {}, markets: [], weather: [], election: ep() };
   const lines = ["Oil demand is projected to rise, Reuters reports.", "In Japan, the ruling party won the election.", "The Senate votes on the budget this week.", "Senate Majority Leader John Thune leads the talks."]
     .map((text, i) => ({ id: `s${i}`, story: "t1", text }));
-  assert.deepEqual(checkSegments({ "the-hour": { lines } }, hourSlot, p).report, []);
+  // Merged with #208: #197 leaves the non-US "won the election" line alone, but #208's rule drops any
+  // unattributed winner claim, whatever the country. Both rules apply, so only that line is dropped.
+  const report = checkSegments({ "the-hour": { lines } }, hourSlot, p).report;
+  assert.deepEqual(report.map((r) => r.line), ["s1"]);
+  assert.match(report[0].drop, /^election: a winner asserted without a named outlet or official/);
 });
 
 test("checks: no Pakistan politics on the desk either", () => {

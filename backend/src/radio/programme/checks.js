@@ -9,11 +9,13 @@
  *   quotes    quoted words must appear verbatim in the pack
  *   election  (#197) ScoopFeeds never calls a race: a result line must name the organisation that
  *             projected it, and match a projection in the election pack; polls are never results;
- *             a partial count says how much is in, as the source states it, or "counting continues"
+ *             a partial count says how much is in, as the source states it, or "counting continues".
+ *             (#208) fraud/rigging or a winner, asserted without a named outlet or official, is dropped.
  */
 import { radioRulesVerdict, hasPakistanSignal } from "../radioRules.js";
 import { storyIndex } from "./factPack.js";
 import { electionText, canonOrg, ORGS, statesIn } from "./electionPack.js";
+import { electionClaimVerdict } from "../safety/electionClaims.js";
 
 export const toSpoken = (t) => String(t || "").replace(/\s*%/g, " percent").replace(/\s+/g, " ").trim();
 
@@ -119,6 +121,9 @@ export function checkSegments(segments, slots, pack, { log = () => {} } = {}) {
         const electoral = isElectoral(text, slot);
         if (line.outlet && (!story || !story.outlets.some((o) => o.source === line.outlet)) && !(electoral && elOutlets.has(line.outlet))) return `outlet "${line.outlet}" did not cover this story`;
         if (electoral) { const e = electionReason(text, pack.election); if (e) return e; }
+        // #208: both rules apply; an election-pack outlet counts as a named source for an electoral line
+        const election = electionClaimVerdict(text, { outlets: [...(story?.outlets || []).map((o) => o.source), ...(electoral ? [...elOutlets] : [])], outlet: line.outlet || null });
+        if (election) return election;
         const src = (story ? storyText(story) : "") + (electoral && elText ? ` \n ${elText}` : "");
         const pool = slot.segment === "markets" ? marketNums : slot.segment === "weather" ? weatherNums : numsIn(src, { all: true }).concat(marketNums);
         const bad = numsIn(text).filter((n) => !backed(n, pool) && !src.includes(String(n)));

@@ -134,8 +134,10 @@ class WavWriter {
  * @param {Function} o.voice      (text) => {path, durationSecs}
  * @param {string} o.outWav
  */
-export async function assemble({ slots, segments, pack, hourStart, bedFor, defaultDaypart = "markets", film = null, filmUrl = "/media/film.mp4", feature = null, featureUrl = "/programme/feature.webm", voice, outWav, log = () => {}, seriesCards = [] }) {
+export async function assemble({ slots, segments, pack, hourStart, bedFor, defaultDaypart = "markets", film = null, filmUrl = "/media/film.mp4", feature = null, featureUrl = "/programme/feature.webm", voice, outWav, log = () => {}, seriesCards = [], creditFor = () => null }) {
   const idx = storyIndex(pack);
+  // #208: a music scene carries the airing bed's "Music: Artist – Track" credit (none for the procedural bed)
+  const md = (s, extra = {}) => { const c = creditFor(bedFor(s.daypart || defaultDaypart)?.file); return c ? { ...extra, credit: c } : extra; };
   const cues = [];
   const at = (sec) => Math.round(hourStart + sec * 1000);
   const report = { dropped: {}, voicedSecs: 0 };
@@ -165,15 +167,15 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
     switch (s.kind) {
       case "countdown": cues.push({ at: at(s.startSec), scene: "countdown", data: { target: hourStart } }); break;
       case "ident": cues.push({ at: at(s.startSec), scene: "ident", data: { mode: s.mode, t0: at(s.startSec) } }); break;
-      case "music": cues.push({ at: at(t0), scene: "music", data: s.nextTitle ? { next: { title: s.nextTitle, at: at(s.nextAt) } } : {} }); break;
-      case "film": cues.push({ at: at(t0), scene: film ? "film" : "music", data: film ? { src: filmUrl, title: s.title, t0: at(s.startSec) } : {} }); break;
-      case "feature": cues.push({ at: at(s.startSec + 2.6), scene: feature ? "feature" : "music", data: feature ? { src: featureUrl, title: s.title, t0: at(s.startSec + 2.6) } : {} }); break;
+      case "music": cues.push({ at: at(t0), scene: "music", data: md(s, s.nextTitle ? { next: { title: s.nextTitle, at: at(s.nextAt) } } : {}) }); break;
+      case "film": cues.push({ at: at(t0), scene: film ? "film" : "music", data: film ? { src: filmUrl, title: s.title, t0: at(s.startSec) } : md(s) }); break;
+      case "feature": cues.push({ at: at(s.startSec + 2.6), scene: feature ? "feature" : "music", data: feature ? { src: featureUrl, title: s.title, t0: at(s.startSec + 2.6) } : md(s) }); break;
       case "series": cues.push({ at: at(s.startSec), scene: "series", data: { title: s.title, cards: seriesCards } }); break;
       case "endcard": cues.push({ at: at(s.startSec), scene: "endcard", data: {} }); break;
       case "spoken": {
         const lines = voiced[s.id] || [];
         const seg = segments[s.id] || {};
-        if (!lines.length) { cues.push({ at: at(t0), scene: "music", data: {} }); break; }   // nothing survived: headlines and music
+        if (!lines.length) { cues.push({ at: at(t0), scene: "music", data: md(s) }); break; }   // nothing survived: headlines and music
         const storyLines = lines.filter((l) => l.story && !l.outlet);
         if (s.segment === "markets") { cues.push({ at: at(t0), scene: "markets", data: { title: s.title, rows: pack.markets, asOf: pack.builtAt } }); break; }
         if (s.segment === "weather") { cues.push({ at: at(t0), scene: "weather", data: { title: s.title, cities: pack.weather } }); break; }
@@ -213,7 +215,7 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
         if (close && nextSlot) cues.push({ at: at(close.atSec), scene: "title", data: { kicker: "Next", title: nextSlot.title, items: [] } });
         // a segment that runs short hands the rest of its slot to headlines and music, never a frozen card
         const lastEnd = lines.at(-1).endSec;
-        if (s.endSec - lastEnd > 12) cues.push({ at: at(lastEnd + 2), scene: "music", data: nextSlot ? { next: { title: nextSlot.title, at: at(nextSlot.startSec) } } : {} });
+        if (s.endSec - lastEnd > 12) cues.push({ at: at(lastEnd + 2), scene: "music", data: md(s, nextSlot ? { next: { title: nextSlot.title, at: at(nextSlot.startSec) } } : {}) });
       }
     }
   }

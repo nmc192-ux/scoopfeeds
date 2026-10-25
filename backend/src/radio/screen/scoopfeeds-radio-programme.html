@@ -116,6 +116,8 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 .eq{position:absolute; left:96px; bottom:56px; display:flex; gap:7px; align-items:flex-end; height:60px;}
 .eq i{width:8px; background:var(--red2); animation:eq 1.2s ease-in-out infinite; height:100%; transform-origin:bottom;}
 @keyframes eq{0%,100%{transform:scaleY(.2)} 50%{transform:scaleY(1)}}
+.mcredit{position:absolute; left:96px; bottom:20px; font-size:20px; color:var(--muted); letter-spacing:.02em;}
+.mcredit[hidden]{display:none;}
 .strap{position:absolute; right:96px; bottom:52px; display:flex; align-items:center; gap:16px; font-size:24px;}
 .strap b{background:var(--red); color:#fff; padding:8px 14px 7px; font-size:18px; letter-spacing:.14em;}
 
@@ -202,7 +204,7 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
     <section class="scene s-elec" data-scene="election"><div class="pad"><div class="kicker caps" id="eKick">The Midterms</div><h1 class="st" id="eTitle"></h1>
       <div class="eb"><div><div id="eBars"></div><div class="kicker caps" style="font-size:16px">Latest projections</div><div class="elatest" id="eLatest"></div></div><div class="egrid" id="eGrid"></div></div></div></section>
 
-    <section class="scene s-music" data-scene="music"><div id="hcards"></div><div class="eq" id="eq"></div><div class="strap" id="strap" hidden><b class="caps">Coming up</b><span id="strapTxt"></span></div></section>
+    <section class="scene s-music" data-scene="music"><div id="hcards"></div><div class="eq" id="eq"></div><div class="strap" id="strap" hidden><b class="caps">Coming up</b><span id="strapTxt"></span></div><div class="mcredit" id="musicCredit" hidden></div></section>
 
     <section class="scene s-film" data-scene="film">
       <div class="side l"><div class="w">ScoopFeeds <i>60</i></div><div class="caps" style="font-size:20px;margin-top:22px;color:var(--muted)">A story in sixty seconds</div></div>
@@ -332,6 +334,7 @@ const R = {
     $('eLatest').innerHTML = (d.latest || []).map((x) => `<p>${esc(x.quote)}<em>${esc(x.source)}</em></p>`).join('');
     show('election'); },
   music(d){ show('music'); const n = d.next && d.next.at > now();
+    $('musicCredit').hidden = !d.credit; $('musicCredit').textContent = d.credit || '';
     $('strap').hidden = !n; if (n) $('strapTxt').textContent = `${hm(d.next.at, 'Asia/Karachi')} PKT · ${d.next.title}`; },
   film(d){ show('film'); if (ENCODER_MEDIA) return; const v = $('film'); if (!v.src.endsWith(d.src)) v.src = d.src;
     const pos = Math.max(0, (now() - d.t0) / 1000); try { v.currentTime = pos; } catch (_) {} v.play().catch(() => {}); },

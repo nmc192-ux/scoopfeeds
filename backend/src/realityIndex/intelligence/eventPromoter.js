@@ -421,15 +421,29 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
   }
 
   // ── 3. Cluster centroids + article sets ─────────────────────────────────────
+  // LIVE MEMBERS ONLY. story_clusters rows are never deleted, and eligibility
+  // keeps old ones in the top-300 through market links, so a cluster can name
+  // articles the 03:00 prune already removed. Linking those ids recreated the
+  // dangling event_articles the prune had just swept, every cycle, all day —
+  // and let a dead cluster keep "refreshing" an event's activity. Drop ids
+  // with no article row; a cluster whose EVERY id was pruned is skipped and
+  // counted. A cluster that named no articles to begin with is untouched.
+  const hasArticle = db.prepare("SELECT 1 FROM articles WHERE id = ?");
+  let prunedRefsDropped = 0, emptyClustersSkipped = 0;
   const clusters = [];
   for (const c of eligible) {
-    clusters.push(buildClusterState(c));
+    const st = buildClusterState(c);
+    if (st.aids.length || !st.namedCount) clusters.push(st); else emptyClustersSkipped++;
     await yieldToLoop();
   }
   function buildClusterState(c) {
     let aids = []; try { aids = JSON.parse(c.article_ids || "[]"); } catch { /* skip */ }
+    const namedCount = aids.length;
+    const live = aids.filter((id) => hasArticle.get(id));
+    prunedRefsDropped += namedCount - live.length;
+    aids = live;
     const vmap = loadArticleVectors(db, aids);
-    return { c, aids, idSet: new Set(aids), centroid: meanCentroid([...vmap.values()]), entKeys: ENTITY_MIN > 0 ? loadEntityKeys(db, aids, idfMap, catSpanMap) : null, entSet: affCtx.entitySet(aids), market_count: c.market_count };
+    return { c, aids, namedCount, idSet: new Set(aids), centroid: meanCentroid([...vmap.values()]), entKeys: ENTITY_MIN > 0 ? loadEntityKeys(db, aids, idfMap, catSpanMap) : null, entSet: affCtx.entitySet(aids), market_count: c.market_count };
   }
 
   // qualifies — entity gate (step 3): every accept path ALSO requires entity overlap ≥ ENTITY_MIN.
@@ -736,6 +750,7 @@ export async function runEventPromoter({ now = Date.now(), _yielder = null } = {
   const stats = {
     eligible: eligible.length, promoted, matched, absorbed, held, merged: merges.length,
     reactivated, dormanted, closed, skippedStale, chained,
+    prunedRefsDropped, emptyClustersSkipped,
     yields: yieldToLoop.count ? yieldToLoop.count() : null,
   };
   logger.info(`🗂️  eventPromoter done — ${JSON.stringify(stats)}`);

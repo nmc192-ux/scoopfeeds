@@ -23,7 +23,9 @@ import { checkSegments } from "./checks.js";
 import { buildElectionPack } from "./electionPack.js";
 import { deskOn, addDeskToClock, addBallotLines } from "./electionDesk.js";
 import { assemble, fakeVoice, kokoroVoice, durationSecs } from "./assemble.js";
-import { listBeds, DAYPARTS } from "../musicLibrary.js";
+import { listBeds, listFiles, bedEntry, DAYPARTS } from "../musicLibrary.js";
+import { loadManifest, screenCredit } from "../musicManifest.js";
+import { ensureProceduralBed } from "../proceduralBed.js";
 import { measureIntegrated } from "../playout/loudness.js";
 
 const { values: v } = parseArgs({ options: {
@@ -57,13 +59,19 @@ if (fromIdx < 0) die(`--from: no slot "${v.from}" (slots: ${clock.map((s) => s.i
 const slots = clock.slice(fromIdx);
 const t0 = Date.now();
 
-// ── beds (measured once) ──
+// ── beds (measured once) ── only beds the manifest clears (#208); with none, the procedural bed
+const manifest = loadManifest(musicDir);
 const beds = {};
 for (const d of DAYPARTS) {
-  const f = listBeds(d, musicDir)[0];
-  if (f) beds[d] = { file: f, lufs: (await measureIntegrated(f)) ?? -16, len: durationSecs(f) };
+  const f = listBeds(d, musicDir, { manifest, onRefused: (why) => log(`music refused: ${why}`) })[0];
+  if (f) beds[d] = { file: f, lufs: (await measureIntegrated(f)) ?? -16, len: durationSecs(f), entry: bedEntry(f, musicDir, manifest) };
 }
-if (!Object.keys(beds).length) die(`no music beds under ${musicDir}`);
+if (!Object.keys(beds).length) {
+  const refused = DAYPARTS.reduce((n, d) => n + listFiles(d, musicDir).length, 0);
+  let f; try { f = ensureProceduralBed(musicDir); } catch (e) { die(`no cleared music bed under ${musicDir} and ${e.message}`); }
+  beds.procedural = { file: f, lufs: (await measureIntegrated(f)) ?? -16, len: durationSecs(f), entry: null };
+  log(`no cleared music bed (${refused} file(s) without a complete manifest entry): the procedural bed carries the hour`);
+}
 const anyBed = Object.values(beds)[0];
 const bedFor = (d) => beds[d] || anyBed;
 log(`beds: ${Object.entries(beds).map(([d, b]) => `${d}=${path.basename(b.file)} ${b.lufs} LUFS`).join(", ")}`);
@@ -140,6 +148,7 @@ if (feature && slots.some((s) => s.kind === "feature") && !fresh("feature.webm")
 }
 const { cues, report: mixReport } = await assemble({
   slots, segments, pack, hourStart, bedFor, film, filmUrl: "/programme/film.webm", feature, voice, outWav: path.join(out, partFile), log, seriesCards: SERIES,
+  creditFor: (file) => screenCredit(Object.values(beds).find((b) => b.file === file)?.entry || null),
 });
 
 // ── programme.json ──
@@ -157,6 +166,10 @@ prog.film = film ? path.basename(film) : null;
 prog.feature = feature ? path.basename(feature) : null;
 prog.featurePath = feature;
 prog.filmPath = film;
+// #208: every track this hour airs, with the library's exact credit, for the broadcast description and X text
+prog.music = Object.values(beds).filter((b) => b.entry).map((b) => ({ file: b.entry.file, title: b.entry.title, artist: b.entry.artist, licence: b.entry.licence, credit: b.entry.credit }))
+  .filter((m, i, all) => all.findIndex((x) => x.file === m.file) === i);
+prog.proceduralBed = Boolean(beds.procedural);
 prog.builtAt = Date.now();
 fs.writeFileSync(pf + ".tmp", JSON.stringify(prog, null, 1));
 fs.renameSync(pf + ".tmp", pf);   // atomic: the screen and playout never read half a file

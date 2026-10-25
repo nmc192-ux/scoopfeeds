@@ -4,11 +4,14 @@
  * Priority (highest quality wins, most expensive first):
  *   1. OpenAI TTS              (OPENAI_API_KEY + OPENAI_TTS_VOICE)         — best quality, paid
  *   2. ElevenLabs              (ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID)  — premium, paid
- *   3. Google Cloud TTS        (GOOGLE_TTS_KEY)                            — free tier 1M chars/mo, key-gated
- *   4. Google Translate TTS    (no key required)                           — same backend gTTS Python lib uses;
+ *   3. Google Translate TTS    (no key required)                           — same backend gTTS Python lib uses;
  *                                                                            standard (non-neural) voice but
  *                                                                            crisp and free with no signup
- *   5. "silent"                — returns null; caller renders a text-only video
+ *   4. "silent"                — returns null; caller renders a text-only video
+ *
+ * Google Cloud TTS (GOOGLE_TTS_KEY) was removed (DrJ, 2026-10-22): paid Google
+ * usage is kept to embeddings only. The free Google Translate voice above has
+ * no key and no bill, so it stays.
  *
  * The Google Translate path means TTS is "always configured" out of the box:
  * with zero env vars set, every video still gets narration. Set
@@ -48,7 +51,6 @@ export function isTtsConfigured() {
   return Boolean(
     process.env.OPENAI_API_KEY   ||
     process.env.ELEVENLABS_API_KEY ||
-    process.env.GOOGLE_TTS_KEY    ||
     freeTtsEnabled()
   );
 }
@@ -56,7 +58,6 @@ export function isTtsConfigured() {
 export function ttsProvider() {
   if (process.env.OPENAI_API_KEY)    return "openai";
   if (process.env.ELEVENLABS_API_KEY) return "elevenlabs";
-  if (process.env.GOOGLE_TTS_KEY)    return "google";
   if (freeTtsEnabled())              return "gtranslate";
   return "silent";
 }
@@ -110,32 +111,6 @@ async function elevenLabsTts(text, outputPath) {
   }
   const buffer = Buffer.from(await res.arrayBuffer());
   writeFileSync(outputPath, buffer);
-  return outputPath;
-}
-
-// ─── Google Cloud TTS ───────────────────────────────────────────────────────
-
-async function googleTts(text, outputPath) {
-  const key = process.env.GOOGLE_TTS_KEY;
-  const res = await fetch(
-    `https://texttospeech.googleapis.com/v1/text:synthesize?key=${key}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input: { text: text.slice(0, 5000) },
-        voice: { languageCode: "en-US", ssmlGender: "NEUTRAL", name: "en-US-Neural2-C" },
-        audioConfig: { audioEncoding: "MP3", speakingRate: 1.05, pitch: 0 },
-      }),
-    }
-  );
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`Google TTS ${res.status}: ${body.slice(0, 200)}`);
-  }
-  const json = await res.json();
-  const buf  = Buffer.from(json.audioContent, "base64");
-  require("fs").writeFileSync(outputPath, buf);
   return outputPath;
 }
 
@@ -240,7 +215,6 @@ export async function generateTts(text, articleId) {
   try {
     if (provider === "openai")     return await openaiTts(text, outputPath);
     if (provider === "elevenlabs") return await elevenLabsTts(text, outputPath);
-    if (provider === "google")     return await googleTts(text, outputPath);
     if (provider === "gtranslate") return await gtranslateTts(text, outputPath);
   } catch (err) {
     logger.warn(`ttsService(${provider}): ${err.message} — falling back to silent`);
