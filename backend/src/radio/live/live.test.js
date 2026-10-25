@@ -68,10 +68,17 @@ test("a watch?v= URL airs only when the probe ties it to the entry's channel", (
 test("an official page embedding someone else's YouTube stream is refused", () => {
   assert.throws(() => assertCanAir({ entryId: "us-house", url: "https://live.house.gov/", probe: { ...PASS, uploaderHandle: "@CSPAN" } }), /not on "us-house"/);
   // the embed's channel is unknown: refused, not assumed
-  assert.throws(() => assertCanAir({ entryId: "us-senate", url: "https://www.senate.gov/", probe: { ...PASS, extractor: "Youtube", uploaderHandle: null } }), /could not be confirmed/);
+  assert.throws(() => assertCanAir({ entryId: "us-house", url: "https://live.house.gov/", probe: { ...PASS, extractor: "Youtube", uploaderHandle: null } }), /could not be confirmed/);
   // the page is official, the stream it resolves to is another broadcaster's
-  assert.throws(() => assertCanAir({ entryId: "us-senate", url: "https://www.senate.gov/", probe: { ...PASS, mediaUrl: "https://hls.c-span.org/live/x.m3u8" } }), /another broadcaster/);
-  assert.equal(assertCanAir({ entryId: "us-senate", url: "https://www.senate.gov/", probe: { ...PASS, extractor: "Generic" } }).id, "us-senate");
+  assert.throws(() => assertCanAir({ entryId: "us-house", url: "https://live.house.gov/", probe: { ...PASS, mediaUrl: "https://hls.c-span.org/live/x.m3u8" } }), /another broadcaster/);
+  assert.equal(assertCanAir({ entryId: "us-house", url: "https://live.house.gov/", probe: { ...PASS, extractor: "Generic" } }).id, "us-house");
+});
+
+test("DrJ 25 Oct: the Senate airs from its floor page only, and nothing on senate.gov airs until that page is confirmed", () => {
+  for (const url of ["https://www.senate.gov/", "https://www.senate.gov/floor/", "https://www.senate.gov/committees/", "https://www.judiciary.senate.gov/"]) {
+    assert.equal(entryForUrl(url), null, url);
+    assert.throws(() => assertCanAir({ entryId: "us-senate", url, probe: { ...PASS, extractor: "Generic" } }), /not on the official-feeds allow-list/, url);
+  }
 });
 
 test("no pre-air check, or a failed one, means no air", () => {

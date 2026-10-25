@@ -184,6 +184,8 @@ body.live .ph{display:none;}
 .mcard .cat{font-size:24px; color:var(--muted); font-stretch:85%;}
 .mcard p{font-family:'Newsreader',Georgia,serif; font-weight:500; font-size:76px; line-height:1.08; margin:16px 0 18px; max-width:24ch; letter-spacing:-0.01em;}
 .mcard .src{font-size:21px; color:var(--muted);}
+.mcredit{position:absolute; right:40px; bottom:4px; font-size:18px; color:var(--muted); letter-spacing:.02em;}
+.mcredit[hidden]{display:none;}
 .eq{position:absolute; left:40px; bottom:0; display:flex; align-items:flex-end; gap:6px; height:34px;}
 .eq i{width:7px; height:100%; background:var(--muted); transform-origin:bottom; animation:bar 1.4s ease-in-out infinite;}
 
@@ -256,7 +258,7 @@ body.live .ph{display:none;}
             <div class="plate thumb"><div class="series" id="nextSeries"></div><div class="ph">Teaser plays here</div></div>
           </section>
           <!-- Music break -->
-          <section class="scene s-music" data-scene="music"><div id="mcards"></div><div class="eq" id="eq"></div></section>
+          <section class="scene s-music" data-scene="music"><div id="mcards"></div><div class="eq" id="eq"></div><div class="mcredit" id="musicCredit" hidden></div></section>
           <!-- Film Hour -->
           <section class="scene s-film" data-scene="film">
             <div class="plate ep"><div class="ph">Episode plays here</div>
@@ -291,6 +293,8 @@ body.live .ph{display:none;}
 </div>
 
 <script>
+/* #208: the playout sets the airing bed's "Music: Artist – Track" credit (a standard music credit, not an AI label). */
+window.setMusicCredit = (text) => { const el = document.getElementById('musicCredit'); if (!el) return; el.textContent = text || ''; el.hidden = !text; };
 /* ======================================================================
    SAMPLE STATE. The playout server replaces this with live data by calling
    ScoopRadio.set({...}) (any subset of these keys), or by serving a JSON

@@ -49,9 +49,12 @@ export const OFFICIAL_FEEDS = Object.freeze([
   },
   {
     id: "us-senate", publisher: "US Senate",
-    youtube: [], pages: ["senate.gov/"],
-    why: "The Senate's own floor proceedings feed.",
-    addedBy: DRJ_202,
+    // DrJ, 25 Oct 2026 (PR #211): the floor-proceedings stream page ONLY, never "any page on senate.gov".
+    // Empty until the exact page is confirmed on the Mac (PR #211 test step 7) and DrJ adds it here,
+    // so the Senate cannot air yet. Committee and member pages are not covered.
+    youtube: [], pages: [],
+    why: "The Senate's own floor proceedings feed (floor page only; exact page to be confirmed).",
+    addedBy: "DrJ, #202 decision 22 Oct 2026; narrowed to the floor page 25 Oct 2026",
   },
   // Candidates' and campaigns' own streams: DrJ adds each one here (handle + why) before it can air.
 ]);

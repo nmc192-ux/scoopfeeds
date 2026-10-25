@@ -2,7 +2,11 @@
  * musicLibrary.js — choose the music bed for a ScoopFeeds Radio break (R2: selection only, no playback).
  *
  * Beds live in $SCOOP_PERSISTENT_DATA_DIR/radio/music/{morning,markets,evening,overnight}/
- * and are generated separately and dropped in by DrJ. normalizeMusic.mjs writes a
+ * (on the Mac: ~/scoopfeeds-radio/music/). PROVENANCE GATE (#208): a bed is listed only when
+ * <music dir>/manifest.json clears it (musicManifest.js: YouTube Audio Library, Creative Commons
+ * attribution, sha256 matching). Anything else, including every AI-generated bed, is refused.
+ * With no cleared bed at all, the station falls back to the procedural bed (proceduralBed.js:
+ * synthesised by ffmpeg, no AI model, no licence) — never to an unmanifested file. normalizeMusic.mjs writes a
  * loudness-normalised `<name>.norm.mp3` beside each one; when a .norm.mp3 exists it is
  * what gets picked, and its un-normalised original is skipped.
  *
@@ -15,6 +19,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { loadManifest, clearBed, screenCredit } from "./musicManifest.js";
 
 export const DAYPARTS = ["morning", "markets", "evening", "overnight"];
 const AUDIO = /\.(mp3|m4a|aac|wav|ogg|flac)$/i;
@@ -43,8 +48,8 @@ export function daypartAt(date = new Date()) {
   return "overnight";
 }
 
-/** The beds available for a daypart: .norm.mp3 when present, else the original. */
-export function listBeds(daypart, dir = musicDir()) {
+/** Every audio file in a daypart folder: .norm.mp3 when present, else the original. NO provenance check. */
+export function listFiles(daypart, dir = musicDir()) {
   let names;
   try { names = fs.readdirSync(path.join(dir, daypart)).filter((n) => AUDIO.test(n) && !n.startsWith(".")); }
   catch { return []; }
@@ -53,6 +58,35 @@ export function listBeds(daypart, dir = musicDir()) {
     .filter((n) => n.endsWith(".norm.mp3") || !norm.has(n.replace(/\.[^.]+$/, "") + ".norm.mp3"))
     .sort()
     .map((n) => path.join(dir, daypart, n));
+}
+
+/**
+ * The beds that may AIR in a daypart: listFiles() filtered by the manifest. `onRefused(why)` hears each
+ * refusal (the playout logs them once). `manifest` is injectable; by default it is read fresh each call.
+ */
+export function listBeds(daypart, dir = musicDir(), { manifest = loadManifest(dir), onRefused = null } = {}) {
+  return listFiles(daypart, dir).filter((f) => {
+    const c = clearBed(f, dir, manifest);
+    if (!c.ok) onRefused?.(c.why);
+    return c.ok;
+  });
+}
+
+/** The manifest entry behind an airing bed, or null (procedural bed, programme audio, unmanifested). */
+export function bedEntry(file, dir = musicDir(), manifest = loadManifest(dir)) {
+  if (!file) return null;
+  const c = clearBed(file, dir, manifest);
+  return c.ok ? c.entry : null;
+}
+
+/** "Music: Artist – Track" for an airing bed, or null when it has no credit to show. */
+export const bedCredit = (file, dir = musicDir(), manifest) => screenCredit(bedEntry(file, dir, manifest));
+
+/** Every cleared track in the library (all dayparts): what the 24/7 radio may air, for the broadcast credits. */
+export function clearedTracks(dir = musicDir(), manifest = loadManifest(dir)) {
+  const out = [];
+  for (const d of DAYPARTS) for (const f of listBeds(d, dir, { manifest })) { const e = bedEntry(f, dir, manifest); if (e) out.push(e); }
+  return out;
 }
 
 let lastPick = null;

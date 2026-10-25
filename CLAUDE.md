@@ -226,6 +226,16 @@ because the subscriber notification has already gone out. Review it as such.
 The loop is off unless the flag is literally `"1"`, and `LONGFORM_MAX_PER_WEEK=0`
 pauses it without unsetting the flag.
 
+SECOND SCOPED EXCEPTION, decided by DrJ 2026-10-22 (#193): the radio auto-air loop.
+It covers only `programme/autoair.mjs` airing a programme hour produced by `produce.mjs`
+that passed `airCheck`, on the main ScoopFeeds YouTube channel and the ScoopFeeds X account
+(X Live), at times installed on the Mac. It is off unless `RADIO_AUTOAIR_ENABLED` is literally
+`1`, and `~/scoopfeeds-radio/PAUSE` stops it. It never covers: code merges outside the
+engine's normal gates, prod deploys of the web app outside autodeploy, new formats, changing
+the clock or the Rule 0 layer, credentials, or any other channel. The playout host is the Mac
+mini now, and the design must allow a cloud host later. See `docs/radio/autonomous-newsroom.md`.
+This records DrJ's decision; it does not widen it.
+
 ## Gotchas
 
 - **Env loading**: `src/config/env.js` reads `backend/.env` then `~/.scoopfeeds.env`, and
