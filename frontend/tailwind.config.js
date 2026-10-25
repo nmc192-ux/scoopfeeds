@@ -16,9 +16,18 @@ export default {
         editorial: ["'Playfair Display'", "Georgia", "serif"],
         serif: ["Georgia", "New York", "Times New Roman", "serif"],
         mono: ["SF Mono", "Fira Code", "Monaco", "Consolas", "monospace"],
-        display: ["'Bebas Neue'", "Impact", "system-ui"],
+        // #188: Bebas Neue on the flag-off site, Anton under v2 (styles/tokens.css --font-display)
+        display: ["var(--font-display)"],
+        reading: ["var(--sf-reading)"],
+        label: ["var(--sf-label)"],
       },
       colors: {
+        // #188 shared tokens (values only in src/styles/tokens.css)
+        ink: "var(--sf-ink)",
+        paper: "var(--sf-paper)",
+        lime: "var(--sf-lime)",
+        live: "var(--sf-live)",
+        "radio-navy": "var(--radio-navy)",
         brand: {
           red: "#FF3B30",
           blue: "#007AFF",
