@@ -135,6 +135,24 @@ class WavWriter {
  * @param {Function} o.voice      (text) => {path, durationSecs}
  * @param {string} o.outWav
  */
+/**
+ * #247: the weather map follows the presenter. Each voiced weather line names a city; the map moves to it when
+ * the line starts, in the order the lines are read. A line that names no pack city adds no step; the same city
+ * twice in a row is one step.
+ * @returns {{ atSec: number, city: string }[]}
+ */
+export function weatherFocus(lines, cities) {
+  const names = (cities || []).map((w) => w.city).filter(Boolean);
+  const out = [];
+  for (const l of lines || []) {
+    const text = String(l.text || "").toLowerCase();
+    let best = null, pos = Infinity;
+    for (const n of names) { const i = text.indexOf(n.toLowerCase()); if (i >= 0 && (i < pos || (i === pos && n.length > best.length))) { best = n; pos = i; } }
+    if (best && out.at(-1)?.city !== best) out.push({ atSec: l.atSec, city: best });
+  }
+  return out;
+}
+
 export async function assemble({ slots, segments, pack, hourStart, bedFor, defaultDaypart = "markets", film = null, filmUrl = "/media/film.mp4", feature = null, featureUrl = "/programme/feature.webm", voice, outWav, log = () => {}, seriesCards = [], creditFor = () => null }) {
   const idx = storyIndex(pack);
   // #208: a music scene carries the airing bed's "Music: Artist – Track" credit (none for the procedural bed)
@@ -180,7 +198,7 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
         const storyLines = lines.filter((l) => l.story && !l.outlet);
         if (s.segment === "markets") { cues.push({ at: at(t0), scene: "markets", data: { title: s.title, rows: pack.markets, asOf: pack.builtAt } }); break; }
         if (s.segment === "crypto") { cues.push({ at: at(t0), scene: "markets", data: { title: s.title, rows: pack.crypto || [], asOf: pack.builtAt, note: "Prices from CoinGecko. 24-hour change." } }); break; }
-        if (s.segment === "weather") { cues.push({ at: at(t0), scene: "weather", data: { title: s.title, cities: pack.weather } }); break; }
+        if (s.segment === "weather") { cues.push({ at: at(t0), scene: "weather", data: { title: s.title, cities: pack.weather, focus: weatherFocus(lines, pack.weather).map((f) => ({ at: at(f.atSec), city: f.city })) } }); break; }
         if (s.segment === "signoff") { cues.push({ at: at(t0), scene: "signoff", data: {} }); break; }
         if (s.segment === "compared") {
           const picks = (seg.outlets || []).map((src) => idx.get(seg.story)?.outlets.find((o) => o.source === src)).filter(Boolean).slice(0, 4);
