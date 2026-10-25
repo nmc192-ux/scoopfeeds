@@ -81,7 +81,9 @@ broadcasters' live feeds.
 **On any new incident** it writes `~/scoopfeeds-radio/PAUSE` (with the reason), ends the live broadcast(s)
 cleanly (`transition → complete`), stops the 24/7 playout (`launchctl bootout com.scoopfeeds.radio`), and
 alerts DrJ at once: macOS notification, email (`RADIO_ALERT_EMAIL` + `SMTP_*`) and phone push
-(`RADIO_ALERT_PUSH_URL`). An auto-air hour on air sees PAUSE within 30 s and ends; `run-playout.sh` holds
+(`RADIO_ALERT_PUSH_URL`). It also unloads the 24/7 rolling loop (`com.scoopfeeds.radio.rolling`, #195), which on
+its own takes the stream off air within 30 s of PAUSE (playout stopped, broadcast completed; no headline screen),
+and holds off air at start-up while PAUSE exists. An auto-air hour on air sees PAUSE within 30 s and ends; `run-playout.sh` holds
 off air while PAUSE exists, so a reboot cannot restart the stream. **Resume is by hand only:** read the alert,
 deal with the cause, then `rm ~/scoopfeeds-radio/PAUSE` and re-run
 `bash backend/src/radio/playout/deploy/macos/install.sh`: the watchdog unloaded the 24/7 agent

@@ -76,6 +76,19 @@ export const avDelayMs = (env = process.env) => { const n = Number(env.RADIO_PRO
 /** ffmpeg prints this when the output can no longer be written (dead RTMP socket, full disk). */
 export const isFatalMuxError = (text) => /Error (submitting a packet to the muxer|muxing a packet)/.test(String(text));
 
+/**
+ * The programme audio part on air at `t`: the last entry whose `from` has passed. `origin` is the instant the
+ * part's file starts (the feeder seeks to t - origin); it is `from` unless the entry resumes an earlier part
+ * after a spliced insert (produce.mjs --from/--to, the 24/7 overnight repeat).
+ */
+export function partAt(p, t) {
+  if (!p || !Array.isArray(p.audio) || t >= p.endsAt) return null;
+  const part = p.audio.filter((a) => a.from <= t).at(-1);
+  if (!part) return null;
+  const origin = Number.isFinite(part.origin) ? part.origin : part.from;
+  return { file: part.file, from: part.from, origin, key: `${part.file}@${origin}` };
+}
+
 /** Start one Chromium + ffmpeg unit. Resolves once both are running. */
 export async function startUnit(opts) {
   const { target, bed, bedLufs, seconds, pageUrl, log = () => {}, demoCycleSec = 0, env = process.env, stats } = opts;
@@ -353,9 +366,8 @@ export async function runPlayout(o = {}) {
   };
   const partNow = (t = Date.now()) => {
     const p = progDir && readProgramme();
-    if (!p || !Array.isArray(p.audio) || t >= p.endsAt) return null;
-    const part = p.audio.filter((a) => a.from <= t).at(-1);
-    return part ? { file: path.join(progDir, part.file), lufs: AUDIO_TARGET, from: part.from } : null;
+    const part = partAt(p, t);
+    return part ? { file: path.join(progDir, part.file), lufs: AUDIO_TARGET, from: part.origin } : null;
   };
   const dir = o.musicDir || musicDir();
   let current = { daypart: null };
