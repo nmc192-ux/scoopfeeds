@@ -138,7 +138,7 @@ test("no NEW in-process cron has appeared without being counted", () => {
   // takes a neighbouring dispatch cron down three weeks later.
   const inProcess = HOURLY.filter((c) => !c.isDispatch).map((c) => c.label).sort();
   assert.equal(
-    inProcess.length, 13,
+    inProcess.length, 14,   // 14th: runWhatWeKnowCycle at :31 (#250)
     `The number of hourly in-process crons changed (now ${inProcess.length}): ${inProcess.join(", ")}.\n` +
     "If you ADDED one: it will block the scheduler's event loop for as long as it runs, and " +
     "every cron sharing its minute will stop firing — permanently, not intermittently. " +

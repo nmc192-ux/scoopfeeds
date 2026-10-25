@@ -28,6 +28,7 @@ import { eligibleMarketSql } from "../realityIndex/dal/marketsDao.js";
 import { notMachineEventSql } from "../realityIndex/dal/machineEvents.js";
 import { resolveSlugAlias } from "../realityIndex/dal/slugAliases.js";
 import { dossierCoherence } from "../realityIndex/intelligence/eventCoherence.js";
+import { whatWeKnowForApi } from "../realityIndex/generation/whatWeKnow.js";
 import { reorderByCountry, parseCountry } from "../realityIndex/dal/countryAffinity.js";
 import { sourceEligibleSql, filterReaderEligible, readerEligibilityOn } from "../realityIndex/dal/readerEligibility.js";
 
@@ -447,7 +448,12 @@ router.get("/:slug", (req, res) => {
     let coherence;
     try { coherence = dossierCoherence(db, ev.id); }
     catch (e) { logger.warn(`coherence lookup failed for ${ev.slug}: ${e.message}`); coherence = { score: null, level: null }; }
-    res.json({ ...publicEvent(ev), related, ...(coherence ? { coherence } : {}) });
+    // #250: "What we know" is served only with a stored 'ok' block AND a live
+    // coherence level of "ok" right now. Any failure → no field, never a broken dossier.
+    let whatWeKnow;
+    try { whatWeKnow = whatWeKnowForApi(db, ev.id, coherence); }
+    catch (e) { logger.warn(`what-we-know lookup failed for ${ev.slug}: ${e.message}`); whatWeKnow = undefined; }
+    res.json({ ...publicEvent(ev), related, ...(coherence ? { coherence } : {}), ...(whatWeKnow ? { what_we_know: whatWeKnow } : {}) });
   } catch (err) {
     logger.error(`GET /api/events/:slug error: ${err.message}`);
     res.status(500).json({ error: "Internal server error" });

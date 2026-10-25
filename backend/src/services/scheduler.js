@@ -39,6 +39,7 @@ import { runTrackerDetector } from "../realityIndex/intelligence/trackerDetector
 import { runScoringJob } from "../skills/scoring/runtime/scoringRun.js";
 import { runEventTimelineBuilder } from "../realityIndex/intelligence/eventTimelineBuilder.js";
 import { runEventActorExtractor } from "../realityIndex/intelligence/eventActorExtractor.js";
+import { runWhatWeKnow } from "../realityIndex/generation/whatWeKnow.js";
 import { runEntityExtractionBatch } from "../realityIndex/intelligence/entityExtractor.js";
 import { runEntityIdfRecompute } from "../realityIndex/intelligence/entityIdf.js";
 import { runMediaSentimentForActiveEvents } from "../realityIndex/intelligence/mediaSentimentScorer.js";
@@ -640,7 +641,7 @@ export function startScheduler() {
   // minute occupied by the ~19 in-process crons that remain in this process.
   //
   // Minutes with NO hourly in-process cron, computed from this file:
-  //   1,2,6,9,11,12,17,22,25,26,28,31,32,36,39,42,47,52,53,55,56,57,58,59
+  //   1,2,6,9,11,12,17,22,25,26,28,32,36,39,42,47,52,53,55,56,57,58,59   (:31 → whatWeKnow, #250)
   // If you move a cron here, recompute that set — scheduler.cronCollision.test.js
   // asserts the invariant and will fail you rather than let it drift.
   scheduleCron("2,32 * * * *",  () => runDispatch(() => dispatchIngestionCycle(), "news ingestion"));
@@ -899,6 +900,10 @@ scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "
     scheduleCron("16,46 * * * *", () => runTrackerDetectorCronCycle());     // every 30 min, +3 offset from eventPromoter
     scheduleCron("19 * * * *",    () => runEventTimelineBuilderCycle());   // every 1 hr
     scheduleCron("49 * * * *",    () => runActorExtractorCycle());         // every 1 hr, offset
+    // #250 "What we know": in-process (the generator only awaits the LLM and yields between
+    // events). :31 because :53 is a dispatch minute (longform) and the collision test forbids
+    // sharing one; :31 carries no other cron. Returns at once unless WHAT_WE_KNOW_ENABLED=1.
+    scheduleCron("31 * * * *",    () => runWhatWeKnowCycle());             // every 1 hr, offset
     // Phase 3 — Sentiment + Composite + Anomalies
     scheduleCron("21,51 * * * *", () => runDispatch(() => dispatchRealityIndexComposeCycle(), "reality index compose")); // 30 min, offset
     scheduleCron("27 * * * *",    () => runSentimentScoreCycle());         // every 1 hr
@@ -1067,6 +1072,15 @@ async function runTrackerDetectorCronCycle() {
 async function runEventTimelineBuilderCycle() {
   try { return await runEventTimelineBuilder(); }
   catch (err) { logger.error("❌ Event timeline builder failed", { error: err.message }); return null; }
+}
+
+let isWhatWeKnowRun = false;
+async function runWhatWeKnowCycle() {
+  if (isWhatWeKnowRun) { logger.warn("⏸️ What-we-know already running"); return null; }
+  isWhatWeKnowRun = true;
+  try { return await runWhatWeKnow(); }
+  catch (err) { logger.error("❌ What-we-know failed", { error: err.message }); return null; }
+  finally { isWhatWeKnowRun = false; }
 }
 
 async function runActorExtractorCycle() {
