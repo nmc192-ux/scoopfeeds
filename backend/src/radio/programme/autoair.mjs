@@ -53,6 +53,14 @@ export function nextHour(nowMs, minLeadMin = 25) {
   if (h.getUTCMinutes() || h.getUTCSeconds() || h.getUTCMilliseconds()) h.setUTCHours(h.getUTCHours() + 1, 0, 0, 0);
   return h.getTime();
 }
+/** DrJ's kill switch: `~/scoopfeeds-radio/PAUSE` (under RADIO_BASE_DIR) stops every run while it exists. */
+export function isPaused(baseDir) {
+  return fs.existsSync(path.join(baseDir, "PAUSE"));
+}
+/** Airing (anything public) needs RADIO_AUTOAIR_ENABLED to be literally "1"; everything else is a rehearsal. */
+export function autoairLive(e = process.env) {
+  return e.RADIO_AUTOAIR_ENABLED === "1";
+}
 /** A file, or the newest video in a directory. */
 export function newestVideo(p) {
   if (!p || !fs.existsSync(p)) return null;
@@ -75,7 +83,7 @@ async function main() {
   const stage = (s) => { status.stage = s; saveStatus(); log(`— ${s}`); };
 
   // ── gate 0: kill switch, single run ──
-  if (fs.existsSync(path.join(BASE, "PAUSE"))) { log(`${path.join(BASE, "PAUSE")} exists: this hour is skipped`); stage("paused"); return; }
+  if (isPaused(BASE)) { log(`${path.join(BASE, "PAUSE")} exists: this hour is skipped`); stage("paused"); return; }
   const lock = path.join(BASE, "autoair.lock");
   try { fs.writeFileSync(lock, String(process.pid), { flag: "wx" }); }
   catch {
@@ -87,7 +95,7 @@ async function main() {
   const unlock = () => { try { fs.unlinkSync(lock); } catch { /* */ } };
   process.on("exit", unlock);
 
-  const live = env.RADIO_AUTOAIR_ENABLED === "1";
+  const live = autoairLive(env);
   log(`hour ${status.hour} (${fmtPkt(hourStart)} Karachi) -> ${out}; ${live ? "LIVE run" : "REHEARSAL (RADIO_AUTOAIR_ENABLED is not 1: nothing goes out)"}`);
 
   // ── 1. produce ── films and episodes only when their copyright clearance is known (#208)
@@ -155,7 +163,7 @@ async function main() {
   // ── 4. wait for the slot, hand over from the 24/7 radio, start the playout ──
   stage("waiting");
   await sleepUntil(hourStart - leadMs);
-  if (fs.existsSync(path.join(BASE, "PAUSE"))) { log("PAUSE appeared before air: stopping"); if (yt && broadcastId) await yt.transition(broadcastId, "complete").catch(() => {}); stage("paused"); return; }
+  if (isPaused(BASE)) { log("PAUSE appeared before air: stopping"); if (yt && broadcastId) await yt.transition(broadcastId, "complete").catch(() => {}); stage("paused"); return; }
   const was247 = spawnSync("launchctl", ["print", `gui/${UID}/${LIVE_AGENT}`], { stdio: "ignore" }).status === 0;
   if (was247) { spawnSync("launchctl", ["bootout", `gui/${UID}/${LIVE_AGENT}`], { stdio: "ignore" }); log(`paused the 24/7 radio (${LIVE_AGENT})`); }
   for (const label of String(env.RADIO_AUTOAIR_PAUSE_AGENTS || "").split(",").map((s) => s.trim()).filter(Boolean)) {
@@ -165,7 +173,9 @@ async function main() {
 
   stage("on-air");
   const prog = JSON.parse(fs.readFileSync(path.join(out, "programme.json"), "utf8"));
-  const playArgs = [path.join(BACKEND, "src/radio/playout/cli.js"), "--programme", out, "--music-dir", tilde(v["music-dir"] || env.RADIO_MUSIC_DIR || path.join(BASE, "music"))];
+  const outputsFile = path.join(out, "outputs.json");   // per-destination status from the fan-out (#207); only written with more than one destination
+  const playArgs = [path.join(BACKEND, "src/radio/playout/cli.js"), "--programme", out, "--music-dir", tilde(v["music-dir"] || env.RADIO_MUSIC_DIR || path.join(BASE, "music")),
+    "--status-file", outputsFile, "--alerts", "off"];
   let playExit = null, playChild = null, pausedOnAir = false;
   const playing = runLogged(process.execPath, playArgs, { cwd: BACKEND, logFile: path.join(out, "playout.log"), log: () => {}, onSpawn: (ch) => { playChild = ch; }, env: { ...env, RADIO_PLAYOUT_CHROME: env.RADIO_PLAYOUT_CHROME || "system" } })
     .then((c) => { playExit = c; return c; });
@@ -180,6 +190,7 @@ async function main() {
 
   // ── 5. watch until the end ──
   let badSince = null, lastWarn = 0;
+  const downSince = {}, warned = {};
   while (playExit === null) {
     await Promise.race([playing, sleep(30_000)]);
     // #208: the standing watchdog (or DrJ) wrote PAUSE mid-hour: end the hour now, cleanly
@@ -189,6 +200,19 @@ async function main() {
       try { playChild?.kill("SIGINT"); } catch { /* gone */ }
       setTimeout(() => { try { playChild?.kill("SIGKILL"); } catch { /* gone */ } }, 10_000).unref();
       continue;
+    }
+    // #207: each destination's state goes into this hour's status.json; alert only for a primary down over 5 min
+    const outs = readOutputs(outputsFile);
+    if (outs) {
+      status.outputs = outs.summary; saveStatus();
+      for (const x of outs.outputs) {
+        if (x.state === "live") { downSince[x.id] = null; warned[x.id] = false; continue; }
+        downSince[x.id] ??= Date.now();
+        if (x.priority === "primary" && !warned[x.id] && Date.now() - downSince[x.id] > 5 * 60_000) {
+          warned[x.id] = true;
+          await alert(`${x.label} has been off air for over 5 minutes (${x.state}${x.lastError ? `: ${x.lastError}` : ""}). The other outputs are unaffected.`);
+        }
+      }
     }
     if (playExit !== null || !yt || !streamId || !status.liveAt) continue;
     const st = await yt.streamState(streamId).catch(() => null);
@@ -218,6 +242,10 @@ async function main() {
 }
 
 // ── helpers ──
+/** The fan-out's status file, or null when there is none (one destination) or it is mid-write. */
+export function readOutputs(file) {
+  try { const j = JSON.parse(fs.readFileSync(file, "utf8")); return Array.isArray(j.outputs) ? j : null; } catch { return null; }
+}
 function sleep(ms) { return new Promise((r) => setTimeout(r, Math.max(0, ms))); }
 async function sleepUntil(t) { while (Date.now() < t) await sleep(Math.min(30_000, t - Date.now())); }
 const fmt = (ms, tz, o) => new Intl.DateTimeFormat("en-GB", { timeZone: tz, ...o }).format(new Date(ms));

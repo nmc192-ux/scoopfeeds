@@ -30,6 +30,8 @@ ARGS=(src/radio/playout/cli.js --base-url "${RADIO_BASE_URL:-https://scoopfeeds.
 if [ "${RADIO_PLAYOUT_MODE:-segments}" = "rtmp" ]; then :; else
   ARGS+=(--segments-dir "${RADIO_SEGMENTS_DIR:-$BASE_DIR/segments}")
 fi
+# per-destination live status (#207); only written when more than one destination is on (e.g. RADIO_X_ENABLED=true)
+ARGS+=(--status-file "$BASE_DIR/outputs.json")
 [ -n "${RADIO_FORCE_DAYPART_CYCLE:-}" ] && ARGS+=(--force-daypart-cycle "$RADIO_FORCE_DAYPART_CYCLE")
 
 # #208: while ~/scoopfeeds-radio/PAUSE exists (the standing watchdog, or DrJ), do not go on air. Hold here rather than
