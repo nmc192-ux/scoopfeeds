@@ -141,6 +141,19 @@ export async function fetchMarkets(base, opts = {}) {
   return rows.map((r) => ({ ...r, price: Math.round(r.price * 100) / 100, pct: r.pct == null ? null : Math.round(r.pct * 100) / 100 }));
 }
 
+/** Crypto rows for the Crypto segment (#200): the CoinGecko list scoopfeeds.com already serves at /api/market. */
+export const CRYPTO_KEEP = ["BTC", "ETH", "SOL", "XRP", "BNB", "DOGE"];
+export function parseCrypto(m) {
+  return (m?.data?.crypto || [])
+    .filter((c) => CRYPTO_KEEP.includes(String(c.symbol || "").toUpperCase()) && Number.isFinite(c.price) && c.price > 0)
+    .map((c) => ({ key: c.name || c.symbol, sym: String(c.symbol).toUpperCase(), group: "Crypto", price: Math.round(c.price * 100) / 100,
+      pct: Number.isFinite(c.changePct) ? Math.round(c.changePct * 100) / 100 : null, time: null }))
+    .sort((a, b) => CRYPTO_KEEP.indexOf(a.sym) - CRYPTO_KEEP.indexOf(b.sym));
+}
+export async function fetchCrypto(base, opts = {}) {
+  return parseCrypto(await getJson(`${base}/api/market`, { ...opts, timeoutMs: 45_000 }));
+}
+
 export const WEATHER_CITIES = ["New York", "Washington D.C.", "London", "Paris", "Dubai", "Riyadh", "Doha", "Karachi", "Delhi", "Tokyo"];
 
 export async function fetchWeather(base, opts = {}) {
@@ -153,10 +166,10 @@ export async function fetchWeather(base, opts = {}) {
 }
 
 /**
- * @returns {Promise<{ builtAt, state, top: story[], desks: {[desk]: story[]}, markets, weather, dropped }>}
+ * @returns {Promise<{ builtAt, state, top: story[], desks: {[desk]: story[]}, markets, weather, dropped, crypto? }>}
  *   story = { id, headline, outlets: [{source, title, description, published}], count }
  */
-export async function buildFactPack({ base = "https://scoopfeeds.com", fetchImpl = fetch, now = Date.now(), log = () => {} } = {}) {
+export async function buildFactPack({ base = "https://scoopfeeds.com", fetchImpl = fetch, now = Date.now(), log = () => {}, crypto = false } = {}) {
   const opts = { fetchImpl, log };
   const dropped = [];
   const news = async (q) => {
@@ -204,7 +217,10 @@ export async function buildFactPack({ base = "https://scoopfeeds.com", fetchImpl
   try { markets = await fetchMarkets(base, opts); } catch (e) { log(`markets failed: ${e.message}`); }
   try { weather = await fetchWeather(base, opts); } catch (e) { log(`weather failed: ${e.message}`); }
 
-  return { builtAt: now, state, top, desks, markets, weather, dropped };
+  const out = { builtAt: now, state, top, desks, markets, weather, dropped };
+  // the grid's Crypto segment (#200) only: without `crypto` the pack is exactly what it was
+  if (crypto) { try { out.crypto = await fetchCrypto(base, opts); } catch (e) { log(`crypto failed: ${e.message}`); out.crypto = []; } }
+  return out;
 }
 
 /** Every story id in the pack -> story. */

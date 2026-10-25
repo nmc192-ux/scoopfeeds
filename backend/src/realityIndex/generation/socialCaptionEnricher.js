@@ -12,6 +12,7 @@
  */
 
 import { getDb } from "../../models/database.js";
+import { marketOddsEnabled } from "../../config/marketOdds.js";
 
 const CALLOUT_TEMPLATES = {
   // Strong divergence — the most newsworthy framing
@@ -43,6 +44,9 @@ function clip(s) {
  * articleId may be a string (matches articles.id which is TEXT).
  */
 export function realityIndexCallout(articleId) {
+  // #205: market odds are hidden everywhere while SITE_MARKET_ODDS is off; this line
+  // is market odds, so any caller gets null (belt and braces with socialComposer).
+  if (!marketOddsEnabled()) return null;
   if (!articleId) return null;
   const db = getDb();
 

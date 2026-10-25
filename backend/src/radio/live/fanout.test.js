@@ -163,6 +163,47 @@ test("a capped output restarts at a segment boundary, not before; the others are
   await fan.stop();
 });
 
+// #220: the real destinations (YouTube uncapped, X capped at 24 h by X Live Studio), on a fake clock
+const REAL = [
+  { id: "youtube", label: "YouTube", priority: "primary", maxDurationSec: null, url: "rtmp://yt/live2/K1" },
+  { id: "x", label: "X", priority: "primary", maxDurationSec: 86400, url: "rtmps://x/x/K2" },
+];
+async function liveFor(sec) {
+  const sp = fakeSpawnFactory(), clock = { t: 1e9 }, logs = [];
+  const fan = createFanout({ outputs: REAL, spawn: sp, now: () => clock.t, log: (m) => logs.push(m) });
+  fan.write(Buffer.concat([flvHeader(), META, AVCSEQ, AACSEQ, KEY(0)]));
+  await tickUntil(fan, clock, 4000);
+  assert.deepEqual(fan.summary(), { youtube: "live", x: "live" });
+  await tickUntil(fan, clock, sec * 1000, 60_000);
+  return { sp, clock, logs, fan };
+}
+
+test("#220: X 23 h 50 min on air is restarted at the next boundary; YouTube is not touched", async () => {
+  const { sp, logs, fan } = await liveFor(23 * 3600 + 50 * 60);
+  assert.ok(logs.some((l) => /^X: .*restart due at the next segment boundary/.test(l)), logs.join("\n"));
+  assert.equal(sp.procs.length, 2, "due, but no boundary yet: neither relay restarted");
+  fan.boundary();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(sp.procs.length, 3, "exactly one new relay");
+  assert.equal(sp.procs[2].url, "rtmps://x/x/K2", "the new relay is X's");
+  assert.equal(sp.procs[0].signalCode, null, "YouTube's relay was never signalled");
+  assert.equal(sp.live("rtmp://yt/live2/K1").length, 1);
+  assert.deepEqual(fan.status().map((s) => [s.id, s.restarts]), [["youtube", 0], ["x", 1]]);
+  assert.ok(!logs.some((l) => /^YouTube: .*restart/.test(l)));
+  await fan.stop();
+});
+
+test("#220: with no boundary, X is restarted before the 24 h cap; YouTube is not touched", async () => {
+  const { sp, logs, fan } = await liveFor(24 * 3600 - FANOUT.HARD_MARGIN_SEC);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(logs.some((l) => /^X: no segment boundary before the 24 h cap; restarting now/.test(l)), logs.join("\n"));
+  assert.equal(sp.procs.length, 3);
+  assert.equal(sp.procs[2].url, "rtmps://x/x/K2");
+  assert.equal(sp.procs[0].signalCode, null);
+  assert.deepEqual(fan.status().map((s) => [s.id, s.restarts]), [["youtube", 0], ["x", 1]]);
+  await fan.stop();
+});
+
 test("a primary down for more than 5 minutes raises one primary-down event; no key in a log line or the status file", async () => {
   const sp = fakeSpawnFactory(), clock = { t: 1e9 };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fanout-"));

@@ -13,7 +13,7 @@
  * re-joined automatically (no flapping between the feed and the grid on a bad connection); put it in
  * the manual file again to retry.
  */
-import { OFFICIAL_FEEDS, assertCanAir } from "./officialFeeds.js";
+import { OFFICIAL_FEEDS, assertCanAir, feedById, creditFor } from "./officialFeeds.js";
 import { airsAutomatically } from "./eventsCalendar.js";
 
 export const DROP_MS = 30_000;
@@ -73,7 +73,7 @@ export function createLiveDesk({ unit, calendar, probe, log, say = () => {}, now
     try {
       await u.goLive({
         mediaUrl: p.mediaUrl, httpHeaders: p.httpHeaders,
-        overlay: { publisher: ev.publisher, title: ev.title, credit: `Live feed: ${ev.publisher}` },
+        overlay: { publisher: ev.publisher, title: ev.title, credit: creditFor(feedById(ev.feed, feeds) || { publisher: ev.publisher }, new Date(now())) },
         onMedia: () => { if (state.mode === "live" && state.event?.id === ev.id) state.lastMediaAt = now(); },
       });
     } catch (err) {

@@ -27,6 +27,7 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { airCheck } from "./airCheck.js";
 import { resolveHourShort } from "../filmLibrary.js";
+import { hasValidClearance } from "../safety/contentSafety.js";
 import { makeYouTubeLive, liveConfigured, goLiveWhenActive } from "../live/youtubeLive.js";
 import { pickClearedFilm } from "../safety/filmClearance.js";
 import { factualTitle, xBroadcastText, withCredits } from "../safety/broadcastCopy.js";
@@ -110,6 +111,15 @@ async function main() {
 
   // ── 1. produce ── films and episodes only when their copyright clearance is known (#208)
   stage("producing");
+  // DrJ's media rule (#218): a film or feature without a valid content-safety clearance is dropped from
+  // the hour (the rest of the hour still airs); airCheck refuses the hour if one slips through anyway.
+  const cleared = async (kind, file) => {
+    if (!file) return null;
+    const c = hasValidClearance(file);
+    if (c.ok) return file;
+    await alert(`the ${kind} ${path.basename(file)} was left out of the ${fmtPkt(hourStart)} hour: ${c.why}. Clear it with: node src/radio/safety/contentSafetyCli.mjs check "${file}"`);
+    return null;
+  };
   const ytApi = liveConfigured(env) ? makeYouTubeLive({ env }) : null;
   // #216: the film slot takes only a Short cut from a published long-form film (the newest eligible one in a
   // folder); anything else, ScoopFeeds 60 included, leaves the slot to the normal programme, and says why.
@@ -121,13 +131,14 @@ async function main() {
     let reason = r.reason;
     if (r.item) {
       const src = sourceFileFor(filmArg, r.item.file);
-      film = src ? await pickClearedFilm(src, { yt: ytApi, log }) : null;
-      if (!film) reason = `${r.item.id}: ${src ? "not cleared for air (#208; see the 'film excluded' line above)" : "no matching file in " + filmArg}`;
+      const copyrightOk = src ? await pickClearedFilm(src, { yt: ytApi, log }) : null;
+      film = copyrightOk ? await cleared("film", copyrightOk) : null;
+      if (!film) reason = `${r.item.id}: ${!src ? "no matching file in " + filmArg : copyrightOk ? "no content-safety clearance (#218)" : "not cleared for air (#208; see the 'film excluded' line above)"}`;
     }
     status.film = film ? { id: r.item.id, parentFilm: r.item.parentFilm, file: path.basename(film) } : { id: null, reason }; saveStatus();
     log(film ? `film slot: ${r.item.id} (Short from ${r.item.parentFilm})` : `film slot: no film this hour: ${reason}`);
   }
-  const feature = await pickClearedFilm(tilde(v.feature || env.RADIO_AUTOAIR_FEATURE), { yt: ytApi, log });
+  const feature = await cleared("feature", await pickClearedFilm(tilde(v.feature || env.RADIO_AUTOAIR_FEATURE), { yt: ytApi, log }));
   status.feature = feature ? path.basename(feature) : null; saveStatus();
   const ft = factualTitle(v["feature-title"] || env.RADIO_AUTOAIR_FEATURE_TITLE || null, null);
   if (ft.replaced) log(`feature title dropped (${ft.why.join(", ")})`);

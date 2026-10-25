@@ -23,6 +23,7 @@ import { getDb } from "../models/database.js";
 import { getTransport, sendMail } from "./mailer.js";
 import { logger } from "./logger.js";
 import { buildRealityIndexBlock } from "../realityIndex/generation/newsletterEnricher.js";
+import { marketOddsEnabled } from "../config/marketOdds.js";
 
 const SITE_URL = (process.env.PRIMARY_SITE_URL || "https://scoopfeeds.com").replace(/\/+$/, "");
 const PER_DIGEST = 8;
@@ -47,10 +48,8 @@ export function editionForCountry(countryCode) {
   return AMERICAS.has(String(countryCode || "").trim().toUpperCase()) ? "americas" : "rest";
 }
 
-/** Same switch the site reads at /api/site-config. */
-export function marketOddsEnabled() {
-  return process.env.SITE_MARKET_ODDS === "true";
-}
+/** Same switch the site reads at /api/site-config (one definition: config/marketOdds.js, #205). */
+export { marketOddsEnabled };
 
 // ── Sponsor slot ─────────────────────────────────────────────────────────────
 // To activate: set these env vars in your Hostinger panel. Leave blank to hide.

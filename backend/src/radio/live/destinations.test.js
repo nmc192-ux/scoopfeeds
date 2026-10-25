@@ -32,7 +32,14 @@ test("destinations are data: YouTube and X, both primary, no Facebook/Twitch thi
   assert.deepEqual(DESTINATIONS.map((d) => [d.id, d.priority]), [["youtube", "primary"], ["x", "primary"]]);
   assert.ok(Object.isFrozen(DESTINATIONS));
   const x = DESTINATIONS.find((d) => d.id === "x");
-  assert.deepEqual([x.enabledVar, x.keyVar, x.urlVar, x.maxDurationSec], ["RADIO_X_ENABLED", "RADIO_X_STREAM_KEY", "RADIO_X_RTMP_URL", null]);
+  assert.deepEqual([x.enabledVar, x.keyVar, x.urlVar, x.maxDurationSec], ["RADIO_X_ENABLED", "RADIO_X_STREAM_KEY", "RADIO_X_RTMP_URL", 86400]);
+});
+
+test("#220: with X enabled, the X output carries X Live Studio's 24 h cap (86400 s); YouTube stays uncapped (null)", () => {
+  assert.deepEqual(extraOutputs({ ...X }).outputs.map((o) => [o.id, o.maxDurationSec]), [["x", 86400]]);
+  const t = resolveTarget({ env: { ...YT, ...X } });
+  assert.deepEqual(t.outputs.map((o) => [o.id, o.maxDurationSec]), [["youtube", null], ["x", 86400]]);
+  assert.equal(DESTINATIONS.find((d) => d.id === "youtube").maxDurationSec, null);
 });
 
 test("X needs RADIO_X_ENABLED literally true, plus a key and an rtmp(s) URL; a broken X is skipped, never fatal", () => {

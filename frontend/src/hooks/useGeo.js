@@ -4,6 +4,15 @@ import { useEffect, useState } from "react";
 
 const api = createApi({ baseURL: "/api" });
 const OVERRIDE_KEY = "scoop.geo.override";
+const GEO_EVENT = "scoop:geo-override";
+
+function readOverride() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(OVERRIDE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
 
 /**
  * useGeo — lightweight client-side geolocation for personalization.
@@ -21,13 +30,7 @@ const OVERRIDE_KEY = "scoop.geo.override";
  *   }
  */
 export function useGeo() {
-  const [override, setOverrideState] = useState(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const raw = window.localStorage.getItem(OVERRIDE_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
-  });
+  const [override, setOverrideState] = useState(readOverride);
 
   const { data: detected, isLoading } = useQuery({
     queryKey: ["geo"],
@@ -41,12 +44,29 @@ export function useGeo() {
     refetchOnWindowFocus: false,
   });
 
+  // Every useGeo() caller keeps its own copy of the override, so a change made in
+  // one component (the v2 header's country control, #190) is broadcast to the rest:
+  // GEO_EVENT within this tab, the "storage" event across tabs.
+  useEffect(() => {
+    const sync = (e) => {
+      if (e.type === "storage" && e.key !== OVERRIDE_KEY) return;
+      setOverrideState(e.type === "storage" ? readOverride() : (e.detail ?? null));
+    };
+    window.addEventListener(GEO_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(GEO_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+
   const setOverride = (geo) => {
     setOverrideState(geo);
     try {
       if (geo) window.localStorage.setItem(OVERRIDE_KEY, JSON.stringify(geo));
       else     window.localStorage.removeItem(OVERRIDE_KEY);
     } catch {}
+    try { window.dispatchEvent(new CustomEvent(GEO_EVENT, { detail: geo || null })); } catch {}
   };
 
   const resolved = override || detected || {
