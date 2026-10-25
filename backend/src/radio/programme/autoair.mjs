@@ -12,6 +12,9 @@
  *   RADIO_AUTOAIR_ENABLED is not exactly "1" -> REHEARSAL: produce and check only, then stop
  *   the playout's own RTMP gates               -> RADIO_PLAYOUT_ENABLED=true and RADIO_STREAM_KEY (never printed)
  * The scope of this unattended loop is DrJ's standing approval: see docs/radio/autonomous-newsroom.md.
+ * Platform safety (#208, docs/radio/safety.md): films and episodes air only when cleared (filmClearance.js);
+ * every broadcast description carries the music credits, whole or linked; the X text is written beside it;
+ * PAUSE appearing mid-hour (the standing watchdog) ends the hour and keeps the 24/7 radio off.
  *
  *   node src/radio/programme/autoair.mjs --hour next --out ~/scoopfeeds-radio/air/auto \
  *     --music-dir ~/scoopfeeds-radio/music [--film <file|dir>: only an eligible library Short, #216] [--feature <file>] [--feature-title "..."] [--thumbnail <jpg>]
@@ -25,6 +28,9 @@ import { fileURLToPath } from "node:url";
 import { airCheck } from "./airCheck.js";
 import { resolveHourShort } from "../filmLibrary.js";
 import { makeYouTubeLive, liveConfigured, goLiveWhenActive } from "../live/youtubeLive.js";
+import { pickClearedFilm } from "../safety/filmClearance.js";
+import { factualTitle, xBroadcastText, withCredits } from "../safety/broadcastCopy.js";
+import { creditLines } from "../musicManifest.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND = path.resolve(HERE, "../../..");
@@ -64,6 +70,15 @@ export function newestVideo(p) {
   return vids.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0] || null;
 }
 
+/** #216 + #208: the file inside `arg` (a file or a folder) that is the library Short `libFile` (matched by realpath, since library files may be symlinks). */
+export function sourceFileFor(arg, libFile) {
+  const real = (f) => { try { return fs.realpathSync(f); } catch { return path.resolve(f); } };
+  if (!arg || !fs.existsSync(arg)) return null;
+  const want = real(libFile);
+  if (!fs.statSync(arg).isDirectory()) return real(arg) === want ? arg : null;
+  return fs.readdirSync(arg).map((n) => path.join(arg, n)).find((f) => real(f) === want) || null;
+}
+
 async function main() {
   const hourStart = v.hour === "next" ? nextHour(Date.now()) : Date.parse(v.hour);
   if (!Number.isFinite(hourStart)) { console.error("--hour must be 'next' or an ISO time"); process.exit(2); }
@@ -93,20 +108,30 @@ async function main() {
   const live = autoairLive(env);
   log(`hour ${status.hour} (${fmtPkt(hourStart)} Karachi) -> ${out}; ${live ? "LIVE run" : "REHEARSAL (RADIO_AUTOAIR_ENABLED is not 1: nothing goes out)"}`);
 
-  // ── 1. produce ──
+  // ── 1. produce ── films and episodes only when their copyright clearance is known (#208)
   stage("producing");
+  const ytApi = liveConfigured(env) ? makeYouTubeLive({ env }) : null;
   // #216: the film slot takes only a Short cut from a published long-form film (the newest eligible one in a
-  // folder); anything else, ScoopFeeds 60 included, leaves the slot to the normal programme, and says why
+  // folder); anything else, ScoopFeeds 60 included, leaves the slot to the normal programme, and says why.
+  // #208: that Short must ALSO pass copyright clearance (pickClearedFilm) on the file in the given folder.
   const filmArg = tilde(v.film || env.RADIO_AUTOAIR_FILM);
   let film = null;
   if (filmArg) {
     const r = resolveHourShort(filmArg, { env });
-    film = r.item ? r.item.file : null;
-    status.film = r.item ? { id: r.item.id, parentFilm: r.item.parentFilm } : { id: null, reason: r.reason }; saveStatus();
-    log(r.item ? `film slot: ${r.item.id} (Short from ${r.item.parentFilm})` : `film slot: no film this hour: ${r.reason}`);
+    let reason = r.reason;
+    if (r.item) {
+      const src = sourceFileFor(filmArg, r.item.file);
+      film = src ? await pickClearedFilm(src, { yt: ytApi, log }) : null;
+      if (!film) reason = `${r.item.id}: ${src ? "not cleared for air (#208; see the 'film excluded' line above)" : "no matching file in " + filmArg}`;
+    }
+    status.film = film ? { id: r.item.id, parentFilm: r.item.parentFilm, file: path.basename(film) } : { id: null, reason }; saveStatus();
+    log(film ? `film slot: ${r.item.id} (Short from ${r.item.parentFilm})` : `film slot: no film this hour: ${reason}`);
   }
-  const feature = newestVideo(tilde(v.feature || env.RADIO_AUTOAIR_FEATURE));
-  const featureTitle = v["feature-title"] || env.RADIO_AUTOAIR_FEATURE_TITLE || null;
+  const feature = await pickClearedFilm(tilde(v.feature || env.RADIO_AUTOAIR_FEATURE), { yt: ytApi, log });
+  status.feature = feature ? path.basename(feature) : null; saveStatus();
+  const ft = factualTitle(v["feature-title"] || env.RADIO_AUTOAIR_FEATURE_TITLE || null, null);
+  if (ft.replaced) log(`feature title dropped (${ft.why.join(", ")})`);
+  const featureTitle = ft.title;
   const pargs = [path.join(HERE, "produce.mjs"), "--hour", new Date(hourStart).toISOString(), "--out", out,
     "--music-dir", tilde(v["music-dir"] || env.RADIO_MUSIC_DIR || path.join(BASE, "music"))];
   if (film) pargs.push("--film", film);
@@ -125,20 +150,29 @@ async function main() {
   log(`air check: ${check.ok ? "PASS" : "FAIL"} ${JSON.stringify(check.stats)}${check.problems.length ? ` problems: ${check.problems.join("; ")}` : ""}`);
   if (!check.ok) { await alert(`the ${fmtPkt(hourStart)} hour failed its air check and did not air: ${check.problems.join("; ")}`); stage("check-failed"); process.exitCode = 1; return; }
 
+  function prog0() { try { return JSON.parse(fs.readFileSync(path.join(out, "programme.json"), "utf8")); } catch { return {}; } }
   if (!live) { stage("rehearsal-done"); log("rehearsal complete: the hour is produced and passed its check. Set RADIO_AUTOAIR_ENABLED=1 to air it."); return; }
 
   // ── 3. YouTube broadcast ──
   let yt = null, broadcastId = null, streamId = null;
+  // #208: factual titles; the exact music credits (whole, or a link to the full list) on YouTube and on X
+  const defaultTitle = `ScoopFeeds Radio LIVE · The news, compared · ${fmtDate(hourStart)}`;
+  const tt = factualTitle(v.title || env.RADIO_AUTOAIR_TITLE || defaultTitle, defaultTitle);
+  if (tt.replaced) log(`title replaced with the default (${tt.why.join(", ")})`);
+  const title = tt.title;
+  const credits = creditLines(prog0().music || []);
+  const body = ([`One hour of world news, compared across outlets. ${fmtPkt(hourStart)} Karachi · ${fmtNy(hourStart)} New York.`,
+    feature && featureTitle ? `Also this hour: ${featureTitle}.` : "", "Every newsroom, one stream. https://scoopfeeds.com"].filter(Boolean).join("\n\n"));
+  const creditsUrl = String(env.RADIO_MUSIC_CREDITS_URL || "").trim() || null;
+  try { status.description = withCredits(body, credits, { creditsUrl }); }   // exactly what broadcastBody() sends
+  catch (e) { await alert(`the ${fmtPkt(hourStart)} hour did not air: ${e.message}`); stage("credits-failed"); process.exitCode = 1; return; }
   if (liveConfigured(env)) {
     stage("youtube-setup");
     try {
-      yt = makeYouTubeLive({ env });
+      yt = ytApi;
       await yt.checkScope();
       const stream = await yt.findStream(); streamId = stream.id;
-      const title = v.title || env.RADIO_AUTOAIR_TITLE || `ScoopFeeds Radio LIVE · The news, compared · ${fmtDate(hourStart)}`;
-      const desc = [`One hour of world news, compared across outlets. ${fmtPkt(hourStart)} Karachi · ${fmtNy(hourStart)} New York.`,
-        feature && featureTitle ? `Also this hour: ${featureTitle}.` : "", "Every newsroom, one stream. https://scoopfeeds.com"].filter(Boolean).join("\n\n");
-      const b = await yt.createBroadcast({ title, description: desc, startMs: hourStart, privacy: env.RADIO_AUTOAIR_PRIVACY || "public" });
+      const b = await yt.createBroadcast({ title, description: body, startMs: hourStart, privacy: env.RADIO_AUTOAIR_PRIVACY || "public", credits, creditsUrl });
       broadcastId = b.id; status.broadcastId = broadcastId; status.watch = `https://www.youtube.com/watch?v=${broadcastId}`; saveStatus();
       await yt.bind(broadcastId, streamId);
       const thumb = tilde(v.thumbnail || env.RADIO_AUTOAIR_THUMBNAIL || path.join(BASE, "scoopfeeds-radio-live-thumbnail.jpg"));
@@ -149,6 +183,9 @@ async function main() {
       await alert(`YouTube setup failed (${e.message}). The programme will still stream at ${fmtPkt(hourStart - leadMs)}: go live by hand in YouTube Studio.`);
     }
   } else log("youtube: no API credentials (RADIO_YT_*); the stream goes out and YouTube Studio must be used to go live");
+  const xText = xBroadcastText({ title, credits, creditsUrl });
+  for (const f of [path.join(out, "x-broadcast.txt"), path.join(BASE, "x-broadcast.txt")]) { try { fs.writeFileSync(f, xText + "\n"); } catch { /* best effort */ } }
+  status.xText = path.join(BASE, "x-broadcast.txt"); saveStatus();
 
   // ── 4. wait for the slot, hand over from the 24/7 radio, start the playout ──
   stage("waiting");
@@ -166,8 +203,8 @@ async function main() {
   const outputsFile = path.join(out, "outputs.json");   // per-destination status from the fan-out (#207); only written with more than one destination
   const playArgs = [path.join(BACKEND, "src/radio/playout/cli.js"), "--programme", out, "--music-dir", tilde(v["music-dir"] || env.RADIO_MUSIC_DIR || path.join(BASE, "music")),
     "--status-file", outputsFile, "--alerts", "off"];
-  let playExit = null;
-  const playing = runLogged(process.execPath, playArgs, { cwd: BACKEND, logFile: path.join(out, "playout.log"), log: () => {}, env: { ...env, RADIO_PLAYOUT_CHROME: env.RADIO_PLAYOUT_CHROME || "system" } })
+  let playExit = null, playChild = null, pausedOnAir = false;
+  const playing = runLogged(process.execPath, playArgs, { cwd: BACKEND, logFile: path.join(out, "playout.log"), log: () => {}, onSpawn: (ch) => { playChild = ch; }, env: { ...env, RADIO_PLAYOUT_CHROME: env.RADIO_PLAYOUT_CHROME || "system" } })
     .then((c) => { playExit = c; return c; });
   status.playoutStartedAt = Date.now(); saveStatus();
   log("playout started");
@@ -183,6 +220,14 @@ async function main() {
   const downSince = {}, warned = {};
   while (playExit === null) {
     await Promise.race([playing, sleep(30_000)]);
+    // #208: the standing watchdog (or DrJ) wrote PAUSE mid-hour: end the hour now, cleanly
+    if (playExit === null && !pausedOnAir && fs.existsSync(path.join(BASE, "PAUSE"))) {
+      pausedOnAir = true; status.pausedOnAir = Date.now(); saveStatus();
+      log("PAUSE appeared on air: stopping the playout and ending the broadcast");
+      try { playChild?.kill("SIGINT"); } catch { /* gone */ }
+      setTimeout(() => { try { playChild?.kill("SIGKILL"); } catch { /* gone */ } }, 10_000).unref();
+      continue;
+    }
     // #207: each destination's state goes into this hour's status.json; alert only for a primary down over 5 min
     const outs = readOutputs(outputsFile);
     if (outs) {
@@ -204,21 +249,23 @@ async function main() {
   }
   const early = Date.now() < prog.endsAt - 5_000;
   status.playoutExit = playExit; status.endedAt = Date.now();
-  if (early) await alert(`the playout stopped early (exit ${playExit}) at ${fmtPkt(Date.now())}, ${Math.round((prog.endsAt - Date.now()) / 60_000)} min before the end.`);
+  if (early && !pausedOnAir) await alert(`the playout stopped early (exit ${playExit}) at ${fmtPkt(Date.now())}, ${Math.round((prog.endsAt - Date.now()) / 60_000)} min before the end.`);
 
   // ── 6. wrap up ──
   stage("wrapping");
   if (yt && broadcastId) await yt.transition(broadcastId, "complete").then(() => log("youtube: broadcast complete")).catch((e) => log(`youtube: complete failed (auto-stop will end it): ${e.message}`));
-  if (was247) {
+  if (pausedOnAir || fs.existsSync(path.join(BASE, "PAUSE"))) log("PAUSE is set: the 24/7 radio stays off until it is removed by hand");
+  else if (was247) {
     const plist = path.join(HOME, "Library/LaunchAgents", `${LIVE_AGENT}.plist`);
     const r = spawnSync("launchctl", ["bootstrap", `gui/${UID}`, plist], { stdio: "ignore" });
     log(r.status === 0 ? "the 24/7 radio is back" : `could not restart the 24/7 radio (launchctl bootstrap exit ${r.status})`);
     if (r.status !== 0) await alert("the 24/7 radio did not come back after the hour; reload it with launchctl bootstrap.");
   }
   for (const label of String(env.RADIO_AUTOAIR_PAUSE_AGENTS || "").split(",").map((s) => s.trim()).filter(Boolean)) {
+    if (pausedOnAir) break;
     spawnSync("launchctl", ["bootstrap", `gui/${UID}`, path.join(HOME, "Library/LaunchAgents", `${label}.plist`)], { stdio: "ignore" }); log(`restarted ${label}`);
   }
-  stage(early ? "ended-early" : "done");
+  stage(pausedOnAir ? "paused-on-air" : early ? "ended-early" : "done");
 }
 
 // ── helpers ──
@@ -234,10 +281,11 @@ function fmtNy(ms) { return fmt(ms, "America/New_York", { hour: "numeric", minut
 function fmtDate(ms) { return fmt(ms, "Asia/Karachi", { weekday: "short", day: "numeric", month: "short", year: "numeric" }); }
 
 /** Run a child, appending its output to a log file; SIGKILL it at `killAt`. Resolves its exit code. */
-function runLogged(cmd, args, { cwd, logFile, killAt, env: childEnv = process.env, log }) {
+function runLogged(cmd, args, { cwd, logFile, killAt, env: childEnv = process.env, log, onSpawn = null }) {
   return new Promise((resolve) => {
     const fd = fs.openSync(logFile, "a");
     const ch = spawn(cmd, args, { cwd, env: childEnv, stdio: ["ignore", fd, fd] });
+    onSpawn?.(ch);
     const t = killAt ? setTimeout(() => { log(`${path.basename(args[0])} ran past its deadline; killed`); ch.kill("SIGKILL"); }, Math.max(0, killAt - Date.now())) : null;
     ch.on("exit", (code, sig) => { if (t) clearTimeout(t); fs.closeSync(fd); resolve(code ?? (sig ? 128 : 1)); });
     ch.on("error", (e) => { if (t) clearTimeout(t); log(`could not start ${cmd}: ${e.message}`); resolve(127); });

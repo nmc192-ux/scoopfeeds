@@ -8,19 +8,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { chooseBed, runPlayout, isFatalMuxError } from "./playout.js";
+import { makeMusicLibrary } from "../musicTestLibrary.js";
 import { resolveTarget, rtmpAllowed, rtmpBase, redact, RTMP_BASE } from "./outputTarget.js";
 import { buildFfmpegArgs, buildFeederArgs, loudnessFilter, VIDEO, AUDIO, RTMP } from "./ffmpegArgs.js";
 import { parseIntegrated } from "./loudness.js";
 import { supervise, nextDelay, BACKOFF } from "./watchdog.js";
 
-function makeLibrary(dayparts) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "playout-music-"));
-  for (const d of dayparts) {
-    fs.mkdirSync(path.join(dir, d), { recursive: true });
-    fs.writeFileSync(path.join(dir, d, `${d}-a.mp3`), "x");
-  }
-  return dir;
-}
+// beds with complete manifest entries (#208): unmanifested files never air
+const makeLibrary = (dayparts) => makeMusicLibrary(Object.fromEntries(dayparts.map((d) => [d, [`${d}-a.mp3`]])), { prefix: "playout-music-" });
 
 // ── daypart / bed selection ──────────────────────────────────────────────────
 test("chooseBed picks the bed for the US-Eastern daypart", () => {
@@ -48,9 +43,14 @@ test("chooseBed falls back to another daypart's bed, flagged, when the daypart i
   assert.ok(r.bed.includes("evening"));
 });
 
-test("chooseBed throws, rather than going to air silent, when the library is empty", () => {
+test("chooseBed with no cleared bed: the procedural bed, never silence and never an unmanifested file (#208)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "playout-empty-"));
-  assert.throws(() => chooseBed(new Date(), { dir }), /no music bed/);
+  fs.mkdirSync(path.join(dir, "evening")); fs.writeFileSync(path.join(dir, "evening", "elevenlabs-bed.mp3"), "x");   // no manifest entry
+  const r = chooseBed(new Date(), { dir, procedural: (d) => path.join(d, "_procedural", "bed.wav") });
+  assert.equal(r.procedural, true);
+  assert.equal(r.refused, 1);
+  assert.ok(r.bed.endsWith(path.join("_procedural", "bed.wav")));
+  assert.throws(() => chooseBed(new Date(), { dir, procedural: null }), /no cleared music bed/);
 });
 
 // ── loudness + ffmpeg arguments ──────────────────────────────────────────────

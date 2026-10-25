@@ -184,6 +184,8 @@ body.live .ph{display:none;}
 .mcard .cat{font-size:24px; color:var(--muted); font-stretch:85%;}
 .mcard p{font-family:'Newsreader',Georgia,serif; font-weight:500; font-size:76px; line-height:1.08; margin:16px 0 18px; max-width:24ch; letter-spacing:-0.01em;}
 .mcard .src{font-size:21px; color:var(--muted);}
+.mcredit{position:absolute; right:40px; bottom:4px; font-size:18px; color:var(--muted); letter-spacing:.02em;}
+.mcredit[hidden]{display:none;}
 .eq{position:absolute; left:40px; bottom:0; display:flex; align-items:flex-end; gap:6px; height:34px;}
 .eq i{width:7px; height:100%; background:var(--muted); transform-origin:bottom; animation:bar 1.4s ease-in-out infinite;}
 
@@ -196,6 +198,15 @@ body.live .ph{display:none;}
 .s-film .cap{display:flex; align-items:baseline; gap:18px;}
 .s-film .cap b{font-family:'Newsreader',Georgia,serif; font-weight:600; font-size:40px;}
 .s-film .cap span{font-size:24px; color:var(--muted);}
+
+/* live official feed (#202): the publisher's picture inside our frame, credited */
+.s-livefeed{display:flex; flex-direction:column; gap:18px;}
+.lf{flex:1; position:relative; background:#000; overflow:hidden;}
+.lf img{position:absolute; inset:0; width:100%; height:100%; object-fit:contain;}
+.lf .lf-credit{position:absolute; left:22px; bottom:22px; background:var(--bg); border:1px solid var(--line); padding:10px 16px; font-size:22px; font-weight:600; font-stretch:82%;}
+.s-livefeed .cap{display:flex; align-items:baseline; gap:18px;}
+.s-livefeed .cap b{font-family:'Newsreader',Georgia,serif; font-weight:600; font-size:40px;}
+.s-livefeed .cap span{font-size:24px; color:var(--muted);}
 
 @keyframes tick{from{transform:translateX(0)} to{transform:translateX(-50%)}}
 @keyframes bar{0%,100%{transform:scaleY(.25)} 50%{transform:scaleY(1)}}
@@ -247,12 +258,17 @@ body.live .ph{display:none;}
             <div class="plate thumb"><div class="series" id="nextSeries"></div><div class="ph">Teaser plays here</div></div>
           </section>
           <!-- Music break -->
-          <section class="scene s-music" data-scene="music"><div id="mcards"></div><div class="eq" id="eq"></div></section>
+          <section class="scene s-music" data-scene="music"><div id="mcards"></div><div class="eq" id="eq"></div><div class="mcredit" id="musicCredit" hidden></div></section>
           <!-- Film Hour -->
           <section class="scene s-film" data-scene="film">
             <div class="plate ep"><div class="ph">Episode plays here</div>
               <div class="watch"><b>Watch the full episode</b><span>On the ScoopFeeds YouTube channel. Subscribe for new episodes every week.</span></div></div>
             <div class="cap" id="filmCap"></div>
+          </section>
+          <!-- Live official feed (#202) -->
+          <section class="scene s-livefeed" data-scene="livefeed">
+            <div class="plate lf"><img id="lfPic" alt=""><div class="lf-credit" id="lfCredit"></div></div>
+            <div class="cap" id="lfCap"></div>
           </section>
         </main>
 
@@ -277,6 +293,8 @@ body.live .ph{display:none;}
 </div>
 
 <script>
+/* #208: the playout sets the airing bed's "Music: Artist – Track" credit (a standard music credit, not an AI label). */
+window.setMusicCredit = (text) => { const el = document.getElementById('musicCredit'); if (!el) return; el.textContent = text || ''; el.hidden = !text; };
 /* ======================================================================
    SAMPLE STATE. The playout server replaces this with live data by calling
    ScoopRadio.set({...}) (any subset of these keys), or by serving a JSON
@@ -385,7 +403,8 @@ const hasNext     = () => !!(STATE.next && STATE.next.title);
 const hasLater    = () => Array.isArray(STATE.later) && STATE.later.length > 0;
 const hasFilm     = () => !!(STATE.film && STATE.film.title);
 const hasPhoto    = () => typeof STATE.photo === 'string' && STATE.photo.length > 0;
-const sceneAvailable = name => name === 'markets' ? hasMarkets() : name === 'weather' ? hasWeather() : name === 'explains' ? hasExplains() : name === 'next' ? hasNext() : name === 'film' ? hasFilm() : true;
+let LIVEFEED = null;   // #202: { publisher, title, credit, picture } while an official feed is on air
+const sceneAvailable = name => name === 'livefeed' ? !!LIVEFEED : name === 'markets' ? hasMarkets() : name === 'weather' ? hasWeather() : name === 'explains' ? hasExplains() : name === 'next' ? hasNext() : name === 'film' ? hasFilm() : true;
 
 function marketsLine(){
   const open = EXCHANGES.map(e => ({ e, s:status(e) })).filter(x => x.s.state === 'open');
@@ -414,7 +433,8 @@ const SEG = {
   weather:  { tag:'Weather',             head:() => STATE.weatherLine },
   next:     { tag:'Coming up',           head:() => (hasNext() ? `${STATE.next.title} at ${STATE.next.start}` : '') },
   music:    { tag:'Music break',         head:() => 'More news at the top of the half hour' },
-  film:     { tag:'Film Hour',           head:() => (hasFilm() ? `${STATE.film.series}: ${STATE.film.title}` : '') }
+  film:     { tag:'Film Hour',           head:() => (hasFilm() ? `${STATE.film.series}: ${STATE.film.title}` : '') },
+  livefeed: { tag:'Live',                head:() => (LIVEFEED ? LIVEFEED.title : '') }
 };
 
 function renderClocks(){
@@ -576,11 +596,12 @@ function swapStrip(){
 
 /* ---------------- scenes ---------------- */
 function setScene(name){
+  if (LIVEFEED) name = 'livefeed';      // a live official feed holds the screen until the playout ends it
   if (!SEG[name]) return;
   if (!sceneAvailable(name)) name = 'news';   // e.g. no markets feed → the Markets scene is hidden
   STATE.scene = name;
   document.querySelectorAll('.scene').forEach(s => s.classList.toggle('active', s.dataset.scene === name));
-  $('segTag').textContent = SEG[name].tag;
+  $('segTag').textContent = name === 'livefeed' && LIVEFEED ? `LIVE · ${LIVEFEED.publisher}` : SEG[name].tag;
   $('ltHead').textContent = SEG[name].head();
   document.querySelectorAll('#controls [data-go]').forEach(b => b.setAttribute('aria-pressed', b.dataset.go === name ? 'true' : 'false'));
 }
@@ -613,6 +634,25 @@ window.ScoopRadio = {
     Object.assign(STATE, patch); renderStatic(); renderBoard(); buildTicker(); setScene(STATE.scene);
   },
   scene: setScene,
+  /* #202: the playout calls these; only for feeds that passed the official-feeds allow-list. */
+  goLive(o){
+    o = o || {};
+    if (!o.publisher || !o.picture) return false;
+    LIVEFEED = { publisher: String(o.publisher), title: String(o.title || ''), credit: String(o.credit || `Live feed: ${o.publisher}`), picture: String(o.picture) };
+    $('lfPic').src = LIVEFEED.picture;
+    $('lfCredit').textContent = LIVEFEED.credit;
+    $('lfCap').innerHTML = `<b>${esc(LIVEFEED.publisher)}</b><span>${esc(LIVEFEED.title)}</span>`;
+    setScene('livefeed');
+    return true;
+  },
+  endLive(){
+    if (!LIVEFEED) return false;
+    LIVEFEED = null;
+    $('lfPic').removeAttribute('src'); $('lfCredit').textContent = ''; $('lfCap').innerHTML = '';
+    setScene(STATE.scene === 'livefeed' ? 'news' : STATE.scene);
+    return true;
+  },
+  live: () => (LIVEFEED ? { ...LIVEFEED } : null),
   state: () => JSON.parse(JSON.stringify(STATE))
 };
 

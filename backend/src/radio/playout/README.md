@@ -59,3 +59,9 @@ VPS relay, which changes the server (stop-list item 2, needs DrJ; not built); `u
 3. In `~/.scoopfeeds-radio.env` (mode 600): `RADIO_X_RTMP_URL=<url>`, `RADIO_X_STREAM_KEY=<key>`, `RADIO_X_ENABLED=true`.
 4. Restart the radio (`launchctl kickstart -k gui/$(id -u)/com.scoopfeeds.radio`) and check `~/scoopfeeds-radio/outputs.json`
    shows both `youtube` and `x` as `live`.
+## Live official feeds (#202)
+
+Dark unless `RADIO_LIVE_ENABLED=true`. At an event's start the unit swaps its audio feeder for a live feeder
+(official feed's sound) and shows the feed's picture in the `livefeed` scene with `LIVE · <publisher>`; at the end, or
+after 30 s with no media, it swaps back to the bed. Encoder and RTMP untouched. Only allow-listed feeds can air:
+see `../live/README.md`. Rehearsal: `--live-now <feed id> --live-url <url> [--live-minutes 5]` with `--segments-dir` (refused with RTMP or `--out`).

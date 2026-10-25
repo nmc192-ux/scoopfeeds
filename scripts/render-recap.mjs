@@ -13,7 +13,7 @@
  * Optional env:
  *   RECAP_KIND    — "daily" (default) | "weekly"
  *   RECAP_CATEGORY — category slug to filter (omit for "all categories")
- *   OPENAI_API_KEY / ELEVENLABS_API_KEY / GOOGLE_TTS_KEY — enables TTS
+ *   OPENAI_API_KEY / ELEVENLABS_API_KEY — enables TTS
  */
 
 import { readFileSync, existsSync } from "fs";

@@ -16,7 +16,8 @@ export const AIR_RULES = Object.freeze({
 });
 
 const readJson = (f) => JSON.parse(fs.readFileSync(f, "utf8"));
-const lineCount = (segs) => Object.values(segs || {}).reduce((n, s) => n + (Array.isArray(s?.lines) ? s.lines.length : 0), 0);
+// mechanical lines (the station ID) are not written by the model, so they do not count toward the kept share
+const lineCount = (segs) => Object.values(segs || {}).reduce((n, s) => n + (Array.isArray(s?.lines) ? s.lines.filter((l) => !l?.mechanical).length : 0), 0);
 
 /**
  * @param {string} dir   the producer's --out directory
