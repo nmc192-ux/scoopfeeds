@@ -177,6 +177,7 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
         if (!lines.length) { cues.push({ at: at(t0), scene: "music", data: md(s) }); break; }   // nothing survived: headlines and music
         const storyLines = lines.filter((l) => l.story && !l.outlet);
         if (s.segment === "markets") { cues.push({ at: at(t0), scene: "markets", data: { title: s.title, rows: pack.markets, asOf: pack.builtAt } }); break; }
+        if (s.segment === "crypto") { cues.push({ at: at(t0), scene: "markets", data: { title: s.title, rows: pack.crypto || [], asOf: pack.builtAt, note: "Prices from CoinGecko. 24-hour change." } }); break; }
         if (s.segment === "weather") { cues.push({ at: at(t0), scene: "weather", data: { title: s.title, cities: pack.weather } }); break; }
         if (s.segment === "signoff") { cues.push({ at: at(t0), scene: "signoff", data: {} }); break; }
         if (s.segment === "compared") {
