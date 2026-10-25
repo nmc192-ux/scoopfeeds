@@ -5,7 +5,7 @@
  *   rule0     Pakistan politics / critical of Pakistan (the radio's own rules layer)
  *   story     a story line must point at a story in the pack
  *   outlet    a Compared line must name an outlet that actually covered that story
- *   numbers   every figure must appear in the pack (story text, market row or weather row)
+ *   numbers   every figure must appear in the pack (story text, market, crypto or weather row)
  *   quotes    quoted words must appear verbatim in the pack
  *   election  fraud/rigging or a winner, asserted without a named outlet or official (#197, #208)
  */
@@ -52,6 +52,7 @@ export function checkSegments(segments, slots, pack, { log = () => {} } = {}) {
   const idx = storyIndex(pack);
   const marketNums = pack.markets.flatMap((m) => [m.price, m.pct, Math.round(m.price), m.pct == null ? null : Math.round(m.pct * 10) / 10].filter((x) => x != null));
   const weatherNums = pack.weather.flatMap((w) => [w.c, w.f]);
+  const cryptoNums = (pack.crypto || []).flatMap((c) => [c.price, c.pct, Math.round(c.price), c.pct == null ? null : Math.round(c.pct * 10) / 10].filter((x) => x != null));
   const report = [];
   const out = {};
 
@@ -74,7 +75,7 @@ export function checkSegments(segments, slots, pack, { log = () => {} } = {}) {
         const election = electionClaimVerdict(text, { outlets: (story?.outlets || []).map((o) => o.source), outlet: line.outlet || null });
         if (election) return election;
         const src = story ? storyText(story) : "";
-        const pool = slot.segment === "markets" ? marketNums : slot.segment === "weather" ? weatherNums : numsIn(src, { all: true }).concat(marketNums);
+        const pool = slot.segment === "markets" ? marketNums : slot.segment === "weather" ? weatherNums : slot.segment === "crypto" ? cryptoNums : numsIn(src, { all: true }).concat(marketNums);
         const bad = numsIn(text).filter((n) => !backed(n, pool) && !src.includes(String(n)));
         if (bad.length) return `unbacked figure(s) ${bad.join(", ")}`;
         for (const q of text.match(/[“"]([^”"]{4,})[”"]/g) || []) {

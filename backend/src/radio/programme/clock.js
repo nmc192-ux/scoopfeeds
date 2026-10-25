@@ -18,6 +18,7 @@
  *
  * `sting: true` puts the 3 s Signal sting (visual + sonic) over the first 3 s of the slot.
  */
+import { planHour, applyPlan } from "./grid.js";
 
 export const PREROLL_SEC = 15 * 60;
 export const TAIL_SEC = 30;
@@ -98,6 +99,19 @@ export function buildClock(hourStartMs, { featureSec = 0, featureTitle = null, f
     start: hourStartMs + s * 1000, end: hourStartMs + e * 1000,
     ...extra,
   }));
+}
+
+/**
+ * The hour as an instance of the channel grid (#200, grid.js): the base running order above, with the hour's
+ * plan applied (Crypto, weather every two hours, markets by open session, the film only in its fixed slot).
+ * A feature passed for an hour that is not the grid's feature slot is dropped; `plan.featureDropped` says so.
+ * @returns {{ plan, slots }}
+ */
+export function buildGridClock(hourStartMs, { featureSec = 0, ...opts } = {}) {
+  const plan = planHour(hourStartMs);
+  const useFeature = featureSec > 0 && Boolean(plan.feature);
+  const base = buildClock(hourStartMs, { ...opts, featureSec: useFeature ? featureSec : 0, featureTitle: opts.featureTitle || plan.feature?.title || null });
+  return { plan: { ...plan, featureDropped: featureSec > 0 && !useFeature }, slots: applyPlan(base, plan) };
 }
 
 /** Words the writer may use in a spoken slot: its length less a 4 s margin (sting, breaths), at WORDS_PER_SEC. */
