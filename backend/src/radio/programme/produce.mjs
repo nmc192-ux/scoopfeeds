@@ -25,6 +25,7 @@ import { listBeds, listFiles, bedEntry, DAYPARTS } from "../musicLibrary.js";
 import { loadManifest, screenCredit } from "../musicManifest.js";
 import { ensureProceduralBed } from "../proceduralBed.js";
 import { measureIntegrated } from "../playout/loudness.js";
+import { resolveHourShort } from "../filmLibrary.js";
 
 const { values: v } = parseArgs({ options: {
   hour: { type: "string" }, out: { type: "string" }, "music-dir": { type: "string" }, film: { type: "string" },
@@ -40,13 +41,20 @@ if (!v.out) die("--out is required");
 const out = path.resolve(v.out.replace(/^~/, process.env.HOME));
 fs.mkdirSync(out, { recursive: true });
 const musicDir = path.resolve((v["music-dir"] || path.join(process.env.HOME, "scoopfeeds-radio/music")).replace(/^~/, process.env.HOME));
-const film = v.film ? path.resolve(v.film.replace(/^~/, process.env.HOME)) : null;
-if (film && !fs.existsSync(film)) die(`film not found: ${film}`);
+// #216: the film slot takes only a Short cut from a published long-form film, checked against the film
+// library. Anything else (ScoopFeeds 60, an unlinked clip, a file outside the library) is logged and the
+// slot is filled by the normal programme.
+let film = null, filmTitle = null;
+if (v.film) {
+  const r = resolveHourShort(path.resolve(v.film.replace(/^~/, process.env.HOME)));
+  if (r.item) { film = r.item.file; filmTitle = `From ${r.item.seriesName}: ${r.item.title}`; log(`film slot: ${r.item.id} (Short from ${r.item.parentFilm})`); }
+  else log(`film slot: no film this hour (${r.reason}); the slot is filled by the normal programme`);
+}
 
 const feature = v.feature ? path.resolve(v.feature.replace(/^~/, process.env.HOME)) : null;
 if (feature && !fs.existsSync(feature)) die(`feature not found: ${feature}`);
 const featureSec = feature ? durationSecs(feature) + 2.6 + 1.0 : 0;   // sting + the episode + a breath
-const clock = buildClock(hourStart, { featureSec, featureTitle: v["feature-title"] || (feature ? path.basename(feature).replace(/\.[^.]+$/, "") : null) });
+const clock = buildClock(hourStart, { featureSec, featureTitle: v["feature-title"] || (feature ? path.basename(feature).replace(/\.[^.]+$/, "") : null), film: !!film, filmTitle });
 const problems = checkClock(clock);
 if (problems.length) die(`clock is broken: ${problems.join("; ")}`);
 const fromIdx = v.from ? clock.findIndex((s) => s.id === v.from) : 0;

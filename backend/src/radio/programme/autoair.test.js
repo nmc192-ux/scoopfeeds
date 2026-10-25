@@ -113,3 +113,16 @@ test("gate: the rehearsal return comes before any YouTube or playout step in the
   }
   assert.ok(body.indexOf("isPaused(BASE)") < body.indexOf('stage("producing")'), "PAUSE must be checked before producing");
 });
+
+test("#216+#208: sourceFileFor maps a library Short (symlink) back to its file in the film folder", async () => {
+  const { sourceFileFor } = await import("./autoair.mjs");
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "srcfor-"));
+  const pub = path.join(d, "pub"); const lib = path.join(d, "lib");
+  fs.mkdirSync(pub); fs.mkdirSync(lib);
+  fs.writeFileSync(path.join(pub, "s1.mp4"), "x"); fs.writeFileSync(path.join(pub, "other.mp4"), "y");
+  fs.symlinkSync(path.join(pub, "s1.mp4"), path.join(lib, "s1.mp4"));
+  assert.equal(sourceFileFor(pub, path.join(lib, "s1.mp4")), path.join(pub, "s1.mp4"));
+  assert.equal(sourceFileFor(path.join(pub, "s1.mp4"), path.join(lib, "s1.mp4")), path.join(pub, "s1.mp4"));
+  assert.equal(sourceFileFor(path.join(pub, "other.mp4"), path.join(lib, "s1.mp4")), null);
+  assert.equal(sourceFileFor(path.join(d, "missing"), path.join(lib, "s1.mp4")), null);
+});

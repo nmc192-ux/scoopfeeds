@@ -10,7 +10,8 @@
  *   ident    a Signal ident (visual + its sonic WAV), mode id | top
  *   spoken   a script read by the voice, over a ducked bed
  *   music    the bed at full level, rotating headline cards on screen
- *   film     one ScoopFeeds 60 film, played with its own sound
+ *   film     one Short cut from a published long-form film (#216), played with its own sound; with no
+ *            eligible Short the slot is music (headlines and the bed), never "ScoopFeeds 60"
  *   feature  a full episode (this week's A-Eye), played with its own sound
  *   series   "This week on ScoopFeeds" cards over the bed
  *   countdown / endcard   holding slates over the bed
@@ -31,7 +32,7 @@ const ORDER = [
   ["music-1", 840, 1200, "music", { sting: true, nextAt: 1200, nextTitle: "Middle East desk" }],
   ["desk-me", 1200, 1380, "spoken", { segment: "desk", desk: "middle-east", title: "Middle East desk", sting: true }],
   ["desk-us", 1380, 1560, "spoken", { segment: "desk", desk: "us", title: "US desk: politics and economy" }],
-  ["film", 1560, 1620, "film", { sting: true, title: "ScoopFeeds 60" }],
+  ["film", 1560, 1620, "film", { sting: true, title: "From the films" }],
   ["series", 1620, 1710, "series", { title: "This week on ScoopFeeds" }],
   ["music-2", 1710, 1792, "music", {}],
   ["ident-half", 1792, 1800, "ident", { mode: "id" }],
@@ -80,9 +81,18 @@ function withFeature(order, featureSec, featureTitle) {
   return [...head, ...mid, ...tail];
 }
 
-export function buildClock(hourStartMs, { featureSec = 0, featureTitle = null } = {}) {
+/**
+ * `film: false` (no eligible Short this hour, #216) turns the film slot into music; `filmTitle` labels it
+ * when there is one.
+ */
+export function buildClock(hourStartMs, { featureSec = 0, featureTitle = null, film = true, filmTitle = null } = {}) {
   if (!Number.isFinite(hourStartMs)) throw new Error("buildClock: hourStartMs must be a number");
-  const order = featureSec > 0 ? withFeature(ORDER, featureSec, featureTitle) : ORDER;
+  let order = featureSec > 0 ? withFeature(ORDER, featureSec, featureTitle) : ORDER;
+  order = order.map((row) => {
+    if (row[0] !== "film") return row;
+    if (!film) return [row[0], row[1], row[2], "music", {}];
+    return filmTitle ? [row[0], row[1], row[2], row[3], { ...row[4], title: filmTitle }] : row;
+  });
   return order.map(([id, s, e, kind, extra]) => ({
     id, kind, startSec: s, endSec: e, lenSec: e - s,
     start: hourStartMs + s * 1000, end: hourStartMs + e * 1000,
