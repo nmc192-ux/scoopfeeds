@@ -83,6 +83,7 @@ test("24/7 mode: an ended broadcast is replaced by a new one, bound to the strea
   assert.equal(yt.created.length, 1);
   assert.deepEqual(yt.binds, [["N1", "S"]]);
   assert.equal(yt.created[0].privacy, "unlisted");
+  assert.equal(yt.created[0].autoStop, false, "the 24/7 replacement broadcast must survive the hourly hand-over (#195)");
   assert.match(yt.created[0].title, /ScoopFeeds Radio LIVE/);
   await r.minute(9);
   assert.equal(yt.created.length, 1, "rate-limited");

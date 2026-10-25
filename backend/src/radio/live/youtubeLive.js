@@ -40,15 +40,18 @@ export const liveConfigured = (env = process.env) => { const c = liveCredentials
 
 /**
  * The broadcast resource: public, auto-start and auto-stop on, no monitor stream (so "live" is one step), DVR on.
+ * `autoStop: false` is for the 24/7 continuous broadcast (#195): the hourly playout hand-over drops the encoder for
+ * a few seconds, and auto-stop must not end the broadcast then; the orchestrator completes it itself when it rolls.
  * #208: the description always ends with the music credits, whole (or a link to the full list), whatever the
- * caller passes. YouTube's "altered or synthetic content" flag (containsSyntheticMedia) is deliberately never
- * sent (DrJ, 22 Oct 2026), and there is no disclosure sentence (DrJ, 23 Oct 2026).
+ * caller passes (`listAll: false` with a `creditsUrl`: the link alone, for the 24/7 broadcast). YouTube's
+ * "altered or synthetic content" flag (containsSyntheticMedia) is deliberately never sent (DrJ, 22 Oct 2026),
+ * and there is no disclosure sentence (DrJ, 23 Oct 2026).
  */
-export function broadcastBody({ title, description = "", startMs, privacy = "public", credits = [], creditsUrl = null, listAll = true }) {
+export function broadcastBody({ title, description = "", startMs, privacy = "public", autoStop = true, credits = [], creditsUrl = null, listAll = true }) {
   return {
     snippet: { title: String(title).slice(0, 100), description: withCredits(description, credits, { creditsUrl, listAll }), scheduledStartTime: new Date(startMs).toISOString() },
     status: { privacyStatus: privacy, selfDeclaredMadeForKids: false },
-    contentDetails: { enableAutoStart: true, enableAutoStop: true, enableDvr: true, latencyPreference: "low", monitorStream: { enableMonitorStream: false } },
+    contentDetails: { enableAutoStart: true, enableAutoStop: autoStop !== false, enableDvr: true, latencyPreference: "low", monitorStream: { enableMonitorStream: false } },
   };
 }
 

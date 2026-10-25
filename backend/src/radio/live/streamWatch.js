@@ -96,7 +96,7 @@ export function createStreamWatch(o) {
     if (copy.titleReplaced) log(`stream watch: title replaced with the default (${copy.why.join(", ")})`);
     if (!copy.credits.length) log("stream watch: the 24/7 library has no cleared tracks (procedural bed only), so the description carries no music credits");
     try {
-      const b = await o.yt.createBroadcast({ title: copy.title, description: copy.description, credits: copy.credits, creditsUrl: copy.creditsUrl, listAll: copy.listAll, startMs: t, privacy: env.RADIO_STREAM_WATCH_PRIVACY || "public" });
+      const b = await o.yt.createBroadcast({ title: copy.title, description: copy.description, credits: copy.credits, creditsUrl: copy.creditsUrl, listAll: copy.listAll, startMs: t, autoStop: false, privacy: env.RADIO_STREAM_WATCH_PRIVACY || "public" });
       await o.yt.bind(b.id, s.streamId);
       s.broadcastId = b.id;
       log(`stream watch: ${prev ? `broadcast ${prev} has ended; ` : "no broadcast was bound to the stream; "}created ${b.id} and bound it (auto-start: it goes live as data arrives)`);

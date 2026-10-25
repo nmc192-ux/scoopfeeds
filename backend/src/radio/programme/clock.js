@@ -83,12 +83,23 @@ function withFeature(order, featureSec, featureTitle) {
 }
 
 /**
- * `film: false` (no eligible Short this hour, #216) turns the film slot into music; `filmTitle` labels it
- * when there is one.
+ * No weather this hour (the 24/7 day reads it every two hours, dayClock.js): its 90 s go to the half-hour
+ * headlines, which read seven stories instead of five. Contiguity is unchanged.
  */
-export function buildClock(hourStartMs, { featureSec = 0, featureTitle = null, film = true, filmTitle = null } = {}) {
+function withoutWeather(order) {
+  const w = order.find(([id]) => id === "weather");
+  if (!w) return order;
+  return order.filter(([id]) => id !== "weather").map((row) => (row[0] === "half" ? [row[0], row[1], w[2], row[3], { ...row[4], stories: 7 }] : row));
+}
+
+/**
+ * `film: false` (no eligible Short this hour, #216) turns the film slot into music; `filmTitle` labels it
+ * when there is one. `weather: false` (#195) drops the weather slot into the half-hour headlines.
+ */
+export function buildClock(hourStartMs, { featureSec = 0, featureTitle = null, film = true, filmTitle = null, weather = true } = {}) {
   if (!Number.isFinite(hourStartMs)) throw new Error("buildClock: hourStartMs must be a number");
   let order = featureSec > 0 ? withFeature(ORDER, featureSec, featureTitle) : ORDER;
+  if (!weather) order = withoutWeather(order);
   order = order.map((row) => {
     if (row[0] !== "film") return row;
     if (!film) return [row[0], row[1], row[2], "music", {}];

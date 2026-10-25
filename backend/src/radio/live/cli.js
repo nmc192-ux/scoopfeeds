@@ -7,7 +7,7 @@
  *   node backend/src/radio/live/cli.js audit              the live log: carries, refusals, clips (none over 30 s)
  * Needs yt-dlp and ffprobe on PATH for check / --fetch.
  */
-import { OFFICIAL_FEEDS, entryForUrl, assertCanAir, awaitingMacCheck, streamMonetised } from "./officialFeeds.js";
+import { OFFICIAL_FEEDS, entryForUrl, assertCanAir, isProposed, awaitingMacCheck, streamMonetised } from "./officialFeeds.js";
 import { probeFeed } from "./feedProbe.js";
 import { loadManualEvents, fetchPublisherEvents, mergeCalendar, eventsFile, airsAutomatically } from "./eventsCalendar.js";
 import { createLiveLog, liveLogDir } from "./liveLog.js";
@@ -19,7 +19,7 @@ const out = (x) => console.log(typeof x === "string" ? x : JSON.stringify(x, nul
 if (cmd === "feeds") {
   out(`RADIO_STREAM_MONETISED: ${streamMonetised() ? "on (nonCommercialOnly feeds refused)" : "off"}`);
   for (const f of OFFICIAL_FEEDS) {
-    const tags = [f.nonCommercialOnly ? "non-commercial only" : null, awaitingMacCheck(f) ? "AWAITING MAC CHECK" : null].filter(Boolean);
+    const tags = [isProposed(f) ? "PROPOSED, cannot air" : null, f.nonCommercialOnly ? "non-commercial only" : null, awaitingMacCheck(f) ? "AWAITING MAC CHECK" : null].filter(Boolean);
     out(`${f.id.padEnd(16)} ${f.publisher}  [${[...(f.youtube || []), ...(f.pages || [])].join(", ")}]${tags.length ? `  (${tags.join("; ")})` : ""}  ${f.why}`);
   }
 } else if (cmd === "check") {
