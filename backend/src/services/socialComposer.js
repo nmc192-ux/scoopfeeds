@@ -11,11 +11,22 @@
 // with a recent market-implied probability, the composers below splice in
 // a one-line callout from socialCaptionEnricher. Disabled cleanly when
 // the import or DB read fails — caption falls back to the original layout.
+//
+// #205: that callout is market-odds data ("Markets price this at N% … Polymarket"),
+// so it follows SITE_MARKET_ODDS exactly like the site and the newsletter. Off (the
+// default) → no callout, no DB read, and the caption is the no-market layout.
+// Turning it on is stop-list item 6.
 
-import { realityIndexCallout as _riCallout } from "../realityIndex/generation/socialCaptionEnricher.js";
+import { realityIndexCallout } from "../realityIndex/generation/socialCaptionEnricher.js";
+import { marketOddsEnabled } from "../config/marketOdds.js";
 import { TRAGEDY_KEYWORDS } from "./editorialSensitivity.js";
 
+let _riCallout = realityIndexCallout;
+/** Test seam (#205): swap the callout source; pass nothing to restore the real one. */
+export function _setRiCalloutForTest(fn) { _riCallout = fn || realityIndexCallout; }
+
 function safeRiCallout(articleId) {
+  if (!marketOddsEnabled()) return null;
   try { return _riCallout(articleId); } catch { return null; }
 }
 
