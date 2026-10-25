@@ -244,8 +244,13 @@ the report.
 absorbed event's articles onto the survivor but never bumps the survivor's
 `last_activity_at` (`markMerged` updates the *absorbed* row). Fix:
 `touchActivity.run(now, now, survivor)` after the link loop.
-3. **Machine-event quarantine at ingest** `[queued]` — USGS/NOAA article-less events have caused
-**two** production failures. Quarantine at ingest or distinct status; structural fix.
+3. **Machine-event quarantine** `[in review, #177]` — USGS/NOAA article-less events have caused
+**two** production failures. Fix: one read-side predicate, `notMachineEventSql` /
+`isMachineEvent` in `realityIndex/dal/machineEvents.js`, keyed on `meta.source` (no schema
+change, no backfill). Applied to `GET /api/events` (opt back in with `?include_machine=1`),
+v1 `/events`, `listQualifyingEvents` (social, long-form) and the sentiment cycle. The world map
+and trackers still see machine events on purpose. **ACLED** (`meta.source = 'acled'`) is the
+same article-less class and is not covered yet.
 4. **W2.1 floor recalibration** `[queued]` — re-sweep from the SAME/porous distributions once a week
 of 🧭 `promoter-merge` lines has accumulated. "No floor" is an acceptable outcome.
 5. **Wave 3** `[queued]` — husk cleanup, blob dissolution, summary repair. Porous-absorb contamination
