@@ -58,6 +58,15 @@ not exist before; `backend/.env.example` documented 77 of the ~262 vars the code
 | `AFFINITY_NEWBORN_MAX_MEMBERS` | `8` | default | yes | Newborn exemption from the incoherence check (R1). |
 | `AFFINITY_NEWBORN_MAX_AGE_MS` | `24h` | default | yes | Newborn exemption by age. |
 
+### Coherence gate and slug-follow (#179, `eventCoherence.js`, `eventPromoter.js`)
+
+| Var | Default | Prod | Runtime-flip | Purpose |
+|---|---|---|---|---|
+| `EVENT_COHERENCE_GATE` | `false` | unset (off) | yes (read per cycle) | Hold incoming articles that are FOREIGN to an event's core when they would pull its coherence below the floor. Calibrate the floor with `scripts/coherence-report.mjs` before turning on. |
+| `EVENT_COHERENCE_FLOOR` | `0.6` | unset (default) | yes | Coherence floor for the gate and for `coherence.level: "low"` in the dossier API. `0.6` is the audit's suggestion, not yet measured on prod. |
+| `EVENT_COHERENCE_API` | `true` | unset (on) | yes | Kill switch for the `coherence` block on `GET /api/ri/events/:slug`. |
+| `EVENT_SLUG_FOLLOWS_HEADLINE` | `false` | unset (off) | yes | Mint a new slug when an adopted lead headline shares under half its words with the slug; the old slug 301s (table `event_slug_aliases`). |
+
 ### W2.1 merge floor — **shipped DISABLED, do not enable without recalibration**
 
 | Var | Default | Prod | Runtime-flip | Purpose |

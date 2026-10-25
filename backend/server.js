@@ -42,6 +42,7 @@ import meterRouter       from "./src/routes/meter.js";
 import analysisRouter    from "./src/routes/analysis.js";
 import predictionsRouter from "./src/routes/predictions.js";
 import eventsRouter      from "./src/routes/events.js";
+import eventSlugAliasRouter from "./src/routes/eventSlugAlias.js";
 import trackersRouter    from "./src/routes/trackers.js";
 import realityIndexRouter from "./src/routes/realityIndex.js";
 import watchlistsRouter  from "./src/routes/watchlists.js";
@@ -471,6 +472,9 @@ app.get("/ads.txt", (req, res, next) => {
 // ── SEO routes (sitemaps, robots.txt, article detail SSR) ───────────────
 // Must be mounted BEFORE the SPA catch-all so crawlers get XML/HTML, not index.html.
 app.use("/", seoRouter);
+// #179: a retired dossier slug answers 301 to the event's current slug. Above the
+// SPA catch-all for the same reason as seoRouter; a live slug falls straight through.
+app.use("/", eventSlugAliasRouter);
 // Must sit above the SPA catch-all, same as seoRouter: /tiktok/callback needs to
 // render the authorisation code server-side, and the catch-all would otherwise
 // answer it with index.html.
