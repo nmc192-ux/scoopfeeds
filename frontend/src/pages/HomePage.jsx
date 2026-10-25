@@ -19,6 +19,7 @@ import { useSiteConfig } from "../hooks/useSiteConfig";
 import LoadingCard from "../components/ui/LoadingCard";
 import TimeoutNotice, { useTimedOut } from "../components/ui/TimeoutNotice";
 import ScoopMascot from "../components/mascot/ScoopMascot";
+import TodayPage from "./TodayPage";
 
 const DAY_MS = 86_400_000;
 const MIN_SECTION_STORIES = 3;  // a band with fewer stories than this does not render
@@ -144,7 +145,15 @@ function NewsSection({ label, category, moreHref = "/events", moreCta }) {
   );
 }
 
+// SITE_V2 (or ?v2=1) renders the Today page (#189); flag off renders the classic
+// spine below, unchanged. While site-config is loading v2 reads false, so the
+// flag-off page never waits on it.
 export default function HomePage() {
+  const { v2 } = useSiteConfig();
+  return v2 ? <TodayPage /> : <ClassicHome />;
+}
+
+function ClassicHome() {
   // One prominence fetch powers the whole Top Stories band: the main shows the top 7
   // (lead + 6); the rail derives Developing + Most-sourced from the fuller list.
   // Each story renders at most ONCE above the fold: the rails exclude anything
