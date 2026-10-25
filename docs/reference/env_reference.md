@@ -226,6 +226,7 @@ whether the index is mixed. `scripts/reembed.mjs` needs no cutover today — emb
 | `SCOOP_PROCESS_ROLE` | — | set | restart | `web` \| `worker` \| `scheduler`. Determines which crons a container runs. |
 | `HOMEPAGE_GROUPING` | `false` | default | yes | Group homepage cards by story. |
 | `HOMEPAGE_GROUP_TAU` | `0.86` | default | yes | Grouping threshold. |
+| `SOURCE_QUALITY_FLOOR` | `60` | unset | n/a (read by `scripts/sources/source-step.mjs`) | #251: the admission floor for a source step. A candidate joins `config/sources.js` only with a scorer status of `scored`, ≥3 components at or above `MIN_COVERAGE`, and `quality_score` ≥ this. Unscored is not admitted. `source-step.mjs floor --db <copy>` reports the 25th percentile of current active sources; if that is higher, it is the floor to use. Integer 0–100; anything else falls back to 60. |
 
 ## Video autopost (§6.1) — gates, retention, cross-post
 

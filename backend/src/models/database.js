@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
 import { runMigrations, waitForMigrations, migrationsOwner } from "../db/migrate.js";
+import { syncSourcesFromConfig } from "../db/sourceSync.js";
 import { timedQuery } from "../db/queryTiming.js";
 import { logger } from "../services/logger.js";
 
@@ -200,7 +201,16 @@ export function bootstrapSchema(db) {
   if (!migrationsOwner()) {
     return waitForMigrations(db);
   }
-  return runMigrations(db);
+  const result = runMigrations(db);
+  // #251: every config/sources.js entry gets a `sources` row, so it can be scored.
+  // INSERT OR IGNORE only (never UPDATE/DELETE); a failure never blocks boot.
+  try {
+    const { inserted } = syncSourcesFromConfig(db);
+    if (inserted) logger.info(`🗂️ sources table: ${inserted} new row(s) from config/sources.js`);
+  } catch (err) {
+    logger.warn(`sources table sync failed: ${err.message}`);
+  }
+  return result;
 }
 
 export function initializeSchema(db) {

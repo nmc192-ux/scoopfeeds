@@ -1,0 +1,984 @@
+{
+  "probedAt": "2026-10-25T23:11:59.474Z",
+  "candidates": 80,
+  "passed": 42,
+  "results": [
+    {
+      "name": "CNN",
+      "url": "http://rss.cnn.com/rss/cnn_topstories.rss",
+      "category": "top",
+      "region": "us",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "newest item 30552.1 h old",
+        "items": 69,
+        "newestAgeHours": 30552.1
+      }
+    },
+    {
+      "name": "USA Today",
+      "url": "https://rssfeeds.usatoday.com/usatoday-NewsTopStories",
+      "category": "top",
+      "region": "us",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 402"
+      }
+    },
+    {
+      "name": "Washington Post",
+      "url": "https://feeds.washingtonpost.com/rss/national",
+      "category": "top",
+      "region": "us",
+      "credibility": 9,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 502"
+      }
+    },
+    {
+      "name": "Washington Post World",
+      "url": "https://feeds.washingtonpost.com/rss/world",
+      "category": "international",
+      "region": "global",
+      "credibility": 9,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 502"
+      }
+    },
+    {
+      "name": "Wall Street Journal World",
+      "url": "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+      "category": "international",
+      "region": "global",
+      "credibility": 9,
+      "probe": {
+        "ok": false,
+        "reason": "newest item 15267.8 h old",
+        "items": 20,
+        "newestAgeHours": 15267.8
+      }
+    },
+    {
+      "name": "Wall Street Journal Markets",
+      "url": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+      "category": "business",
+      "region": "us",
+      "credibility": 9,
+      "probe": {
+        "ok": false,
+        "reason": "newest item 15267.7 h old",
+        "items": 20,
+        "newestAgeHours": 15267.7
+      }
+    },
+    {
+      "name": "CBS News Politics",
+      "url": "https://www.cbsnews.com/latest/rss/politics",
+      "category": "politics",
+      "region": "us",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "host already listed (cbsnews.com)"
+      }
+    },
+    {
+      "name": "ProPublica",
+      "url": "https://www.propublica.org/feeds/propublica/main",
+      "category": "politics",
+      "region": "us",
+      "credibility": 9,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 20,
+        "newestAgeHours": 19.2
+      }
+    },
+    {
+      "name": "The Texas Tribune",
+      "url": "https://feeds.texastribune.org/feeds/main/",
+      "category": "local",
+      "region": "us",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 20,
+        "newestAgeHours": 19.2
+      }
+    },
+    {
+      "name": "Boston Globe",
+      "url": "https://www.bostonglobe.com/arc/outboundfeeds/rss/?outputType=xml",
+      "category": "local",
+      "region": "us-east",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 100,
+        "newestAgeHours": 0.2
+      }
+    },
+    {
+      "name": "Miami Herald",
+      "url": "https://www.miamiherald.com/news/local/?widgetName=rssfeed&widgetContentId=712015&getXmlFeed=true",
+      "category": "local",
+      "region": "us",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Request timed out after 20000ms"
+      }
+    },
+    {
+      "name": "Denver Post",
+      "url": "https://www.denverpost.com/feed/",
+      "category": "local",
+      "region": "us-west",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 403"
+      }
+    },
+    {
+      "name": "Star Tribune",
+      "url": "https://www.startribune.com/local/index.rss2",
+      "category": "local",
+      "region": "us-midwest",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 10,
+        "newestAgeHours": 2.2
+      }
+    },
+    {
+      "name": "Axios Politics",
+      "url": "https://api.axios.com/feed/politics",
+      "category": "politics",
+      "region": "us",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "host already listed (api.axios.com)"
+      }
+    },
+    {
+      "name": "Roll Call",
+      "url": "https://rollcall.com/feed/",
+      "category": "politics",
+      "region": "us",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 10,
+        "newestAgeHours": 52.2
+      }
+    },
+    {
+      "name": "The Dispatch",
+      "url": "https://thedispatch.com/feed/",
+      "category": "politics",
+      "region": "us",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 10,
+        "newestAgeHours": 12.2
+      }
+    },
+    {
+      "name": "Vox",
+      "url": "https://www.vox.com/rss/index.xml",
+      "category": "politics",
+      "region": "us",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 10,
+        "newestAgeHours": 10.7
+      }
+    },
+    {
+      "name": "Semafor",
+      "url": "https://www.semafor.com/rss.xml",
+      "category": "international",
+      "region": "global",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 207,
+        "newestAgeHours": 0.6
+      }
+    },
+    {
+      "name": "Christian Science Monitor",
+      "url": "https://rss.csmonitor.com/feeds/all",
+      "category": "international",
+      "region": "global",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 10,
+        "newestAgeHours": 2.1
+      }
+    },
+    {
+      "name": "Yahoo Finance",
+      "url": "https://finance.yahoo.com/news/rssindex",
+      "category": "business",
+      "region": "us",
+      "credibility": 6,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 404"
+      }
+    },
+    {
+      "name": "Barron's",
+      "url": "https://www.barrons.com/xml/rss/3_7510.xml",
+      "category": "business",
+      "region": "us",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 403"
+      }
+    },
+    {
+      "name": "Quartz",
+      "url": "https://qz.com/rss",
+      "category": "business",
+      "region": "global",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "only 0 item(s)",
+        "items": 0
+      }
+    },
+    {
+      "name": "Harvard Business Review",
+      "url": "https://feeds.hbr.org/harvardbusiness",
+      "category": "business",
+      "region": "global",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Client network socket disconnected before secure TLS connection was established"
+      }
+    },
+    {
+      "name": "Kiplinger",
+      "url": "https://www.kiplinger.com/feeds/all",
+      "category": "business",
+      "region": "us",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 50,
+        "newestAgeHours": 8.2
+      }
+    },
+    {
+      "name": "The Independent",
+      "url": "https://www.independent.co.uk/news/uk/rss",
+      "category": "top",
+      "region": "uk",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Non-whitespace before first tag.\nLine: 0\nColumn: 1\nChar: \u001f"
+      }
+    },
+    {
+      "name": "The Independent World",
+      "url": "https://www.independent.co.uk/news/world/rss",
+      "category": "international",
+      "region": "global",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Unable to parse XML."
+      }
+    },
+    {
+      "name": "The Telegraph",
+      "url": "https://www.telegraph.co.uk/rss.xml",
+      "category": "top",
+      "region": "uk",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 120,
+        "newestAgeHours": 0.1
+      }
+    },
+    {
+      "name": "Evening Standard",
+      "url": "https://www.standard.co.uk/rss",
+      "category": "local",
+      "region": "uk",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 70,
+        "newestAgeHours": 0.3
+      }
+    },
+    {
+      "name": "The Scotsman",
+      "url": "https://www.scotsman.com/rss",
+      "category": "local",
+      "region": "uk",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 44,
+        "newestAgeHours": 1.6
+      }
+    },
+    {
+      "name": "inews",
+      "url": "https://inews.co.uk/feed",
+      "category": "top",
+      "region": "uk",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 10,
+        "newestAgeHours": 0.8
+      }
+    },
+    {
+      "name": "City AM",
+      "url": "https://www.cityam.com/feed/",
+      "category": "business",
+      "region": "uk",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 30,
+        "newestAgeHours": 7.7
+      }
+    },
+    {
+      "name": "The Spectator",
+      "url": "https://www.spectator.co.uk/feed",
+      "category": "politics",
+      "region": "uk",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 404"
+      }
+    },
+    {
+      "name": "New Statesman",
+      "url": "https://www.newstatesman.com/feed",
+      "category": "politics",
+      "region": "uk",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 20,
+        "newestAgeHours": 23.3
+      }
+    },
+    {
+      "name": "BBC Business",
+      "url": "https://feeds.bbci.co.uk/news/business/rss.xml",
+      "category": "business",
+      "region": "uk",
+      "credibility": 9,
+      "probe": {
+        "ok": false,
+        "reason": "host already listed (feeds.bbci.co.uk)"
+      }
+    },
+    {
+      "name": "Guardian Business",
+      "url": "https://www.theguardian.com/uk/business/rss",
+      "category": "business",
+      "region": "uk",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "host already listed (theguardian.com)"
+      }
+    },
+    {
+      "name": "Irish Independent",
+      "url": "https://www.independent.ie/rss",
+      "category": "top",
+      "region": "eu",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 50,
+        "newestAgeHours": 1.1
+      }
+    },
+    {
+      "name": "The Journal (Ireland)",
+      "url": "https://www.thejournal.ie/feed/",
+      "category": "top",
+      "region": "eu",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 40,
+        "newestAgeHours": 1.2
+      }
+    },
+    {
+      "name": "The Local Sweden",
+      "url": "https://www.thelocal.se/feeds/rss.php",
+      "category": "international",
+      "region": "eu",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 20,
+        "newestAgeHours": 37.1
+      }
+    },
+    {
+      "name": "The Local Germany",
+      "url": "https://www.thelocal.de/feeds/rss.php",
+      "category": "international",
+      "region": "de",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 20,
+        "newestAgeHours": 6.9
+      }
+    },
+    {
+      "name": "The Local France",
+      "url": "https://www.thelocal.fr/feeds/rss.php",
+      "category": "international",
+      "region": "fr",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 20,
+        "newestAgeHours": 6.9
+      }
+    },
+    {
+      "name": "Yle News",
+      "url": "https://yle.fi/rss/uutiset/englanti",
+      "category": "international",
+      "region": "eu",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 404"
+      }
+    },
+    {
+      "name": "NL Times",
+      "url": "https://nltimes.nl/rss",
+      "category": "international",
+      "region": "eu",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "no item dates (freshness unmeasured)",
+        "items": 10
+      }
+    },
+    {
+      "name": "Brussels Times",
+      "url": "https://www.brusselstimes.com/feed",
+      "category": "international",
+      "region": "eu",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Unexpected close tag\nLine: 58\nColumn: 3592\nChar: >"
+      }
+    },
+    {
+      "name": "Kyiv Independent",
+      "url": "https://kyivindependent.com/rss/",
+      "category": "international",
+      "region": "eu",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 404"
+      }
+    },
+    {
+      "name": "Notes from Poland",
+      "url": "https://notesfrompoland.com/feed/",
+      "category": "international",
+      "region": "eu",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 12,
+        "newestAgeHours": 9
+      }
+    },
+    {
+      "name": "Balkan Insight",
+      "url": "https://balkaninsight.com/feed/",
+      "category": "international",
+      "region": "eu",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 90,
+        "newestAgeHours": 1.1
+      }
+    },
+    {
+      "name": "RFE/RL",
+      "url": "https://www.rferl.org/api/zrqiteuuir",
+      "category": "international",
+      "region": "eu",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "only 0 item(s)",
+        "items": 0
+      }
+    },
+    {
+      "name": "ANSA English",
+      "url": "https://www.ansa.it/english/news/english_nr_rss.xml",
+      "category": "international",
+      "region": "eu",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 100,
+        "newestAgeHours": 37.1
+      }
+    },
+    {
+      "name": "Swissinfo",
+      "url": "https://www.swissinfo.ch/eng/rss",
+      "category": "international",
+      "region": "eu",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 410"
+      }
+    },
+    {
+      "name": "CBC News",
+      "url": "https://www.cbc.ca/webfeed/rss/rss-topstories",
+      "category": "top",
+      "region": "ca",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Request timed out after 20000ms"
+      }
+    },
+    {
+      "name": "Global News",
+      "url": "https://globalnews.ca/feed/",
+      "category": "top",
+      "region": "ca",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 10,
+        "newestAgeHours": 1.2
+      }
+    },
+    {
+      "name": "Toronto Star",
+      "url": "https://www.thestar.com/search/?f=rss&t=article&c=news*&l=50&s=start_time&sd=desc",
+      "category": "top",
+      "region": "ca",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 50,
+        "newestAgeHours": 0.4
+      }
+    },
+    {
+      "name": "The Globe and Mail",
+      "url": "https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/canada/",
+      "category": "top",
+      "region": "ca",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 100,
+        "newestAgeHours": 0.3
+      }
+    },
+    {
+      "name": "Sydney Morning Herald",
+      "url": "https://www.smh.com.au/rss/feed.xml",
+      "category": "top",
+      "region": "au",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 20,
+        "newestAgeHours": 0
+      }
+    },
+    {
+      "name": "The Conversation AU",
+      "url": "https://theconversation.com/au/articles.atom",
+      "category": "science",
+      "region": "au",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "host already listed (theconversation.com)"
+      }
+    },
+    {
+      "name": "Guardian Australia",
+      "url": "https://www.theguardian.com/australia-news/rss",
+      "category": "top",
+      "region": "au",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "host already listed (theguardian.com)"
+      }
+    },
+    {
+      "name": "RNZ",
+      "url": "https://www.rnz.co.nz/rss/national.xml",
+      "category": "top",
+      "region": "global",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 38,
+        "newestAgeHours": 0.3
+      }
+    },
+    {
+      "name": "The National (UAE)",
+      "url": "https://www.thenationalnews.com/arc/outboundfeeds/rss/?outputType=xml",
+      "category": "international",
+      "region": "ae",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 86,
+        "newestAgeHours": 3.7
+      }
+    },
+    {
+      "name": "Middle East Eye",
+      "url": "https://www.middleeasteye.net/rss",
+      "category": "international",
+      "region": "global",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 404"
+      }
+    },
+    {
+      "name": "The Express Tribune Business",
+      "url": "https://tribune.com.pk/feed/business",
+      "category": "pakistan",
+      "region": "pk",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "host already listed (tribune.com.pk)"
+      }
+    },
+    {
+      "name": "Hindustan Times",
+      "url": "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml",
+      "category": "international",
+      "region": "in",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 100,
+        "newestAgeHours": 4.2
+      }
+    },
+    {
+      "name": "NDTV",
+      "url": "https://feeds.feedburner.com/ndtvnews-top-stories",
+      "category": "international",
+      "region": "in",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 20,
+        "newestAgeHours": 3.9
+      }
+    },
+    {
+      "name": "Scroll.in",
+      "url": "https://feeds.feedburner.com/ScrollinArticles.rss",
+      "category": "international",
+      "region": "in",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "host already in this batch (feeds.feedburner.com)"
+      }
+    },
+    {
+      "name": "The Daily Star (Bangladesh)",
+      "url": "https://www.thedailystar.net/frontpage/rss.xml",
+      "category": "international",
+      "region": "global",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "newest item 37355.2 h old",
+        "items": 10,
+        "newestAgeHours": 37355.2
+      }
+    },
+    {
+      "name": "Premium Times",
+      "url": "https://www.premiumtimesng.com/feed",
+      "category": "international",
+      "region": "global",
+      "credibility": 7,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 15,
+        "newestAgeHours": 1
+      }
+    },
+    {
+      "name": "Daily Maverick",
+      "url": "https://www.dailymaverick.co.za/dmrss/",
+      "category": "international",
+      "region": "za",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 53,
+        "newestAgeHours": 0.2
+      }
+    },
+    {
+      "name": "The East African",
+      "url": "https://www.theeastafrican.co.ke/rss",
+      "category": "international",
+      "region": "ke",
+      "credibility": 7,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 403"
+      }
+    },
+    {
+      "name": "South China Morning Post",
+      "url": "https://www.scmp.com/rss/91/feed",
+      "category": "international",
+      "region": "global",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 50,
+        "newestAgeHours": 0.2
+      }
+    },
+    {
+      "name": "Nikkei Asia",
+      "url": "https://asia.nikkei.com/rss/feed/nar",
+      "category": "business",
+      "region": "jp",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "no item dates (freshness unmeasured)",
+        "items": 50
+      }
+    },
+    {
+      "name": "Rest of World",
+      "url": "https://restofworld.org/feed/latest",
+      "category": "tech",
+      "region": "global",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Invalid character in entity name\nLine: 25\nColumn: 131\nChar: ="
+      }
+    },
+    {
+      "name": "Ars Technica Science",
+      "url": "https://feeds.arstechnica.com/arstechnica/science",
+      "category": "science",
+      "region": "global",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "host already listed (feeds.arstechnica.com)"
+      }
+    },
+    {
+      "name": "Science News",
+      "url": "https://www.sciencenews.org/feed",
+      "category": "science",
+      "region": "global",
+      "credibility": 9,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 20,
+        "newestAgeHours": 36.2
+      }
+    },
+    {
+      "name": "Science (AAAS) News",
+      "url": "https://www.science.org/rss/news_current.xml",
+      "category": "science",
+      "region": "global",
+      "credibility": 9,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 10,
+        "newestAgeHours": 66.3
+      }
+    },
+    {
+      "name": "The Lancet",
+      "url": "https://www.thelancet.com/rssfeed/lancet_current.xml",
+      "category": "medicine",
+      "region": "global",
+      "credibility": 9,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 35,
+        "newestAgeHours": 47.2
+      }
+    },
+    {
+      "name": "Undark",
+      "url": "https://undark.org/feed/",
+      "category": "science",
+      "region": "global",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 10,
+        "newestAgeHours": 64.1
+      }
+    },
+    {
+      "name": "Knowable Magazine",
+      "url": "https://knowablemagazine.org/rss",
+      "category": "science",
+      "region": "global",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 20,
+        "newestAgeHours": 71.2
+      }
+    },
+    {
+      "name": "Defense One",
+      "url": "https://www.defenseone.com/rss/all/",
+      "category": "politics",
+      "region": "us",
+      "credibility": 8,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 23,
+        "newestAgeHours": 13.2
+      }
+    },
+    {
+      "name": "Lawfare",
+      "url": "https://www.lawfaremedia.org/feeds/articles",
+      "category": "politics",
+      "region": "us",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "only 1 item(s)",
+        "items": 1
+      }
+    },
+    {
+      "name": "SCOTUSblog",
+      "url": "https://www.scotusblog.com/feed/",
+      "category": "politics",
+      "region": "us",
+      "credibility": 9,
+      "probe": {
+        "ok": true,
+        "reason": "ok",
+        "items": 25,
+        "newestAgeHours": 57.2
+      }
+    },
+    {
+      "name": "Devex",
+      "url": "https://www.devex.com/news/rss",
+      "category": "public-health",
+      "region": "global",
+      "credibility": 8,
+      "probe": {
+        "ok": false,
+        "reason": "fetch/parse failed: Status code 403"
+      }
+    }
+  ]
+}
