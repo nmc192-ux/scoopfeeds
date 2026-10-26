@@ -58,6 +58,14 @@
  *               seeds the `sources` table only when it first runs, so
  *               entries added here after that are NOT in the scoring
  *               table and stay unscored until a seeding step exists.
+ *   2026-10-25  #251 Source step 1, part 1: the seeding step exists now
+ *               (db/sourceSync.js, run by bootstrapSchema after the
+ *               migrations; INSERT OR IGNORE only), so every entry in this
+ *               file gets a `sources` row and can be scored. Admission rule
+ *               in skills/scoring/sourceAdmission.js; probe/score tool in
+ *               scripts/sources/source-step.mjs; batch record in
+ *               docs/sources/source_batches.md. No sources added yet: no
+ *               candidate has been scored (see that file).
  *   2026-10-22  #194 US midterms batch: added 10 US politics / battleground
  *               feeds (Fox, WSJ, NBC, CBS, NYT politics, Ballotpedia, Votebeat,
  *               Nevada Independent, Bridge Michigan, Wisconsin Watch).
