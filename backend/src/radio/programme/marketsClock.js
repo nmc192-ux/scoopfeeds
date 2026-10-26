@@ -108,3 +108,27 @@ export function stripCloseDates(text, rows) {
     .replace(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:${MONTHS})\\b\\.?`, "gi"), keep)
     .replace(new RegExp(`\\b(?:${MONTHS})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, "gi"), keep);
 }
+
+// ── the overnight repeat (#249) ─────────────────────────────────────────────
+/** A Markets Now slot ("markets-1", "markets-2"), by id: the programme's slot list does not keep the segment. */
+export const isMarketsSlot = (s) => /^markets(-|$)/.test(String(s?.id || ""));
+
+/**
+ * #249: a repeated hour's Markets Now lines, re-checked against its own pack re-labelled at the REPEAT's air time
+ * (each slot's start + 1 min, as produce.mjs labels a fresh pack). Only slots still spoken are checked: a slot that
+ * was already music (too few market rows) airs no market lines. A slot whose lines or pack cannot be read is
+ * `measured: false`, never a pass. Pure.
+ * @returns {{ id, start, end, airAt, measured: boolean, why?: string, lines?: number, stale: string[] }[]}
+ */
+export function recheckRepeatedMarkets(slots, segments, pack) {
+  return (slots || []).filter((s) => isMarketsSlot(s) && s.kind === "spoken").map((s) => {
+    const base = { id: s.id, start: s.start, end: s.end, airAt: s.start + 60_000, stale: [] };
+    if (!Number.isFinite(s.start)) return { ...base, measured: false, why: `${s.id} has no start time` };
+    if (!Array.isArray(pack?.markets)) return { ...base, measured: false, why: "the repeated hour's pack.json is missing or has no market rows" };
+    const seg = segments?.[s.id];
+    if (!seg || !Array.isArray(seg.lines)) return { ...base, measured: false, why: `the repeated hour's ${s.id} lines are not in its segments.json` };
+    const rows = labelMarkets({ markets: pack.markets }, base.airAt).markets;
+    const stale = seg.lines.map((l) => { const why = staleMarketLine(l?.text, rows); return why ? `${l?.id}: ${why}` : null; }).filter(Boolean);
+    return { ...base, measured: true, lines: seg.lines.length, stale };
+  });
+}
