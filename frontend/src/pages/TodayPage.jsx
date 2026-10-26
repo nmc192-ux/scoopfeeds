@@ -7,7 +7,9 @@
  *   2. Developing      — a horizontal strip of multi-day active events, minus the lead.
  *                        Red "Live" only on an event active in the last hour.
  *   3. Today's stories — everything else from the same list, once each.
- *   4. Radio card      — only when /api/radio/state.json answers 200 with a headline.
+ *   4. Radio card      — only when /api/radio/state.json answers 200 with a headline. #261 adds
+ *                        "Scheduled now / Next" from /api/radio/now.json (earn-rendered per line),
+ *                        and Listen goes to RADIO_PUBLIC_WATCH_URL when the server sets one.
  *
  * The whole page comes from ONE /api/ri/events prominence request (the classic
  * HomePage made ~10: one per category band). Categories are reached via the topic chips.
@@ -17,7 +19,7 @@
  * TODO(#188): drop the fallbacks once tokens.css is on main.
  */
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useRadioState, useRadioNow } from "../hooks/useRadio";
 import EventCard from "../components/events/EventCard";
 import { useEvents } from "../hooks/useEvents";
 import LoadingCard from "../components/ui/LoadingCard";
@@ -85,20 +87,6 @@ function StoryGrid({ events }) {
   );
 }
 
-function useRadioState() {
-  return useQuery({
-    queryKey: ["radio-state-card"],
-    queryFn: async () => {
-      const res = await fetch("/api/radio/state.json", { headers: { Accept: "application/json" } });
-      if (!res.ok) return null; // 404 = radio dark, 503 = not built yet: no card either way
-      return res.json();
-    },
-    retry: false,
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
-  });
-}
-
 function MetaLine({ ev }) {
   return (
     <p className="text-xs uppercase tracking-wider text-[var(--color-text-tertiary)]" style={{ fontFamily: LABEL }}>
@@ -160,15 +148,14 @@ function DevelopingStrip({ events }) {
   );
 }
 
-function RadioCard({ state }) {
+function RadioCard({ state, schedule }) {
   const also = (state.alsoThisHour ?? []).filter(x => x && x.h).slice(0, 2);
-  return (
-    <Link
-      to="/live-tv"
-      data-testid="today-radio"
-      className="block rounded-xl p-5 text-[var(--sf-paper,#F4EFE6)] hover:opacity-95 transition-opacity"
-      style={{ background: "var(--radio-navy, #0F2238)" }}
-    >
+  // #261: the grid's schedule, worded as "Scheduled" because it is the plan, not a now-playing feed.
+  const nowLabel = schedule?.basis === "schedule" ? schedule.now?.label : null;
+  const nextLabel = schedule?.basis === "schedule" ? schedule.next?.label : null;
+  const watchUrl = schedule?.watchUrl || null;
+  const body = (
+    <>
       <p className="text-xs font-bold uppercase tracking-wider opacity-80" style={{ fontFamily: LABEL }}>ScoopFeeds Radio</p>
       <p className="mt-2 text-xl font-semibold leading-snug" style={{ fontFamily: READING }}>{state.headline}</p>
       {also.length > 0 && (
@@ -176,8 +163,21 @@ function RadioCard({ state }) {
           {also.map((x, i) => <li key={i}>{x.h}</li>)}
         </ul>
       )}
+      {(nowLabel || nextLabel) && (
+        <div className="mt-3 space-y-0.5 text-xs opacity-90" style={{ fontFamily: LABEL }} data-testid="today-radio-schedule">
+          {nowLabel && <p><span className="font-bold">Scheduled now:</span> {nowLabel}</p>}
+          {nextLabel && <p><span className="font-bold">Next:</span> {nextLabel}</p>}
+        </div>
+      )}
       <p className="mt-3 text-sm font-semibold underline" style={{ fontFamily: LABEL }}>Listen →</p>
-    </Link>
+    </>
+  );
+  const cls = "block rounded-xl p-5 text-[var(--sf-paper,#F4EFE6)] hover:opacity-95 transition-opacity";
+  const style = { background: "var(--radio-navy, #0F2238)" };
+  return watchUrl ? (
+    <a href={watchUrl} target="_blank" rel="noopener noreferrer" data-testid="today-radio" className={cls} style={style}>{body}</a>
+  ) : (
+    <Link to="/live-tv" data-testid="today-radio" className={cls} style={style}>{body}</Link>
   );
 }
 
@@ -192,6 +192,7 @@ export default function TodayPage() {
   const isLoading = geo.isLoading || eventsLoading;
   const [timedOut, restartTimer] = useTimedOut(isLoading);
   const { data: radio } = useRadioState();
+  const { data: radioNow } = useRadioNow();
   const events = data?.events ?? [];
   const { lead, developing, local, today } = layoutToday(events);
   const localName = country ? countryName(country, geo.isOverridden ? null : geo.country) : null;
@@ -227,7 +228,7 @@ export default function TodayPage() {
         <>
           <div className={radioOn ? "lg:grid lg:grid-cols-[1fr_320px] lg:gap-10 lg:items-start space-y-8 lg:space-y-0" : ""}>
             {lead && <LeadStory ev={lead} />}
-            {radioOn && <RadioCard state={radio} />}
+            {radioOn && <RadioCard state={radio} schedule={radioNow} />}
           </div>
 
           {developing.length > 0 && <DevelopingStrip events={developing} />}

@@ -11,7 +11,7 @@ async function mockApi(page, v2) {
 }
 
 const DOORS = [
-  ["Today", "/"], ["News", "/events"], ["Originals", "/briefs"],
+  ["Today", "/"], ["News", "/events"], ["Originals", "/originals"],
   ["Markets", "/markets"], ["Watch & Listen", "/live-tv"],
 ];
 
