@@ -16,7 +16,7 @@ import clsx from "clsx";
 export const DOORS = [
   { to: "/",         label: "Today",          icon: Home,      match: (p) => p === "/" },
   { to: "/events",   label: "News",           icon: Newspaper, match: (p) => /^\/(events|topic|article|region|country|health|climate|sports|crypto|ai|space)(\/|$)/.test(p) },
-  { to: "/briefs",   label: "Originals",      icon: PenLine,   match: (p) => p.startsWith("/briefs") },
+  { to: "/originals", label: "Originals",     icon: PenLine,   match: (p) => /^\/(originals|briefs|analysis)(\/|$)/.test(p) },
   { to: "/markets",  label: "Markets",        icon: LineChart, match: (p) => p.startsWith("/markets") },
   { to: "/live-tv",  label: "Watch & Listen", icon: Radio,     match: (p) => p.startsWith("/live-tv") },
 ];
@@ -170,7 +170,7 @@ export function BottomBarV2() {
 }
 
 const FOOTER_GROUPS = [
-  { title: "Read", links: [["Today", "/"], ["News", "/events"], ["Originals", "/briefs"], ["Saved", "/saved"]] },
+  { title: "Read", links: [["Today", "/"], ["News", "/events"], ["Originals", "/originals"], ["Saved", "/saved"]] },
   { title: "Data", links: [["Markets", "/markets"], ["Weather", "/weather"]] },
   { title: "Watch & Listen", links: [["Live TV", "/live-tv"], ["Newsletter", "/newsletter"]] },
   { title: "About", links: [

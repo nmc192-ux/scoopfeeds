@@ -51,6 +51,7 @@ import riOpsRouter       from "./src/routes/ri-ops.js";
 import articlesOpsRouter from "./src/routes/articles-ops.js";
 import metricsOpsRouter  from "./src/routes/metrics-ops.js";
 import briefsRouter      from "./src/routes/briefs.js";
+import originalsRouter   from "./src/routes/originals.js";
 import embedRouter       from "./src/routes/embed.js";
 import { radioApiRouter, radioScreenRouter } from "./src/routes/radio.js";
 import macroRouter       from "./src/routes/macro.js";
@@ -244,6 +245,7 @@ app.use("/api/translate",    standardReadLimiter);
 app.use("/api/macro",        standardReadLimiter);
 app.use("/api/synthetic-markets", standardReadLimiter);
 app.use("/api/briefs",       standardReadLimiter);
+app.use("/api/originals",    standardReadLimiter);
 app.use("/api/live-stream",  standardReadLimiter);
 
 // MUTATION tier (60/5min): user-action POST/PUT/DELETE. Covers both reads
@@ -283,6 +285,7 @@ app.use("/api/ri/trackers", predictionsLimiter, cacheMiddleware("short"), tracke
 app.use("/api/ri",         predictionsLimiter, cacheMiddleware("short"), realityIndexRouter); // Reality Index Phase 3: /truth-gap, /anomalies
 app.use("/api/watchlists", watchlistsRouter);                            // Reality Index Phase 4: per-user follow lists (auth-gated; no caching)
 app.use("/api/briefs",     cacheMiddleware("short"), briefsRouter);      // Reality Index Phase 4: published analyst briefs (drafts in /scoop-ops)
+app.use("/api/originals",  cacheMiddleware("short"), originalsRouter);   // #260: /originals page — published briefs, live Explained, public films (read-only)
 app.use("/embed",          embedRouter);                                 // Phase 5: public iframe embeds for blogs/Substacks (no auth, frame-ancestors *)
 app.use("/api/radio",      standardReadLimiter, radioApiRouter);   // ScoopFeeds Radio (R2): /state.json — 404 unless RADIO_ENABLED=true
 app.use("/radio",          radioScreenRouter);                     // ScoopFeeds Radio (R2): /screen — above the SPA catch-all; 404 unless RADIO_ENABLED=true

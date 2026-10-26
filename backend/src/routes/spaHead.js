@@ -27,6 +27,7 @@ const STATIC = {
   "/":                 { title: `${SITE_NAME} — Intelligent news, curated.`, description: DEFAULT_DESC },
   "/events":           { title: `News — every developing story, every outlet · ${SITE_NAME}`, description: "Every developing story as one dossier: the timeline, which outlets covered it, and how their angles differ." },
   "/briefs":           { title: `Originals — analysis briefs · ${SITE_NAME}`, description: "ScoopFeeds' own analysis briefs, each tied to the evidence and the outlets behind it." },
+  "/originals":        { title: `ScoopFeeds Originals: our analysis, films and explainers · ${SITE_NAME}`, description: "ScoopFeeds Originals: our analysis, films and explainers." },
   "/markets":          { title: `Markets · ${SITE_NAME}`, description: "Markets, macro indicators and the stories moving them." },
   "/live-tv":          { title: `Watch & Listen — ScoopFeeds Radio and live TV · ${SITE_NAME}`, description: "ScoopFeeds Radio and live news channels in one place." },
   "/about":            { title: `About · ${SITE_NAME}`, description: "Who runs ScoopFeeds, how stories are grouped, and where the coverage comes from." },
