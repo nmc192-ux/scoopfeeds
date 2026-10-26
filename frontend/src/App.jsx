@@ -52,6 +52,7 @@ import AnomaliesPage        from "./pages/AnomaliesPage";
 import RealityIndexOpsPage  from "./pages/RealityIndexOpsPage";
 import MetricsOpsPage       from "./pages/MetricsOpsPage";
 import BriefsPage           from "./pages/BriefsPage";
+import OriginalsPage        from "./pages/OriginalsPage";
 import BriefPage            from "./pages/BriefPage";
 import BriefsReviewPage     from "./pages/BriefsReviewPage";
 import WorldMapPage         from "./pages/WorldMapPage";
@@ -79,7 +80,7 @@ const HIDE_TOPICNAV_ON = [
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
-  "/analysis", "/predictions", "/events", "/timeline", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/world-map", "/finance", "/macro", "/synthetic", "/leaderboard",
+  "/analysis", "/predictions", "/events", "/timeline", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/originals", "/world-map", "/finance", "/macro", "/synthetic", "/leaderboard",
   "/health", "/climate", "/sports", "/crypto", "/ai", "/space",
 ];
 
@@ -90,6 +91,14 @@ function V2Redirect({ to, children }) {
   const params = useParams();
   if (!v2) return loading ? null : (children ?? <NotFound />);
   return <Navigate to={typeof to === "function" ? to(params) : to} replace />;
+}
+
+/* #260. The inverse of V2Redirect: a v2-only page. With the flag off the address
+   lands on its classic equivalent, so the flag-off site is unchanged. */
+function V2Only({ fallback, children }) {
+  const { v2, loading } = useSiteConfig();
+  if (v2) return children;
+  return loading ? null : <Navigate to={fallback} replace />;
 }
 
 export default function App() {
@@ -220,6 +229,7 @@ export default function App() {
           <Route path="/scoop-ops/reality-index" element={<RealityIndexOpsPage />} />
           <Route path="/scoop-ops/metrics"        element={<MetricsOpsPage />} />
           <Route path="/scoop-ops/briefs"     element={<BriefsReviewPage />} />
+          <Route path="/originals"            element={<V2Only fallback="/briefs"><OriginalsPage /></V2Only>} />
           <Route path="/briefs"               element={<BriefsPage />} />
           <Route path="/briefs/:slug"         element={<BriefPage />} />
           <Route path="/world-map"            element={<V2Redirect to="/markets?tab=world-map"><WorldMapPage /></V2Redirect>} />

@@ -230,6 +230,12 @@ merge and deploy automatically, with only a short stop list waiting for him. Rul
 filed as GitHub issues labelled `phase:0`). Open items 1–3 below are Phase 0 items and were
 filed as issues the same night. Auto-deploy runbook: `docs/ops/runbooks/autodeploy.md`.
 
+**Originals page (#260, dark behind the v2 gate).** `/originals` (`frontend/src/pages/OriginalsPage.jsx`) reads
+`GET /api/originals` (`routes/originals.js` → `realityIndex/dal/originalsDao.js`): published `generated_briefs`
+(≤ 8), non-expired `explained_pieces` (≤ 6) and `longform_posts` already public on YouTube (≤ 6; never drafts,
+scheduled, private or unlisted films, nor `qc_json`/channel status). Each shelf earn-renders. Without v2 the
+address redirects to `/briefs`; the v2 Originals door and footer link point here.
+
 ## Open items — roughly in priority order
 
 <!-- J Loop status markers: [queued] available · [proposed] awaiting DrJ approval ·
