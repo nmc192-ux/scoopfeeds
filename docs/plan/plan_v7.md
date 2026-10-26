@@ -45,9 +45,9 @@ Specced directly as issues on 14 Oct; see the GitHub backlog (label `phase:0`).
 
 ## Phase 2 — new doors (19 Nov–9 Dec 2026)
 
-- [queued] lane:originals — Originals page and shelves (latest analysis, ScoopFeeds Stories, Explained, By the numbers) with the house format
+- [spec #260] lane:originals — Originals page and shelves (latest analysis, ScoopFeeds Stories, Explained, By the numbers) with the house format
 - [queued] lane:website — Watch & Listen: latest episodes from the YouTube channel, per-show rows, Shorts, Live TV, episode pages
-- [queued] lane:radio — Radio on the site: "On air now" card and a persistent mini-player with current and next programme
+- [spec #261] lane:radio — Radio on the site: "On air now" card and a persistent mini-player with current and next programme
 - [queued] lane:website — Social hub: public read of latest posts per platform from social_posts; "On social" box in dossiers; UTM tags
 - [queued] lane:website — Markets door with tabs (overview, economy, world map; odds tabs stay off until re-enabled)
 - [queued] lane:website — My Scoop: saved, followed stories, alerts, sign-in; Follow button on dossiers
@@ -57,10 +57,10 @@ Specced directly as issues on 14 Oct; see the GitHub backlog (label `phase:0`).
 
 ## Phase 3 — unique features (10 Dec 2026–6 Jan 2027)
 
-- [queued] lane:graph — Coverage Gaps: stories big in one region and absent in another; daily module + weekly Gap Report
+- [spec #262] lane:graph — Coverage Gaps: stories big in one region and absent in another; daily module + weekly Gap Report
 - [queued] lane:website — Same story, different headlines wall on dossiers
 - [queued] lane:website — Live mode on developing dossiers (auto-refresh, "N new reports")
-- [queued] lane:originals — Morning Scoop redesign: dossier-based, new look, Intern sign-off, US and Europe editions by local time
+- [spec #263] lane:originals — Morning Scoop redesign: dossier-based, new look, Intern sign-off, US and Europe editions by local time
 - [queued] lane:originals — Weekly quiz "Did you scoop it?" built from the week's dossiers
 - [queued] lane:originals — By the numbers: one sourced number a day, site card + IG card
 - [queued] lane:website — Search answer card with sources
