@@ -25,14 +25,17 @@ import { _internals as radioRegions, isIndianOutlet } from "../../radio/sourceRe
 
 // Region tags config/sources.js uses that COUNTRY_REGIONS does not list. "eu" is the
 // pan-European bucket, not a country: it only counts in the Europe fallback tier.
-const EXTRA_TAGS = { fr: "FR", de: "DE", il: "IL", qa: "QA", eu: "EU" };
+// #262 adds the unambiguous single-country tags (za, ke, kr, jp, br). "latam" and
+// "global" name no single country and stay unresolved on purpose.
+const EXTRA_TAGS = { fr: "FR", de: "DE", il: "IL", qa: "QA", eu: "EU",
+  za: "ZA", ke: "KE", kr: "KR", jp: "JP", br: "BR" };
 
 // radio/sourceRegions.js puts UK and continental outlets in one "europe" bucket.
 // Every name in it is a UK outlet except these.
 const EUROPE_NOT_UK = { "DW English": "DE", "France 24": "FR" };
 
 // Country codes that count as "Europe" in the fallback tier (GB has its own tier).
-const EUROPE = new Set(["EU", "FR", "DE", "IE", "ES", "IT", "NL", "BE", "PT", "AT", "CH",
+export const EUROPE = new Set(["EU", "FR", "DE", "IE", "ES", "IT", "NL", "BE", "PT", "AT", "CH",
   "SE", "NO", "DK", "FI", "PL", "CZ", "GR", "HU", "RO", "UA"]);
 
 export const FALLBACK_TIERS = Object.freeze(["US", "GB", "EUROPE"]);
@@ -80,19 +83,26 @@ export function parseCountry(raw) {
 /**
  * Distinct outlets per country for each event id: Map<eventId, Map<cc, count>>.
  * One query over the event_articles join; no new column.
+ *
+ * Options (#262 Coverage Gaps; the #190 call passes none and is unchanged):
+ *   since / until — count only articles whose published_at is inside [since, until]
+ *   unknownKey    — count outlets with no known country under this key instead of
+ *                   dropping them, so a caller can measure what it cannot place
  */
-export function outletCountriesByEvent(db, eventIds) {
+export function outletCountriesByEvent(db, eventIds, { since = null, until = null, unknownKey = null } = {}) {
   const out = new Map();
   if (!eventIds.length) return out;
+  const timeSql = (since !== null ? " AND a.published_at >= ?" : "") + (until !== null ? " AND a.published_at <= ?" : "");
+  const timeArgs = [since, until].filter((v) => v !== null);
   const rows = db.prepare(`
     SELECT DISTINCT ea.event_id AS event_id, a.source_name AS source_name, a.region AS region
     FROM event_articles ea JOIN articles a ON a.id = ea.article_id
     WHERE ea.event_id IN (${eventIds.map(() => "?").join(",")})
-      AND a.source_name IS NOT NULL AND a.source_name <> ''
-  `).all(...eventIds);
+      AND a.source_name IS NOT NULL AND a.source_name <> ''${timeSql}
+  `).all(...eventIds, ...timeArgs);
   const seen = new Map(); // eventId → Set("cc|outlet")
   for (const r of rows) {
-    const cc = outletCountry(r.source_name, r.region);
+    const cc = outletCountry(r.source_name, r.region) || unknownKey;
     if (!cc) continue;
     const key = `${cc}|${r.source_name}`;
     if (!seen.has(r.event_id)) seen.set(r.event_id, new Set());

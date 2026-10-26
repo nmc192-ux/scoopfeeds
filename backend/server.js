@@ -51,6 +51,7 @@ import riOpsRouter       from "./src/routes/ri-ops.js";
 import articlesOpsRouter from "./src/routes/articles-ops.js";
 import metricsOpsRouter  from "./src/routes/metrics-ops.js";
 import briefsRouter      from "./src/routes/briefs.js";
+import gapsRouter        from "./src/routes/gaps.js";
 import embedRouter       from "./src/routes/embed.js";
 import { radioApiRouter, radioScreenRouter } from "./src/routes/radio.js";
 import macroRouter       from "./src/routes/macro.js";
@@ -280,6 +281,7 @@ app.use("/api/analysis",   analysisLimiter, cacheMiddleware("short"), analysisRo
 app.use("/api/predictions", predictionsLimiter, cacheMiddleware("short"), predictionsRouter); // Reality Index: Polymarket markets bound to news clusters
 app.use("/api/ri/events",  predictionsLimiter, cacheMiddleware("short"), eventsRouter);      // Reality Index Phase 2: event tracker (dossier, timeline, actors)
 app.use("/api/ri/trackers", predictionsLimiter, cacheMiddleware("short"), trackersRouter);   // Tracker Auto-Detection Engine reads (Sprint 1.5.1) — must precede /api/ri catch-all
+app.use("/api/ri/gaps",     predictionsLimiter, gapsRouter);                              // #262 Coverage Gaps (own 15-min per-process cache) — must precede /api/ri catch-all
 app.use("/api/ri",         predictionsLimiter, cacheMiddleware("short"), realityIndexRouter); // Reality Index Phase 3: /truth-gap, /anomalies
 app.use("/api/watchlists", watchlistsRouter);                            // Reality Index Phase 4: per-user follow lists (auth-gated; no caching)
 app.use("/api/briefs",     cacheMiddleware("short"), briefsRouter);      // Reality Index Phase 4: published analyst briefs (drafts in /scoop-ops)

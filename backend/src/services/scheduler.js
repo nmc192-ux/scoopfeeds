@@ -40,6 +40,7 @@ import { runScoringJob } from "../skills/scoring/runtime/scoringRun.js";
 import { runEventTimelineBuilder } from "../realityIndex/intelligence/eventTimelineBuilder.js";
 import { runEventActorExtractor } from "../realityIndex/intelligence/eventActorExtractor.js";
 import { runWhatWeKnow } from "../realityIndex/generation/whatWeKnow.js";
+import { runWeeklyGapReport, coverageGapsEnabled } from "../realityIndex/intelligence/coverageGaps.js";
 import { runEntityExtractionBatch } from "../realityIndex/intelligence/entityExtractor.js";
 import { runEntityIdfRecompute } from "../realityIndex/intelligence/entityIdf.js";
 import { runMediaSentimentForActiveEvents } from "../realityIndex/intelligence/mediaSentimentScorer.js";
@@ -904,6 +905,9 @@ scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "
     // events). :31 because :53 is a dispatch minute (longform) and the collision test forbids
     // sharing one; :31 carries no other cron. Returns at once unless WHAT_WE_KNOW_ENABLED=1.
     scheduleCron("31 * * * *",    () => runWhatWeKnowCycle());             // every 1 hr, offset
+    // #262 weekly Gap Report: Monday 05:17 UTC, in-process (one read pass, one insert).
+    // :17 carries no dispatch cron. Returns at once unless COVERAGE_GAPS_ENABLED=1.
+    scheduleCron("17 5 * * 1",    () => runCoverageGapCycle(), { timezone: "Etc/UTC" });
     // Phase 3 — Sentiment + Composite + Anomalies
     scheduleCron("21,51 * * * *", () => runDispatch(() => dispatchRealityIndexComposeCycle(), "reality index compose")); // 30 min, offset
     scheduleCron("27 * * * *",    () => runSentimentScoreCycle());         // every 1 hr
@@ -1072,6 +1076,12 @@ async function runTrackerDetectorCronCycle() {
 async function runEventTimelineBuilderCycle() {
   try { return await runEventTimelineBuilder(); }
   catch (err) { logger.error("❌ Event timeline builder failed", { error: err.message }); return null; }
+}
+
+async function runCoverageGapCycle() {
+  if (!coverageGapsEnabled()) return null;
+  try { return runWeeklyGapReport(getDb()); }
+  catch (err) { logger.error("❌ Coverage gap report failed", { error: err.message }); return null; }
 }
 
 let isWhatWeKnowRun = false;
