@@ -6,7 +6,8 @@
  *                               A stale file is STILL served: the screen shows
  *                               "Feed delayed" itself when updatedAt is >20 min old,
  *                               which is more honest than a 404 that looks like "off".
- *   GET /radio/screen           the R1 1920×1080 template, served as-is from
+ *   GET /api/radio/now.json     what the grid SCHEDULES this hour and next (#261), basis:"schedule".
+ *   GET /radio/screen         the R1 1920×1080 template, served as-is from
  *                               radio/screen/scoopfeeds-radio-screen.html.
  *                               Point it at the feed with ?state=/api/radio/state.json.
  *
@@ -20,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { radioEnabled, statePath } from "../radio/radioState.js";
 import { electionMapEnabled, readMapState } from "../radio/election/mapStore.js";
 import { renderMapHtml } from "../radio/election/mapScene.js";
+import { buildRadioNow } from "../radio/radioNow.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SCREEN_FILE = path.join(HERE, "../radio/screen/scoopfeeds-radio-screen.html");
@@ -37,6 +39,13 @@ radioApiRouter.get("/state.json", (req, res) => {
     return res.status(503).json({ error: "radio state not built yet" });
   }
   res.type("application/json").send(body);
+});
+
+// What is SCHEDULED this hour and next (#261). Computed per request from the grid, no I/O. `basis:"schedule"`:
+// the plan, not a now-playing confirmation (see radio/radioNow.js).
+radioApiRouter.get("/now.json", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json(buildRadioNow(Date.now()));
 });
 
 // Election map (#204): dark unless RADIO_ELECTION_MAP_ENABLED=true as well.

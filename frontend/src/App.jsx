@@ -63,6 +63,7 @@ import LeaderboardPage      from "./pages/LeaderboardPage";
 import SyntheticReviewPage  from "./pages/SyntheticReviewPage";
 import MobileBottomBar      from "./components/layout/MobileBottomBar";
 import { HeaderV2, BottomBarV2, FooterV2 } from "./components/layout/SiteChromeV2";
+import RadioMiniPlayer from "./components/radio/RadioMiniPlayer";
 
 // Category alias pages — thin wrappers around EventsPage with locked filter.
 import HealthEventsPage  from "./pages/category/HealthEventsPage";
@@ -244,6 +245,7 @@ export default function App() {
 
       {/* Mobile-only bottom navigation. Adds matching bottom padding so
           fixed-position bar doesn't crowd content. */}
+      {v2 && <RadioMiniPlayer />}
       {v2 ? <BottomBarV2 /> : <MobileBottomBar />}
       <div className="h-14 sm:hidden" aria-hidden />
     </div>
