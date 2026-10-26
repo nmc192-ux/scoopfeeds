@@ -71,6 +71,16 @@ Still open from the old Stage 2 list: prepare film/feature lists automatically f
 - Two presenter voices and live data graphics.
 - An always-on wired host with backup power, or a cloud playout, so air never depends on home Wi-Fi.
 
+## Radio on the site (#261, dark)
+The site shows the **schedule**, not a now-playing feed. `GET /api/radio/now.json` (404 unless `RADIO_ENABLED=true`)
+computes this hour and next from the channel grid (`programme/grid.js` `planHour`) on every request, with no I/O,
+and always says `basis: "schedule"`. What actually airs is known only on the Mac (`air/<hour>/status.json`): repeats,
+a failed air check or the `PAUSE` file all make the real output differ, so the site words it "Scheduled now" and never
+"Live". Labels need `RADIO_GRID_ENABLED=1` in the web process's env (otherwise `now`/`next` are `null`). The Listen
+controls use `RADIO_PUBLIC_WATCH_URL`; the persistent mini-player is dark behind `?radio=1` / `VITE_RADIO_MINIPLAYER`.
+A real now-playing feed from the Mac to the VPS would need a write path and a credential (stop-list item 2) and is
+not built.
+
 ## X (X Live Studio)
 
 X is the second live output beside YouTube (#207), dark until the D4 rehearsal (`RADIO_X_ENABLED` unset). The Mac
