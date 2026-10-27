@@ -16,7 +16,10 @@
  * link; credits that cannot be published complete keep the loop in REHEARSAL.
  *
  *   node src/radio/programme/rolling.mjs [--hours 6] [--force-fail 2026-10-27T15] [--force-top-change]
- *        [--music-dir DIR] [--film FILE|DIR] [--fake-voice] [--fake-writer]
+ *        [--music-dir DIR] [--film FILE|DIR] [--fake-voice] [--fake-writer] [--developing-file FILE]
+ * #201 developing desk: on when RADIO_DEVELOPING_ENABLED=1 (reads <RADIO_BASE_URL>/api/radio/developing.json) or with
+ *   --developing-file (a rehearsal: the list is read from that file, e.g. one fake fast-growing event). A bulletin is
+ *   spliced into the hour on air at the next segment boundary within 15 minutes (bulletin.mjs, developingDesk.js).
  * Mac: playout/deploy/macos/install-rolling.sh (launchd). Nothing else here is Mac-specific.
  */
 import fs from "node:fs";
@@ -31,7 +34,8 @@ import { pickClearedFilm } from "../safety/filmClearance.js";
 import { factualTitle, withCredits, xBroadcastText } from "../safety/broadcastCopy.js";
 import { clearedTracks } from "../musicLibrary.js";
 import { creditLines } from "../musicManifest.js";
-import { RollingStation, WriterLedger, continuousBroadcast, hourStamp } from "./rollingStation.js";
+import { RollingStation, WriterLedger, continuousBroadcast, hourStamp, writerRunCount, writerRunSince } from "./rollingStation.js";
+import { DevelopingDesk, deskEnabled, developingTick, fetchDevelopingList } from "./developingDesk.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND = path.resolve(HERE, "../../..");
@@ -123,6 +127,7 @@ async function main() {
   const { values: v } = parseArgs({ options: {
     hours: { type: "string" }, "force-fail": { type: "string" }, "force-top-change": { type: "boolean" },
     "music-dir": { type: "string" }, film: { type: "string" }, "fake-voice": { type: "boolean" }, "fake-writer": { type: "boolean" },
+    "developing-file": { type: "string" },
   } });
   const env = process.env;
   const BASE = tilde(env.RADIO_BASE_DIR || "~/scoopfeeds-radio");
@@ -171,6 +176,10 @@ async function main() {
 
   const ytApi = liveConfigured(env) ? makeYouTubeLive({ env }) : null;
   const filmSrc = tilde(v.film || env.RADIO_ROLLING_FILM || env.RADIO_AUTOAIR_FILM);
+  // #201: the developing desk (dark unless RADIO_DEVELOPING_ENABLED=1, or a --developing-file rehearsal)
+  const devDir = path.join(BASE, "developing");
+  const devDesk = deskEnabled(env) || v["developing-file"] ? new DevelopingDesk({ dir: devDir, log }) : null;
+  if (devDesk) log(`developing desk ON (${v["developing-file"] ? `rehearsal list ${tilde(v["developing-file"])}` : `${env.RADIO_BASE_URL || "https://scoopfeeds.com"}/api/radio/developing.json`}); state in ${devDir}`);
   const produce = async ({ hourStart, out, from, to, weather, headlineWriter, deadline }) => {
     const f = await filmFor({ out, to, filmSrc, yt: ytApi, log: (m) => log(`${hourStamp(hourStart)}: ${m}`) });
     if (!f.ok) { log(`hour ${hourStamp(hourStart)}: ${f.why}; not airing it`); return 1; }
@@ -179,6 +188,7 @@ async function main() {
     if (from) args.push("--from", from);
     if (to) args.push("--to", to);
     if (headlineWriter) args.push("--headline-writer");
+    if (devDesk && !to && fs.existsSync(path.join(devDir, "followups.json"))) args.push("--developing", path.join(devDir, "followups.json"));   // #201
     if (film) args.push("--film", film);
     if (v["fake-voice"]) args.push("--fake-voice");
     if (v["fake-writer"]) args.push("--fake-writer");
@@ -215,6 +225,36 @@ async function main() {
     return pack.top?.[0] || null;
   };
 
+  // #201: one bulletin, produced by bulletin.mjs into the target hour's folder, killed at its deadline
+  let station = null;
+  const produceBulletin = async ({ dir, hourStart, event, plan, writer, deadline }) => {
+    const evFile = path.join(dir, `developing-event-${Date.now().toString(36)}.json`);
+    fs.writeFileSync(evFile, JSON.stringify(event, null, 1));
+    const args = [path.join(HERE, "bulletin.mjs"), "--dir", dir, "--event", evFile, "--cut", String(plan.cut), "--end", String(plan.end), "--resume", String(plan.resumeAt),
+      "--slot", plan.slot.id, "--music-dir", musicDir, "--writer", writer];
+    if (plan.next) args.push("--next-title", plan.next.title, "--next-at", String(plan.next.at));
+    if (v["fake-voice"]) args.push("--fake-voice");
+    if (v["fake-writer"]) args.push("--fake-writer");
+    const before = writerRunCount(dir);
+    const { ch, done } = spawnLogged(process.execPath, args, { cwd: BACKEND, logFile: path.join(dir, "bulletin.log") });
+    const t = setTimeout(() => { log(`bulletin for ${hourStamp(hourStart)} ran past its deadline; killed`); ch.kill("SIGKILL"); }, Math.max(0, deadline - Date.now()));
+    const code = await done.finally(() => clearTimeout(t));
+    const run = writerRunSince(dir, before);
+    if (run && station) station.ledger.add(hourStart, run, "developing");
+    return code;
+  };
+  const developing = devDesk ? async ({ targets, now, writerBusy }) => {
+    let list;
+    try {
+      if (v["developing-file"]) { list = JSON.parse(fs.readFileSync(tilde(v["developing-file"]), "utf8")); list.updatedAt ??= now; }
+      else list = await fetchDevelopingList(env.RADIO_BASE_URL || "https://scoopfeeds.com");
+    } catch (e) { log(`developing: list unavailable (${e.message})`); return { result: "list unavailable" }; }
+    const guard = station.ledger.guard();
+    const r = await developingTick({ desk: devDesk, list, targets, now, useClaude: !writerBusy && guard.ok && !v["fake-writer"], produceBulletin, log: (m) => log(m) });
+    if (!["nothing firing", "no insertion this tick"].includes(r.result)) log(`developing: ${r.result}`);
+    return r;
+  } : null;
+
   let broadcast = null;
   if (live) {
     if (ytApi) {
@@ -238,8 +278,8 @@ async function main() {
 
   const ac = new AbortController();
   for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { log(`${sig}: stopping after the current step`); ac.abort(); });
-  const station = new RollingStation({
-    airDir, produce, check: airCheck, topStory, playout, broadcast, log, alert,
+  station = new RollingStation({
+    airDir, produce, check: airCheck, topStory, playout, broadcast, log, alert, developing,
     isPaused: () => fs.existsSync(path.join(BASE, "PAUSE")),
     ledger: new WriterLedger({ dir: path.join(BASE, "writer-calls"), maxPerDay: numEnv(env.RADIO_WRITER_DAILY_MAX, 96, 1), cooldownMin: numEnv(env.RADIO_WRITER_COOLDOWN_MIN, 60, 1) }),
     forceFail: new Set(String(v["force-fail"] || "").split(",").map((s) => s.trim().replace(/[:]/g, "").slice(0, 13)).filter(Boolean)),

@@ -231,6 +231,11 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
           if (!board && s.endSec - lastEnd > 12) cues.push({ at: at(lastEnd + 2), scene: "music", data: nextSlot ? { next: { title: nextSlot.title, at: at(nextSlot.startSec) } } : {} });
           break;
         }
+        if (s.segment === "developing") {   // #201: one card, the BREAKING banner, the outlets' own headline and lede
+          const id = seg.story || storyLines[0]?.story || lines.find((l) => l.story)?.story;
+          cues.push({ at: at(s.startSec), scene: "story", data: { banner: s.banner || "Breaking", kicker: s.title || "Developing story", n: 1, of: 1, headline: headline(id), outlets: outletsOf(id).slice(0, 4), lede: ledeOf(id) } });
+          break;
+        }
         // the-hour, half, desks: a title card, then one card per story
         cues.push({ at: at(t0), scene: "title", data: { kicker: "ScoopFeeds Radio", title: s.title, items: storyLines.map((l) => headline(l.story)).filter(Boolean) } });
         storyLines.forEach((l, i) => cues.push({ at: at(l.atSec), scene: "story", data: { kicker: s.title, n: i + 1, of: storyLines.length, headline: headline(l.story), outlets: outletsOf(l.story).slice(0, 4), lede: ledeOf(l.story) } }));
@@ -257,7 +262,8 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
     const buf = new Float32Array(n * 2);
     const bed = bedFor(s.daypart || defaultDaypart);
     const full = dbToGain(-16 - bed.lufs);
-    const level = s.kind === "spoken" ? full * dbToGain(DUCK_DB) : (s.kind === "ident" || (s.kind === "film" && film) || (s.kind === "feature" && feature)) ? 0 : full;
+    // #201: a sensitive developing story is read with no music bed under it (`noBed`)
+    const level = s.noBed ? 0 : s.kind === "spoken" ? full * dbToGain(DUCK_DB) : (s.kind === "ident" || (s.kind === "film" && film) || (s.kind === "feature" && feature)) ? 0 : full;
     const pos = bedPos.get(bed.file) || 0;
     if (level > 0 || prevLevel > 0) {
       const b = decode(bed.file, { ss: pos % Math.max(1, bed.len - 1), t: s.lenSec, loop: true });

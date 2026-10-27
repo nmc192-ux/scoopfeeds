@@ -17,7 +17,7 @@ function fmtPct(p) { return p == null ? "n/a" : `${p > 0 ? "+" : ""}${p.toFixed(
 
 /** The fact pack as plain text the writer can quote from, every story under its id. */
 export function packText(pack) {
-  const story = (s) => [`[${s.id}] ${s.headline}  (${s.count} outlet${s.count === 1 ? "" : "s"})`,
+  const story = (s) => [`[${s.id}] ${s.developing ? "DEVELOPING: " : ""}${s.headline}  (${s.count} outlet${s.count === 1 ? "" : "s"})`,
     ...s.outlets.map((o) => `    - ${o.source}: "${o.title}"${o.description ? ` — ${o.description}` : ""}`)].join("\n");
   const out = ["TOP STORIES", ...pack.top.map(story)];
   for (const [desk, list] of Object.entries(pack.desks)) out.push("", `DESK: ${desk}`, ...list.map(story));
@@ -58,11 +58,14 @@ const SYSTEM = [
  * @param {{ hourLabel: string, cityTimes: string }} when  e.g. { hourLabel: "noon in New York", cityTimes: "nine in the evening in Karachi" }
  */
 export function buildPrompt(pack, slots, when) {
+  // #201: a developing story that is still growing leads the headlines; it says only what its outlets report
+  const devNote = (pack.top || []).some((t) => t.developing)
+    ? " Stories marked DEVELOPING are still growing: lead with them, say which outlets report each fact, and call anything only one outlet reports unconfirmed." : "";
   const spec = slots.map((s) => {
     const budget = wordBudget(s);
     const base = `- "${s.id}" (${s.title}, ${Math.round(s.lenSec)} s, max ${budget} words)`;
     switch (s.segment) {
-      case "the-hour": return `${base}: line "open" = "It's ${when.hourLabel}, ${when.cityTimes}. This is ScoopFeeds Radio, the news, compared." then one sentence naming the five stories; then exactly ${s.stories} story lines ("s1".."s${s.stories}"), the five most important stories from TOP STORIES or any DESK (rule 11), each ~45-55 words: what happened, why it matters, and, where the pack shows two or more outlets, how their coverage differs; then line "close" = a one-line handoff to ${(slots[slots.indexOf(s) + 1] || {}).title || "the next segment"}. Each story line carries "story": its id.`;
+      case "the-hour": return `${base}: line "open" = "It's ${when.hourLabel}, ${when.cityTimes}. This is ScoopFeeds Radio, the news, compared." then one sentence naming the five stories; then exactly ${s.stories} story lines ("s1".."s${s.stories}"), the five most important stories from TOP STORIES or any DESK (rule 11), each ~45-55 words: what happened, why it matters, and, where the pack shows two or more outlets, how their coverage differs; then line "close" = a one-line handoff to ${(slots[slots.indexOf(s) + 1] || {}).title || "the next segment"}. Each story line carries "story": its id.${devNote}`;
       case "markets": {
         const lead = when.marketsLead?.[s.id];   // groups whose exchange is in session at air time (dayClock.sessionsAt)
         const order = lead?.length ? `lead with the ${lead.join(" and ")} rows (their exchanges are trading now), then the other indices, then oil, gold, bitcoin` : "lead with the US indices, then Europe, then oil, gold, bitcoin";
@@ -79,7 +82,7 @@ export function buildPrompt(pack, slots, when) {
       }
       case "compared": return `${base}: pick ONE story with 3 or more outlets (a different one for each Compared segment, give its id in "story" at segment level and "outlets": the 3-4 source names you compare, exactly as written in the pack). Lines: "intro" (the story in two sentences), then one line per outlet ("o1".."o4", each with "outlet": name) on how THAT outlet framed it — its headline's emphasis and the words it chose, "gap" (what some leave out), "agree" (what all agree on), "watch" (what to watch next, only if the pack supports it), "close" ("That was the news, compared.").`;
       case "desk": return `${base}: the ${s.desk} desk. Use stories from DESK: ${s.desk} (or TOP STORIES if clearly from that beat). Line "open" ("On the ${s.title}..." style, one sentence), then 2-3 story lines ("d1".., each with "story": id), then "close" (one short sentence).`;
-      case "half": return `${base}: "Headlines at the half hour." Line "open", then ${s.stories} lines "h1".., 25-30 words each, each with "story": id; you may repeat The Hour's stories here (it is a recap) but prefer any newer TOP STORIES or desk stories not yet used.`;
+      case "half": return `${base}: "Headlines at the half hour." Line "open", then ${s.stories} lines "h1".., 25-30 words each, each with "story": id; you may repeat The Hour's stories here (it is a recap) but prefer any newer TOP STORIES or desk stories not yet used.${devNote}`;
       case "weather": return `${base}: lines "w1".. using only WEATHER NOW, US cities first, then Europe, the Gulf, South Asia, Tokyo; give every temperature in degrees Celsius, saying "degrees Celsius", and name one city per line.`;
       case "midterms": return `${base}: the Midterms desk, on the 3 November 2026 US midterm elections. Line "open" (one sentence, "The Midterms, on ScoopFeeds Radio." style). Lines "b1".. ("what's on the ballot") may be added for you after "open": do not write them, and leave about 130 words of the budget for them. Then up to 3 story lines ("e1".., each with "story": an id from DESK: midterms) on what the outlets report about the campaigns. Then, only if ELECTION PROJECTIONS lists any, one line per projected race ("p1"..): name the organisation that projected it, in its own words ("The Associated Press projects ..."); where outlets disagree, say so and name each; if a race is not in ELECTION PROJECTIONS, never say anyone won it, leads it or will win it. A poll is never a result. A partial count must say how much of the count is in, exactly as in COUNTS, or say that counting continues. ScoopFeeds never calls a race. Then "close" (one short sentence).`;
       case "crypto": return `${base}: lines "c1".. using only CRYPTO rows, bitcoin first, then ether, then at most three others; price and 24-hour change only. Never predict prices, never advise buying or selling, never call a coin safe or risky. "story": null.`;

@@ -57,6 +57,16 @@ tail -f ~/scoopfeeds-radio/logs/rolling.log
 ```
 Gates, flags and the plan: `docs/radio/autonomous-newsroom.md` (Stage 2), `docs/reference/env_reference.md` (RADIO_ROLLING_*).
 
+## Developing stories (#201)
+
+With `RADIO_DEVELOPING_ENABLED=1` (VPS and Mac), the rolling loop's developing desk (`developingDesk.js`) reads
+`/api/radio/developing.json` (events new or surging in the event graph, `../developing.js`) every 2 minutes and
+splices a "Developing" bulletin (`bulletin.mjs`: BREAKING banner, confirmed vs unconfirmed lines) into the hour on air
+at the next segment boundary within 15 minutes; never two inside 20 minutes; no bed under a sensitive story. Aired
+stories that keep growing lead the next hours' headlines (`produce.mjs --developing`). Rehearsal:
+`rolling.mjs --developing-file FILE`. Replay of a recorded day: `../developingReplay.mjs`. Plain English:
+`docs/radio/developing.md`.
+
 ## Tuesday 13 October 2026 — test hour, 9:00 to 10:00 pm PKT (H = 16:00 UTC)
 
 All on the Mac Mini, in `~/work/scoopfeeds` on branch `feat/radio-test-hour`.
