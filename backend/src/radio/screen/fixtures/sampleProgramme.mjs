@@ -29,6 +29,9 @@ export function sampleProgramme(hourStart = Date.parse("2026-10-27T14:00:00Z")) 
   const scenes = {
     title: { at: at("the-hour"), scene: "title", data: { kicker: "ScoopFeeds Radio", title: "The Hour", items: headlines.map((x) => x.h) } },
     story: { at: at("the-hour", 60), scene: "story", data: story },
+    // #201: a developing story's card with the BREAKING banner (the longest headline and four outlets)
+    breaking: { at: at("desk-us"), scene: "story", data: { banner: "Breaking", kicker: "Developing story", n: 1, of: 1, headline: "Sample breaking headline: officials confirm a large fire at a port warehouse, roads closed around the harbour",
+      outlets: ["Outlet A", "Outlet B", "Outlet C", "Outlet D"], lede: { text: "Sample lede: emergency services said the fire started early in the evening; the cause is not yet known.", source: "Outlet A" } } },
     markets: { at: at("markets-1"), scene: "markets", data: { title: "Markets Now", rows: rows.slice(0, 7), asOf: hourStart } },
     crypto: { at: at("crypto"), scene: "markets", data: { title: "Crypto", rows: [{ key: "Bitcoin", group: "Crypto", price: 98450, pct: 1.84 }, { key: "Ethereum", group: "Crypto", price: 3420.5, pct: -0.73 }], asOf: hourStart, note: "Prices from CoinGecko. 24-hour change." } },
     compared: { at: at("compared-1", 20), scene: "compared", data: { title: "The News, Compared", headline: headlines[0].h, cards: [{ source: "Outlet A", title: "Council passes transit plan after long debate" }, { source: "Outlet B", title: "Fares to rise under approved budget" }, { source: "Outlet G", title: "Transit budget clears final vote" }], active: 1 } },

@@ -39,6 +39,7 @@ export const DEFAULTS = Object.freeze({
   alertAfter: 2,          // alert DrJ when this many hours IN A ROW fall back
   maxRestartsPerHour: 3,  // a playout that keeps dying in one hour gives way to the 24/7 screen
   rollEtHours: [4, 16],   // quiet hand-overs where the 12-hour YouTube broadcast rolls over
+  developingEveryMin: 2,  // #201: how often the developing desk looks at the event graph's list
 });
 
 export const hourStamp = (ms) => new Date(ms).toISOString().slice(0, 13).replace(/[:]/g, "");
@@ -58,7 +59,7 @@ export function topChanged(oldTop, newTop) {
 
 /** The slot a refresh re-produces from: the first music slot that starts at or after `notBefore`. */
 export function refreshSlot(prog, notBefore) {
-  return (prog?.slots || []).find((s) => s.kind === "music" && s.start >= notBefore) || null;
+  return (prog?.slots || []).find((s) => s.kind === "music" && !s.insert && s.start >= notBefore) || null;   // never a #201 insert's own slot
 }
 
 /** One writer at a time: jobs run strictly in order, never overlapping (the radio state queue's rule). */
@@ -182,6 +183,9 @@ export class RollingStation {
    * @param {WriterLedger} o.ledger
    * @param {Function} [o.grid]      (hourStart) => plan (dayClock.planHour, or #200's grid)
    * @param {object} [o.broadcast]   continuousBroadcast(), live runs only
+   * @param {Function} [o.developing] #201: async ({ targets, now, writerBusy }) => result; called every
+   *                                  developingEveryMin while the loop sleeps, never twice at once. `targets` are the
+   *                                  programmes that may take a bulletin: the hour on air, then the next hour if ready.
    */
   constructor(o) {
     Object.assign(this, { now: Date.now, sleep: (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms))), log: () => {}, alert: async () => {}, isPaused: () => false, grid: planHour, broadcast: null, forceFail: new Set(), forceTopChange: false }, o);
@@ -193,12 +197,36 @@ export class RollingStation {
     this.hours = [];             // per-hour summary (for the rehearsal report and tests)
     this.stopping = false;
     this.offAir = null;          // { at, hour } once PAUSE took the stream off air
+    this.devNext = 0; this.devBusy = null; this.devLast = null;
+  }
+
+  /** #201: the hour on air and (if ready) the next one, as bulletin targets. Never the 24/7 screen. */
+  developingTargets() {
+    const out = [];
+    const air = this.onAir;
+    if (air?.kind === "programme" && air.dir && air.hourStart) out.push({ dir: air.dir, hourStart: air.hourStart });
+    const nextH = air?.hourStart ? air.hourStart + HOUR : null;
+    const nx = nextH ? this.ready.get(nextH) : null;
+    if (nx?.dir) out.push({ dir: nx.dir, hourStart: nextH });
+    return out;
+  }
+
+  /** #201: run the developing desk if it is due. Not awaited by the loop: a bulletin never delays a hand-over. */
+  maybeDeveloping() {
+    if (!this.developing || this.devBusy || this.stopping || this.now() < this.devNext) return;
+    this.devNext = this.now() + this.opts.developingEveryMin * MIN;
+    this.devBusy = Promise.resolve()
+      .then(() => this.developing({ targets: this.developingTargets(), now: this.now(), writerBusy: this.queue.running > 0 }))
+      .then((r) => { this.devLast = r; if (r?.result === "inserted" && this.onAir?.hourStart) this.status(this.onAir.hourStart, { developing: [...(this.status(this.onAir.hourStart, {}).developing || []), r] }); })
+      .catch((e) => this.log(`developing desk crashed: ${e.stack || e.message}`))
+      .finally(() => { this.devBusy = null; });
   }
 
   /** Sleep until `t`, looking for PAUSE at least every 30 s (#208: it takes the stream off air, mid-hour too). */
   async sleepUntil(t) {
     while (!this.stopping && this.now() < t) {
       if (this.isPaused()) { await this.goOffAir(); break; }
+      this.maybeDeveloping();
       await this.sleep(Math.min(30_000, t - this.now()));
     }
   }
@@ -253,7 +281,7 @@ export class RollingStation {
     if (this.onAir) this.onAir.retired = true;
     await this.onAir?.handle?.stop();   // off air first; a producer still running cannot air anything now
     if (this.broadcast) await this.broadcast.end(this.offAir ? "PAUSE" : "the loop stopped");
-    await Promise.allSettled(jobs);
+    await Promise.allSettled([...jobs, this.devBusy].filter(Boolean));
     this.log(`stopped after ${this.hours.length} hour(s)${this.offAir ? " (PAUSE: off air)" : ""}`);
     return this.hours;
   }

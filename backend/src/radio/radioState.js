@@ -28,6 +28,7 @@ import { HEARTBEAT_PING_URLS, pingHeartbeat } from "../services/heartbeatPing.js
 import { callJson } from "../realityIndex/llmQueue.js";
 import { loadArticleVectors } from "../realityIndex/intelligence/eventPromoter.js";
 import { radioRulesVerdict, judgeItems, hasPakistanSignal, isRadioSensitive } from "./radioRules.js";
+import { developingEnabled, buildDeveloping, developingPath } from "./developing.js";
 import { groupArticles, rankStories, pickSlots, attribution, displayCategory, chooseGroupMode, groupModeSetting, GROUP_WINDOW_MS } from "./radioRank.js";
 
 export const HEADLINE_MAX = 90;
@@ -316,6 +317,15 @@ export async function runRadioStateCycle(deps = {}) {
     recordHeartbeat("radio_state", meta);
     pingHeartbeat(HEARTBEAT_PING_URLS.radio);            // completion only
     logger.info(radioLogLine(stats));
+    // #201: developing stories, same cadence, own file; dark unless RADIO_DEVELOPING_ENABLED. Never fails the state.
+    if (developingEnabled()) {
+      try {
+        const dev = buildDeveloping(db, { now: deps.now || Date.now() });
+        writeJsonAtomic(deps.developingFile || developingPath(), dev);
+        meta.developing = { considered: dev.considered, fired: dev.fired, listed: dev.events.length };
+        logger.info(`📻 radio developing: ${dev.fired} firing, ${dev.events.length} listed of ${dev.considered} active event(s)${dev.events.filter((e) => e.fires).map((e) => ` | ${e.headline.slice(0, 80)} (${e.recent.articles} art/${e.recent.outlets} outlets, x${e.ratio ?? "new"})`).join("")}`);
+      } catch (err) { meta.developing = { error: String(err?.message || err).slice(0, 200) }; logger.error(`📻 radio developing FAILED: ${meta.developing.error}`); }
+    }
     return meta;
   } catch (err) {
     const meta = { phase: "error", startedAt, ms: Date.now() - startedAt, error: String(err?.message || err).slice(0, 300) };

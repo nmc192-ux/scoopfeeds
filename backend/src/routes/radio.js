@@ -6,6 +6,7 @@
  *                               A stale file is STILL served: the screen shows
  *                               "Feed delayed" itself when updatedAt is >20 min old,
  *                               which is more honest than a 404 that looks like "off".
+ *   GET /api/radio/developing.json  developing stories (#201), 404 unless RADIO_DEVELOPING_ENABLED too.
  *   GET /api/radio/now.json     what the grid SCHEDULES this hour and next (#261), basis:"schedule".
  *   GET /radio/screen         the R1 1920×1080 template, served as-is from
  *                               radio/screen/scoopfeeds-radio-screen.html.
@@ -22,6 +23,7 @@ import { radioEnabled, statePath } from "../radio/radioState.js";
 import { electionMapEnabled, readMapState } from "../radio/election/mapStore.js";
 import { renderMapHtml } from "../radio/election/mapScene.js";
 import { buildRadioNow } from "../radio/radioNow.js";
+import { developingEnabled, developingPath } from "../radio/developing.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SCREEN_FILE = path.join(HERE, "../radio/screen/scoopfeeds-radio-screen.html");
@@ -46,6 +48,16 @@ radioApiRouter.get("/state.json", (req, res) => {
 radioApiRouter.get("/now.json", (req, res) => {
   res.set("Cache-Control", "no-store");
   res.json(buildRadioNow(Date.now()));
+});
+
+// Developing stories (#201): what the event graph says is new or surging, for the Mac's rolling station.
+// Dark unless RADIO_DEVELOPING_ENABLED as well. A stale file is still served: its updatedAt says how old it is.
+radioApiRouter.get("/developing.json", (req, res) => {
+  if (!developingEnabled()) return res.status(404).json({ error: "not found" });
+  res.set("Cache-Control", "no-store");
+  let body;
+  try { body = fs.readFileSync(developingPath(), "utf8"); } catch { return res.status(503).json({ error: "developing list not built yet" }); }
+  res.type("application/json").send(body);
 });
 
 // Election map (#204): dark unless RADIO_ELECTION_MAP_ENABLED=true as well.
