@@ -96,6 +96,7 @@ function NumbersShelf({ items }) {
         </p>
         <p className="mt-3 text-xl leading-snug" style={{ fontFamily: READING, color: INK }}>{today.fact_text}</p>
         <NumberSources sources={today.sources} />
+        <p className="mt-1 text-xs uppercase tracking-wider opacity-60" style={{ fontFamily: LABEL }} data-testid="numbers-today-date">{fmtDate(`${today.day}T12:00:00Z`)}</p>
         {today.event?.slug && (
           <p className="mt-2 text-sm" style={{ fontFamily: LABEL }}>
             <Link to={`/events/${today.event.slug}`} className="underline">Read the dossier</Link>
