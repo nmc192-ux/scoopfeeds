@@ -179,6 +179,40 @@ The promoter's matching guard (`PROMOTER_SINGLE_SOURCE_GUARD`, default true) sto
 ones: no event is created from one outlet, and an event whose members plus incoming
 articles are one outlet does not grow (`🧭 promoter-refuse-single-source`).
 
+### #262 Coverage Gaps — **DARK** (`/gaps?gaps=1`; weekly cron off: `COVERAGE_GAPS_ENABLED`)
+
+`intelligence/coverageGaps.js`, read-only. **Measured by region, never by political leaning**
+(DrJ's binding decision; no leaning data exists or may be added). A gap is an event with at
+least `GAP_MIN_PRESENT` (4) distinct outlets from region A in the window and **zero** from
+region B, where B had at least `GAP_MIN_BASE` (5) outlets publishing anything in the same
+window. Score = A's outlets on the story ÷ A's active outlets. Where an outlet is comes only
+from `countryAffinity.outletCountry` (#190); this module folds countries into fixed buckets:
+
+| Bucket | Countries |
+|---|---|
+| US | US (incl. us-west/east/midwest/south tags) |
+| UK | GB |
+| EUROPE | the `EUROPE` set in countryAffinity (FR, DE, IE, ES, IT, NL, …) plus EU |
+| MIDDLE_EAST | AE, SA, QA, IL |
+| SOUTH_ASIA | PK, IN |
+| OTHER | any other resolved country (ZA, KE, KR, JP, BR, CA, AU, …) |
+| UNKNOWN | no known country (`latam`, most `global` outlets) — never present or absent |
+
+Candidates: active events (the weekly run adds dormant) with articles, not machine events,
+passing `sourceEligibleSql` and `filterReaderEligible`, active in the window; capped at 3000
+and the result says when the cap was hit. Skipped and counted: an event whose outlets are
+more than half UNKNOWN (`unknown-majority`), one whose only silent regions are too small
+(`small-base`), and explicit-harm headlines (`harm`). Every kept gap logs `🧭 gap-found`,
+every non-zero skip count `🧭 gap-skip`. Every response carries `measured_by:"region"` and
+`method` (buckets, thresholds, bases, `unknownShare`).
+
+API: `GET /api/ri/gaps/daily` (24 h, computed on request, 15-min **per-process** cache) and
+`GET /api/ri/gaps/weekly/:weekStart?` (stored report, latest when omitted). The weekly row in
+`coverage_gap_reports` (migration 044) is insert-only: a stored week keeps its numbers. #262
+also taught `outletCountry` the single-country tags `za ke kr jp br`; `latam` and `global`
+stay unresolved. Today-page and dossier placement are a paused `lane:website` item; emailing
+or posting the report would be a new post type (stop-list item 4).
+
 ### #179 slug follows headline — shipped **DARK** (`EVENT_SLUG_FOLLOWS_HEADLINE=false`)
 
 When the promoter adopts a new lead title whose slug shares under half its words with the
