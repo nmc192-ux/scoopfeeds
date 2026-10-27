@@ -19,6 +19,10 @@
  * does not hold. prepareRepeat re-checks those lines at the repeat's air time and cuts a stale slot to music; here
  * every Markets slot still spoken is re-checked again from repeat-source-*.json. A repeat with no re-check record,
  * or a slot whose lines or pack cannot be read, is unmeasured: a failure.
+ *
+ * Listen-back (#273): once every audio part exists and is big enough, the mixed audio itself is listened to
+ * (listenBack.js): dead air, speech buried under the bed, clipping. A part that cannot be read or a spoken slot with
+ * no line timings is unmeasured: a failure. It has no flag: it only ever refuses an hour.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -26,6 +30,7 @@ import { hasValidClearance } from "../safety/contentSafety.js";
 import { weatherProblems } from "./weatherUnits.js";
 import { staleMarketLine, recheckRepeatedMarkets, isMarketsSlot } from "./marketsClock.js";
 import { REPEAT_SOURCE_SEGMENTS, REPEAT_SOURCE_PACK } from "./repeat.js";
+import { listenBack, LISTEN_RULES } from "./listenBack.js";
 
 export const AIR_RULES = Object.freeze({
   minKeptShare: 0.6,       // at least 60 % of the written lines survived the fact checks
@@ -40,10 +45,10 @@ const lineCount = (segs) => Object.values(segs || {}).reduce((n, s) => n + (Arra
 
 /**
  * @param {string} dir   the producer's --out directory
- * @param {{ hourStart: number, rules?: object }} want
+ * @param {{ hourStart: number, rules?: object, listenRules?: object }} want
  * @returns {{ ok: boolean, problems: string[], stats: object }}
  */
-export function airCheck(dir, { hourStart, rules = AIR_RULES } = {}) {
+export function airCheck(dir, { hourStart, rules = AIR_RULES, listenRules = LISTEN_RULES } = {}) {
   const problems = [];
   const stats = {};
   const need = (f) => { const p = path.join(dir, f); if (!fs.existsSync(p)) { problems.push(`${f} missing`); return null; } try { return readJson(p); } catch (e) { problems.push(`${f} unreadable: ${e.message}`); return null; } };
@@ -56,11 +61,18 @@ export function airCheck(dir, { hourStart, rules = AIR_RULES } = {}) {
     if (prog.hourStart !== hourStart) problems.push(`programme is for ${new Date(prog.hourStart).toISOString()}, not ${new Date(hourStart).toISOString()}`);
     stats.cues = prog.cues?.length || 0;
     if (stats.cues < rules.minCues) problems.push(`only ${stats.cues} cues`);
+    const before = problems.length;
     if (!Array.isArray(prog.audio) || !prog.audio.length) problems.push("no audio parts");
     for (const a of prog.audio || []) {
       const f = path.join(dir, a.file);
       const size = fs.existsSync(f) ? fs.statSync(f).size : 0;
       if (size < rules.minPartBytes) problems.push(`audio ${a.file} ${size ? `is only ${size} bytes` : "missing"}`);
+    }
+    // #273: listen to what was mixed, but only once every part is there (otherwise it is already a failure)
+    if (problems.length > before) problems.push("listen-back: not run, the audio parts failed the checks above (unmeasured)");
+    else {
+      try { const lb = listenBack(dir, prog, listenRules); problems.push(...lb.problems); stats.listenBack = lb.stats; }
+      catch (e) { problems.push(`listen-back: failed: ${e.message} (unmeasured)`); }
     }
     stats.headlines = prog.headlines?.length || 0;
     if (prog.feature && prog.featurePath && !fs.existsSync(prog.featurePath)) problems.push(`feature file ${prog.featurePath} missing`);

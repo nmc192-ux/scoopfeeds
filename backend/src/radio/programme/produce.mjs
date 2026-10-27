@@ -204,7 +204,7 @@ if (feature && slots.some((s) => s.kind === "feature") && !fresh("feature.webm")
   if (r.status !== 0) die(`feature transcode failed: ${String(r.stderr).slice(-300)}`);
   log("feature transcoded");
 }
-const { cues, report: mixReport } = await assemble({
+const { cues, report: mixReport, lines } = await assemble({
   slots, segments, pack, hourStart, bedFor, film, filmUrl: "/programme/film.webm", feature, voice, outWav: path.join(out, partFile + ".tmp"), log, seriesCards: SERIES,
   creditFor: (file) => screenCredit(Object.values(beds).find((b) => b.file === file)?.entry || null),
 });
@@ -221,10 +221,12 @@ withProgrammeLock(out, () => {
   if (v.to) {
     // Splice [cut, resumeAt) into the existing programme. At resumeAt the playout switches back to whichever part was
     // playing there, seeking from that part's own origin (`origin`), so the rest of the hour plays as before.
-    prog = spliceProgramme(prog, { cut, resumeAt: clock[toIdx].start, partFile, cues });
+    prog = spliceProgramme(prog, { cut, resumeAt: clock[toIdx].start, partFile, cues, lines });
   } else {
     prog.audio = prog.audio.filter((a) => a.from < cut).concat([{ file: partFile, from: cut }]);
     prog.cues = prog.cues.filter((c) => c.at < cut).concat(cues);
+    // #273: where each voiced line sits, for the listen-back in airCheck
+    prog.lines = (prog.lines || []).filter((l) => l.at < cut).concat(lines);
     prog.slots = clock.map(({ id, kind, start, end, title, elements }) => ({ id, kind, start, end, title: title || null, ...(elements ? { elements } : {}) }));
     // #201: a refresh keeps the developing bulletins already spliced into this hour
     if (fromIdx > 0 && (prog.inserts || []).length) prog = reapplyInserts(prog, prog.inserts, cut);

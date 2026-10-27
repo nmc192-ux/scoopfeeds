@@ -83,7 +83,7 @@ let bedFor, beds;
 try { ({ beds, bedFor } = await loadBeds(home(v["music-dir"] || "~/scoopfeeds-radio/music"), { log })); } catch (e) { die(e.message); }
 const voice = v["fake-voice"] ? fakeVoice(path.join(dir, "fake-voice")) : await kokoroVoice();
 const partFile = `part-developing-${tag}.wav`;
-const { cues, report } = await assemble({
+const { cues, report, lines } = await assemble({
   slots, segments: { [slot.id]: checked.segment }, pack, hourStart: H, bedFor, defaultDaypart: daypart, voice, outWav: path.join(dir, `${partFile}.tmp`), log,
   creditFor: (file) => screenCredit(Object.values(beds).find((b) => b.file === file)?.entry || null),
 });
@@ -92,6 +92,6 @@ fs.renameSync(path.join(dir, `${partFile}.tmp`), path.join(dir, partFile));
 
 // ── splice ──
 try {
-  insertBulletin(dir, { id: slot.id, eventId: ev.id, title: slot.title, cut, end, resumeAt, partFile, cues, sensitive, headline: ev.headline, slot: v.slot || null, at: Date.now() });
+  insertBulletin(dir, { id: slot.id, eventId: ev.id, title: slot.title, cut, end, resumeAt, partFile, cues, lines, sensitive, headline: ev.headline, slot: v.slot || null, at: Date.now() });
 } catch (e) { die(`not inserted: ${e.message}`, 4); }
 log(`inserted "${ev.headline}" at ${new Date(cut).toISOString()} for ${Math.round((end - cut) / 1000)} s (${Math.round(report.voicedSecs)} s of speech, ${checked.segment.lines.length} lines, ${checked.report.length} dropped${sensitive ? ", no bed: sensitive" : ""}); the grid resumes at ${new Date(resumeAt).toISOString()}`);

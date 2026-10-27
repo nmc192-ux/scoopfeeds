@@ -16,7 +16,7 @@ started muted. The stutter is fixed: films now play through the encoder, not the
 |---|---|---|
 | Timer | launchd fires about 45 min before the hour | `playout/deploy/macos/install-autoair.sh 20:14` |
 | Orchestrator | produce → air check → YouTube setup → hand over from the 24/7 radio → air → watch → wrap up | `programme/autoair.mjs` |
-| Air check | the hour airs only if the files are there, it is the right hour, at least 60 % of written lines passed the fact checks, The Hour has at least 3 checked stories, and any film or feature has a content-safety clearance (#218, `docs/radio/content-safety.md`). Anything unmeasured fails | `programme/airCheck.js` |
+| Air check | the hour airs only if the files are there, it is the right hour, at least 60 % of written lines passed the fact checks, The Hour has at least 3 checked stories, any film or feature has a content-safety clearance (#218, `docs/radio/content-safety.md`), and the mixed audio passes a listen-back (#273): no run quieter than -50 dBFS for more than 4 s (the endcard's fade to silence at the very end excepted), voice at least 10 dB above the bed in every spoken slot (median of the voiced lines against the gaps between them; a no-bed developing story is exempt), at most 100 clipped samples per slot and no peak above -0.1 dBFS. Anything unmeasured fails: an unreadable or non-16-bit part, a part shorter than its slots, a spoken slot without line timings | `programme/airCheck.js`, `programme/listenBack.js` |
 | YouTube Live | creates the public broadcast, binds the station's stream, sets the thumbnail, goes live once the signal arrives, completes it at the end | `live/youtubeLive.js` |
 | Markets | CNBC's quote feed first, Yahoo second | `programme/factPack.js` |
 | Unmute line | "No sound? Tap the speaker to unmute" on the countdown | programme screen |
@@ -63,7 +63,7 @@ Still open from the old Stage 2 list: prepare film/feature lists automatically f
 
 ## Stage 3: an editor and a quality gate
 - An editor step that sets the running order and can hold a story.
-- A stricter pre-air gate: listen-back checks (speech level above the bed, silence, clipping) on the mixed audio.
+- A stricter pre-air gate: listen-back checks (speech level above the bed, silence, clipping) on the mixed audio. **Built (#273):** `programme/listenBack.js`, run by `airCheck` on every hour, rehearsals included. It has no flag because it only ever refuses an hour. It reads every sample in JS (no ffmpeg); a full 75-minute part took about 2.7 s in the cloud build sandbox (to measure on the Mac).
 - An automatic post-air review of each hour: what was cut, sync, levels, viewers. Plus a corrections log.
 
 ## Stage 4: the full newsroom
