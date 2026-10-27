@@ -14,6 +14,10 @@ measured and what is not. It ships **dark**: nothing changes on air until `RADIO
      of Pakistan, soft news). Opinion pieces and duplicates do not count.
    - The radio's LLM judge does not run here, so an event with **any** Pakistan signal is dropped whole (fail closed).
    - Machine events (USGS/NOAA) count only once they have articles.
+   - Only events a reader may be shown (#243, `readerEligibility.js`: at least 3 outlets, no outlet over 70%, not
+     incoherent) fire or are followed up; the bulletin says the outlets "report this story", which is only true of a
+     coherent event. A check that errors drops the event. `EVENT_READER_ELIGIBILITY=false` turns this off with the
+     rest of #243. The verdict reads the event as it is now, so a replay of an older day applies today's verdict.
    - The list is served at `GET /api/radio/developing.json`. Its headline for each event is an outlet's own title,
      never the event graph's title.
 2. **Air (the Mac, the rolling loop).** The developing desk (`programme/developingDesk.js`) reads the list every 2

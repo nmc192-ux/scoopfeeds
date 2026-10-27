@@ -80,7 +80,8 @@ test("thresholds: two outlets is not enough; Rule 0 and opinion pieces do not co
   const r = buildDeveloping(db, { now: NOW });
   assert.equal(r.fired, 0);
   assert.ok(!r.events.find((e) => e.id === "e-op"), "opinion pieces are not news: nothing left to list");
-  assert.match(r.events.find((e) => e.id === "e-two").why, /2 outlet/);
+  assert.ok(!r.events.find((e) => e.id === "e-two"), "#243: a 2-outlet event is not reader-eligible, so not even followed up");
+  assert.match(scoreEvent(buildDevelopingRows(db, "e-two"), NOW, devThresholds({})).why, /2 outlet/);
 });
 
 test("Rule 0: an event with a Pakistan signal is dropped whole (the LLM judge does not run here)", () => {
@@ -146,5 +147,24 @@ test("the radio cycle writes developing.json only when RADIO_DEVELOPING_ENABLED 
     assert.equal(JSON.parse(fs.readFileSync(deps.developingFile, "utf8")).events[0].id, "e-c");
   } finally {
     for (const [k, v] of Object.entries(keep)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+});
+
+test("#243: an event a reader may not be shown (one outlet dominating) never fires; with the gate off it would", () => {
+  const { db } = makeTestDb({ prefix: "dev-elig-" });
+  event(db, { id: "e-blob", created: NOW - 25 * MIN });
+  // 3 outlets in the window, but one outlet supplies 9 of the event's 11 articles (> 70%)
+  ["Reuters", "BBC News"].forEach((source, i) => art(db, "e-blob", { title: `${FIRE} ${source}`, source, ago: 10 + i }));
+  for (let j = 0; j < 9; j++) art(db, "e-blob", { title: `${FIRE} wire ${j}`, source: "Wire One", ago: 2 + j });
+  const keep = process.env.EVENT_READER_ELIGIBILITY;
+  try {
+    delete process.env.EVENT_READER_ELIGIBILITY;
+    const on = buildDeveloping(db, { now: NOW });
+    assert.equal(on.fired, 0); assert.equal(on.events.length, 0); assert.equal(on.ineligible, 1);
+    process.env.EVENT_READER_ELIGIBILITY = "false";
+    const off = buildDeveloping(db, { now: NOW });
+    assert.equal(off.fired, 1, "the gate is what held it, not the thresholds");
+  } finally {
+    if (keep === undefined) delete process.env.EVENT_READER_ELIGIBILITY; else process.env.EVENT_READER_ELIGIBILITY = keep;
   }
 });

@@ -17,6 +17,11 @@
  * critical of Pakistan, soft news) and opinion URLs are dropped. The radio's LLM judge is NOT run here, so any
  * event whose surviving articles carry a Pakistan signal is dropped whole rather than aired unjudged.
  *
+ * Reader eligibility (#243), fail closed: an event that may not be shown to a reader in a list (fewer than 3
+ * outlets, one outlet dominating, or incoherent) never fires and is never followed up. The bulletin says the listed
+ * outlets "report this story", which is only true of a coherent event. A check that throws drops the event.
+ * The eligibility rules read the event as it is now, so a replay of an older day applies today's verdict.
+ *
  * Every time is "as of `now`": rows linked or fetched after `now` are invisible, so the same function replays a
  * recorded day (developingReplay.mjs) exactly as it would have run live.
  *
@@ -25,6 +30,7 @@
  */
 import path from "node:path";
 import { radioRulesVerdict, hasPakistanSignal, isRadioSensitive } from "./radioRules.js";
+import { eventReaderEligibility } from "../realityIndex/dal/readerEligibility.js";
 
 export const DEV_DEFAULTS = Object.freeze({
   windowMin: 30,        // the "last 30 minutes" of the spec
@@ -153,12 +159,19 @@ export function scoreEvent(ev, now, t) {
 export function buildDeveloping(db, { now = Date.now(), env = process.env, thresholds = null } = {}) {
   const t = thresholds || devThresholds(env);
   const rows = loadActivity(db, now, t);
-  const scored = rows.map((ev) => ({ ev, s: scoreEvent(ev, now, t) })).filter(({ s }) => s.fires || s.follow);
+  let ineligible = 0;
+  const scored = rows.map((ev) => ({ ev, s: scoreEvent(ev, now, t) })).filter(({ s }) => s.fires || s.follow)
+    .filter(({ ev }) => {   // #243: only events a reader may be shown; an error is not a pass
+      let ok = false;
+      try { ok = eventReaderEligibility(db, ev.id, { now }).eligible === true; } catch { ok = false; }
+      if (!ok) ineligible++;
+      return ok;
+    });
   scored.sort((a, b) => (b.s.fires - a.s.fires) || (b.s.recent.outlets - a.s.recent.outlets) || (b.s.recent.articles - a.s.recent.articles) || (b.s.lastHour.articles - a.s.lastHour.articles));
   const events = scored.slice(0, t.maxEvents).map(({ ev, s }) => ({
     id: ev.id, slug: ev.slug, category: ev.category, createdAt: ev.created_at,
     headline: s.headline, kind: s.kind, fires: s.fires, follow: s.follow, why: s.why,
     recent: s.recent, lastHour: s.lastHour, baseline: s.baseline, ratio: s.ratio, sensitive: s.sensitive, outlets: s.outlets,
   }));
-  return { updatedAt: now, thresholds: t, events, considered: rows.length, fired: events.filter((e) => e.fires).length };
+  return { updatedAt: now, thresholds: t, events, considered: rows.length, ineligible, fired: events.filter((e) => e.fires).length };
 }
