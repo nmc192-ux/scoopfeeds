@@ -120,10 +120,10 @@ Rules:
 }
 
 const NUM_RE = /\d+(?:[.,]\d+)*/g;
-function numbersIn(text) {
+export function numbersIn(text) {
   return (String(text).match(NUM_RE) || []).map((n) => n.replace(/[.,]+$/, ""));
 }
-function hasNumberVerbatim(haystack, num) {
+export function hasNumberVerbatim(haystack, num) {
   const esc = num.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?<![\\d.,])${esc}(?![\\d]|[.,]\\d)`).test(haystack);
 }

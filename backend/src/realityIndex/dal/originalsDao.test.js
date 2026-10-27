@@ -66,9 +66,9 @@ test("DAL: drafts, expired, private/unlisted/scheduled/unpublished/no-youtube fi
   }
 });
 
-test("DAL: empty database → three empty lists", () => {
+test("DAL: empty database → three empty lists and no quiz", () => {
   const { db } = makeTestDb({ prefix: "scoop-originals-empty-" });
-  assert.deepEqual(dao.listOriginals({ now: NOW, db }), { analysis: [], explained: [], stories: [] });
+  assert.deepEqual(dao.listOriginals({ now: NOW, db }), { analysis: [], explained: [], stories: [], quiz: null });
 });
 
 test("GET /api/originals returns the three lists with no internal film fields", async () => {
@@ -86,7 +86,7 @@ test("GET /api/originals returns the three lists with no internal film fields", 
       assert.ok(!text.includes(leak), `response leaked ${leak}`);
     }
     const body = JSON.parse(text);
-    assert.deepEqual(Object.keys(body).sort(), ["analysis", "explained", "stories"]);
+    assert.deepEqual(Object.keys(body).sort(), ["analysis", "explained", "quiz", "stories"]);
     assert.equal(body.stories[0].youtube_id, "yt_0");
   } finally {
     server.close();

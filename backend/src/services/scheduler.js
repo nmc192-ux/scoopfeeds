@@ -41,6 +41,7 @@ import { runEventTimelineBuilder } from "../realityIndex/intelligence/eventTimel
 import { runEventActorExtractor } from "../realityIndex/intelligence/eventActorExtractor.js";
 import { runWhatWeKnow } from "../realityIndex/generation/whatWeKnow.js";
 import { runWeeklyGapReport, coverageGapsEnabled } from "../realityIndex/intelligence/coverageGaps.js";
+import { runWeeklyQuiz, weeklyQuizEnabled } from "../realityIndex/generation/weeklyQuiz.js";
 import { runEntityExtractionBatch } from "../realityIndex/intelligence/entityExtractor.js";
 import { runEntityIdfRecompute } from "../realityIndex/intelligence/entityIdf.js";
 import { runMediaSentimentForActiveEvents } from "../realityIndex/intelligence/mediaSentimentScorer.js";
@@ -908,6 +909,9 @@ scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "
     // #262 weekly Gap Report: Monday 05:17 UTC, in-process (one read pass, one insert).
     // :17 carries no dispatch cron. Returns at once unless COVERAGE_GAPS_ENABLED=1.
     scheduleCron("17 5 * * 1",    () => runCoverageGapCycle(), { timezone: "Etc/UTC" });
+    // #271 weekly quiz "Did you scoop it?": Monday 06:17 UTC, in-process (one read pass, one
+    // LLM call, one insert). :17 carries no dispatch cron. Returns at once unless ORIGINALS_QUIZ_ENABLED=1.
+    scheduleCron("17 6 * * 1",    () => runWeeklyQuizCycle(), { timezone: "Etc/UTC" });
     // Phase 3 — Sentiment + Composite + Anomalies
     scheduleCron("21,51 * * * *", () => runDispatch(() => dispatchRealityIndexComposeCycle(), "reality index compose")); // 30 min, offset
     scheduleCron("27 * * * *",    () => runSentimentScoreCycle());         // every 1 hr
@@ -1082,6 +1086,12 @@ async function runCoverageGapCycle() {
   if (!coverageGapsEnabled()) return null;
   try { return runWeeklyGapReport(getDb()); }
   catch (err) { logger.error("❌ Coverage gap report failed", { error: err.message }); return null; }
+}
+
+async function runWeeklyQuizCycle() {
+  if (!weeklyQuizEnabled()) return null;
+  try { return await runWeeklyQuiz(); }
+  catch (err) { logger.error("❌ Weekly quiz failed", { error: err.message }); return null; }
 }
 
 let isWhatWeKnowRun = false;

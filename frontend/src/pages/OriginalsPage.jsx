@@ -1,7 +1,8 @@
 /**
  * OriginalsPage — `/originals` under SITE_V2 (#260, plan v7 Phase 2).
  *
- * What ScoopFeeds itself writes and makes, in three shelves:
+ * What ScoopFeeds itself writes and makes. First, when a quiz is published, the weekly
+ * quiz card (#271) → /originals/quiz. Then three shelves:
  *   Latest analysis   — published briefs   → /briefs/:slug
  *   ScoopFeeds Stories — public films       → youtube.com (thumbnail, no autoplay embed)
  *   Explained          — live Explained     → /analysis/explained/:slug
@@ -120,6 +121,21 @@ function ExplainedShelf({ items }) {
   );
 }
 
+function QuizCard({ quiz }) {
+  return (
+    <section className="mt-8" data-testid="originals-quiz-card">
+      <Link to="/originals/quiz" className="block group border-2 p-5" style={{ borderColor: INK }}>
+        <h2 className="uppercase text-3xl group-hover:underline" style={{ fontFamily: DISPLAY, color: INK }}>
+          Did you scoop it?
+        </h2>
+        <p className="mt-1 text-lg opacity-80" style={{ fontFamily: READING }}>
+          {quiz.count} questions on this week's news
+        </p>
+      </Link>
+    </section>
+  );
+}
+
 export default function OriginalsPage() {
   const { data } = useOriginals();
   const analysis = data?.analysis ?? [];
@@ -134,6 +150,7 @@ export default function OriginalsPage() {
           Our analysis, films and explainers.
         </p>
       </header>
+      {data?.quiz && data.quiz.count > 0 && <QuizCard quiz={data.quiz} />}
       {analysis.length > 0 && <AnalysisShelf items={analysis} />}
       {stories.length > 0 && <StoriesShelf items={stories} />}
       {explained.length > 0 && <ExplainedShelf items={explained} />}
