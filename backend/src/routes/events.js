@@ -31,6 +31,7 @@ import { dossierCoherence } from "../realityIndex/intelligence/eventCoherence.js
 import { whatWeKnowForApi } from "../realityIndex/generation/whatWeKnow.js";
 import { reorderByCountry, parseCountry } from "../realityIndex/dal/countryAffinity.js";
 import { sourceEligibleSql, filterReaderEligible, readerEligibilityOn } from "../realityIndex/dal/readerEligibility.js";
+import { prominenceSql, PROMINENCE_HALFLIFE_MS } from "../realityIndex/dal/eventsDao.js";
 
 const router = express.Router();
 
@@ -116,8 +117,7 @@ function publicActor(a) {
 // /api/ri/anomalies feed.
 const ANOM_FRESH_MS = 6 * 60 * 60 * 1000;
 // Prominence sort (Phase 5a): rank by (2·source_count + article_count), recency-decayed.
-// Divisor 1 + age/HALFLIFE → an event last active PROMINENCE_HALFLIFE_MS ago counts at ~half weight.
-const PROMINENCE_HALFLIFE_MS = 24 * 60 * 60 * 1000;
+// Prominence (and its half-life) has one definition, shared with the Morning Scoop (#263).
 
 function getEventBySlug(db, slug) {
   const cutoff = Date.now() - ANOM_FRESH_MS;
@@ -334,12 +334,7 @@ router.get("/", (req, res) => {
         (SELECT a.payload      FROM anomaly_alerts a
          WHERE a.event_id = e.id AND a.acknowledged = 0 AND a.detected_at >= ?
          ORDER BY a.detected_at DESC LIMIT 1) AS anom_payload,
-        (
-          (2.0 * (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
-                    JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = e.id)
-           + (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = e.id))
-          / (1.0 + (CAST(? AS REAL) - e.last_activity_at) / ?)
-        ) AS prominence
+        ${prominenceSql("e")} AS prominence
       FROM events e
       WHERE e.status = ?
     `;

@@ -83,9 +83,19 @@ router.get("/status", (_req, res) => {
   });
 });
 
-// Tomorrow's Morning Scoop as HTML in the browser. Reads articles only.
-router.get("/preview", (_req, res) => {
-  const preview = buildDigestPreview();
+// #263: ?v2=1 previews the dossier-based v2 edition whatever MORNING_SCOOP_V2 says
+// (?v2=0 forces the current one; absent follows the flag). ?edition=americas|rest
+// sets the link campaign, ?topics=tech,world adds a "Your topics" block as a
+// subscriber with those topics would see it. Reads only; touches no subscriber.
+function previewOpts(q = {}) {
+  const v2 = q.v2 === "1" ? true : q.v2 === "0" ? false : null;
+  const topics = String(q.topics || "").split(",").map((t) => t.trim()).filter(Boolean).slice(0, 20);
+  return { v2, edition: q.edition === "americas" ? "americas" : "rest", topics };
+}
+
+// Tomorrow's Morning Scoop as HTML in the browser. Reads only.
+router.get("/preview", (req, res) => {
+  const preview = buildDigestPreview(previewOpts(req.query));
   if (!preview) return res.status(404).type("text/plain").send("No articles in the last 24h — nothing would be sent.");
   res.type("html").send(preview.html);
 });
@@ -100,7 +110,7 @@ router.post("/test", async (req, res) => {
   if (!getTransport()) {
     return res.status(503).json({ ok: false, error: "SMTP not configured (set SMTP_HOST/PORT/USER/PASS in Hostinger env)." });
   }
-  const preview = buildDigestPreview();
+  const preview = buildDigestPreview(previewOpts(req.query));
   if (!preview) return res.status(404).json({ ok: false, error: "No articles in the last 24h — nothing to send." });
   try {
     await sendMail({ to: email, subject: `[Scoop test] ${preview.subject}`, html: preview.html, text: preview.text });
