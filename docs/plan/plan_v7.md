@@ -61,8 +61,8 @@ Specced directly as issues on 14 Oct; see the GitHub backlog (label `phase:0`).
 - [queued] lane:website — Same story, different headlines wall on dossiers
 - [queued] lane:website — Live mode on developing dossiers (auto-refresh, "N new reports")
 - [spec #263] lane:originals — Morning Scoop redesign: dossier-based, new look, Intern sign-off, US and Europe editions by local time
-- [queued] lane:originals — Weekly quiz "Did you scoop it?" built from the week's dossiers
-- [queued] lane:originals — By the numbers: one sourced number a day, site card + IG card
+- [spec #271] lane:originals — Weekly quiz "Did you scoop it?" built from the week's dossiers
+- [spec #272] lane:originals — By the numbers: one sourced number a day, site card + IG card
 - [queued] lane:website — Search answer card with sources
 - [queued] lane:website — Embeddable dossier widget
 - [queued] lane:website — Receipts and dated corrections log
@@ -70,4 +70,4 @@ Specced directly as issues on 14 Oct; see the GitHub backlog (label `phase:0`).
 
 ## Radio lane (runs alongside)
 
-- [queued] lane:radio — Stage 1: timed unattended hour with the YouTube Live API (agreed 13 Oct), then the reordered phases: launch, voice, news compared, markets/weather, programme clock, always-on
+- [spec #273] lane:radio — Stage 1: timed unattended hour with the YouTube Live API (agreed 13 Oct), then the reordered phases: launch, voice, news compared, markets/weather, programme clock, always-on (Stages 1-2 built per `docs/radio/autonomous-newsroom.md`; #273 is the next unbuilt piece, the Stage 3 listen-back gate)
