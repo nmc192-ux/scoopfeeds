@@ -230,3 +230,57 @@ export function qualifyingCountsByDay({ withinMs = 7 * 24 * 60 * 60 * 1000 } = {
   }
   return { total: rows.length, byDay: [...byDay.entries()].sort().map(([day, n]) => ({ day, n })) };
 }
+
+// ── Prominence selection (#263) ──────────────────────────────────────────────
+// ONE definition of "prominence", shared by GET /api/ri/events?sort=prominence and
+// the Morning Scoop v2 edition. Moved here verbatim from routes/events.js so the two
+// cannot drift; the route splices the same SQL text, so its output is unchanged.
+
+// Divisor 1 + age/HALFLIFE → an event last active PROMINENCE_HALFLIFE_MS ago counts at ~half weight.
+export const PROMINENCE_HALFLIFE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Prominence of an event row as a SQL expression over `alias`:
+ * (2 × distinct outlets + articles) / (1 + age / half-life).
+ * Binds TWO parameters, in order: now (ms), PROMINENCE_HALFLIFE_MS.
+ */
+export function prominenceSql(alias = "e") {
+  return `(
+          (2.0 * (SELECT COUNT(DISTINCT a.source_name) FROM event_articles ea
+                    JOIN articles a ON a.id = ea.article_id WHERE ea.event_id = ${alias}.id)
+           + (SELECT COUNT(*) FROM event_articles ea WHERE ea.event_id = ${alias}.id))
+          / (1.0 + (CAST(? AS REAL) - ${alias}.last_activity_at) / ?)
+        )`;
+}
+
+/**
+ * The most prominent reader-eligible active events. Read-only.
+ * Filters: has articles, not a machine event (USGS/NOAA), #243 source rules in SQL
+ * before the LIMIT, the coherence rule on the returned rows (over-fetched like the
+ * route, then trimmed back to `limit`).
+ *
+ * @param {object}   o
+ * @param {number}   [o.limit=6]
+ * @param {string[]} [o.categories]     only events whose category is in this list
+ * @param {number}   [o.activeWithinMs] only events active inside this window
+ * @param {string[]} [o.excludeIds]     event ids to leave out
+ * @param {number}   [o.now]
+ * → [{ id, slug, title, category, started_at, last_activity_at, prominence }]
+ */
+export function topEventsByProminence(db = getDb(), { limit = 6, categories = null, activeWithinMs = null, excludeIds = [], now = Date.now() } = {}) {
+  let sql = `
+    SELECT e.id, e.slug, e.title, e.category, e.started_at, e.last_activity_at,
+      ${prominenceSql("e")} AS prominence
+    FROM events e
+    WHERE e.status = 'active'
+      AND EXISTS (SELECT 1 FROM event_articles ea WHERE ea.event_id = e.id)
+      AND ${notMachineEventSql("e")}
+      AND ${sourceEligibleSql("e")}`;
+  const params = [now, PROMINENCE_HALFLIFE_MS];
+  if (activeWithinMs != null) { sql += " AND e.last_activity_at >= ?"; params.push(now - activeWithinMs); }
+  if (categories?.length) { sql += ` AND e.category IN (${categories.map(() => "?").join(",")})`; params.push(...categories); }
+  if (excludeIds?.length) { sql += ` AND e.id NOT IN (${excludeIds.map(() => "?").join(",")})`; params.push(...excludeIds); }
+  sql += " ORDER BY prominence DESC, e.last_activity_at DESC LIMIT ?";
+  params.push(Math.min(limit * 2 + 10, 250));
+  return filterReaderEligible(db, db.prepare(sql).all(...params), { now }).slice(0, limit);
+}
