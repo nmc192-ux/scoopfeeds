@@ -241,6 +241,12 @@ reads `GET /api/originals/quiz`; one row per week in `weekly_quizzes` (migration
 `realityIndex/generation/weeklyQuiz.js` only when `ORIGINALS_QUIZ_ENABLED=1`. Every answer is checked against its
 dossier's reports; a week that fails the checks is stored `refused` and nothing is served.
 
+**By the numbers (#272, dark).** A "By the numbers" shelf on `/originals` (v2 gate) from `daily_numbers` (migration 046),
+one row a day picked at 05:58 UTC by `realityIndex/generation/byTheNumbers.js` only when `BY_THE_NUMBERS_ENABLED=1`. No AI
+call: the number comes from a "What we know" fact and is re-checked verbatim in two outlets' current reports, never a
+casualty count. The IG-format image (`services/numberCard.js`) is admin-only at `/scoop-ops/originals/numbers/:day.png`,
+for DrJ to post by hand; nothing posts it.
+
 ## Open items — roughly in priority order
 
 <!-- J Loop status markers: [queued] available · [proposed] awaiting DrJ approval ·

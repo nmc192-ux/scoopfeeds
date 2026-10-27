@@ -42,6 +42,7 @@ import { runEventActorExtractor } from "../realityIndex/intelligence/eventActorE
 import { runWhatWeKnow } from "../realityIndex/generation/whatWeKnow.js";
 import { runWeeklyGapReport, coverageGapsEnabled } from "../realityIndex/intelligence/coverageGaps.js";
 import { runWeeklyQuiz, weeklyQuizEnabled } from "../realityIndex/generation/weeklyQuiz.js";
+import { runByTheNumbers, byTheNumbersEnabled } from "../realityIndex/generation/byTheNumbers.js";
 import { runEntityExtractionBatch } from "../realityIndex/intelligence/entityExtractor.js";
 import { runEntityIdfRecompute } from "../realityIndex/intelligence/entityIdf.js";
 import { runMediaSentimentForActiveEvents } from "../realityIndex/intelligence/mediaSentimentScorer.js";
@@ -912,6 +913,10 @@ scheduleCron("39 * * * *", () => runDispatch(() => dispatchVideoRenderCycle(), "
     // #271 weekly quiz "Did you scoop it?": Monday 06:17 UTC, in-process (one read pass, one
     // LLM call, one insert). :17 carries no dispatch cron. Returns at once unless ORIGINALS_QUIZ_ENABLED=1.
     scheduleCron("17 6 * * 1",    () => runWeeklyQuizCycle(), { timezone: "Etc/UTC" });
+    // #272 "By the numbers": daily 05:58 UTC, in-process (one read pass over the last 36 h of
+    // What-we-know rows, no LLM call, one insert). :58 carries no other cron at all. Returns at
+    // once unless BY_THE_NUMBERS_ENABLED=1.
+    scheduleCron("58 5 * * *",    () => runByTheNumbersCycle(), { timezone: "Etc/UTC" });
     // Phase 3 — Sentiment + Composite + Anomalies
     scheduleCron("21,51 * * * *", () => runDispatch(() => dispatchRealityIndexComposeCycle(), "reality index compose")); // 30 min, offset
     scheduleCron("27 * * * *",    () => runSentimentScoreCycle());         // every 1 hr
@@ -1086,6 +1091,12 @@ async function runCoverageGapCycle() {
   if (!coverageGapsEnabled()) return null;
   try { return runWeeklyGapReport(getDb()); }
   catch (err) { logger.error("❌ Coverage gap report failed", { error: err.message }); return null; }
+}
+
+function runByTheNumbersCycle() {
+  if (!byTheNumbersEnabled()) return null;
+  try { return runByTheNumbers(); }
+  catch (err) { logger.error("❌ By the numbers failed", { error: err.message }); return null; }
 }
 
 async function runWeeklyQuizCycle() {

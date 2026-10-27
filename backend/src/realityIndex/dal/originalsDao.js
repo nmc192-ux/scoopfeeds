@@ -75,6 +75,45 @@ export function latestWeeklyQuiz({ now = Date.now(), db = getDb() } = {}) {
   return { week_start: row.week_start, questions, disclosure: body.disclosure };
 }
 
+export const NUMBERS_LIMIT = 7;
+
+function numberRow(r) {
+  let sources = [];
+  try { sources = JSON.parse(r.sources_json || "[]"); } catch { sources = []; }
+  return {
+    day: r.day, number_text: r.number_text, fact_text: r.fact_text,
+    sources: (Array.isArray(sources) ? sources : []).map((x) => ({ source_name: x?.source_name ?? null, url: x?.url ?? null })),
+    event: { slug: r.slug, title: r.title },
+  };
+}
+
+/**
+ * "By the numbers" (#272): the latest NUMBERS_LIMIT daily_numbers rows, newest
+ * first, with the event's slug/title joined at read time. A row whose event no
+ * longer exists is dropped. Event ids stay internal.
+ */
+export function listDailyNumbers({ limit = NUMBERS_LIMIT, db = getDb() } = {}) {
+  return db.prepare(`
+    SELECT n.day, n.number_text, n.fact_text, n.sources_json, e.slug, e.title
+    FROM daily_numbers n
+    JOIN events e ON e.id = n.event_id
+    WHERE e.slug IS NOT NULL AND e.slug <> ''
+    ORDER BY n.day DESC
+    LIMIT ?
+  `).all(limit).map(numberRow);
+}
+
+/** Today's (UTC) number, or null. */
+export function dailyNumberFor(day, { db = getDb() } = {}) {
+  const r = db.prepare(`
+    SELECT n.day, n.number_text, n.fact_text, n.sources_json, e.slug, e.title
+    FROM daily_numbers n
+    JOIN events e ON e.id = n.event_id
+    WHERE n.day = ? AND e.slug IS NOT NULL AND e.slug <> ''
+  `).get(day);
+  return r ? numberRow(r) : null;
+}
+
 export function listOriginals({ now = Date.now(), db = getDb() } = {}) {
   const quiz = latestWeeklyQuiz({ now, db });
   return {
@@ -82,5 +121,6 @@ export function listOriginals({ now = Date.now(), db = getDb() } = {}) {
     explained: listOriginalExplained({ now, db }),
     stories:   listOriginalStories({ now, db }),
     quiz:      quiz ? { week_start: quiz.week_start, count: quiz.questions.length } : null,
+    numbers:   listDailyNumbers({ db }),
   };
 }
