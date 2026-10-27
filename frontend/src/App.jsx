@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Routes, Route, useLocation, useParams, Navigate } from "react-router-dom";
+import { Routes, Route, useLocation, useParams, Navigate, useSearchParams } from "react-router-dom";
 import { useSiteConfig } from "./hooks/useSiteConfig";
 import { LANGUAGES as I18N_LANGUAGES, getCurrentLang } from "./lib/i18n";
 import Header from "./components/layout/Header";
@@ -53,6 +53,7 @@ import RealityIndexOpsPage  from "./pages/RealityIndexOpsPage";
 import MetricsOpsPage       from "./pages/MetricsOpsPage";
 import BriefsPage           from "./pages/BriefsPage";
 import OriginalsPage        from "./pages/OriginalsPage";
+import CoverageGapsPage     from "./pages/CoverageGapsPage";
 import BriefPage            from "./pages/BriefPage";
 import BriefsReviewPage     from "./pages/BriefsReviewPage";
 import WorldMapPage         from "./pages/WorldMapPage";
@@ -81,7 +82,7 @@ const HIDE_TOPICNAV_ON = [
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
-  "/analysis", "/predictions", "/events", "/timeline", "/truth-gap", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/originals", "/world-map", "/finance", "/macro", "/synthetic", "/leaderboard",
+  "/analysis", "/predictions", "/events", "/timeline", "/truth-gap", "/gaps", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/originals", "/world-map", "/finance", "/macro", "/synthetic", "/leaderboard",
   "/health", "/climate", "/sports", "/crypto", "/ai", "/space",
 ];
 
@@ -231,6 +232,7 @@ export default function App() {
           <Route path="/scoop-ops/metrics"        element={<MetricsOpsPage />} />
           <Route path="/scoop-ops/briefs"     element={<BriefsReviewPage />} />
           <Route path="/originals"            element={<V2Only fallback="/briefs"><OriginalsPage /></V2Only>} />
+          <Route path="/gaps"                 element={<GapsGate><CoverageGapsPage /></GapsGate>} />
           <Route path="/briefs"               element={<BriefsPage />} />
           <Route path="/briefs/:slug"         element={<BriefPage />} />
           <Route path="/world-map"            element={<V2Redirect to="/markets?tab=world-map"><WorldMapPage /></V2Redirect>} />
@@ -298,6 +300,14 @@ function OddsOnly({ children }) {
   const { marketOdds, loading } = useSiteConfig();
   if (loading) return null; // redirecting before the answer arrives would bounce readers even when the flag is on
   return marketOdds ? children : <Navigate to="/" replace />;
+}
+
+/* #262 Coverage Gaps ships dark: ?gaps=1 shows it per visit; VITE_COVERAGE_GAPS=true is the flip.
+   Otherwise the address is a plain 404, so the page does not exist for readers. */
+const COVERAGE_GAPS_ENV = String(import.meta.env.VITE_COVERAGE_GAPS ?? "false").toLowerCase() === "true";
+function GapsGate({ children }) {
+  const [params] = useSearchParams();
+  return COVERAGE_GAPS_ENV || params.get("gaps") === "1" ? children : <NotFound />;
 }
 
 /* ─── 404 ────────────────────────────────────────────────────────────────── */

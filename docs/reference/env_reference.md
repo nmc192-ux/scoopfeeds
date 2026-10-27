@@ -199,6 +199,10 @@ whether the index is mixed. `scripts/reembed.mjs` needs no cutover today — emb
 | `WHAT_WE_KNOW_ENABLED` | unset (**off**) | unset | yes (read per cycle) | #250. Hourly (`:31`) generator for the dossier's AI-written "What we know" block. On only when literally `"1"`. Coherence `"ok"` events only, never sensitive headlines, ≥3 outlets; ledgered like the actor extractor (migration 043). Do not switch on before `EVENT_COHERENCE_GATE` is on in prod. |
 | `WHAT_WE_KNOW_PER_CYCLE` | `10` | unset | yes | LLM calls per `whatWeKnow` cycle (skips do not count). Worst case 10 × 24 = 240 calls/day against `LLM_DAILY_CALL_CAP`; ≈ $0.11/day at Haiku prices. Lowered from the spec's 20 because current monthly spend could not be measured at build time. |
 | `WHAT_WE_KNOW_API` | `true` | unset (on) | yes (read per request) | Kill switch for `what_we_know` on `GET /api/ri/events/:slug`. Served only with a stored `ok` block AND a live coherence level of `"ok"`; nothing is served while no rows exist. |
+| `COVERAGE_GAPS_ENABLED` | unset (**off**) | unset | yes (read per run) | #262. Weekly Gap Report cron (Monday 05:17 UTC, in-process). On only when literally `"1"`. Inserts one `coverage_gap_reports` row per week (migration 044) and never rewrites an existing week. The daily `/api/ri/gaps/daily` list is computed on request and does not need this flag. Measured by region only. |
+| `GAP_MIN_PRESENT` | `4` | unset | yes (read per call) | #262. Distinct outlets from one region an event needs in the window to count as "big" there. |
+| `GAP_MIN_BASE` | `5` | unset | yes (read per call) | #262. A region needs at least this many outlets publishing anything in the window before its silence on a story counts as a gap. |
+| `GAP_DAILY_MAX` | `10` | unset | yes (read per call) | #262. Gaps kept in the daily list (the weekly report keeps 20). |
 
 ## Frontend (build-time — `VITE_*` requires a rebuild)
 
@@ -207,6 +211,7 @@ whether the index is mixed. `scripts/reembed.mjs` needs no cutover today — emb
 | `VITE_SENTIMENT_ENABLED` | `false` (**hidden**) | default | **build** | Sentiment module. Hidden because it fails comprehensibility, not data sufficiency — see the architecture doc. |
 | `VITE_WHAT_WE_KNOW` | `false` (**dark**) | unset | **build** | #250 "What we know" dossier block. Dark: `?wwk=1` shows it per visit. Renders only when the API sends `what_we_know`. |
 | `VITE_RADIO_MINIPLAYER` | `false` (**dark**) | unset | **build** | #261 persistent ScoopFeeds Radio mini-player in the v2 chrome (`components/radio/RadioMiniPlayer.jsx`). Dark: `?radio=1` shows it per visit (kept in sessionStorage; `?radio=0` clears it). Either way it renders only when `/api/radio/now.json` returns a `watchUrl` (i.e. `RADIO_PUBLIC_WATCH_URL` is set). The YouTube embed loads only after the reader clicks Listen; never autoplays. |
+| `VITE_COVERAGE_GAPS` | `false` (**dark**) | unset | **build** | #262 `/gaps` Coverage Gaps page. Dark: `?gaps=1` shows it per visit; otherwise `/gaps` is a 404. |
 
 ## Site flags (runtime — served to the SPA by `GET /api/site-config`)
 
