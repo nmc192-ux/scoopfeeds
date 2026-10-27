@@ -53,6 +53,7 @@ import RealityIndexOpsPage  from "./pages/RealityIndexOpsPage";
 import MetricsOpsPage       from "./pages/MetricsOpsPage";
 import BriefsPage           from "./pages/BriefsPage";
 import OriginalsPage        from "./pages/OriginalsPage";
+import OriginalsQuizPage    from "./pages/OriginalsQuizPage";
 import CoverageGapsPage     from "./pages/CoverageGapsPage";
 import BriefPage            from "./pages/BriefPage";
 import BriefsReviewPage     from "./pages/BriefsReviewPage";
@@ -232,6 +233,7 @@ export default function App() {
           <Route path="/scoop-ops/metrics"        element={<MetricsOpsPage />} />
           <Route path="/scoop-ops/briefs"     element={<BriefsReviewPage />} />
           <Route path="/originals"            element={<V2Only fallback="/briefs"><OriginalsPage /></V2Only>} />
+          <Route path="/originals/quiz"       element={<V2Only fallback="/briefs"><OriginalsQuizPage /></V2Only>} />
           <Route path="/gaps"                 element={<GapsGate><CoverageGapsPage /></GapsGate>} />
           <Route path="/briefs"               element={<BriefsPage />} />
           <Route path="/briefs/:slug"         element={<BriefPage />} />

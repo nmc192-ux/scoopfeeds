@@ -49,10 +49,38 @@ export function listOriginalStories({ limit = ORIGINALS_LIMITS.stories, now = Da
   `).all(now, now, limit);
 }
 
+export const QUIZ_MAX_AGE_DAYS = 14;
+
+/**
+ * The latest PUBLISHED weekly quiz (#271) from the last QUIZ_MAX_AGE_DAYS days,
+ * or null. Never reads refused rows or refusal_reason; event ids stay internal.
+ */
+export function latestWeeklyQuiz({ now = Date.now(), db = getDb() } = {}) {
+  const since = new Date(now - QUIZ_MAX_AGE_DAYS * 86400e3).toISOString().slice(0, 10);
+  const row = db.prepare(`
+    SELECT week_start, body_json
+    FROM weekly_quizzes
+    WHERE status = 'published' AND week_start >= ?
+    ORDER BY week_start DESC
+    LIMIT 1
+  `).get(since);
+  if (!row) return null;
+  let body;
+  try { body = JSON.parse(row.body_json || "{}"); } catch { return null; }
+  const questions = (Array.isArray(body.questions) ? body.questions : []).map((x) => ({
+    q: x.q, choices: x.choices, answer: x.answer,
+    event: { slug: x.event?.slug, title: x.event?.title },
+  }));
+  if (!questions.length) return null;
+  return { week_start: row.week_start, questions, disclosure: body.disclosure };
+}
+
 export function listOriginals({ now = Date.now(), db = getDb() } = {}) {
+  const quiz = latestWeeklyQuiz({ now, db });
   return {
     analysis:  listOriginalAnalysis({ db }),
     explained: listOriginalExplained({ now, db }),
     stories:   listOriginalStories({ now, db }),
+    quiz:      quiz ? { week_start: quiz.week_start, count: quiz.questions.length } : null,
   };
 }

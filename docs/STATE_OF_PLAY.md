@@ -236,6 +236,11 @@ filed as issues the same night. Auto-deploy runbook: `docs/ops/runbooks/autodepl
 scheduled, private or unlisted films, nor `qc_json`/channel status). Each shelf earn-renders. Without v2 the
 address redirects to `/briefs`; the v2 Originals door and footer link point here.
 
+**Weekly quiz "Did you scoop it?" (#271, dark).** `/originals/quiz` (`frontend/src/pages/OriginalsQuizPage.jsx`, v2 gate)
+reads `GET /api/originals/quiz`; one row per week in `weekly_quizzes` (migration 045), written Monday 06:17 UTC by
+`realityIndex/generation/weeklyQuiz.js` only when `ORIGINALS_QUIZ_ENABLED=1`. Every answer is checked against its
+dossier's reports; a week that fails the checks is stored `refused` and nothing is served.
+
 ## Open items — roughly in priority order
 
 <!-- J Loop status markers: [queued] available · [proposed] awaiting DrJ approval ·
