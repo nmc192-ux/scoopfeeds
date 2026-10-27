@@ -8,12 +8,14 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { nextHour, newestVideo, isPaused, autoairLive } from "./autoair.mjs";
 import { parseCnbc } from "./factPack.js";
+import { writeHourAudio } from "../../testing/radioWav.js";
 
 const H = Date.UTC(2026, 9, 14, 16);
-function produced({ hourStart = H, kept = 10, written = 12, hourStories = 5, partBytes = 2_000_000 } = {}) {
+function produced({ hourStart = H, kept = 10, written = 12, hourStories = 5, partBytes = null } = {}) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), "air-"));
-  fs.writeFileSync(path.join(d, "part-the-hour.wav"), Buffer.alloc(partBytes));
-  fs.writeFileSync(path.join(d, "programme.json"), JSON.stringify({ hourStart, cues: Array(30).fill({}), audio: [{ file: "part-the-hour.wav", from: H }], headlines: [] }));
+  // a real (synthetic) mixed hour for the listen-back (#273); `partBytes` writes a bare file of that size instead
+  const audio = partBytes == null ? writeHourAudio(d, H, { file: "part-the-hour.wav" }) : (fs.writeFileSync(path.join(d, "part-the-hour.wav"), Buffer.alloc(partBytes)), { audio: [{ file: "part-the-hour.wav", from: H }] });
+  fs.writeFileSync(path.join(d, "programme.json"), JSON.stringify({ hourStart, cues: Array(30).fill({}), headlines: [], ...audio }));
   const lines = (n, story) => Array.from({ length: n }, (_, i) => ({ id: `s${i + 1}`, story }));
   fs.writeFileSync(path.join(d, "segments.raw.json"), JSON.stringify({ "the-hour": { lines: lines(written, "t1") } }));
   fs.writeFileSync(path.join(d, "segments.json"), JSON.stringify({ "the-hour": { lines: [].concat(lines(Math.min(kept, hourStories), "t1"), lines(Math.max(0, kept - hourStories), null)) } }));

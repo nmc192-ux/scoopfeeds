@@ -16,6 +16,7 @@ import { createLiveSafetyGate } from "./liveSafetyGate.js";
 import { ffmpegFrameSampler, ffprobeProbe, parseShowinfoTimes } from "./mediaCheckers.js";
 import { airCheck } from "../programme/airCheck.js";
 import { clearedLibrary } from "../filmRotation.js";
+import { writeHourAudio } from "../../testing/radioWav.js";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "content-safety-test-"));
 function fakeFile(dir, name = "clip.mp4", bytes = "not really a video") {
@@ -169,8 +170,8 @@ test("airCheck refuses an hour whose film has no clearance, and passes once it i
   const d = tmp();
   const H = Date.parse("2026-10-24T16:00:00Z");
   const film = fakeFile(d, "film.mp4");
-  const part = path.join(d, "part.wav"); fs.writeFileSync(part, Buffer.alloc(1_100_000));
-  fs.writeFileSync(path.join(d, "programme.json"), JSON.stringify({ hourStart: H, cues: Array.from({ length: 25 }, (_, i) => ({ i })), audio: [{ file: "part.wav" }], film: "film.mp4", filmPath: film }));
+  const audio = writeHourAudio(d, H, { file: "part.wav" });   // a mixed hour the listen-back passes (#273)
+  fs.writeFileSync(path.join(d, "programme.json"), JSON.stringify({ hourStart: H, cues: Array.from({ length: 25 }, (_, i) => ({ i })), ...audio, film: "film.mp4", filmPath: film }));
   const hour = { lines: [1, 2, 3].map((i) => ({ id: `s${i}`, story: `story ${i}` })) };
   fs.writeFileSync(path.join(d, "segments.raw.json"), JSON.stringify({ segments: { "the-hour": hour } }));
   fs.writeFileSync(path.join(d, "segments.json"), JSON.stringify({ "the-hour": hour }));

@@ -289,5 +289,16 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
     log(`mixed ${s.id} (${s.kind}, ${s.lenSec} s)`);
   }
   w.close();
-  return { cues, report, voiced };
+  return { cues, report, voiced, lines: placedLines(voiced, hourStart) };
+}
+
+/**
+ * #273: where every voiced line sits, in epoch ms, for the listen-back (programme.json `lines`). The mix is
+ * unchanged; this is only the layout it already used.
+ * @returns {{ slot: string, id: string, at: number, end: number }[]}
+ */
+export function placedLines(voiced, hourStart) {
+  return Object.entries(voiced || {}).flatMap(([slot, placed]) => (placed || []).map((l) => ({
+    slot, id: l.id ?? null, at: Math.round(hourStart + l.atSec * 1000), end: Math.round(hourStart + l.endSec * 1000),
+  })));
 }

@@ -9,6 +9,7 @@ import { prepareRepeat, spliceProgramme, retimeProgramme, cutSlotToMusic, REPEAT
 import { recheckRepeatedMarkets } from "./marketsClock.js";
 import { airCheck, repeatMarketsProblems } from "./airCheck.js";
 import { partAt } from "../playout/playout.js";
+import { writeHourAudio, writeWav, renderProgramme, linesFor } from "../../testing/radioWav.js";
 
 const utc = (s) => Date.parse(s);
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
@@ -37,8 +38,9 @@ function seedHour(H, { marketsLines, rowsAt, segmentsOverride, noMusic = false }
   const m2 = slots.find((s) => s.id === "markets-2");
   cues.push({ at: m2.start - 20e3, scene: "music", data: { next: { title: "Markets Now", at: m2.start } } }, { at: m2.start - 40e3, scene: "title", data: { kicker: "Next", title: "Markets Now", items: [] } });
   cues.sort((a, b) => a.at - b.at);
-  fs.writeFileSync(path.join(dir, PART), Buffer.alloc(1_100_000));
-  fs.writeFileSync(path.join(dir, "programme.json"), JSON.stringify({ version: 1, hourStart: H, endsAt: H + 3630e3, audio: [{ file: PART, from: H - 900e3 }], cues, slots }));
+  // a mixed hour the listen-back passes (#273): one part from the countdown, line timings for every spoken slot
+  const { audio, lines } = writeHourAudio(dir, H, { file: PART, slots });
+  fs.writeFileSync(path.join(dir, "programme.json"), JSON.stringify({ version: 1, hourStart: H, endsAt: H + 3630e3, audio, lines, cues, slots }));
   const segments = segmentsOverride || {
     "the-hour": { lines: [{ id: "open", text: "It's two." }] },
     "markets-1": { lines: marketsLines },
@@ -162,8 +164,11 @@ function fresh(dir, H) {
   fs.writeFileSync(path.join(dir, "pack.json"), JSON.stringify({ markets: rows(H), marketsCheckedAt: H }));
   const pf = path.join(dir, "programme.json");
   const p = JSON.parse(fs.readFileSync(pf, "utf8"));
-  fs.writeFileSync(path.join(dir, "part-the-hour-new.wav"), Buffer.alloc(1_100_000));
-  fs.writeFileSync(pf, JSON.stringify(spliceProgramme(p, { cut: H + 6e3, resumeAt: H + 360e3, partFile: "part-the-hour-new.wav", cues: [] })));
+  // the fresh The Hour's own audio and line timings (#273)
+  const hour = p.slots.find((s) => s.id === "the-hour");
+  const fl = linesFor(hour);
+  writeWav(path.join(dir, "part-the-hour-new.wav"), renderProgramme({ slots: [hour], lines: fl, from: H + 6e3, to: H + 360e3, rate: 1000 }), { rate: 1000 });   // 1000 Hz: over minPartBytes
+  fs.writeFileSync(pf, JSON.stringify(spliceProgramme(p, { cut: H + 6e3, resumeAt: H + 360e3, partFile: "part-the-hour-new.wav", cues: [], lines: fl })));
   return dir;
 }
 

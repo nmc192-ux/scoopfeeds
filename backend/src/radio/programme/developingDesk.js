@@ -235,7 +235,7 @@ export function insertSlots(slots, ins) {
 
 /** Put an insert into a programme object: audio and cues spliced, the displaced slot replaced. Pure. */
 export function applyInsert(prog, ins) {
-  const out = spliceProgramme(prog, { cut: ins.cut, resumeAt: ins.resumeAt, partFile: ins.partFile, cues: ins.cues });
+  const out = spliceProgramme(prog, { cut: ins.cut, resumeAt: ins.resumeAt, partFile: ins.partFile, cues: ins.cues, lines: ins.lines || [] });
   out.slots = insertSlots(prog.slots, ins);
   out.inserts = [...(prog.inserts || []).filter((x) => x.id !== ins.id), ins];
   return out;

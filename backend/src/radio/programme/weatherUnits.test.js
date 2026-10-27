@@ -12,6 +12,7 @@ import { airCheck } from "./airCheck.js";
 import { buildPrompt, packText } from "./writer.js";
 import { weatherFocus } from "./assemble.js";
 import { WEATHER_CITIES } from "./factPack.js";
+import { writeHourAudio } from "../../testing/radioWav.js";
 
 const pack = { top: [], desks: {}, markets: [], weather: [
   { city: "New York", c: 18, f: 64, condition: "partly cloudy" }, { city: "Washington", c: 20, f: 68, condition: "clear sky" },
@@ -49,8 +50,8 @@ test("airCheck second lock: a surviving Fahrenheit weather line fails the hour; 
 
   const H = Date.UTC(2026, 9, 25, 16);
   const d = fs.mkdtempSync(path.join(os.tmpdir(), "air-wx-"));
-  fs.writeFileSync(path.join(d, "part-the-hour.wav"), Buffer.alloc(2_000_000));
-  fs.writeFileSync(path.join(d, "programme.json"), JSON.stringify({ hourStart: H, cues: Array(30).fill({}), audio: [{ file: "part-the-hour.wav", from: H }], headlines: [] }));
+  const audio = writeHourAudio(d, H, { file: "part-the-hour.wav" });   // a mixed hour the listen-back passes (#273)
+  fs.writeFileSync(path.join(d, "programme.json"), JSON.stringify({ hourStart: H, cues: Array(30).fill({}), headlines: [], ...audio }));
   const hour = Array.from({ length: 5 }, (_, i) => ({ id: `s${i + 1}`, story: "t1" }));
   const segs = (wx) => ({ "the-hour": { lines: hour }, weather: { lines: [{ id: "w1", text: wx }] } });
   fs.writeFileSync(path.join(d, "segments.raw.json"), JSON.stringify(segs("x")));

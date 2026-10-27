@@ -9,6 +9,7 @@ import { packText, buildPrompt } from "./writer.js";
 import { checkSegments } from "./checks.js";
 import { airCheck, marketsProblems } from "./airCheck.js";
 import { parseCnbc } from "./factPack.js";
+import { writeHourAudio } from "../../testing/radioWav.js";
 
 const utc = (s) => Date.parse(s);
 // Sunday 25 Oct 2026, 15:00 New York (EDT, UTC-4). The previous session is Friday 23 Oct, closing 16:00 New York.
@@ -119,8 +120,8 @@ test("checkSegments drops a stale row read as today's and keeps the close (its d
 function producedDir({ text, withPack = true, checked = true }) {
   const H = utc("2026-10-25T19:00:00Z");
   const d = fs.mkdtempSync(path.join(os.tmpdir(), "air245-"));
-  fs.writeFileSync(path.join(d, "part.wav"), Buffer.alloc(2_000_000));
-  fs.writeFileSync(path.join(d, "programme.json"), JSON.stringify({ hourStart: H, cues: Array(30).fill({}), audio: [{ file: "part.wav", from: H }], headlines: [] }));
+  const audio = writeHourAudio(d, H, { file: "part.wav" });   // a mixed hour the listen-back passes (#273)
+  fs.writeFileSync(path.join(d, "programme.json"), JSON.stringify({ hourStart: H, cues: Array(30).fill({}), headlines: [], ...audio }));
   const hour = { lines: Array.from({ length: 5 }, (_, i) => ({ id: `s${i + 1}`, story: "t1" })) };
   const segs = { "the-hour": hour, "markets-1": { lines: [{ id: "m1", text }] } };
   fs.writeFileSync(path.join(d, "segments.raw.json"), JSON.stringify(segs));

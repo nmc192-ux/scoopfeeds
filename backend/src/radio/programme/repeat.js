@@ -70,6 +70,8 @@ export function retimeProgramme(prog, newHourStart) {
     audio: (prog.audio || []).map((a) => ({ ...a, from: sh(a.from), ...(Number.isFinite(a.origin) ? { origin: sh(a.origin) } : {}) })),
     cues: (prog.cues || []).map(cue),
     slots: (prog.slots || []).map((s) => ({ ...s, start: sh(s.start), end: sh(s.end) })),
+    // #273: the listen-back's line timings move with the audio
+    ...(Array.isArray(prog.lines) ? { lines: prog.lines.map((l) => ({ ...l, at: sh(l.at), end: sh(l.end) })) } : {}),
     repeatOf: { hourStart: prog.hourStart, hour: new Date(prog.hourStart).toISOString() },
   };
 }
@@ -79,7 +81,7 @@ export function retimeProgramme(prog, newHourStart) {
  * the playout switches back to whichever part was playing there, seeking from that part's own `origin`, so the
  * rest of the hour plays exactly as before. Cues are replaced inside the stretch only. Pure.
  */
-export function spliceProgramme(prog, { cut, resumeAt, partFile, cues }) {
+export function spliceProgramme(prog, { cut, resumeAt, partFile, cues, lines = [] }) {
   const old = prog.audio || [];
   const covering = old.filter((a) => a.from <= resumeAt).at(-1);
   const after = old.filter((a) => a.from >= resumeAt);
@@ -88,6 +90,9 @@ export function spliceProgramme(prog, { cut, resumeAt, partFile, cues }) {
     ...prog,
     audio: [...old.filter((a) => a.from < cut), { file: partFile, from: cut }, ...resume, ...after],
     cues: [...(prog.cues || []).filter((c) => c.at < cut), ...cues.filter((c) => c.at >= cut && c.at < resumeAt), ...(prog.cues || []).filter((c) => c.at >= resumeAt)],
+    // #273: line timings inside the stretch are the new part's; a splice that brings none leaves the stretch without
+    // any, so a spoken slot there is unmeasured by the listen-back rather than measured against the old audio
+    ...(Array.isArray(prog.lines) || lines.length ? { lines: [...(prog.lines || []).filter((l) => l.at < cut || l.at >= resumeAt), ...lines.filter((l) => l.at >= cut && l.at < resumeAt)].sort((a, b) => a.at - b.at) } : {}),
   };
 }
 
@@ -141,7 +146,8 @@ export function cutSlotToMusic(prog, id, { why = "cut", avoid = [] } = {}) {
   cues.push({ at: slot.start, scene: "music", data: { ...(credit ? { credit } : {}), ...nextData } });
   cues.sort((a, b) => a.at - b.at);
   const slots = prog.slots.map((s) => (s === slot ? { ...s, kind: "music", title: null, cut: why, ...(s.elements ? { elements: elementsForKind({ kind: "music" }) } : {}) } : s));
-  return { ok: true, prog: { ...prog, audio, cues, slots }, donor: d.slot.id };
+  const lines = Array.isArray(prog.lines) ? { lines: prog.lines.filter((l) => l.slot !== id) } : {};   // #273: the slot is music now
+  return { ok: true, prog: { ...prog, audio, cues, slots, ...lines }, donor: d.slot.id };
 }
 
 /**
