@@ -7,7 +7,8 @@
  * to the end of 6 Nov (New York). The explainer rotation runs until the first polls close on 3 Nov.
  *
  * Clock: the desk takes the first 180 s of music-1 (14:00-17:00). Nothing else moves, so the hour
- * stays contiguous and every other slot keeps its time.
+ * stays contiguous and every other slot keeps its time. In the v1.5 clock (#285, music blocks of 90 s at most) it
+ * takes the US desk's slot instead (45:00-48:00): the Midterms desk is the US politics desk while it runs.
  */
 import { STATE_NAMES, SENATE_UP, GOVERNOR_UP, SENATE_SEATS, SENATE_MAJORITY, HOUSE_SEATS, HOUSE_MAJORITY } from "../election/races2026.js";
 
@@ -24,6 +25,15 @@ export function deskOn(hourStart, { env = process.env, force = false } = {}) {
 
 /** Put the desk into the clock IN PLACE (the first 180 s of music-1). Returns the desk slot, or null. */
 export function addDeskToClock(clock, hourStart) {
+  // #285: the v1.5 clock has no music block long enough; the desk takes the US desk's slot (`electionDonor`), same time
+  const u = clock.findIndex((s) => s.electionDonor);
+  if (u >= 0 && clock[u].lenSec >= DESK_SEC) {
+    const d = clock[u];
+    const desk = { id: "midterms", kind: "spoken", segment: "midterms", title: "The Midterms", sting: true, daypart: "evening",
+      startSec: d.startSec, endSec: d.endSec, lenSec: d.lenSec, start: d.start, end: d.end, ...(d.elements ? { elements: d.elements } : {}) };
+    clock.splice(u, 1, desk);
+    return desk;
+  }
   const i = clock.findIndex((s) => s.id === "music-1");
   if (i < 0 || clock[i].lenSec < DESK_SEC + 60) return null;
   const m = clock[i];

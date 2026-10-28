@@ -70,6 +70,57 @@ back an hour, and so do these columns. The grid itself is always set in New York
 - **South Asia** gets its own slot, 10 pm to midnight New York (7 to 9 am Karachi in US summer time, 8 to 10 am in
   winter). It is a produced hour; Rule 0 and the Pakistan-politics rules apply to it like every other hour.
 
+## The v1.5 clock (RADIO_CLOCK_V15, #285)
+
+DrJ's rehearsal notes of 28 October (#281, note 1): the same stories came round too often, and after each update the
+screen looped the same headlines over music. The v1.5 clock is the quick fix before election night. It is **off**
+unless `RADIO_CLOCK_V15` is literally `1` on the Mac; off, every hour is today's running order, unchanged.
+
+- **The Hour reads 7 stories**, world news first, then business, then one sport story. Each is the headline plus three
+  or four sentences of context: what happened, who said what (attributed to the outlet), and why it matters. About
+  60 to 80 seconds a story.
+- **Sport**, 3 minutes, straight after The Hour, from a Sport desk (the site's sports tab). No sport stories (fewer
+  than two), no Sport slot: its time goes back to The Hour, which then reads two more stories.
+- **The half-hour reads only new or changed stories**: never a story The Hour read (by story id, or the same story
+  under another id). With fewer than three, it says "No major changes since the top of the hour." and moves on.
+- **Less music.** Every music block is 90 seconds at most: 4.5 minutes an hour, 5.5 when there is no Short for the
+  film slot, 3 in a grid hour (Crypto takes the first block whole). It was about 19 minutes.
+- **Music shows what is coming up**, with a countdown, beside the markets and weather rail; it no longer loops the
+  headline cards.
+- The Tech and AI desk is **Science, Tech and AI**, and its stories include the site's science tab.
+- The US desk moves to the second half. In election season the Midterms desk (and on the days after, the counting
+  desk) takes the US desk's slot, because no music block is long enough to give it 3 minutes.
+- The second half opens as today (half, weather, the science and tech desk), so the 9 pm film still starts at 37:30
+  and may still run 16 minutes. The election night special (#198), the film slot and the idents are not changed.
+- **Repeats** (midnight to 6 am New York) take the clock of the hour they repeat; a fresh top of the hour over a v1.5
+  hour is written in the long format, with a fresh Sport slot.
+
+| Slot | id | Starts | Ends | Kind |
+|---|---|---|---|---|
+| Countdown | countdown | -15:00 | -00:04 | countdown |
+| Top ident and ping | ident-top | -00:04 | 00:06 | ident |
+| The Hour | the-hour | 00:06 | 10:06 | spoken |
+| Sport | sport | 10:06 | 13:06 | spoken |
+| Markets Now | markets-1 | 13:06 | 15:36 | spoken |
+| The News, Compared | compared-1 | 15:36 | 21:36 | spoken |
+| Music (Crypto in a grid hour) | music-1 | 21:36 | 23:06 | music |
+| Middle East desk | desk-me | 23:06 | 27:06 | spoken |
+| From the films | film | 27:06 | 28:06 | film |
+| This week on ScoopFeeds | series | 28:06 | 29:52 | series |
+| Half-hour ident | ident-half | 29:52 | 30:00 | ident |
+| Headlines at the half hour | half | 30:00 | 33:00 | spoken |
+| Weather around the world | weather | 33:00 | 34:30 | spoken |
+| Science, Tech and AI | desk-tech | 34:30 | 37:30 | spoken |
+| Music | music-3 | 37:30 | 39:00 | music |
+| Business desk | desk-biz | 39:00 | 45:00 | spoken |
+| US desk: politics and economy | desk-us | 45:00 | 48:00 | spoken |
+| The News, Compared | compared-2 | 48:00 | 54:00 | spoken |
+| Music | music-4 | 54:00 | 55:30 | music |
+| Markets Now | markets-2 | 55:30 | 58:00 | spoken |
+| Sign-off | signoff | 58:00 | 58:45 | spoken |
+| Closing ident | ident-end | 58:45 | 58:53 | ident |
+| End card | endcard | 58:53 | 60:30 | endcard |
+
 ## The segment catalogue
 
 Each segment is a format with its own fact pack, writer prompt, checks and screen layout. Every spoken line is
@@ -83,6 +134,7 @@ Rule 0, figure, quote and outlet checks as every other segment).
 | The News, Compared | compared | produced | twice an hour | on-air |
 | Business & Markets | markets | produced + live data | twice an hour, led by the exchanges in session | on-air |
 | Desks: Middle East, US, Tech and AI, Business | desk | produced | once an hour each | on-air |
+| Sport | sport | produced | once an hour, after The Hour (v1.5 clock; no sport stories, no slot) | #285 |
 | Crypto | crypto | produced + live data | once an hour, every hour (repeats get a fresh one) | on-air |
 | Weather | weather | produced + live data | every 2 hours (even New York hours) | on-air |
 | ScoopFeeds showcase | showcase | pre-recorded | a Short every hour; the film at 9 ET | on-air |

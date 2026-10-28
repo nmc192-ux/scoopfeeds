@@ -53,6 +53,7 @@ export const SEGMENTS = Object.freeze([
   { id: "compared", name: "The News, Compared", kind: "produced", every: "twice an hour", facts: "one story, 3+ outlets", scene: "compared, known", status: "on-air" },
   { id: "markets", name: "Business & Markets", kind: "produced + live data", every: "twice an hour, led by the exchanges in session", facts: "market rows", scene: "markets", status: "on-air" },
   { id: "desk", name: "Desks: Middle East, US, Tech and AI, Business", kind: "produced", every: "once an hour each", facts: "desk stories", scene: "title, story", status: "on-air" },
+  { id: "sport", name: "Sport", kind: "produced", every: "once an hour, after The Hour (v1.5 clock; no sport stories, no slot)", facts: "sport stories", scene: "title, story", status: "#285" },
   { id: "crypto", name: "Crypto", kind: "produced + live data", every: "once an hour, every hour (repeats get a fresh one)", facts: "crypto rows (CoinGecko)", scene: "markets", status: "on-air" },
   { id: "weather", name: "Weather", kind: "produced + live data", every: "every 2 hours (even New York hours)", facts: "weather rows", scene: "weather", status: "on-air" },
   { id: "showcase", name: "ScoopFeeds showcase", kind: "pre-recorded", every: "a Short every hour; the film at 9 ET", facts: "film library", scene: "film, feature, series", status: "on-air" },
@@ -160,7 +161,8 @@ const sessionNames = (list) => {
 /**
  * Apply the hour's plan to the base clock (`buildClock()` slots). Contiguity is preserved, so `checkClock()`
  * still holds.
- *   - crypto: the first 90 s of the first music block become the Crypto segment
+ *   - crypto: the first 90 s of the first music block become the Crypto segment (#285: in the v1.5 clock, where
+ *     that block is 90 s and marked `cryptoDonor`, the whole block)
  *   - no weather this hour: the weather slot's time goes to the half-hour headlines (seven stories, not five)
  *   - Markets Now and the Business desk are titled by the exchanges in session at their air time, and carry
  *     `sessions` (ids) and `marketsLead` (row groups to lead with)
@@ -173,7 +175,11 @@ export function applyPlan(slots, plan) {
   if (plan.crypto) {
     const i = out.findIndex((s) => s.kind === "music" && s.startSec >= 0);
     const m = out[i];
-    if (m && m.lenSec >= CRYPTO_SEC + MIN_MUSIC_AFTER_CRYPTO) {
+    if (m?.cryptoDonor && m.lenSec === CRYPTO_SEC) {
+      // #285: the v1.5 clock's music-1 is exactly the Crypto segment's length: Crypto takes all of it
+      const { cryptoDonor: _d, nextAt: _a, nextTitle: _t, ...rest } = m;
+      out.splice(i, 1, { ...rest, id: "crypto", kind: "spoken", segment: "crypto", title: "Crypto", sting: true, daypart: "markets" });
+    } else if (m && m.lenSec >= CRYPTO_SEC + MIN_MUSIC_AFTER_CRYPTO) {
       const c = retime({ id: "crypto", kind: "spoken", segment: "crypto", title: "Crypto", sting: true, daypart: "markets" }, m.startSec, m.startSec + CRYPTO_SEC, H);
       const rest = retime({ ...m, sting: false }, m.startSec + CRYPTO_SEC, m.endSec, H);
       out.splice(i, 1, c, rest);
@@ -182,7 +188,8 @@ export function applyPlan(slots, plan) {
 
   if (!plan.weather) {
     const w = out.find((s) => s.id === "weather");
-    if (w) out = out.filter((s) => s !== w).map((s) => (s.id === "half" ? { ...retime(s, s.startSec, w.endSec, H), stories: 7 } : s));
+    // #285: the v1.5 half reads only new stories (`fresh`): five at most, not seven
+    if (w) out = out.filter((s) => s !== w).map((s) => (s.id === "half" ? { ...retime(s, s.startSec, w.endSec, H), stories: s.fresh ? 5 : 7 } : s));
   }
 
   out = out.map((s) => {
@@ -206,7 +213,7 @@ export function elementsForKind(slot) {
   if (slot.kind === "ident" || slot.kind === "feature") return ["live-bug"];   // full-frame: the ident or the episode
   if (slot.kind === "countdown" || slot.kind === "endcard") return ["clocks"];
   const rail = ["coming-up", "markets-ticker", "weather-scroller"];
-  if (slot.kind === "spoken" && ["the-hour", "half", "desk"].includes(slot.segment)) return [...frame, "lower-third", ...rail];
+  if (slot.kind === "spoken" && ["the-hour", "half", "desk", "sport"].includes(slot.segment)) return [...frame, "lower-third", ...rail];
   if (slot.kind === "music") return [...frame, ...rail];
   return [...frame, "coming-up"];
 }

@@ -28,6 +28,11 @@ fails when they disagree. `clock.js buildGridClock()` builds an hour as an insta
 segment on air for breaking news or a live event and resumes at the next segment boundary.
 `../screen/fontFloor.mjs --shots <dir>` measures every scene of both screens (26 px floor) and takes the screenshots.
 
+**The v1.5 clock (#285, `RADIO_CLOCK_V15=1`, dark by default):** `clock.js ORDER_V15`. Longer bulletins (The Hour:
+7 stories, world, business, sport), a Sport slot that earn-renders (`dropSport`), a half-hour that reads only stories
+The Hour did not read (`checks.js freshHalf`), music blocks of 90 s at most, "Coming up" on the music scene. A partial
+run keeps the clock its hour was built with (`programme.json` `clock`). See `docs/radio/channel-grid.md`.
+
 ## Unattended hours (auto-air)
 
 `autoair.mjs` runs a whole hour with nobody at the desk: produce, air check (`airCheck.js`), YouTube broadcast

@@ -119,6 +119,13 @@ export function airCheck(dir, { hourStart, rules = AIR_RULES, listenRules = LIST
     problems.push(...r.problems);
   }
 
+  if (prog?.clock === "v15") {
+    const r = v15Report(prog, kept);
+    Object.assign(stats, r.stats);
+    notes.push(...r.notes);
+    problems.push(...r.problems);
+  }
+
   if (prog) {
     const c = cryptoReport(prog);
     stats.crypto = c.status;
@@ -127,6 +134,25 @@ export function airCheck(dir, { hourStart, rules = AIR_RULES, listenRules = LIST
   }
 
   return { ok: problems.length === 0, problems, stats, notes };
+}
+
+/**
+ * #285: the v1.5 clock. The music in the hour's slots is reported (`stats.musicSecs`, a note over 6 minutes: the clock
+ * is built not to). The second lock on the half-hour: a kept half line on a story id The Hour read fails the hour
+ * (checks.js drops those; same-story-under-another-id is checked there, with the pack). A repeat's half is the repeated
+ * hour's and is not compared with the fresh The Hour: noted, never passed silently. Pure.
+ */
+export function v15Report(prog, kept) {
+  const notes = [], problems = [];
+  const slots = (prog.slots || []).filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.start >= prog.hourStart);
+  const musicSecs = Math.round(slots.filter((s) => s.kind === "music").reduce((n, s) => n + (s.end - s.start) / 1000, 0));
+  if (musicSecs > 360) notes.push(`clock v15: ${musicSecs} s of music this hour, over 6 minutes`);
+  if (prog.repeatOf) notes.push("clock v15: repeat: the half-hour is the repeated hour's, not checked against the fresh The Hour (unverified)");
+  else if (kept?.["the-hour"] && kept?.half) {
+    const read = new Set((kept["the-hour"].lines || []).map((l) => l.story).filter(Boolean));
+    for (const l of kept.half.lines || []) if (/^h\d+$/.test(l.id || "") && read.has(l.story)) problems.push(`half/${l.id}: story ${l.story} was read in The Hour (#285: the half reads only new stories)`);
+  }
+  return { stats: { musicSecs }, notes, problems };
 }
 
 /** #283: the hour's Crypto state, for the air-check report. Pure. */
