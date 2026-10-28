@@ -73,10 +73,14 @@ const LEADS = /\b(leads?|leading|ahead|trails?|trailing)\b/i, COUNT_CTX = /\b(ra
 const HOW_MUCH = /\b\d+(\.\d+)? percent of (the )?(expected |estimated )?(vote|votes|ballots|precincts)\b|\bcounting continues\b/i;
 const ORG_NAMES = ORGS.map(([c, names]) => [c, new RegExp(`\\b(${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`, "i")]);
 
+/** Segments that carry election results: the Midterms desk (#197) and the election night special and day after (#198). */
+export const ELECTION_SEGMENTS = new Set(["midterms", "roundup", "update", "results", "counting"]);
+
 /** Is this line about this year's races? */
 export function isElectoral(text, slot) {
-  if (/\b(19|20)(?!26)\d{2}\b/.test(text) && slot?.segment !== "midterms") return false;
-  if (slot?.segment === "midterms" || RACE_TALK.test(text)) return true;
+  const desk = ELECTION_SEGMENTS.has(slot?.segment);
+  if (/\b(19|20)(?!26)\d{2}\b/.test(text) && !desk) return false;
+  if (desk || RACE_TALK.test(text)) return true;
   return US_POLITICS.test(text.replace(/\bwhite house\b/gi, " ")) && ELECT_WORD.test(text);
 }
 

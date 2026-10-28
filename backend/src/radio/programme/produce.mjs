@@ -14,6 +14,10 @@
  *                   overnight repeat: a fresh The Hour over a repeated hour, --from the-hour --to markets-1).
  * --weather 0|1     0: no weather this hour, the half-hour headlines take its time (the 24/7 day, dayClock.js). Default 1.
  * --developing <file>  #201: the developing desk's followups.json; those stories lead the headlines while they grow.
+ * --election-night special|day-after  #198: the election night special's clock (electionNight.js), or a day-after hour
+ *                   with the "Counting continues" desk. The rolling station passes it from stationPlan(); with
+ *                   --election-fixture FILE the projections come from fixture articles (the dress rehearsal), and
+ *                   --election-start ISO moves the night so the special starts at that hour (poll closings move too).
  * --headline-writer reads headlines verbatim instead of calling Claude (the cost-guard fallback; same as --fake-writer).
  * Every Claude call is counted in <out>/writer.json (calls, failures, whether a usage limit was hit).
  * Voice: Kokoro (VIDEO_TTS_PROVIDER=kokoro, VIDEO_TTS_KOKORO_URL=http://127.0.0.1:8880) unless --fake-voice.
@@ -30,7 +34,8 @@ import { labelMarkets, marketsShutAt } from "./marketsClock.js";
 import { spliceProgramme } from "./repeat.js";
 import { withProgrammeLock, reapplyInserts, addDevelopingStories } from "./developingDesk.js";
 import { checkSegments } from "./checks.js";
-import { buildElectionPack } from "./electionPack.js";
+import { buildElectionPack, extractElectionPack } from "./electionPack.js";
+import { buildSpecialClock, addCountingDesk, addPollCloseLines, mechanicalUpdate, mechanicalCounting, projectionLines, nightWindow, fixtureArticles, UPDATE_ID } from "./electionNight.js";
 import { deskOn, addDeskToClock, addBallotLines } from "./electionDesk.js";
 import { assemble, fakeVoice, kokoroVoice, durationSecs } from "./assemble.js";
 import { screenCredit } from "../musicManifest.js";
@@ -44,6 +49,7 @@ const { values: v } = parseArgs({ options: {
   to: { type: "string" }, weather: { type: "string", default: "1" }, "headline-writer": { type: "boolean" },
   developing: { type: "string" },   // #201: followups.json from the developing desk (aired stories still growing)
   grid: { type: "boolean" },   // #200: build the hour from the channel grid (also RADIO_GRID_ENABLED=1)
+  "election-night": { type: "string" }, "election-fixture": { type: "string" }, "election-start": { type: "string" },   // #198
 } });
 const log = (m) => console.log(`🎙 produce: ${m}`);
 const die = (m) => { console.error(`🎙 produce: ${m}`); process.exit(2); };
@@ -64,13 +70,22 @@ if (v.film) {
   else log(`film slot: no film this hour (${r.reason}); the slot is filled by the normal programme`);
 }
 
-const feature = v.feature ? path.resolve(v.feature.replace(/^~/, process.env.HOME)) : null;
+let feature = v.feature ? path.resolve(v.feature.replace(/^~/, process.env.HOME)) : null;
 if (feature && !fs.existsSync(feature)) die(`feature not found: ${feature}`);
 const featureSec = feature ? durationSecs(feature) + 2.6 + 1.0 : 0;   // sting + the episode + a breath
-const useGrid = v.grid || process.env.RADIO_GRID_ENABLED === "1";
+const night = v["election-night"] || null;   // #198
+if (night && !["special", "day-after"].includes(night)) die("--election-night must be special or day-after");
+const nightWin = nightWindow(v["election-start"] ? { startAt: Date.parse(v["election-start"]) } : {});
+const elFixture = v["election-fixture"] ? path.resolve(v["election-fixture"].replace(/^~/, process.env.HOME)) : null;
+const useGrid = night !== "special" && (v.grid || process.env.RADIO_GRID_ENABLED === "1");
 const clockOpts = { featureSec, featureTitle: v["feature-title"] || (feature ? path.basename(feature).replace(/\.[^.]+$/, "") : null), film: !!film, filmTitle };
 let gridPlan = null, clock;
-if (useGrid) {
+if (night === "special") {
+  clock = buildSpecialClock(hourStart);   // replaces the normal clock: no film, feature, markets or weather
+  if (film || feature) log("election night special: the film and the feature do not air this hour");
+  film = null; filmTitle = null; feature = null;
+  log(`election night special${nightWin.rehearsal ? " (dress rehearsal)" : ""}: updates at :00, :15, :30, :45; poll closings from the race list`);
+} else if (useGrid) {
   ({ plan: gridPlan, slots: clock } = buildGridClock(hourStart, clockOpts));
   log(`grid: ${gridPlan.label}`);
   if (gridPlan.format === "repeat") log("grid: this is an overnight repeat hour; produce.mjs builds a full hour (the repeat itself is #195's rolling station)");
@@ -79,7 +94,11 @@ if (useGrid) {
 const problems = checkClock(clock);
 if (problems.length) die(`clock is broken: ${problems.join("; ")}`);
 // The Midterms desk (#197): dark unless RADIO_ELECTION_DESK=1; hours from 26 Oct to 6 Nov (New York)
-const midterms = deskOn(hourStart) ? addDeskToClock(clock, hourStart) : null;
+// #198: on election night and the days after, the counting desk takes the Midterms desk's place
+const midterms = !night && deskOn(hourStart) ? addDeskToClock(clock, hourStart) : null;
+const counting = night === "day-after" ? addCountingDesk(clock, hourStart) : null;
+if (night === "day-after" && !counting) log("day after: no music-1 slot long enough for the counting desk this hour");
+if (counting && checkClock(clock).length) die(`clock is broken after adding the counting desk: ${checkClock(clock).join("; ")}`);
 if (midterms && checkClock(clock).length) die(`clock is broken after adding the Midterms desk: ${checkClock(clock).join("; ")}`);
 const fromIdx = v.from ? clock.findIndex((s) => s.id === v.from) : 0;
 if (fromIdx < 0) die(`--from: no slot "${v.from}" (slots: ${clock.map((s) => s.id).join(", ")})`);
@@ -95,8 +114,10 @@ try { ({ beds, bedFor } = await loadBeds(musicDir, { log })); } catch (e) { die(
 
 // ── facts ──
 const pack = await buildFactPack({ base: v.base || "https://scoopfeeds.com", log, crypto: useGrid });
-if (midterms) {
-  pack.election = await buildElectionPack({ base: v.base || "https://scoopfeeds.com", log, now: pack.builtAt });
+if (midterms || night) {
+  pack.election = elFixture ? extractElectionPack(fixtureArticles(elFixture, nightWin), { now: pack.builtAt })
+    : await buildElectionPack({ base: v.base || "https://scoopfeeds.com", log, now: pack.builtAt });
+  if (elFixture) log(`election pack from the fixture ${path.basename(elFixture)} (rehearsal)`);
   pack.desks.midterms = pack.election.stories;
   log(`election pack: ${pack.election.items.length} attributed item(s), ${pack.election.races.filter((r) => r.status === "conflict").length} conflict(s), ${pack.election.refused.length} refused, ${pack.election.stories.length} stories`);
 }
@@ -170,8 +191,16 @@ const saveWriterLog = () => {
   log(`writer: ${run.calls} Claude call(s), ${run.failures} failure(s)${run.limitHit ? ", USAGE LIMIT hit" : ""}`);
 };
 let raw;
-try { raw = await writeSegments(pack, spoken, when, { write: counted, log }); }
+// #198: the update slots of the special are mechanical placeholders here (update.mjs re-produces each before it airs)
+try { raw = await writeSegments(pack, spoken.filter((s) => !s.mechanical), when, { write: counted, log }); }
 finally { saveWriterLog(); }
+if (night === "special") {
+  for (const s of spoken.filter((x) => UPDATE_ID.test(x.id))) {
+    raw[s.id] = mechanicalUpdate(pack.election, s, nightWin);
+    const g = addPollCloseLines(raw, s, nightWin);
+    if (g.length) log(`${s.id}: poll closings ${g.map((x) => `${new Date(x.at).toISOString().slice(11, 16)} UTC (${x.states.join(" ")})`).join("; ")}`);
+  }
+}
 fs.writeFileSync(path.join(out, "segments.raw.json"), JSON.stringify(raw, null, 1));
 if (midterms) addBallotLines(raw, hourStart);   // mechanical "what's on the ballot" lines, checked like the rest
 const { segments, report } = checkSegments(raw, spoken, pack, { log });
@@ -232,6 +261,7 @@ withProgrammeLock(out, () => {
     if (fromIdx > 0 && (prog.inserts || []).length) prog = reapplyInserts(prog, prog.inserts, cut);
   }
   if (gridPlan) prog.grid = gridPlan;
+  if (night) prog.election = night;   // #198: "special" | "day-after" (airCheck, the update desk, the rehearsal report)
   // the screen's right rail (#200): markets and weather, verbatim from the pack; each block renders only with data
   prog.rail = { markets: pack.markets, weather: pack.weather };
   prog.headlines = [...pack.top.map((s) => ({ h: s.headline, src: s.outlets.slice(0, 2).map((o) => o.source).join(" and ") })),
@@ -276,6 +306,16 @@ async function fakeWriter() {
       (pack.election?.races || []).flatMap((r) => r.calls).slice(0, 4).forEach((c, i) => L.push({ id: `p${i + 1}`, story: null, text: c.quote }));
       L.push({ id: "close", text: "That's the Midterms desk." });
     }
+    else if (slot.segment === "roundup" || slot.segment === "results") {   // #198
+      const ep = pack.election;
+      L.push({ id: "open", text: slot.segment === "roundup" ? "This is ScoopFeeds Radio's election night special." : `${slot.title}.` });
+      const proj = projectionLines(ep, { budget: 150, focus: slot.segment === "results" ? slot.focus : null });
+      if (proj.length) L.push(...proj.map(({ mechanical, ...l }) => l));
+      else L.push({ id: "p1", story: null, text: "No news organisation has made a projection in these races yet." });
+      (pack.desks.midterms || []).slice(0, 2).forEach((st, i) => L.push(line(st, `e${i + 1}`)));
+      L.push({ id: "close", text: "Counting continues." });
+    }
+    else if (slot.segment === "counting") { s[slot.id] = { lines: mechanicalCounting(pack.election, slot).lines.map(({ mechanical, ...l }) => l) }; continue; }
     else if (slot.segment === "signoff") L.push({ id: "s1", text: "That was the first hour of ScoopFeeds Radio. Every newsroom, one stream." });
     else if (slot.segment === "compared") {
       const st = [...pack.top, ...Object.values(pack.desks).flat()].filter((x) => x.count >= 3)[slot.id === "compared-2" ? 1 : 0] || pack.top[0];

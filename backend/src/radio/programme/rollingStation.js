@@ -26,6 +26,7 @@ import path from "node:path";
 import { planHour, broadcastRollDue } from "./dayClock.js";
 import { pickStrongest, prepareRepeat } from "./repeat.js";
 import { sameStory } from "./factPack.js";
+import { updatesDue, UPDATE_DEFAULTS } from "./electionNight.js";
 
 export const HOUR = 3_600_000;
 const MIN = 60_000;
@@ -40,6 +41,8 @@ export const DEFAULTS = Object.freeze({
   maxRestartsPerHour: 3,  // a playout that keeps dying in one hour gives way to the 24/7 screen
   rollEtHours: [4, 16],   // quiet hand-overs where the 12-hour YouTube broadcast rolls over
   developingEveryMin: 2,  // #201: how often the developing desk looks at the event graph's list
+  updateLeadMin: UPDATE_DEFAULTS.leadMin,       // #198: start a 15-minute election update this long before its slot
+  updateMarginSec: UPDATE_DEFAULTS.marginSec,   // ...and splice it at least this long before the slot airs
 });
 
 export const hourStamp = (ms) => new Date(ms).toISOString().slice(0, 13).replace(/[:]/g, "");
@@ -186,6 +189,10 @@ export class RollingStation {
    * @param {Function} [o.developing] #201: async ({ targets, now, writerBusy }) => result; called every
    *                                  developingEveryMin while the loop sleeps, never twice at once. `targets` are the
    *                                  programmes that may take a bulletin: the hour on air, then the next hour if ready.
+   * @param {Function} [o.updates]   #198: async ({ dir, hourStart, slot, deadline, writerBusy }) => exit code (or { code, writer }); produces one
+   *                                  15-minute election update and splices it over its placeholder. Called while the loop
+   *                                  sleeps, one at a time, for the election special's hours (the hour on air and the next).
+   *                                  A failure or a missed window is recorded and skipped: the placeholder airs.
    */
   constructor(o) {
     Object.assign(this, { now: Date.now, sleep: (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms))), log: () => {}, alert: async () => {}, isPaused: () => false, grid: planHour, broadcast: null, forceFail: new Set(), forceTopChange: false }, o);
@@ -198,6 +205,53 @@ export class RollingStation {
     this.stopping = false;
     this.offAir = null;          // { at, hour } once PAUSE took the stream off air
     this.devNext = 0; this.devBusy = null; this.devLast = null;
+    this.updDone = new Set(); this.updBusy = null; this.updateLog = [];   // #198
+  }
+
+  /** #198: election special programmes that may take an update: the hour on air, then the next hour if ready. */
+  updateTargets() {
+    const out = [];
+    const add = (dir, hourStart) => {
+      try { const prog = JSON.parse(fs.readFileSync(path.join(dir, "programme.json"), "utf8")); if (prog.election === "special") out.push({ dir, hourStart, prog }); } catch { /* not ready */ }
+    };
+    const air = this.onAir;
+    if (air?.kind === "programme" && air.dir && air.hourStart) add(air.dir, air.hourStart);
+    const nextH = air?.hourStart ? air.hourStart + HOUR : this.firstH;
+    const nx = this.ready.get(nextH);
+    if (nx?.dir) add(nx.dir, nextH);
+    return out;
+  }
+
+  /** #198: record what happened to one update slot (status.json of its hour, the rehearsal report). */
+  noteUpdate(t, slot, r) {
+    const rec = { hour: hourStamp(t.hourStart), slot: slot.id, airsAt: slot.start, ...r };
+    this.updateLog.push(rec);
+    this.status(t.hourStart, { updates: [...(this.status(t.hourStart, {}).updates || []), rec] });
+    this.log(`hour ${rec.hour}: ${slot.id} ${r.result}${r.reason ? ` (${r.reason})` : ""}`);
+  }
+
+  /** #198: produce the next 15-minute update if one is due. Not awaited by the loop: an update never delays a hand-over. */
+  maybeUpdates() {
+    if (!this.updates || this.updBusy || this.stopping) return;
+    const targets = this.updateTargets();
+    if (!targets.length) return;
+    const now = this.now();
+    const { due, missed } = updatesDue(targets, now, this.updDone, { leadMin: this.opts.updateLeadMin, marginSec: this.opts.updateMarginSec });
+    for (const m of missed) { this.updDone.add(m.key); this.noteUpdate(m.target, m.slot, { result: "skipped", reason: "missed its window: the placeholder airs", startedAt: null, finishedAt: null }); }
+    if (!due) return;
+    this.updDone.add(due.key);
+    const writerBusy = this.queue.running > 0;
+    this.updBusy = Promise.resolve()
+      .then(() => (this.isPaused() ? 99 : this.updates({ dir: due.target.dir, hourStart: due.target.hourStart, slot: due.slot, deadline: due.deadline, writerBusy })))
+      .then((res) => {
+        const code = typeof res === "object" && res ? res.code : res;   // the hook may also say which writer it used
+        const finishedAt = this.now();
+        const ok = code === 0 && finishedAt <= due.slot.start;
+        this.noteUpdate(due.target, due.slot, { result: ok ? "on air" : "skipped", startedAt: now, finishedAt, marginSec: Math.round((due.slot.start - finishedAt) / 1000), writer: res?.writer || (writerBusy ? "mechanical (writer busy)" : "claude"),
+          reason: ok ? null : code === 99 ? "PAUSE" : code === 3 ? "nothing survived the checks: the placeholder airs" : `exit ${code}: the placeholder airs` });
+      })
+      .catch((e) => { this.noteUpdate(due.target, due.slot, { result: "skipped", reason: `crashed (${e.message}): the placeholder airs`, startedAt: now, finishedAt: this.now() }); })
+      .finally(() => { this.updBusy = null; });
   }
 
   /** #201: the hour on air and (if ready) the next one, as bulletin targets. Never the 24/7 screen. */
@@ -227,7 +281,8 @@ export class RollingStation {
     while (!this.stopping && this.now() < t) {
       if (this.isPaused()) { await this.goOffAir(); break; }
       this.maybeDeveloping();
-      await this.sleep(Math.min(30_000, t - this.now()));
+      this.maybeUpdates();
+      await this.sleep(Math.min(this.updates ? 15_000 : 30_000, t - this.now()));
     }
   }
 
@@ -262,6 +317,7 @@ export class RollingStation {
     await this.handover(null);   // until the first prepared hour, the 24/7 screen is on air
     if (this.broadcast) this.broadcast.goLive();
     let H = firstHour(this.now());
+    this.firstH = H;
     const jobs = [];
     for (let n = 0; n < hours && !this.stopping; n++, H += HOUR) {
       await this.sleepUntil(H - this.opts.prepareLeadMin * MIN);
@@ -281,7 +337,7 @@ export class RollingStation {
     if (this.onAir) this.onAir.retired = true;
     await this.onAir?.handle?.stop();   // off air first; a producer still running cannot air anything now
     if (this.broadcast) await this.broadcast.end(this.offAir ? "PAUSE" : "the loop stopped");
-    await Promise.allSettled([...jobs, this.devBusy].filter(Boolean));
+    await Promise.allSettled([...jobs, this.devBusy, this.updBusy].filter(Boolean));
     this.log(`stopped after ${this.hours.length} hour(s)${this.offAir ? " (PAUSE: off air)" : ""}`);
     return this.hours;
   }
@@ -303,7 +359,7 @@ export class RollingStation {
     const produceStep = async (args, kind) => {
       const before = writerRunCount(dir);
       const forced = this.forceFail.has(H) || this.forceFail.has(hourStamp(H));
-      const code = forced ? (this.log(`hour ${hourStamp(H)}: FORCED producer failure (rehearsal switch)`), 1) : await this.produce({ hourStart: H, out: dir, weather: plan.weather, deadline, ...args });
+      const code = forced ? (this.log(`hour ${hourStamp(H)}: FORCED producer failure (rehearsal switch)`), 1) : await this.produce({ hourStart: H, out: dir, weather: plan.weather, deadline, plan, ...args });
       const run = writerRunSince(dir, before);
       if (run) {
         st.writer.calls += run.calls; st.writer.failures += run.failures; st.writer.limitHit ||= run.limitHit;
@@ -319,6 +375,12 @@ export class RollingStation {
     if (!guard.ok) { this.log(`hour ${hourStamp(H)}: cost guard: ${guard.reason}`); st.costGuard = guard.reason; this.status(H, { costGuard: guard.reason }); }
     if (decision === "produced" && !guard.ok) decision = "repeat";
 
+    if (decision === "election-special") {
+      // #198: the special is never replaced by a repeat; over the cost guard it is read by the headline writer
+      this.status(H, { stage: "producing", decision });
+      const code = await produceStep(guard.ok ? {} : { headlineWriter: true }, "produce");
+      if (code !== 0) return fail(`election special producer failed (exit ${code})`);
+    }
     if (decision === "produced") {
       this.status(H, { stage: "producing", decision });
       const code = await produceStep({}, "produce");

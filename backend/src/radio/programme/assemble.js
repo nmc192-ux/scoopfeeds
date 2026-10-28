@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { storyIndex } from "./factPack.js";
 import { boardData, boardPages } from "./electionDesk.js";
+import { ELECTION_SEGMENTS } from "./checks.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const BOARD_PAGE_MIN_SEC = 8;   // #197: shortest time one election-board page stays up
@@ -211,10 +212,11 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
           if (!cues.some((c) => c.at >= at(s.startSec) && c.scene === "compared")) cues.push({ at: at(t0), scene: "compared", data: { title: s.title, headline: headline(seg.story), cards, active: -1 } });
           break;
         }
-        if (s.segment === "midterms") {   // #197: title, ballot cards, story cards, then the board (earn-render: only with an attributed item)
+        if (ELECTION_SEGMENTS.has(s.segment)) {   // #197/#198: title, ballot and poll-closing cards, story cards, then the board (earn-render: only with an attributed item)
           const board = boardData(pack.election), mark = cues.length;
           cues.push({ at: at(t0), scene: "title", data: { kicker: "ScoopFeeds Radio", title: s.title, items: storyLines.map((l) => headline(l.story)).filter(Boolean) } });
           for (const l of lines.filter((x) => /^b\d+$/.test(x.id || ""))) cues.push({ at: at(l.atSec), scene: "known", data: { kicker: s.title, title: s.title, headline: "What's on the ballot, 3 November", label: "On the ballot", text: l.text } });
+          for (const l of lines.filter((x) => /^pc\d+$/.test(x.id || ""))) cues.push({ at: at(l.atSec), scene: "known", data: { kicker: s.title, title: s.title, headline: "Polls closing", label: "Polls closed", text: l.text } });   // #198
           storyLines.forEach((l, i) => cues.push({ at: at(l.atSec), scene: "story", data: { kicker: s.title, n: i + 1, of: storyLines.length, headline: headline(l.story), outlets: outletsOf(l.story).slice(0, 4), lede: ledeOf(l.story) } }));
           if (board) {   // the board is paged (26 px floor): every page gets an equal share from the first projection line to the slot's end
             const first = lines.find((l) => /^p\d+$/.test(l.id || "")) || lines.find((l) => l.id === "close") || lines.at(-1);
