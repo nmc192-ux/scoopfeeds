@@ -14,9 +14,12 @@
  *   markets   (#245) a row from the last session (closed) is never read as today's move.
  *   weather   (#247) every city in degrees Celsius: a line that says Fahrenheit is dropped, and a
  *             Fahrenheit figure is not a backed number.
+ *   fresh     (#285) the v1.5 half-hour reads only stories The Hour did not read: a line on a story read at :00
+ *             (same id, or the same story under another id) is dropped; under 3 lines left, the segment is its
+ *             open, one "No major changes since the top of the hour." line and its close.
  */
 import { radioRulesVerdict, hasPakistanSignal } from "../radioRules.js";
-import { storyIndex } from "./factPack.js";
+import { storyIndex, jaccard } from "./factPack.js";
 import { electionText, canonOrg, ORGS, statesIn } from "./electionPack.js";
 import { electionClaimVerdict } from "../safety/electionClaims.js";
 import { staleMarketLine, stripCloseDates } from "./marketsClock.js";
@@ -151,5 +154,45 @@ export function checkSegments(segments, slots, pack, { log = () => {} } = {}) {
     }
     out[slot.id] = { ...seg, lines: kept };
   }
+  for (const slot of slots.filter((s) => s.segment === "half" && s.fresh && out[s.id])) out[slot.id] = freshHalf(out[slot.id], slot, out["the-hour"], idx, report, log);
   return { segments: out, report };
+}
+
+export const NO_CHANGE = "No major changes since the top of the hour.";
+export const FRESH_MIN = 3;
+
+/** Two pack stories are the same story: same id, near-identical headlines, or an article in common. */
+export function sameStoryAs(a, b) {
+  if (!a || !b) return false;
+  if (a.id === b.id) return true;
+  if (jaccard(a.headline, b.headline) >= 0.5) return true;
+  const titles = new Set((a.outlets || []).map((o) => o.title).filter(Boolean));
+  return (b.outlets || []).some((o) => o.title && titles.has(o.title));
+}
+
+/**
+ * #285: the v1.5 half-hour after the line checks. Without The Hour in the same run there is nothing to compare against
+ * and the half is left as written. In a produced hour the two are always written in the same run (every refresh
+ * starts after the half). Known gap: an overnight repeat splices a fresh The Hour over the repeated hour, and the
+ * repeated hour's own half (checked against ITS The Hour) is not re-checked against the fresh one.
+ */
+export function freshHalf(seg, slot, hour, idx, report, log = () => {}) {
+  if (!hour) return seg;
+  const read = (hour.lines || []).map((l) => idx.get(l.story)).filter(Boolean);
+  const isStory = (l) => /^h\d+$/.test(l.id || "");
+  const kept = [];
+  for (const l of seg.lines) {
+    if (isStory(l) && read.some((r) => sameStoryAs(r, idx.get(l.story)))) {
+      report.push({ slot: slot.id, line: l.id, drop: "fresh: a story The Hour read", text: String(l.text).slice(0, 120) });
+      log(`✂ ${slot.id}/${l.id}: fresh: a story The Hour read`);
+      continue;
+    }
+    kept.push(l);
+  }
+  const stories = kept.filter(isStory);
+  if (stories.length >= FRESH_MIN) return { ...seg, lines: kept.filter((l) => l.id !== "nochange") };
+  for (const l of stories) report.push({ slot: slot.id, line: l.id, drop: `fresh: only ${stories.length} new stor${stories.length === 1 ? "y" : "ies"} (under ${FRESH_MIN}): the half says there are no major changes`, text: String(l.text).slice(0, 120) });
+  const open = kept.find((l) => l.id === "open"), close = kept.find((l) => l.id === "close");
+  const own = kept.find((l) => l.id === "nochange");
+  return { ...seg, lines: [...(open ? [open] : []), own || { id: "nochange", story: null, text: NO_CHANGE, mechanical: true }, ...(close ? [close] : [])] };
 }

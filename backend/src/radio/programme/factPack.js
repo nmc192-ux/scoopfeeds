@@ -79,6 +79,9 @@ const DESKS = {
   business: { tab: "business", keep: (a) => !/\b(psx|kse|karachi|pakistan)\b/i.test(`${a.title} ${a.description}`) },
 };
 
+/** #285: the Sport desk (v1.5 clock only). Sports articles are kept out of every other desk and the top stories. */
+export const SPORT_DESK = { tab: "sports", keep: () => true };
+
 // Markets: CNBC's quote feed, Yahoo's chart API for anything CNBC lacks (prod's own /api/market is
 // blocked by Yahoo from the VPS), crypto from scoopfeeds.com (CoinGecko).
 export const MARKET_SYMBOLS = [
@@ -236,14 +239,14 @@ export async function fetchWeather(base, opts = {}) {
  * @returns {Promise<{ builtAt, state, top: story[], desks: {[desk]: story[]}, markets, weather, dropped, crypto? }>}
  *   story = { id, headline, outlets: [{source, title, description, published}], count }
  */
-export async function buildFactPack({ base = "https://scoopfeeds.com", fetchImpl = fetch, now = Date.now(), log = () => {}, crypto = false, cryptoRetryMs } = {}) {
+export async function buildFactPack({ base = "https://scoopfeeds.com", fetchImpl = fetch, now = Date.now(), log = () => {}, crypto = false, cryptoRetryMs, v15 = false } = {}) {
   const opts = { fetchImpl, log };
   const dropped = [];
-  const news = async (q) => {
+  const news = async (q, { sports = false } = {}) => {
     const d = await getJson(`${base}/api/news?${q}`, opts);
     const out = [];
     for (const a of d?.data || []) {
-      if (Number(a.is_duplicate) === 1 || a.category === "sports") continue;
+      if (Number(a.is_duplicate) === 1 || (a.category === "sports" && !sports)) continue;
       if (/\/(opinion|opinions|op-ed|oped|commentary|columns?|editorials?|analysis\/opinion)\//i.test(a.url || "")) { dropped.push(a.title); continue; }   // opinion is not news
       if (!airable(a)) { dropped.push(a.title); continue; }
       out.push(slim(a));
@@ -270,9 +273,13 @@ export async function buildFactPack({ base = "https://scoopfeeds.com", fetchImpl
   }
 
   const desks = {};
-  for (const [name, d] of Object.entries(DESKS)) {
+  // #285 (RADIO_CLOCK_V15): the Tech and AI desk is "Science, Tech and AI" (the science tab joins it), and a Sport desk
+  // feeds the Sport slot and The Hour's sport story. Off: the desks are exactly what they were.
+  const deskList = v15 ? { ...DESKS, tech: { ...DESKS.tech, tabs: ["tech", "science"] }, sport: SPORT_DESK } : DESKS;
+  for (const [name, d] of Object.entries(deskList)) {
     try {
-      const arts = (await news(`tab=${d.tab}&limit=80&minCredibility=7`)).filter(d.keep)
+      const arts = (await Promise.all((d.tabs || [d.tab]).map((tab) => news(`tab=${tab}&limit=80&minCredibility=7`, { sports: name === "sport" })))).flat()
+        .filter(d.keep)
         .filter((a) => !a.published || now - a.published < 18 * 3600_000);
       desks[name] = clusterStories(arts).slice(0, 4).map((c, i) => ({
         id: `${name.slice(0, 2)}${i + 1}`, headline: c.lead.title, outlets: c.items.slice(0, 5), count: c.outlets,

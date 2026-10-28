@@ -557,8 +557,22 @@ function renderRail(t, scene){
   $('main').classList.toggle('railed', !$('rUp').hidden || !$('rMk').hidden || !$('rWx').hidden);
 }
 
-/* music scene: rotate headline cards every 12 s by the clock (no timers to drift) */
+/* music scene: rotate headline cards every 12 s by the clock (no timers to drift).
+   #285 (v1.5 clock): music no longer loops the headlines just read; it shows what is coming up, with a countdown
+   (the rail beside it carries the markets and the weather). No titled slot ahead: no card (earn-render). */
+function comingUpCard(t){
+  const up = (PROG.slots || []).filter((s) => s.start > t && s.title && !['ident', 'countdown', 'endcard', 'music'].includes(s.kind)).sort((a, b) => a.start - b.start)[0];
+  const s = up ? Math.max(0, Math.ceil((up.start - t) / 1000)) : 0;
+  const key = up ? `${up.start}|${s}` : 'none';
+  if ($('hcards').dataset.i === key) return; const fresh = !$('hcards').dataset.i || $('hcards').dataset.i.split('|')[0] !== key.split('|')[0]; $('hcards').dataset.i = key;
+  if (!up){ $('hcards').innerHTML = ''; return; }
+  const cd = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  if (!fresh && $('hcards').querySelector('.cd')){ $('hcards').querySelector('.cd').textContent = cd; return; }
+  $('hcards').innerHTML = `<div class="hcard coming"><div class="kicker caps">Coming up</div><p>${esc(up.title)}</p><div class="src">in <span class="cd num">${cd}</span> · ${hm(up.start, 'America/New_York')} New York</div></div>`;
+  requestAnimationFrame(() => requestAnimationFrame(() => $('hcards').firstChild?.classList.add('on')));
+}
 function musicCards(t){
+  if (PROG.clock === 'v15') return comingUpCard(t);
   const hs = (PROG.headlines || []).filter((x) => x.h); if (!hs.length) return;
   const i = Math.floor(t / 12000) % hs.length;
   if ($('hcards').dataset.i === String(i)) return; $('hcards').dataset.i = String(i);

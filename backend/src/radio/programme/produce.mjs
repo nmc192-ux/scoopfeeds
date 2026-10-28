@@ -24,11 +24,14 @@
  * Every Claude call is counted in <out>/writer.json (calls, failures, whether a usage limit was hit).
  * Voice: Kokoro (VIDEO_TTS_PROVIDER=kokoro, VIDEO_TTS_KOKORO_URL=http://127.0.0.1:8880) unless --fake-voice.
  * Writer: `claude -p --model sonnet` on DrJ's subscription unless --fake-writer.
+ * #285: RADIO_CLOCK_V15=1 builds the v1.5 clock (clock.js ORDER_V15: longer bulletins, a Sport slot, a fresh-only
+ * half-hour, music blocks of 90 s at most). A partial run (--from) follows the clock of the programme.json already in
+ * --out for this hour, so a refresh or a repeat's splice never mixes the two clocks; programme.json says `clock: "v15"`.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { buildClock, buildGridClock, checkClock } from "./clock.js";
+import { buildClock, buildGridClock, checkClock, clockV15, dropSport, musicSecs } from "./clock.js";
 import { buildFactPack, cryptoForRun, railMarkets } from "./factPack.js";
 import { writeSegments, claudeWriter, isLimitError } from "./writer.js";
 import { sessionsAt } from "./dayClock.js";
@@ -80,7 +83,12 @@ if (night && !["special", "day-after"].includes(night)) die("--election-night mu
 const nightWin = nightWindow(v["election-start"] ? { startAt: Date.parse(v["election-start"]) } : {});
 const elFixture = v["election-fixture"] ? path.resolve(v["election-fixture"].replace(/^~/, process.env.HOME)) : null;
 const useGrid = night !== "special" && (v.grid || process.env.RADIO_GRID_ENABLED === "1");
-const clockOpts = { featureSec, featureTitle: v["feature-title"] || (feature ? path.basename(feature).replace(/\.[^.]+$/, "") : null), film: !!film, filmTitle };
+// #285: a partial run keeps the clock the hour was built with (a repeat's programme.json is the repeated hour's, retimed)
+const existingProg = (() => { if (!v.from) return null; try { const p = JSON.parse(fs.readFileSync(path.join(out, "programme.json"), "utf8")); return p?.hourStart === hourStart ? p : null; } catch { return null; } })();
+const v15 = night !== "special" && (existingProg ? existingProg.clock === "v15" : clockV15());
+if (v15) log(`clock: v1.5 (#285)${existingProg ? ", as this hour was built" : ", RADIO_CLOCK_V15=1"}`);
+else if (existingProg && clockV15() && night !== "special") log("clock: RADIO_CLOCK_V15=1, but this hour was built on the old clock: the partial run keeps it");
+const clockOpts = { featureSec, featureTitle: v["feature-title"] || (feature ? path.basename(feature).replace(/\.[^.]+$/, "") : null), film: !!film, filmTitle, ...(v15 ? { v15 } : {}) };
 let gridPlan = null, clock;
 if (night === "special") {
   clock = buildSpecialClock(hourStart);   // replaces the normal clock: no film, feature, markets or weather
@@ -107,12 +115,15 @@ if (v.from === "crypto" && !clock.some((s) => s.id === "crypto")) {
   log(`crypto: this hour's clock has no Crypto slot (${night === "special" ? "the election night special" : useGrid ? "no music break long enough" : "the grid is off: RADIO_GRID_ENABLED is not 1"}); nothing to splice`);
   process.exit(0);
 }
-const fromIdx = v.from ? clock.findIndex((s) => s.id === v.from) : 0;
-if (fromIdx < 0) die(`--from: no slot "${v.from}" (slots: ${clock.map((s) => s.id).join(", ")})`);
-const toIdx = v.to === "next" ? fromIdx + 1 : v.to ? clock.findIndex((s) => s.id === v.to) : clock.length;
-if (v.to && (toIdx < 0 || toIdx >= clock.length)) die(`--to: no slot "${v.to}"`);
-if (v.to && (!v.from || toIdx <= fromIdx)) die("--to needs --from, and must come after it");
-const slots = clock.slice(fromIdx, toIdx);
+const runSlots = () => {
+  const fromIdx = v.from ? clock.findIndex((s) => s.id === v.from) : 0;
+  if (fromIdx < 0) die(`--from: no slot "${v.from}" (slots: ${clock.map((s) => s.id).join(", ")})`);
+  const toIdx = v.to === "next" ? fromIdx + 1 : v.to ? clock.findIndex((s) => s.id === v.to) : clock.length;
+  if (v.to && (toIdx < 0 || toIdx >= clock.length)) die(`--to: no slot "${v.to}"`);
+  if (v.to && (!v.from || toIdx <= fromIdx)) die("--to needs --from, and must come after it");
+  return { fromIdx, toIdx, slots: clock.slice(fromIdx, toIdx) };
+};
+let { fromIdx, toIdx, slots } = runSlots();
 const t0 = Date.now();
 
 // ── beds (measured once) ── only beds the manifest clears (#208); with none, the procedural bed (beds.js)
@@ -120,7 +131,16 @@ let beds, bedFor;
 try { ({ beds, bedFor } = await loadBeds(musicDir, { log })); } catch (e) { die(e.message); }
 
 // ── facts ──
-const pack = await buildFactPack({ base: v.base || "https://scoopfeeds.com", log, crypto: useGrid });
+const pack = await buildFactPack({ base: v.base || "https://scoopfeeds.com", log, crypto: useGrid, ...(v15 ? { v15 } : {}) });
+// #285 earn-render: no Sport slot without sport stories; its time goes back to The Hour (two more stories)
+if (v15 && slots.some((s) => s.id === "sport") && (pack.desks.sport || []).length < 2) {
+  if (dropSport(clock)) {
+    ({ fromIdx, toIdx, slots } = runSlots());
+    log(`sport: ${(pack.desks.sport || []).length} sport stor${(pack.desks.sport || []).length === 1 ? "y" : "ies"}; no Sport slot this hour, its time goes to The Hour`);
+    if (checkClock(clock).length) die(`clock is broken after dropping the Sport slot: ${checkClock(clock).join("; ")}`);
+  }
+}
+if (v15) log(`clock: ${musicSecs(clock)} s of music blocks this hour`);
 if (midterms || night) {
   pack.election = elFixture ? extractElectionPack(fixtureArticles(elFixture, nightWin), { now: pack.builtAt })
     : await buildElectionPack({ base: v.base || "https://scoopfeeds.com", log, now: pack.builtAt });
@@ -271,10 +291,13 @@ withProgrammeLock(out, () => {
     // #273: where each voiced line sits, for the listen-back in airCheck
     prog.lines = (prog.lines || []).filter((l) => l.at < cut).concat(lines);
     prog.slots = clock.map(({ id, kind, start, end, title, elements }) => ({ id, kind, start, end, title: title || null, ...(elements ? { elements } : {}) }));
+    // #285: a v1.5 refresh keeps the slots already aired (the Sport slot may have given its time to The Hour there)
+    if (v15 && fromIdx > 0 && Array.isArray(existingProg?.slots)) prog.slots = [...existingProg.slots.filter((s) => s.end <= cut), ...prog.slots.filter((s) => s.start >= cut)];
     // #201: a refresh keeps the developing bulletins already spliced into this hour
     if (fromIdx > 0 && (prog.inserts || []).length) prog = reapplyInserts(prog, prog.inserts, cut);
   }
   if (gridPlan) prog.grid = gridPlan;
+  if (v15) prog.clock = "v15";   // #285: read by the screen (music shows "Coming up", not headline cards), airCheck and later partial runs
   if (night) prog.election = night;   // #198: "special" | "day-after" (airCheck, the update desk, the rehearsal report)
   if (cryptoNote) prog.crypto = { ...cryptoNote, at: pack.builtAt };   // #283: read by airCheck
   // the screen's right rail (#200): markets and weather, verbatim from the pack; each block renders only with data
@@ -309,10 +332,22 @@ log(`done in ${Math.round((Date.now() - t0) / 1000)} s: ${cues.length} cues, ${M
 async function fakeWriter() {
   const s = {};
   const top = pack.top.slice(0, 5);
+  const readAtTop = new Set();
   const line = (st, id) => ({ id, story: st.id, text: `${st.outlets[0].source} reports: ${st.headline}.` });
   for (const slot of spoken) {
     const L = [];
-    if (slot.segment === "the-hour") { L.push({ id: "open", text: `It's ${when.hourLabel}, ${when.cityTimes}. This is ScoopFeeds Radio, the news, compared.` }); top.forEach((st, i) => L.push(line(st, `s${i + 1}`))); L.push({ id: "close", text: "Markets Now, after this." }); }
+    if (slot.segment === "the-hour" && slot.long) {   // #285: the v1.5 hour's stories, and what it read
+      L.push({ id: "open", text: `It's ${when.hourLabel}, ${when.cityTimes}. This is ScoopFeeds Radio, the news, compared.` });
+      pack.top.slice(0, slot.stories).forEach((st, i) => { L.push(line(st, `s${i + 1}`)); readAtTop.add(st.id); });
+      L.push({ id: "close", text: "Now the next segment." });
+    }
+    else if (slot.segment === "half" && slot.fresh) {
+      L.push({ id: "open", text: "Headlines at the half hour." });
+      [...pack.top, ...Object.values(pack.desks).flat()].filter((st) => !readAtTop.has(st.id)).slice(0, slot.stories).forEach((st, i) => L.push(line(st, `h${i + 1}`)));
+      L.push({ id: "close", text: "More after this." });
+    }
+    else if (slot.segment === "sport") { L.push({ id: "open", text: "Now the sport." }); (pack.desks.sport || []).slice(0, 3).forEach((st, i) => L.push(line(st, `d${i + 1}`))); L.push({ id: "close", text: "That's the sport." }); }
+    else if (slot.segment === "the-hour") { L.push({ id: "open", text: `It's ${when.hourLabel}, ${when.cityTimes}. This is ScoopFeeds Radio, the news, compared.` }); top.forEach((st, i) => L.push(line(st, `s${i + 1}`))); L.push({ id: "close", text: "Markets Now, after this." }); }
     else if (slot.segment === "half") { L.push({ id: "open", text: "Headlines at the half hour." }); top.forEach((st, i) => L.push(line(st, `h${i + 1}`))); }
     else if (slot.segment === "desk") { const d = pack.desks[slot.desk] || []; L.push({ id: "open", text: `On the ${slot.title}.` }); d.slice(0, 3).forEach((st, i) => L.push(line(st, `d${i + 1}`))); L.push({ id: "close", text: "That's the desk." }); }
     else if (slot.segment === "markets") pack.markets.forEach((m, i) => L.push({ id: `m${i + 1}`, story: null, text: m.closed

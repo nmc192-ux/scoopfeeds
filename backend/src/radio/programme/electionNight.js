@@ -117,6 +117,15 @@ export function buildSpecialClock(hourStartMs) {
 
 /** The day-after desk: the first 180 s of music-1, as the Midterms desk (electionDesk.addDeskToClock), renamed. */
 export function addCountingDesk(clock, hourStart, { deskSec = 180 } = {}) {
+  // #285: in the v1.5 clock the counting desk takes the US desk's slot (`electionDonor`), as the Midterms desk does
+  const u = clock.findIndex((s) => s.electionDonor);
+  if (u >= 0 && clock[u].lenSec >= deskSec) {
+    const d = clock[u];
+    const desk = { id: "counting", kind: "spoken", segment: "counting", title: "Counting continues", sting: true, daypart: "evening",
+      startSec: d.startSec, endSec: d.endSec, lenSec: d.lenSec, start: d.start, end: d.end, ...(d.elements ? { elements: d.elements } : {}) };
+    clock.splice(u, 1, desk);
+    return desk;
+  }
   const i = clock.findIndex((s) => s.id === "music-1");
   if (i < 0 || clock[i].lenSec < deskSec + 60) return null;
   const m = clock[i];

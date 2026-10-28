@@ -52,6 +52,13 @@ test("doc's local-time columns are New York + the zone offset on the summer refe
   });
 });
 
+test("doc's v1.5 clock table is clock.js's v1.5 clock (#285)", () => {
+  const mmss = (sec) => `${sec < 0 ? "-" : ""}${String(Math.floor(Math.abs(sec) / 60)).padStart(2, "0")}:${String(Math.abs(sec) % 60).padStart(2, "0")}`;
+  const rows = table("## The v1.5 clock");
+  assert.deepEqual(rows.map(([, id, from, to, kind]) => [id, from, to, kind]),
+    buildClock(hourAt(ET_MIDNIGHT_SUMMER, 10), { v15: true }).map((s) => [s.id, mmss(s.startSec), mmss(s.endSec), s.kind]));
+});
+
 test("doc's segment catalogue is grid.js SEGMENTS", () => {
   const rows = table("## The segment catalogue");
   assert.deepEqual(rows.map(([name, id, kind, every, status]) => ({ name, id, kind, every, status })),
