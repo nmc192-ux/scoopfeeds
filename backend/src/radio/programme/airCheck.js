@@ -35,6 +35,7 @@ import { listenBack, LISTEN_RULES } from "./listenBack.js";
 export const AIR_RULES = Object.freeze({
   minKeptShare: 0.6,       // at least 60 % of the written lines survived the fact checks
   minHourStories: 3,       // The Hour reads at least three stories
+  minRoundupLines: 2,      // #198: the election special's round-up: its opening line and at least one more
   minCues: 20,
   minPartBytes: 1_000_000, // a part file under 1 MB is not an hour of audio
 });
@@ -93,9 +94,15 @@ export function airCheck(dir, { hourStart, rules = AIR_RULES, listenRules = LIST
     stats.keptShare = written ? Math.round((survived / written) * 100) / 100 : 0;
     if (!written) problems.push("the writer wrote nothing");
     else if (stats.keptShare < rules.minKeptShare) problems.push(`only ${Math.round(stats.keptShare * 100)} % of written lines passed the fact checks (need ${rules.minKeptShare * 100} %)`);
-    const hour = Object.entries(kept).find(([id]) => id === "the-hour")?.[1];
-    stats.hourStories = (hour?.lines || []).filter((l) => /^s\d/.test(l.id || "") && l.story).length;
-    if (stats.hourStories < rules.minHourStories) problems.push(`The Hour has only ${stats.hourStories} checked stories`);
+    if (prog?.election === "special") {
+      // #198: the election night special has no The Hour; its round-up must say something beyond its opening line
+      stats.roundupLines = (kept.roundup?.lines || []).length;
+      if (stats.roundupLines < rules.minRoundupLines) problems.push(`the election round-up has only ${stats.roundupLines} checked lines`);
+    } else {
+      const hour = Object.entries(kept).find(([id]) => id === "the-hour")?.[1];
+      stats.hourStories = (hour?.lines || []).filter((l) => /^s\d/.test(l.id || "") && l.story).length;
+      if (stats.hourStories < rules.minHourStories) problems.push(`The Hour has only ${stats.hourStories} checked stories`);
+    }
   }
 
   if (kept) problems.push(...marketsProblems(kept, () => need("pack.json")));

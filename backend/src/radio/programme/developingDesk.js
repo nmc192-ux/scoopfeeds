@@ -62,6 +62,7 @@ export function insertionPlan(prog, { now, detectedAt, lastInsertAt = -Infinity,
     if (s.start < earliest) continue;
     if (s.start > deadline) break;
     if (!INSERTABLE.has(s.kind) || NEVER.has(s.id) || s.insert || s.cut) continue;
+    if (/^update-\d\d$/.test(s.id)) continue;   // #198: an election night update slot is never displaced
     if ((s.end - s.start) / 1000 < o.minSlotSec) continue;
     if (s.end > prog.endsAt) continue;
     if (taken.some(([a, b]) => s.start < b && a < s.end)) continue;

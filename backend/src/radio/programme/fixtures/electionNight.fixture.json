@@ -1,0 +1,30 @@
+{
+  "note": "FIXTURE for the #198 dress rehearsal. Invented projections, NOT real results; party only, no candidate names. Times are minutes after the special starts (18:00 ET on the night). Includes a poll, a lead, an unattributed result, a conflict, a withdrawn call and a partial count, which the election pack must refuse or keep side by side.",
+  "articles": [
+    { "minutesAfterStart": -120, "source": "Reuters", "title": "Polls open across the US for the midterm elections", "description": "Voters choose 35 Senate seats, 36 governors and all 435 House seats." },
+    { "minutesAfterStart": 20, "source": "CNN", "title": "Republicans lead in Kentucky Senate polls" },
+    { "minutesAfterStart": 62, "source": "Reuters", "title": "AP projects Republicans win the Kentucky Senate race" },
+    { "minutesAfterStart": 64, "source": "NBC News", "title": "NBC News projects Republicans win the Indiana House races in the state's 4th district", "description": "" },
+    { "minutesAfterStart": 70, "source": "Fox News", "title": "Fox News Decision Desk projects Democrats win the Virginia Senate race" },
+    { "minutesAfterStart": 75, "source": "CNBC", "title": "Republicans win Georgia Senate race" },
+    { "minutesAfterStart": 95, "source": "AP", "title": "The Associated Press projects Republicans win the South Carolina Senate race" },
+    { "minutesAfterStart": 125, "source": "Reuters", "title": "AP projects Democrats win the Massachusetts Senate race" },
+    { "minutesAfterStart": 127, "source": "Politico", "title": "Decision Desk HQ projects Democrats win the Illinois Senate race" },
+    { "minutesAfterStart": 130, "source": "Reuters", "title": "AP projects Democrats win the North Carolina Senate race" },
+    { "minutesAfterStart": 140, "source": "Fox News", "title": "Fox News Decision Desk projects Republicans win the North Carolina Senate race" },
+    { "minutesAfterStart": 150, "source": "NBC News", "title": "Ohio Senate race too early to call, NBC News says", "description": "With 64% of the expected vote counted in the Ohio Senate race, the count continues." },
+    { "minutesAfterStart": 160, "source": "Reuters", "title": "AP projects Republicans win the Florida governor race" },
+    { "minutesAfterStart": 170, "source": "Politico", "title": "Decision Desk HQ called the race for Democrats in the Pennsylvania governor contest." },
+    { "minutesAfterStart": 185, "source": "Reuters", "title": "AP projects Republicans win the Texas Senate race" },
+    { "minutesAfterStart": 190, "source": "NBC News", "title": "NBC News projects Democrats win the New York governor race" },
+    { "minutesAfterStart": 205, "source": "Fox News", "title": "Fox News withdrew its call in the North Carolina Senate race" },
+    { "minutesAfterStart": 215, "source": "Reuters", "title": "AP projects Democrats win the Michigan governor race" },
+    { "minutesAfterStart": 240, "source": "Reuters", "title": "AP projects Republicans win the Iowa Senate race" },
+    { "minutesAfterStart": 250, "source": "AP", "title": "The Associated Press projects Republicans win the Ohio Senate race" },
+    { "minutesAfterStart": 265, "source": "Reuters", "title": "Republicans have won 180 House seats so far, AP projects" },
+    { "minutesAfterStart": 280, "source": "NBC News", "title": "NBC News projects Democrats win the Colorado Senate race" },
+    { "minutesAfterStart": 300, "source": "Reuters", "title": "AP projects Democrats win the Oregon governor race" },
+    { "minutesAfterStart": 330, "source": "AP", "title": "The Associated Press projects Republicans will keep control of the House." },
+    { "minutesAfterStart": 345, "source": "Reuters", "title": "AP projects Democrats win the California governor race" }
+  ]
+}

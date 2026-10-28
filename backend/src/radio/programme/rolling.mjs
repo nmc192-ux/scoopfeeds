@@ -20,6 +20,13 @@
  * #201 developing desk: on when RADIO_DEVELOPING_ENABLED=1 (reads <RADIO_BASE_URL>/api/radio/developing.json) or with
  *   --developing-file (a rehearsal: the list is read from that file, e.g. one fake fast-growing event). A bulletin is
  *   spliced into the hour on air at the next segment boundary within 15 minutes (bulletin.mjs, developingDesk.js).
+ * #198 election night: with RADIO_ELECTION_NIGHT=1 the loop switches to the election night special by the clock
+ *   (3 Nov 18:00 ET to 4 Nov 03:00 ET), produces a 15-minute update a few minutes before each update slot (update.mjs),
+ *   and adds the "Counting continues" desk to the hours up to the end of 6 Nov (electionNight.js).
+ * Dress rehearsal (#198): --election-rehearsal [--hours 6] [--election-fixture FILE] [--no-playout] runs the special
+ *   from the next hour on, with fixture projections, ALWAYS to disk (never streamed), in <base>/election-rehearsal/,
+ *   alongside the live loop (its own lock; ~/scoopfeeds-radio/PAUSE still stops it). At the end it writes report.md
+ *   there and sends it to DrJ (RADIO_ALERT_EMAIL, RADIO_ALERT_CMD).
  * Mac: playout/deploy/macos/install-rolling.sh (launchd). Nothing else here is Mac-specific.
  */
 import fs from "node:fs";
@@ -34,7 +41,9 @@ import { pickClearedFilm } from "../safety/filmClearance.js";
 import { factualTitle, withCredits, xBroadcastText } from "../safety/broadcastCopy.js";
 import { clearedTracks } from "../musicLibrary.js";
 import { creditLines } from "../musicManifest.js";
-import { RollingStation, WriterLedger, continuousBroadcast, hourStamp, writerRunCount, writerRunSince } from "./rollingStation.js";
+import { RollingStation, WriterLedger, continuousBroadcast, hourStamp, writerRunCount, writerRunSince, firstHour } from "./rollingStation.js";
+import { stationPlan, nightWindow, nightEnabled, DEFAULT_FIXTURE } from "./electionNight.js";
+import { rehearsalReport } from "./electionReport.js";
 import { DevelopingDesk, deskEnabled, developingTick, fetchDevelopingList } from "./developingDesk.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -128,17 +137,21 @@ async function main() {
     hours: { type: "string" }, "force-fail": { type: "string" }, "force-top-change": { type: "boolean" },
     "music-dir": { type: "string" }, film: { type: "string" }, "fake-voice": { type: "boolean" }, "fake-writer": { type: "boolean" },
     "developing-file": { type: "string" },
+    "election-rehearsal": { type: "boolean" }, "election-fixture": { type: "string" }, "no-playout": { type: "boolean" },   // #198
   } });
   const env = process.env;
   const BASE = tilde(env.RADIO_BASE_DIR || "~/scoopfeeds-radio");
-  const airDir = path.join(BASE, "air");
+  // #198: the dress rehearsal keeps everything of its own under <base>/election-rehearsal (PAUSE and music are shared)
+  const rehearsal = !!v["election-rehearsal"];
+  const RUN = rehearsal ? path.join(BASE, "election-rehearsal") : BASE;
+  const airDir = path.join(RUN, "air");
   const musicDir = tilde(v["music-dir"] || env.RADIO_MUSIC_DIR || path.join(BASE, "music"));
-  const logFile = path.join(BASE, "logs", "rolling.log");
+  const logFile = path.join(RUN, "logs", "rolling.log");
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
   const log = (m) => { const line = `${new Date().toISOString()} 📡 rolling: ${m}`; console.log(line); try { fs.appendFileSync(logFile, line + "\n"); } catch { /* */ } };
 
-  const lock = path.join(BASE, "rolling.lock");
-  if (lockAlive(path.join(BASE, "autoair.lock"))) { log("a one-hour auto-air run holds autoair.lock; not starting (one owner of the air at a time)"); process.exit(75); }
+  const lock = path.join(rehearsal ? RUN : BASE, rehearsal ? "election-rehearsal.lock" : "rolling.lock");
+  if (!rehearsal && lockAlive(path.join(BASE, "autoair.lock"))) { log("a one-hour auto-air run holds autoair.lock; not starting (one owner of the air at a time)"); process.exit(75); }
   if (!takeLock(lock)) { log(`another rolling loop (pid ${fs.readFileSync(lock, "utf8")}) owns the air; exiting`); process.exit(75); }
   process.on("exit", () => { try { if (Number(fs.readFileSync(lock, "utf8")) === process.pid) fs.unlinkSync(lock); } catch { /* */ } });
 
@@ -149,7 +162,8 @@ async function main() {
     log("PAUSE removed: starting");
   }
 
-  let live = rollingLive(env);
+  let live = rollingLive(env) && !rehearsal;   // #198: a rehearsal never streams
+  if (rehearsal) log("ELECTION NIGHT DRESS REHEARSAL: disk only, fixture projections; the live loop (if any) is not touched");
   log(live ? "LIVE: hours stream through the playout's RTMP gates" : "REHEARSAL: every playout writes segments to disk; nothing is streamed (needs RADIO_AUTOAIR_ENABLED=1 and RADIO_ROLLING_ENABLED=1 to air)");
 
   const alert = async (msg) => {
@@ -178,9 +192,15 @@ async function main() {
   const filmSrc = tilde(v.film || env.RADIO_ROLLING_FILM || env.RADIO_AUTOAIR_FILM);
   // #201: the developing desk (dark unless RADIO_DEVELOPING_ENABLED=1, or a --developing-file rehearsal)
   const devDir = path.join(BASE, "developing");
-  const devDesk = deskEnabled(env) || v["developing-file"] ? new DevelopingDesk({ dir: devDir, log }) : null;
+  const devDesk = (!rehearsal && deskEnabled(env)) || v["developing-file"] ? new DevelopingDesk({ dir: devDir, log }) : null;
   if (devDesk) log(`developing desk ON (${v["developing-file"] ? `rehearsal list ${tilde(v["developing-file"])}` : `${env.RADIO_BASE_URL || "https://scoopfeeds.com"}/api/radio/developing.json`}); state in ${devDir}`);
-  const produce = async ({ hourStart, out, from, to, weather, headlineWriter, deadline }) => {
+  // #198: the night (moved to the next hour for a rehearsal) and its fixture
+  const night = rehearsal ? nightWindow({ startAt: firstHour(Date.now()) }) : nightWindow();
+  const electionOn = rehearsal || nightEnabled(env);
+  const fixture = rehearsal ? tilde(v["election-fixture"] || DEFAULT_FIXTURE) : null;
+  const electionArgs = () => (fixture ? ["--election-fixture", fixture, "--election-start", new Date(night.from).toISOString()] : []);
+  if (electionOn) log(`election night ${rehearsal ? "REHEARSAL" : "ON"}: special ${new Date(night.from).toISOString()} to ${new Date(night.until).toISOString()}${fixture ? `, fixture ${fixture}` : ""}`);
+  const produce = async ({ hourStart, out, from, to, weather, headlineWriter, deadline, plan }) => {
     const f = await filmFor({ out, to, filmSrc, yt: ytApi, log: (m) => log(`${hourStamp(hourStart)}: ${m}`) });
     if (!f.ok) { log(`hour ${hourStamp(hourStart)}: ${f.why}; not airing it`); return 1; }
     const film = f.film;
@@ -188,6 +208,7 @@ async function main() {
     if (from) args.push("--from", from);
     if (to) args.push("--to", to);
     if (headlineWriter) args.push("--headline-writer");
+    if (plan?.election && !to) args.push("--election-night", plan.election, ...electionArgs());   // #198
     if (devDesk && !to && fs.existsSync(path.join(devDir, "followups.json"))) args.push("--developing", path.join(devDir, "followups.json"));   // #201
     if (film) args.push("--film", film);
     if (v["fake-voice"]) args.push("--fake-voice");
@@ -197,14 +218,17 @@ async function main() {
     return done.finally(() => clearTimeout(t));
   };
 
-  const playout = {
+  const playout = v["no-playout"] ? {
+    // #198 rehearsal: no Chrome and no encoder beside the live stream; the audio plan is measured from the files instead
+    start({ kind, dir }) { let end; const done = new Promise((r) => { end = r; }); log(`playout (not started, --no-playout): ${kind}${dir ? ` ${path.basename(dir)}` : ""}`); return { done, stop: async () => end(0) }; },
+  } : {
     start({ kind, dir, hourStart }) {
       const tag = hourStart ? hourStamp(hourStart) : `${hourStamp(Date.now())}-start`;
       const args = [path.join(BACKEND, "src/radio/playout/cli.js"), "--music-dir", musicDir];
       if (kind === "programme") args.push("--programme", dir);
       else args.push("--base-url", env.RADIO_BASE_URL || "https://scoopfeeds.com");
-      if (!live) args.push("--segments-dir", path.join(BASE, "rehearsal-seg", `${tag}-${kind}`), "--segment-keep", "80");
-      const logTo = kind === "programme" ? path.join(dir, "playout.log") : path.join(BASE, "logs", "playout-247.log");
+      if (!live) args.push("--segments-dir", path.join(RUN, "rehearsal-seg", `${tag}-${kind}`), "--segment-keep", "80");
+      const logTo = kind === "programme" ? path.join(dir, "playout.log") : path.join(RUN, "logs", "playout-247.log");
       const { ch, done } = spawnLogged(process.execPath, args, { cwd: BACKEND, logFile: logTo, env: { ...env, RADIO_PLAYOUT_CHROME: env.RADIO_PLAYOUT_CHROME || "system" } });
       log(`playout started: ${kind}${dir ? ` ${path.basename(dir)}` : ""} (pid ${ch.pid})`);
       return {
@@ -255,6 +279,21 @@ async function main() {
     return r;
   } : null;
 
+  // #198: one 15-minute election update, produced by update.mjs and spliced over its placeholder, killed at its deadline
+  const updates = electionOn ? async ({ dir, hourStart, slot, deadline, writerBusy }) => {
+    const useClaude = !writerBusy && station.ledger.guard().ok && !v["fake-writer"];
+    const args = [path.join(HERE, "update.mjs"), "--dir", dir, "--slot", slot.id, "--music-dir", musicDir, "--writer", useClaude ? "claude" : "headlines", ...electionArgs()];
+    if (v["fake-voice"]) args.push("--fake-voice");
+    if (v["fake-writer"]) args.push("--fake-writer");
+    const before = writerRunCount(dir);
+    const { ch, done } = spawnLogged(process.execPath, args, { cwd: BACKEND, logFile: path.join(dir, "update.log") });
+    const t = setTimeout(() => { log(`update ${slot.id} for ${hourStamp(hourStart)} ran past its deadline; killed`); ch.kill("SIGKILL"); }, Math.max(0, deadline - Date.now()));
+    const code = await done.finally(() => clearTimeout(t));
+    const run = writerRunSince(dir, before);
+    if (run) station.ledger.add(hourStart, run, "election-update");
+    return code;
+  } : null;
+
   let broadcast = null;
   if (live) {
     if (ytApi) {
@@ -270,7 +309,7 @@ async function main() {
   const keepHours = numEnv(env.RADIO_ROLLING_KEEP_HOURS, 26, 19);
   const prune = () => {
     const a = pruneOld(airDir, { keepHours });
-    const r = pruneOld(path.join(BASE, "rehearsal-seg"), { keepNewest: numEnv(env.RADIO_ROLLING_REHEARSAL_KEEP, 8, 1) });
+    const r = pruneOld(path.join(RUN, "rehearsal-seg"), { keepNewest: numEnv(env.RADIO_ROLLING_REHEARSAL_KEEP, 8, 1) });
     if (a.length || r.length) log(`disk: removed ${a.length} hour folder(s) older than ${keepHours} h and ${r.length} old rehearsal recording(s)`);
   };
   prune();
@@ -279,17 +318,31 @@ async function main() {
   const ac = new AbortController();
   for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { log(`${sig}: stopping after the current step`); ac.abort(); });
   station = new RollingStation({
-    airDir, produce, check: airCheck, topStory, playout, broadcast, log, alert, developing,
+    airDir, produce, check: airCheck, topStory, playout, broadcast, log, alert, developing, updates,
+    grid: (H) => stationPlan(H, { env, night, force: rehearsal }),
     isPaused: () => fs.existsSync(path.join(BASE, "PAUSE")),
-    ledger: new WriterLedger({ dir: path.join(BASE, "writer-calls"), maxPerDay: numEnv(env.RADIO_WRITER_DAILY_MAX, 96, 1), cooldownMin: numEnv(env.RADIO_WRITER_COOLDOWN_MIN, 60, 1) }),
+    ledger: new WriterLedger({ dir: path.join(RUN, "writer-calls"), maxPerDay: numEnv(env.RADIO_WRITER_DAILY_MAX, 96, 1), cooldownMin: numEnv(env.RADIO_WRITER_COOLDOWN_MIN, 60, 1) }),
     forceFail: new Set(String(v["force-fail"] || "").split(",").map((s) => s.trim().replace(/[:]/g, "").slice(0, 13)).filter(Boolean)),
     forceTopChange: !!v["force-top-change"],
     opts: { rollEtHours: String(env.RADIO_ROLLING_ROLL_ET || "4,16").split(",").map(Number).filter((n) => n >= 0 && n < 24) },
   });
   if (v["force-fail"]) log(`rehearsal switch: producer failure forced for ${[...station.forceFail].join(", ")}`);
-  const hours = await station.run({ hours: v.hours ? Number(v.hours) : Infinity, signal: ac.signal });
+  const startedAt = Date.now();
+  const hours = await station.run({ hours: v.hours ? Number(v.hours) : rehearsal ? 6 : Infinity, signal: ac.signal });
   clearInterval(pruneTimer);
-  fs.writeFileSync(path.join(BASE, "logs", `rolling-summary-${hourStamp(Date.now())}.json`), JSON.stringify(hours, null, 1));
+  fs.mkdirSync(path.join(RUN, "logs"), { recursive: true });
+  fs.writeFileSync(path.join(RUN, "logs", `rolling-summary-${hourStamp(Date.now())}.json`), JSON.stringify(hours, null, 1));
+  if (rehearsal) {   // #198: the report for DrJ
+    const rep = rehearsalReport({ airDir, hours, updates: station.updateLog, night, startedAt, endedAt: Date.now() });
+    fs.writeFileSync(path.join(RUN, "report.md"), rep.markdown + "\n");
+    fs.writeFileSync(path.join(RUN, "report.json"), JSON.stringify(rep.data, null, 1));
+    log(`dress rehearsal report: ${rep.verdict}; ${path.join(RUN, "report.md")}`);
+    if (env.RADIO_ALERT_CMD) spawnSync(env.RADIO_ALERT_CMD, [`Election dress rehearsal: ${rep.verdict}. Report: ${path.join(RUN, "report.md")}`], { stdio: "ignore", shell: false });
+    if (env.RADIO_ALERT_EMAIL && env.SMTP_HOST) {
+      try { const { sendMail } = await import("../../services/mailer.js"); await sendMail({ to: env.RADIO_ALERT_EMAIL, subject: `ScoopFeeds Radio: election dress rehearsal ${rep.verdict}`, text: rep.markdown }); }
+      catch (e) { log(`report email failed: ${e.message}`); }
+    }
+  }
   if (station.offAir) log(`PAUSE took the stream off air at ${new Date(station.offAir.at).toISOString()}; exiting (resume: remove PAUSE by hand)`);
   log(`summary: ${hours.map((h) => `${h.hour} ${h.aired}${h.reason ? ` (${h.reason})` : ""}`).join(" | ")}`);
 }

@@ -133,3 +133,19 @@ an overview (Senate bar, House), the latest projections, then the called races t
 uncalled ones listed by name. The pages share the desk from the first projection line to the slot's end, at least
 8 s each, and nothing else interrupts them. `screen/fontFloor.test.js` renders a worst-case full board
 (`screen/fixtures/sampleElection.mjs`) and fails on any text under 26 px or past the frame.
+
+## Election night (#198)
+
+With `RADIO_ELECTION_NIGHT=1` (Mac, dark by default) the rolling loop switches by the clock to the election night
+special, 3 Nov 18:00 ET to 4 Nov 03:00 ET (`electionNight.js` `stationPlan`, `buildSpecialClock`): a round-up at the
+top of the hour, "The News, Compared" on the biggest race, race-by-race blocks, music beds of 3 minutes at most, and
+an update slot at :00, :15, :30 and :45. Each update is produced with the hour as a mechanical placeholder (poll
+closings due in that quarter, the newest projections, "counting continues"), then re-produced 6 minutes before it airs
+by `update.mjs` from a fresh election pack and spliced over the placeholder (`insertUpdate`). One that fails its
+checks or misses its window is skipped: the placeholder airs. Poll closings come from `../election/races2026.js`
+`LAST_POLLS_CLOSE_ET`. Until the end of 6 Nov (New York), produced hours carry a "Counting continues" desk in place
+of the Midterms desk. The dress rehearsal is `rolling.mjs --election-rehearsal` (wrapper:
+`../playout/deploy/macos/run-election-rehearsal.sh`): the same night moved to the next hour, fixture projections
+(`fixtures/electionNight.fixture.json`), disk only, then `report.md` (`electionReport.js`). Plain English:
+`docs/radio/election-night.md`.
+
