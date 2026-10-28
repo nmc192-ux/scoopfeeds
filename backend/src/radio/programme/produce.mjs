@@ -30,7 +30,7 @@ import { buildClock, buildGridClock, checkClock } from "./clock.js";
 import { buildFactPack } from "./factPack.js";
 import { writeSegments, claudeWriter, isLimitError } from "./writer.js";
 import { sessionsAt } from "./dayClock.js";
-import { labelMarkets, marketsShutAt } from "./marketsClock.js";
+import { labelMarkets, labelScreenMarkets, marketsShutAt } from "./marketsClock.js";
 import { spliceProgramme } from "./repeat.js";
 import { withProgrammeLock, reapplyInserts, addDevelopingStories } from "./developingDesk.js";
 import { checkSegments } from "./checks.js";
@@ -279,6 +279,9 @@ withProgrammeLock(out, () => {
   prog.music = (v.to ? [...(prog.music || []), ...runMusic] : runMusic)
     .filter((m, i, all) => all.findIndex((x) => x.file === m.file) === i);
   prog.proceduralBed = Boolean(beds.procedural) || Boolean(v.to && prog.proceduralBed);
+  // #282: every market row on screen (Markets scenes, the rail) carries `closed` for the time it is shown, so the
+  // screen never shows a last session's figure as live; a spliced repeat is relabelled for its own air time
+  prog = labelScreenMarkets(prog);
   prog.builtAt = Date.now();
   fs.writeFileSync(pf + ".tmp", JSON.stringify(prog, null, 1));
   fs.renameSync(pf + ".tmp", pf);   // atomic: the screen and playout never read half a file

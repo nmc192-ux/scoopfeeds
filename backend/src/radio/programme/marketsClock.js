@@ -25,10 +25,10 @@ export function marketsShutAt(ms) {
 
 const TZ_BY_SYM = {
   "^GSPC": "America/New_York", "^DJI": "America/New_York", "^IXIC": "America/New_York",
-  "^FTSE": "Europe/London", "^GDAXI": "Europe/Berlin",
+  "^FTSE": "Europe/London", "^GDAXI": "Europe/Berlin", "^N225": "Asia/Tokyo",
   "BZ=F": "America/New_York", "GC=F": "America/New_York",   // futures: their trading day, read in New York time
 };
-const TZ_BY_GROUP = { US: "America/New_York", Europe: "Europe/London", Commodities: "America/New_York" };
+const TZ_BY_GROUP = { US: "America/New_York", Europe: "Europe/London", Asia: "Asia/Tokyo", Commodities: "America/New_York" };
 const FUTURE_SLACK_MS = 10 * 60_000;   // a trade stamped a little after `at` is clock skew, not the future
 
 const dayKey = (ms, tz) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
@@ -46,7 +46,8 @@ export function closedFor(row, at) {
   if (dayKey(t, tz) === dayKey(at, tz)) return null;
   const weekday = part(t, tz, { weekday: "long" });
   const day = Number(part(t, tz, { day: "numeric" }));
-  return { label: `closed: at ${weekday}'s close, ${day} ${part(t, tz, { month: "short" })}`, weekday, day, time: t };
+  const month = part(t, tz, { month: "short" });
+  return { label: `closed: at ${weekday}'s close, ${day} ${month}`, weekday, day, month, time: t };
 }
 
 /** Stamp every market row; records the air time the check was made for (airCheck refuses an unstamped pack). */
@@ -131,4 +132,28 @@ export function recheckRepeatedMarkets(slots, segments, pack) {
     const stale = seg.lines.map((l) => { const why = staleMarketLine(l?.text, rows); return why ? `${l?.id}: ${why}` : null; }).filter(Boolean);
     return { ...base, measured: true, lines: seg.lines.length, stale };
   });
+}
+
+// ── the programme screen (#282) ─────────────────────────────────────────────
+/** A labelled copy of market rows at `at` (labelMarkets on a throwaway pack). Pure. */
+export const labelRows = (rows, at) => labelMarkets({ markets: Array.isArray(rows) ? rows : [] }, at).markets;
+
+/**
+ * #282: stamp `closed` on every market row the programme screen shows, against the time it is SHOWN: a Markets
+ * scene's rows at the end of that scene (the next non-overlay cue, else the hour's end), the right rail's rows at
+ * the hour's end. The figures were fetched before the hour, so a row live at the end of its showing is live
+ * throughout it; the later time is the stricter one. Run after a fresh produce and after a repeat is retimed, so
+ * a repeated hour is labelled against its own air time. Crypto is untouched. Pure.
+ */
+export function labelScreenMarkets(prog) {
+  const cues = prog.cues || [];
+  const end = Number.isFinite(prog.endsAt) ? prog.endsAt : (Number(prog.hourStart) || 0) + 3_600_000;
+  const shownUntil = (c) => cues.reduce((m, o) => (!o.overlay && o.at > c.at && o.at < m ? o.at : m), end);
+  const out = {
+    ...prog,
+    cues: cues.map((c) => (c.scene === "markets" && Array.isArray(c.data?.rows) && Number.isFinite(c.at)
+      ? { ...c, data: { ...c.data, rows: labelRows(c.data.rows, Math.max(c.at, shownUntil(c))) } } : c)),
+  };
+  if (Array.isArray(prog.rail?.markets)) out.rail = { ...prog.rail, markets: labelRows(prog.rail.markets, end) };
+  return out;
 }
