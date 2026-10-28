@@ -18,6 +18,7 @@ import { assemble, fakeVoice, kokoroVoice } from "./assemble.js";
 import { wordBudget } from "./clock.js";
 import { claudeWriter, isLimitError } from "./writer.js";
 import { loadBeds } from "./beds.js";
+import { loadPresenters, castSegments } from "./presenters.js";
 import { screenCredit } from "../musicManifest.js";
 import { daypartAt } from "../musicLibrary.js";
 import { bulletinPack, bulletinPrompt, BULLETIN_SYSTEM, mechanicalBulletin, checkBulletin, insertBulletin } from "./developingDesk.js";
@@ -84,7 +85,8 @@ try { ({ beds, bedFor } = await loadBeds(home(v["music-dir"] || "~/scoopfeeds-ra
 const voice = v["fake-voice"] ? fakeVoice(path.join(dir, "fake-voice")) : await kokoroVoice();
 const partFile = `part-developing-${tag}.wav`;
 const { cues, report, lines } = await assemble({
-  slots, segments: { [slot.id]: checked.segment }, pack, hourStart: H, bedFor, defaultDaypart: daypart, voice, outWav: path.join(dir, `${partFile}.tmp`), log,
+  // #284: castSegments casts the lines for two presenters with RADIO_DUO=1, else returns them unchanged
+  slots, segments: castSegments({ [slot.id]: checked.segment }, slots, loadPresenters(), { log }), pack, hourStart: H, bedFor, defaultDaypart: daypart, voice, outWav: path.join(dir, `${partFile}.tmp`), log,
   creditFor: (file) => screenCredit(Object.values(beds).find((b) => b.file === file)?.entry || null),
 });
 if (!(report.voicedSecs > 0)) die("no line could be voiced: no bulletin airs");

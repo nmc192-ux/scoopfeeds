@@ -34,6 +34,7 @@ import { labelMarkets, labelScreenMarkets, marketsShutAt } from "./marketsClock.
 import { spliceProgramme } from "./repeat.js";
 import { withProgrammeLock, reapplyInserts, addDevelopingStories } from "./developingDesk.js";
 import { checkSegments } from "./checks.js";
+import { loadPresenters, castSegments } from "./presenters.js";
 import { buildElectionPack, extractElectionPack } from "./electionPack.js";
 import { buildSpecialClock, addCountingDesk, addPollCloseLines, mechanicalUpdate, mechanicalCounting, projectionLines, nightWindow, fixtureArticles, UPDATE_ID } from "./electionNight.js";
 import { deskOn, addDeskToClock, addBallotLines } from "./electionDesk.js";
@@ -169,6 +170,9 @@ const when = {
 // grid hours: Markets Now leads with the exchanges in session (read by the markets prompt once #195 lands)
 if (useGrid) when.marketsLead = Object.fromEntries(slots.filter((s) => s.segment === "markets").map((s) => [s.id, s.marketsLead || []]));
 const spoken = slots.filter((s) => s.kind === "spoken");
+// #284: two presenters (RADIO_DUO=1, dark by default); null leaves every line on the one voice, as before
+const cast = loadPresenters();
+if (cast) when.duo = true;
 const usesClaude = !(v["fake-writer"] || v["headline-writer"]);
 const write = usesClaude ? claudeWriter({ model: v.model || "sonnet", log }) : fakeWriter;
 // Cost guard (#195): every Claude call and failure is counted, per run, in writer.json; the rolling orchestrator
@@ -203,7 +207,8 @@ if (night === "special") {
 }
 fs.writeFileSync(path.join(out, "segments.raw.json"), JSON.stringify(raw, null, 1));
 if (midterms) addBallotLines(raw, hourStart);   // mechanical "what's on the ballot" lines, checked like the rest
-const { segments, report } = checkSegments(raw, spoken, pack, { log });
+const { segments: checked, report } = checkSegments(raw, spoken, pack, { log });
+const segments = castSegments(checked, spoken, cast, { log });
 fs.writeFileSync(path.join(out, "segments.json"), JSON.stringify(segments, null, 1));
 fs.writeFileSync(path.join(out, "checks.json"), JSON.stringify(report, null, 1));
 log(`checks: ${report.length} line(s) dropped`);

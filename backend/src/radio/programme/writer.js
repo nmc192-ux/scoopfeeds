@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import { wordBudget } from "./clock.js";
 import { electionText } from "./electionPack.js";
 import { closedRows, isCrypto } from "./marketsClock.js";
+import { DUO_WRITER_NOTE } from "./presenters.js";
 
 export const SEGMENT_KINDS = ["the-hour", "markets", "compared", "desk", "half", "weather", "crypto", "signoff", "roundup", "update", "results", "counting"];
 
@@ -100,6 +101,7 @@ export function buildPrompt(pack, slots, when) {
   }).join("\n");
   return [
     "Write every spoken segment of this hour.",
+    ...(when.duo ? [DUO_WRITER_NOTE] : []),   // #284: RADIO_DUO; without it the prompt is unchanged
     "",
     "SEGMENTS (in air order):",
     spec,

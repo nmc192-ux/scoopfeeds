@@ -1,0 +1,5 @@
+{
+  "_note": "#284: the two ScoopFeeds Radio presenters (RADIO_DUO=1). Names are neutral and invented; voices come from RADIO_VOICE_A / RADIO_VOICE_B (Kokoro). A is the lead: every segment opens with A.",
+  "A": { "name": "Daniel" },
+  "B": { "name": "Leah" }
+}
