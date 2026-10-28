@@ -23,6 +23,11 @@
  * Listen-back (#273): once every audio part exists and is big enough, the mixed audio itself is listened to
  * (listenBack.js): dead air, speech buried under the bed, clipping. A part that cannot be read or a spoken slot with
  * no line timings is unmeasured: a failure. It has no flag: it only ever refuses an hour.
+ *
+ * Crypto (#283): the hour's Crypto state (programme.json `crypto`, written by produce.mjs and repeat.js) is reported in
+ * `stats.crypto`, and every hour without a Crypto segment on air gets a note saying why ("crypto: feed unavailable
+ * (...)"). A missing Crypto segment never refuses an hour, with one exception: a repeat whose stale Crypto could not be
+ * cut to music and was not replaced by a fresh one. A grid hour with no record at all is reported as "unmeasured".
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -47,10 +52,11 @@ const lineCount = (segs) => Object.values(segs || {}).reduce((n, s) => n + (Arra
 /**
  * @param {string} dir   the producer's --out directory
  * @param {{ hourStart: number, rules?: object, listenRules?: object }} want
- * @returns {{ ok: boolean, problems: string[], stats: object }}
+ * @returns {{ ok: boolean, problems: string[], stats: object, notes: string[] }}  notes never refuse an hour
  */
 export function airCheck(dir, { hourStart, rules = AIR_RULES, listenRules = LISTEN_RULES } = {}) {
   const problems = [];
+  const notes = [];
   const stats = {};
   const need = (f) => { const p = path.join(dir, f); if (!fs.existsSync(p)) { problems.push(`${f} missing`); return null; } try { return readJson(p); } catch (e) { problems.push(`${f} unreadable: ${e.message}`); return null; } };
 
@@ -113,7 +119,26 @@ export function airCheck(dir, { hourStart, rules = AIR_RULES, listenRules = LIST
     problems.push(...r.problems);
   }
 
-  return { ok: problems.length === 0, problems, stats };
+  if (prog) {
+    const c = cryptoReport(prog);
+    stats.crypto = c.status;
+    if (c.note) notes.push(c.note);
+    if (c.problem) problems.push(c.problem);
+  }
+
+  return { ok: problems.length === 0, problems, stats, notes };
+}
+
+/** #283: the hour's Crypto state, for the air-check report. Pure. */
+export function cryptoReport(prog) {
+  const c = prog?.crypto;
+  if (!c || typeof c.status !== "string") {
+    // produce.mjs records the state in every full run since #283; a grid hour without it is unmeasured
+    return prog?.grid ? { status: "unmeasured", note: "crypto: unmeasured (programme.json has no crypto record)" } : { status: "unmeasured", note: null };
+  }
+  if (c.status === "on air") return { status: c.status, note: null };
+  if (c.status === "stale") return { status: c.status, note: c.why || null, problem: `repeat: ${c.why || "crypto: the repeated hour's stale Crypto is still on air"}` };
+  return { status: c.status, note: c.why || `crypto: ${c.status}` };
 }
 
 /**

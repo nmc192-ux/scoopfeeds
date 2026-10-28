@@ -198,7 +198,7 @@ function virtualClock(start) {
   return { now: () => now, sleep, drive };
 }
 
-function rig({ start, forceFail = [], paused = false, ledgerMax = 96, top = { id: "t9", headline: "Earthquake strikes northern Japan", outlets: [{ title: "Strong earthquake hits Japan" }] } } = {}) {
+function rig({ start, forceFail = [], failFrom = [], paused = false, ledgerMax = 96, top = { id: "t9", headline: "Earthquake strikes northern Japan", outlets: [{ title: "Strong earthquake hits Japan" }] } } = {}) {
   const clock = virtualClock(start);
   const airDir = tmp("rolling-air-");
   const calls = [], plays = [], alerts = [], logs = [];
@@ -209,6 +209,11 @@ function rig({ start, forceFail = [], paused = false, ledgerMax = 96, top = { id
     const wf = path.join(a.out, "writer.json");
     let w = { runs: [] }; try { w = JSON.parse(fs.readFileSync(wf, "utf8")); } catch { /* */ }
     w.runs.push({ calls: a.headlineWriter ? 0 : 1, failures: 0 }); fs.writeFileSync(wf, JSON.stringify(w));
+    if (failFrom.includes(a.from)) return 1;
+    if (a.from === "crypto") {   // #283: what produce.mjs records after a fresh Crypto splice
+      const pf = path.join(a.out, "programme.json");
+      fs.writeFileSync(pf, JSON.stringify({ ...JSON.parse(fs.readFileSync(pf, "utf8")), crypto: { status: "on air", rows: 6 } }));
+    }
     if (!a.from) {
       fs.writeFileSync(path.join(a.out, "programme.json"), JSON.stringify({ hourStart: a.hourStart, endsAt: a.hourStart + 3630e3, audio: [{ file: "part-countdown.wav", from: a.hourStart - 900e3 }], cues: [],
         slots: buildClock(a.hourStart, { weather: a.weather }).map(({ id, kind, start: s, end }) => ({ id, kind, start: s, end })) }));
@@ -293,10 +298,25 @@ test("station: an overnight hour repeats the strongest recent hour with a fresh 
   assert.deepEqual(hours.map((h) => [h.aired, h.decision]), [["programme", "repeat"]]);
   const c = r.calls[0];
   assert.deepEqual([c.from, c.to, c.headlineWriter], ["the-hour", "markets-1", false]);
+  // #283: then a Crypto written fresh against the repeat's own air time
+  assert.deepEqual(r.calls.slice(1).map((x) => [x.from, x.to, x.headlineWriter]), [["crypto", "next", false]]);
   const H = utc("2026-10-27T04:00:00Z");
   const dst = path.join(r.airDir, hourStamp(H));
   assert.equal(JSON.parse(fs.readFileSync(path.join(dst, "programme.json"), "utf8")).hourStart, H);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dst, "status.json"), "utf8")).repeatOf, path.basename(src));
+  const st = JSON.parse(fs.readFileSync(path.join(dst, "status.json"), "utf8"));
+  assert.equal(st.repeatOf, path.basename(src));
+  assert.deepEqual(st.crypto, { exit: 0, status: "on air" });
+  assert.ok(r.logs.some((l) => /repeat crypto: on air/.test(l)));
+});
+
+test("station (#283): a failed fresh Crypto does not stop the repeat airing; the reason is logged", async () => {
+  const r = rig({ start: utc("2026-10-27T03:20:00Z"), failFrom: ["crypto"] });
+  seedProduced(r.airDir, utc("2026-10-27T01:00:00Z"));
+  const hours = await r.clock.drive(r.station.run({ hours: 1 }));
+  assert.deepEqual(hours.map((h) => [h.aired, h.decision]), [["programme", "repeat"]]);
+  const st = JSON.parse(fs.readFileSync(path.join(r.airDir, hourStamp(utc("2026-10-27T04:00:00Z")), "status.json"), "utf8"));
+  assert.equal(st.crypto.exit, 1);
+  assert.ok(r.logs.some((l) => /fresh Crypto for the repeat failed \(exit 1\)/.test(l)), r.logs.join("\n"));
 });
 
 test("station: over the day's writer budget, a prime hour becomes a repeat read from headlines (no Claude)", async () => {

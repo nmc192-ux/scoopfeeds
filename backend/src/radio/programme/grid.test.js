@@ -87,12 +87,10 @@ for (const [daypart, h] of Object.entries(REHEARSAL)) {
     // weather every two hours
     assert.equal(ids.includes("weather"), h % 2 === 0, "weather on even ET hours only");
     if (h % 2) assert.equal(slots.find((s) => s.id === "half").stories, 7, "weather's time goes to the half-hour headlines");
-    // Crypto in produced hours
-    assert.equal(ids.includes("crypto"), plan.format === "produced");
-    if (plan.format === "produced") {
-      const c = slots.find((s) => s.id === "crypto");
-      assert.deepEqual([c.kind, c.segment, c.lenSec], ["spoken", "crypto", 90]);
-    }
+    // Crypto in every hour, repeats included (#283: the repeat's clock is what the fresh Crypto splice is cut to)
+    assert.ok(ids.includes("crypto"), "Crypto in every hour");
+    const c = slots.find((s) => s.id === "crypto");
+    assert.deepEqual([c.kind, c.segment, c.lenSec, ids[ids.indexOf("crypto") + 1]], ["spoken", "crypto", 90, "music-1"]);
     // the film only in its fixed slot
     assert.equal(ids.includes("feature"), h === 21, "feature airs only at 9 pm ET");
     assert.equal(plan.featureDropped, h !== 21);
