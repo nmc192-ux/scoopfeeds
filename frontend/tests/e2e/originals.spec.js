@@ -48,3 +48,32 @@ test("flag off: /originals lands on /briefs", async ({ page }) => {
   await page.goto("/originals");
   await expect(page).toHaveURL(/\/briefs$/);
 });
+
+// Issue #272: "By the numbers" shelf, earn-rendered.
+const NUMBERS = [
+  { day: "2026-10-27", number_text: "1,200", fact_text: "About 1,200 port staff joined the strike, the union said.",
+    sources: [{ source_name: "Outlet A", url: "https://a.test/1" }, { source_name: "Outlet B", url: "https://b.test/1" }],
+    event: { slug: "port-strike", title: "Port strike" } },
+  { day: "2026-10-26", number_text: "3.5%", fact_text: "Prices rose 3.5% last year.", sources: [], event: { slug: "prices", title: "Prices" } },
+];
+
+test("flag on: By the numbers shows today's number, its sources, the dossier link and earlier days", async ({ page }, info) => {
+  await mockApi(page, true, { ...DATA, numbers: NUMBERS });
+  await page.goto("/originals");
+  const main = page.getByTestId("originals-page");
+  await expect(main.getByRole("heading", { name: "By the numbers" })).toBeVisible();
+  await expect(main.getByTestId("numbers-note")).toContainText("at least two outlets");
+  const today = main.getByTestId("numbers-today");
+  await expect(today).toContainText("1,200");
+  await expect(today.getByRole("link", { name: "Outlet A" })).toHaveAttribute("href", "https://a.test/1");
+  await expect(today.getByRole("link", { name: "Read the dossier" })).toHaveAttribute("href", "/events/port-strike");
+  await expect(main.getByTestId("numbers-earlier")).toContainText("3.5%");
+  await page.screenshot({ path: info.outputPath("originals-numbers.png"), fullPage: true });
+});
+
+test("flag on: no numbers → no By the numbers shelf", async ({ page }) => {
+  await mockApi(page, true, { ...DATA, numbers: [] });
+  await page.goto("/originals");
+  await expect(page.getByTestId("originals-page").getByRole("heading", { name: "Latest analysis" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "By the numbers" })).toHaveCount(0);
+});

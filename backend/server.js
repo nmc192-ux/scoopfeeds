@@ -50,6 +50,7 @@ import watchlistsRouter  from "./src/routes/watchlists.js";
 import riOpsRouter       from "./src/routes/ri-ops.js";
 import articlesOpsRouter from "./src/routes/articles-ops.js";
 import metricsOpsRouter  from "./src/routes/metrics-ops.js";
+import originalsOpsRouter from "./src/routes/originals-ops.js";
 import briefsRouter      from "./src/routes/briefs.js";
 import originalsRouter   from "./src/routes/originals.js";
 import gapsRouter        from "./src/routes/gaps.js";
@@ -316,6 +317,7 @@ app.use("/scoop-ops/ri-ops",     riOpsRouter);          // Reality Index live pr
 app.use("/scoop-ops/articles",   articlesOpsRouter);    // per-article remediation: /:id/set-published-at
 app.use("/scoop-ops/footage",    createFootageOpsRouter()); // #219 public submissions, for the Mac to pull — inherits adminAuth above
 app.use("/scoop-ops/metrics-ops", metricsOpsRouter);    // Phase A baseline metrics dashboard (Sprint 3.4) — distinct from SPA route at /scoop-ops/metrics
+app.use("/scoop-ops/originals", originalsOpsRouter); // #272 "By the numbers" IG-format image, for posting by hand — inherits adminAuth above
 
 // Health — public. Keeps only the operational contract: status, counts, and
 // the pipelines block (runbook: `curl /api/health | jq .pipelines`). The

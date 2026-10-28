@@ -1,11 +1,11 @@
 /**
  * /api/originals — public, read-only feed for the /originals page (#260).
- * Returns { analysis, explained, stories, quiz }; each list may be empty and the
+ * Returns { analysis, explained, stories, quiz, numbers }; each list may be empty and the
  * page earn-renders (an empty shelf is not shown).
  */
 
 import { Router } from "express";
-import { listOriginals, latestWeeklyQuiz } from "../realityIndex/dal/originalsDao.js";
+import { listOriginals, latestWeeklyQuiz, dailyNumberFor } from "../realityIndex/dal/originalsDao.js";
 import { logger } from "../services/logger.js";
 
 const router = Router();
@@ -29,6 +29,19 @@ router.get("/quiz", (_req, res) => {
     res.json(quiz);
   } catch (err) {
     logger.error(`GET /api/originals/quiz: ${err.message}`);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// #272 — today's (UTC) "By the numbers" item; 404 when there is none.
+router.get("/numbers/today", (_req, res) => {
+  try {
+    const item = dailyNumberFor(new Date().toISOString().slice(0, 10));
+    if (!item) return res.status(404).json({ error: "No number today" });
+    res.set("Cache-Control", "public, max-age=300");
+    res.json(item);
+  } catch (err) {
+    logger.error(`GET /api/originals/numbers/today: ${err.message}`);
     res.status(500).json({ error: "Internal server error" });
   }
 });

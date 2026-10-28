@@ -1,6 +1,6 @@
 /**
  * useOriginals — React Query hook for /api/originals (#260).
- * Returns { analysis, explained, stories, quiz }; each list may be empty, quiz may be null.
+ * Returns { analysis, explained, stories, quiz, numbers }; each list may be empty, quiz may be null.
  */
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
