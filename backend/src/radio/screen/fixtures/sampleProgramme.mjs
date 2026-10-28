@@ -48,7 +48,9 @@ export function sampleProgramme(hourStart = Date.parse("2026-10-27T14:00:00Z")) 
   return {
     programme: { version: 1, hourStart, builtAt: 1, endsAt: slots.at(-1).end, audio: [], cues, headlines,
       slots: slots.map(({ id, kind, start, end, title, elements }) => ({ id, kind, start, end, title: title || null, elements })),
-      rail: { markets: rows, weather } },
+      // #283: the rail's markets block in a grid hour (programme/factPack.js railMarkets): two market rows, Bitcoin, Ether, the top mover
+      rail: { markets: [...rows.slice(0, 2), { key: "Bitcoin", group: "Crypto", price: 98450, pct: 1.84 }, { key: "Ethereum", group: "Crypto", price: 3420.5, pct: -0.73 },
+        { key: "Solana", group: "Crypto", price: 182.34, pct: 6.12 }], weather } },
     scenes,
   };
 }

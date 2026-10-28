@@ -15,7 +15,10 @@ Every produced hour keeps today's running order (`clock.js`): the top ident and 
 Now, The News, Compared, the desks, a Short from a ScoopFeeds film, the half-hour ident and headlines, sign-off. The
 grid then changes four things for the hour:
 
-1. **Crypto.** The first 90 seconds of the first music break become the Crypto segment (prices from CoinGecko).
+1. **Crypto, in every hour.** The first 90 seconds of the first music break become the Crypto segment (prices from
+   CoinGecko). Crypto trades around the clock, so the overnight repeats carry it too (#283): the repeated hour's
+   Crypto is cut to music (its prices are old by then) and a Crypto segment written fresh against the repeat's own air
+   time is spliced in its place.
 2. **Weather every two hours**, on even New York hours. In the other hours its 90 seconds go to the half-hour
    headlines, which then read seven stories instead of five.
 3. **Business follows the open exchange.** Markets Now and the Business desk are titled by the stock exchanges
@@ -35,12 +38,12 @@ back an hour, and so do these columns. The grid itself is always set in New York
 
 | ET hour | Daypart | Format | Audience | Weather | Crypto | Film | London | Dubai | Karachi |
 |---|---|---|---|---|---|---|---|---|---|
-| 00:00 | Overnight: Middle East morning | repeat | middle-east-morning | yes | no | no | 04:00 | 08:00 | 09:00 |
-| 01:00 | Overnight: Middle East morning | repeat | middle-east-morning | no | no | no | 05:00 | 09:00 | 10:00 |
-| 02:00 | Overnight: UK and Europe morning | repeat | uk-europe-morning | yes | no | no | 06:00 | 10:00 | 11:00 |
-| 03:00 | Overnight: UK and Europe morning | repeat | uk-europe-morning | no | no | no | 07:00 | 11:00 | 12:00 |
-| 04:00 | Overnight: UK and Europe morning | repeat | uk-europe-morning | yes | no | no | 08:00 | 12:00 | 13:00 |
-| 05:00 | Overnight: UK and Europe morning | repeat | uk-europe-morning | no | no | no | 09:00 | 13:00 | 14:00 |
+| 00:00 | Overnight: Middle East morning | repeat | middle-east-morning | yes | yes | no | 04:00 | 08:00 | 09:00 |
+| 01:00 | Overnight: Middle East morning | repeat | middle-east-morning | no | yes | no | 05:00 | 09:00 | 10:00 |
+| 02:00 | Overnight: UK and Europe morning | repeat | uk-europe-morning | yes | yes | no | 06:00 | 10:00 | 11:00 |
+| 03:00 | Overnight: UK and Europe morning | repeat | uk-europe-morning | no | yes | no | 07:00 | 11:00 | 12:00 |
+| 04:00 | Overnight: UK and Europe morning | repeat | uk-europe-morning | yes | yes | no | 08:00 | 12:00 | 13:00 |
+| 05:00 | Overnight: UK and Europe morning | repeat | uk-europe-morning | no | yes | no | 09:00 | 13:00 | 14:00 |
 | 06:00 | US morning | produced | us | yes | yes | no | 10:00 | 14:00 | 15:00 |
 | 07:00 | US morning | produced | us | no | yes | no | 11:00 | 15:00 | 16:00 |
 | 08:00 | US morning | produced | us | yes | yes | no | 12:00 | 16:00 | 17:00 |
@@ -62,7 +65,7 @@ back an hour, and so do these columns. The grid itself is always set in New York
 
 - **Produced** (6 am to midnight New York): a full hour written from the live feed.
 - **Repeat** (overnight New York): the strongest recent produced hour again, with freshly written top-of-hour
-  headlines. Midnight to 2 am is timed for the Middle East morning, 2 am to 6 am for the UK and Europe morning. The
+  headlines and a freshly written Crypto segment. Midnight to 2 am is timed for the Middle East morning, 2 am to 6 am for the UK and Europe morning. The
   repeat itself is built by #195's rolling station; the grid only says which hours are repeats.
 - **South Asia** gets its own slot, 10 pm to midnight New York (7 to 9 am Karachi in US summer time, 8 to 10 am in
   winter). It is a produced hour; Rule 0 and the Pakistan-politics rules apply to it like every other hour.
@@ -80,7 +83,7 @@ Rule 0, figure, quote and outlet checks as every other segment).
 | The News, Compared | compared | produced | twice an hour | on-air |
 | Business & Markets | markets | produced + live data | twice an hour, led by the exchanges in session | on-air |
 | Desks: Middle East, US, Tech and AI, Business | desk | produced | once an hour each | on-air |
-| Crypto | crypto | produced + live data | once an hour | on-air |
+| Crypto | crypto | produced + live data | once an hour, every hour (repeats get a fresh one) | on-air |
 | Weather | weather | produced + live data | every 2 hours (even New York hours) | on-air |
 | ScoopFeeds showcase | showcase | pre-recorded | a Short every hour; the film at 9 ET | on-air |
 | Developing and emerging stories | developing | live-produced | breaks into the grid | #201 |
@@ -92,7 +95,11 @@ they land, they do not air from the grid.
 
 **Crypto** reads only the CRYPTO rows of the pack (Bitcoin first, then Ether, then at most three others): price and
 24-hour change. It never predicts prices or advises buying or selling. With fewer than two crypto rows the slot is
-headlines and music.
+headlines and music, and the hour still airs; it is never silent about it (#283): the produce log says
+`crypto: feed unavailable (...)` with the reason, `programme.json` records it under `crypto`, and the hour's air-check
+report carries it (`stats.crypto` and a note). No crypto scene and no placeholder go on screen. The right rail's
+markets block shows Bitcoin, Ether and the biggest 24-hour mover among the other coins after two market rows (five
+rows, as before) in every grid hour that has crypto rows.
 
 ## Screen elements (always on, earn-render)
 

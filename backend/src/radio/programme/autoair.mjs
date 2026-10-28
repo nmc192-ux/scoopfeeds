@@ -160,7 +160,7 @@ async function main() {
   stage("checking");
   const check = airCheck(out, { hourStart });
   status.check = check; saveStatus();
-  log(`air check: ${check.ok ? "PASS" : "FAIL"} ${JSON.stringify(check.stats)}${check.problems.length ? ` problems: ${check.problems.join("; ")}` : ""}`);
+  log(`air check: ${check.ok ? "PASS" : "FAIL"} ${JSON.stringify(check.stats)}${check.problems.length ? ` problems: ${check.problems.join("; ")}` : ""}${check.notes?.length ? ` notes: ${check.notes.join("; ")}` : ""}`);
   if (!check.ok) { await alert(`the ${fmtPkt(hourStart)} hour failed its air check and did not air: ${check.problems.join("; ")}`); stage("check-failed"); process.exitCode = 1; return; }
 
   function prog0() { try { return JSON.parse(fs.readFileSync(path.join(out, "programme.json"), "utf8")); } catch { return {}; } }

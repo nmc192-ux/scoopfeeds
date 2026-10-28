@@ -53,7 +53,7 @@ export const SEGMENTS = Object.freeze([
   { id: "compared", name: "The News, Compared", kind: "produced", every: "twice an hour", facts: "one story, 3+ outlets", scene: "compared, known", status: "on-air" },
   { id: "markets", name: "Business & Markets", kind: "produced + live data", every: "twice an hour, led by the exchanges in session", facts: "market rows", scene: "markets", status: "on-air" },
   { id: "desk", name: "Desks: Middle East, US, Tech and AI, Business", kind: "produced", every: "once an hour each", facts: "desk stories", scene: "title, story", status: "on-air" },
-  { id: "crypto", name: "Crypto", kind: "produced + live data", every: "once an hour", facts: "crypto rows (CoinGecko)", scene: "markets", status: "on-air" },
+  { id: "crypto", name: "Crypto", kind: "produced + live data", every: "once an hour, every hour (repeats get a fresh one)", facts: "crypto rows (CoinGecko)", scene: "markets", status: "on-air" },
   { id: "weather", name: "Weather", kind: "produced + live data", every: "every 2 hours (even New York hours)", facts: "weather rows", scene: "weather", status: "on-air" },
   { id: "showcase", name: "ScoopFeeds showcase", kind: "pre-recorded", every: "a Short every hour; the film at 9 ET", facts: "film library", scene: "film, feature, series", status: "on-air" },
   { id: "developing", name: "Developing and emerging stories", kind: "live-produced", every: "breaks into the grid", facts: "event graph", scene: "story", status: "#201" },
@@ -124,7 +124,9 @@ export function planHour(hourStartMs) {
     format: d.format,
     audience: d.audience,
     weather: h % WEATHER_EVERY_H === 0,
-    crypto: d.format === "produced",
+    // #283: crypto trades around the clock, so every hour carries it. A repeat hour gets a Crypto segment written
+    // fresh against its own air time (rollingStation.js splices it over the repeated hour's, repeat.js cuts the stale one)
+    crypto: true,
     feature: fixed?.kind === "feature" ? fixed : null,
     label: `${h}:00 ET · ${d.name}${d.format === "repeat" ? " (repeat, fresh headlines)" : ""}`,
   };
