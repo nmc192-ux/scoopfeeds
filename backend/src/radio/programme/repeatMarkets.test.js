@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { buildClock } from "./clock.js";
 import { prepareRepeat, spliceProgramme, retimeProgramme, cutSlotToMusic, REPEAT_SOURCE_SEGMENTS } from "./repeat.js";
-import { recheckRepeatedMarkets } from "./marketsClock.js";
+import { recheckRepeatedMarkets, labelScreenMarkets } from "./marketsClock.js";
 import { airCheck, repeatMarketsProblems } from "./airCheck.js";
 import { partAt } from "../playout/playout.js";
 import { writeHourAudio, writeWav, renderProgramme, linesFor } from "../../testing/radioWav.js";
@@ -130,7 +130,9 @@ test("Monday 22:00 ET hour repeated Tuesday 03:00 ET: close wording already, the
   assert.deepEqual(p.repeatMarkets.slots.map((s) => [s.id, s.action, s.stale.length]), [["markets-1", "kept", 0], ["markets-2", "kept", 0]]);
   const plain = retimeProgramme(JSON.parse(fs.readFileSync(path.join(src, "programme.json"), "utf8")), TUE_03_ET);
   assert.deepEqual(p.audio, plain.audio);
-  assert.deepEqual(p.cues, plain.cues);
+  // #282: the only change to the cues is the screen's market rows, re-labelled at the repeat's air time
+  assert.deepEqual(p.cues, labelScreenMarkets(plain).cues);
+  assert.ok(p.cues.filter((c) => c.scene === "markets").every((c) => c.data.rows.filter((r) => r.group !== "Crypto").every((r) => r.closed?.weekday === "Monday")));
   assert.deepEqual(p.slots, plain.slots);
   // airCheck's second lock re-reads the kept slots and finds them fine
   const r = repeatMarketsProblems(p, { "the-hour": {} }, () => ({ segments: JSON.parse(fs.readFileSync(path.join(dst, REPEAT_SOURCE_SEGMENTS), "utf8")), pack: JSON.parse(fs.readFileSync(path.join(dst, "repeat-source-pack.json"), "utf8")) }));

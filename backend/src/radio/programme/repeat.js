@@ -12,7 +12,8 @@
  * writer call (a repeat is the cost guard's fallback), adds no producing time, and works from the repeated hour's
  * real slot times rather than the repeat hour's clock, which can differ after The Hour. The source hour's
  * segments.json and pack.json are kept as repeat-source-*.json, because the splice run overwrites both, so that
- * airCheck can re-check every Markets slot left on air.
+ * airCheck can re-check every Markets slot left on air. The screen's market rows are re-labelled at the repeat's
+ * air time too (#282, marketsClock.labelScreenMarkets), so a repeated hour never shows Friday's close as live.
  *
  * Crypto (#283): crypto trades around the clock, so the repeated hour's Crypto prices are stale by the repeat's air
  * time. prepareRepeat cuts that slot to music (`prog.crypto` says so); the rolling station then splices a Crypto
@@ -22,7 +23,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { recheckRepeatedMarkets } from "./marketsClock.js";
+import { recheckRepeatedMarkets, labelScreenMarkets } from "./marketsClock.js";
 import { elementsForKind } from "./grid.js";
 
 const HOUR = 3_600_000;
@@ -239,7 +240,9 @@ export function prepareRepeat(srcDir, dstDir, newHourStart, { now = Date.now() }
     fs.rmSync(f, { force: true });
     if (data) fs.writeFileSync(f, JSON.stringify(data, null, 1));
   }
-  const moved = cutRepeatCrypto(recheckRepeatMarkets(retimeProgramme(prog, newHourStart), srcSegments, srcPack, { now }), { now });
+  // #282: the screen's market rows (Markets scenes and the rail) are re-labelled against the repeat's own air time;
+  // #283: the repeated hour's Crypto is cut to music first, so the label pass sees the hour as it will air
+  const moved = labelScreenMarkets(cutRepeatCrypto(recheckRepeatMarkets(retimeProgramme(prog, newHourStart), srcSegments, srcPack, { now }), { now }));
   const pf = path.join(dstDir, "programme.json");
   fs.writeFileSync(pf + ".tmp", JSON.stringify(moved, null, 1));
   fs.renameSync(pf + ".tmp", pf);
