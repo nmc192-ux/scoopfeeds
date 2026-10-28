@@ -189,7 +189,7 @@ export class RollingStation {
    * @param {Function} [o.developing] #201: async ({ targets, now, writerBusy }) => result; called every
    *                                  developingEveryMin while the loop sleeps, never twice at once. `targets` are the
    *                                  programmes that may take a bulletin: the hour on air, then the next hour if ready.
-   * @param {Function} [o.updates]   #198: async ({ dir, hourStart, slot, deadline, writerBusy }) => exit code; produces one
+   * @param {Function} [o.updates]   #198: async ({ dir, hourStart, slot, deadline, writerBusy }) => exit code (or { code, writer }); produces one
    *                                  15-minute election update and splices it over its placeholder. Called while the loop
    *                                  sleeps, one at a time, for the election special's hours (the hour on air and the next).
    *                                  A failure or a missed window is recorded and skipped: the placeholder airs.
@@ -243,10 +243,11 @@ export class RollingStation {
     const writerBusy = this.queue.running > 0;
     this.updBusy = Promise.resolve()
       .then(() => (this.isPaused() ? 99 : this.updates({ dir: due.target.dir, hourStart: due.target.hourStart, slot: due.slot, deadline: due.deadline, writerBusy })))
-      .then((code) => {
+      .then((res) => {
+        const code = typeof res === "object" && res ? res.code : res;   // the hook may also say which writer it used
         const finishedAt = this.now();
         const ok = code === 0 && finishedAt <= due.slot.start;
-        this.noteUpdate(due.target, due.slot, { result: ok ? "on air" : "skipped", startedAt: now, finishedAt, marginSec: Math.round((due.slot.start - finishedAt) / 1000), writer: writerBusy ? "mechanical (writer busy)" : "claude",
+        this.noteUpdate(due.target, due.slot, { result: ok ? "on air" : "skipped", startedAt: now, finishedAt, marginSec: Math.round((due.slot.start - finishedAt) / 1000), writer: res?.writer || (writerBusy ? "mechanical (writer busy)" : "claude"),
           reason: ok ? null : code === 99 ? "PAUSE" : code === 3 ? "nothing survived the checks: the placeholder airs" : `exit ${code}: the placeholder airs` });
       })
       .catch((e) => { this.noteUpdate(due.target, due.slot, { result: "skipped", reason: `crashed (${e.message}): the placeholder airs`, startedAt: now, finishedAt: this.now() }); })

@@ -291,7 +291,7 @@ async function main() {
     const code = await done.finally(() => clearTimeout(t));
     const run = writerRunSince(dir, before);
     if (run) station.ledger.add(hourStart, run, "election-update");
-    return code;
+    return { code, writer: useClaude ? "claude" : writerBusy ? "mechanical (writer busy)" : "mechanical" };
   } : null;
 
   let broadcast = null;

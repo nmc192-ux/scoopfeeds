@@ -209,7 +209,7 @@ function nightRig({ start, failUpdates = [], night = nightWindow(), force = fals
     await clock.sleep(2 * MIN);
     if (failUpdates.includes(`${hourStamp(hourStart)}/${slot.id}`)) return 3;
     insertUpdate(dir, { id: slot.id, cut: slot.start, end: slot.end, resumeAt: slot.end, partFile: `part-${slot.id}.wav`, cues: [], lines: [], at: clock.now() }, { now: clock.now });
-    return 0;
+    return { code: 0, writer: writerBusy ? "mechanical (writer busy)" : "fake" };
   };
   const station = new RollingStation({
     airDir, produce, check, playout, updates, now: clock.now, sleep: clock.sleep, log: (m) => logs.push(m),
@@ -238,6 +238,8 @@ test("station: the special starts and ends on its own at 6 pm and 3 am ET; four 
   assert.ok(!r.upd.some((u) => u.hour === hourStamp(SPECIAL_UNTIL)), "no updates once the special has ended");
   const log = r.station.updateLog;
   assert.equal(log.filter((u) => u.result === "on air").length, 35);
+  assert.ok(log.filter((u) => u.result === "on air").every((u) => ["fake", "mechanical (writer busy)"].includes(u.writer)));
+  assert.ok(log.some((u) => u.writer === "mechanical (writer busy)"), "updates while the next hour is being written are mechanical");
   const skipped = log.find((u) => `${u.hour}/${u.slot}` === failing);
   assert.equal(skipped.result, "skipped"); assert.match(skipped.reason, /placeholder airs/);
   const st = JSON.parse(fs.readFileSync(path.join(r.airDir, hourStamp(utc("2026-11-04T01:00:00Z")), "status.json"), "utf8"));
