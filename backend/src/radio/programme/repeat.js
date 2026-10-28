@@ -13,6 +13,12 @@
  * real slot times rather than the repeat hour's clock, which can differ after The Hour. The source hour's
  * segments.json and pack.json are kept as repeat-source-*.json, because the splice run overwrites both, so that
  * airCheck can re-check every Markets slot left on air.
+ *
+ * Crypto (#283): crypto trades around the clock, so the repeated hour's Crypto prices are stale by the repeat's air
+ * time. prepareRepeat cuts that slot to music (`prog.crypto` says so); the rolling station then splices a Crypto
+ * segment written fresh against the repeat's air time over it (produce.mjs --from crypto --to next). If that run
+ * fails, the hour airs with music there. The repeated hour's segments.json / segments.raw.json / checks.json are not
+ * copied: the splice runs write their own and merge them (produce.mjs).
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -81,7 +87,7 @@ export function retimeProgramme(prog, newHourStart) {
  * the playout switches back to whichever part was playing there, seeking from that part's own `origin`, so the
  * rest of the hour plays exactly as before. Cues are replaced inside the stretch only. Pure.
  */
-export function spliceProgramme(prog, { cut, resumeAt, partFile, cues, lines = [] }) {
+export function spliceProgramme(prog, { cut, resumeAt, partFile, cues, lines = [], slots = null }) {
   const old = prog.audio || [];
   const covering = old.filter((a) => a.from <= resumeAt).at(-1);
   const after = old.filter((a) => a.from >= resumeAt);
@@ -93,7 +99,38 @@ export function spliceProgramme(prog, { cut, resumeAt, partFile, cues, lines = [
     // #273: line timings inside the stretch are the new part's; a splice that brings none leaves the stretch without
     // any, so a spoken slot there is unmeasured by the listen-back rather than measured against the old audio
     ...(Array.isArray(prog.lines) || lines.length ? { lines: [...(prog.lines || []).filter((l) => l.at < cut || l.at >= resumeAt), ...lines.filter((l) => l.at >= cut && l.at < resumeAt)].sort((a, b) => a.at - b.at) } : {}),
+    // #283: the stretch's slots are the new run's (a repeated hour's music break can now hold a fresh Crypto segment)
+    ...(slots && Array.isArray(prog.slots) ? { slots: spliceSlots(prog.slots, slots, cut, resumeAt) } : {}),
   };
+}
+
+/**
+ * Slots of a programme with [cut, resumeAt) replaced by `fresh` (the splice run's slots inside the stretch). An old slot
+ * that straddles an edge is kept on its outside part, so the list stays contiguous. Pure.
+ */
+export function spliceSlots(old, fresh, cut, resumeAt) {
+  const out = [];
+  for (const s of old) {
+    if (s.end <= cut || s.start >= resumeAt) { out.push(s); continue; }
+    if (s.start < cut) out.push({ ...s, end: cut });
+    if (s.end > resumeAt) out.push({ ...s, start: resumeAt });
+  }
+  out.push(...fresh.filter((s) => s.start >= cut && s.end <= resumeAt));
+  return out.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * #283: the repeated hour's Crypto slot, cut to music (its prices are stale at the repeat's air time). Records the
+ * result in `prog.crypto`: "cut" (the fresh splice replaces it), or "stale" when it could not be cut (airCheck refuses
+ * the hour unless the fresh splice lands). An hour without a spoken Crypto slot is left as it is. Pure.
+ */
+export function cutRepeatCrypto(prog, { now = Date.now() } = {}) {
+  const slot = (prog.slots || []).find((s) => s.id === "crypto" && s.kind === "spoken");
+  if (!slot) return prog.crypto ? { ...prog, crypto: { ...prog.crypto, why: `${prog.crypto.why || `crypto: ${prog.crypto.status}`} (in the repeated hour)` } } : prog;
+  const why = "the repeated hour's Crypto prices are stale at the repeat's air time";
+  const c = cutSlotToMusic(prog, "crypto", { why: `#283 ${why}` });
+  if (c.ok) return { ...c.prog, crypto: { status: "cut", why: `crypto: ${why}; cut to music until a fresh Crypto segment is spliced in`, at: now } };
+  return { ...prog, crypto: { status: "stale", why: `crypto: ${why}, and it could not be cut to music (${c.why})`, at: now } };
 }
 
 // ── #249: cut a repeated Markets Now slot to the hour's own music ─────────────
@@ -169,18 +206,22 @@ export function recheckRepeatMarkets(prog, segments, pack, { now = Date.now() } 
   return { ...out, repeatMarkets: { checkedAt: now, slots: record } };
 }
 
-const SKIP = new Set(["status.json", "autoair.log", "rolling.log", "playout.log", "writer.json", "produce.log", "refresh.log"]);
+// #283: segments.json, segments.raw.json and checks.json are the splice runs' own (kept as repeat-source-segments.json)
+const SKIP = new Set(["status.json", "autoair.log", "rolling.log", "playout.log", "writer.json", "produce.log", "refresh.log",
+  "segments.json", "segments.raw.json", "checks.json"]);
 
 export const REPEAT_SOURCE_SEGMENTS = "repeat-source-segments.json", REPEAT_SOURCE_PACK = "repeat-source-pack.json";
 
 /**
- * Link (or copy) a produced hour into `dstDir`, retime its programme to `newHourStart`, and re-check its Markets Now
- * at the new air time (#249).
+ * Link (or copy) a produced hour into `dstDir`, retime its programme to `newHourStart`, re-check its Markets Now
+ * at the new air time (#249), and cut its stale Crypto to music (#283).
  */
 export function prepareRepeat(srcDir, dstDir, newHourStart, { now = Date.now() } = {}) {
   const prog = readJson(path.join(srcDir, "programme.json"));
   if (!prog) throw new Error(`no readable programme.json in ${srcDir}`);
   fs.mkdirSync(dstDir, { recursive: true });
+  // #283: a failed producer run may have left its own segments here; the splice runs must start from none
+  for (const name of ["segments.json", "segments.raw.json", "checks.json"]) fs.rmSync(path.join(dstDir, name), { force: true });
   for (const name of fs.readdirSync(srcDir)) {
     if (SKIP.has(name) || name === "programme.json" || name.startsWith("repeat-source-")) continue;
     const from = path.join(srcDir, name), to = path.join(dstDir, name);
@@ -198,7 +239,7 @@ export function prepareRepeat(srcDir, dstDir, newHourStart, { now = Date.now() }
     fs.rmSync(f, { force: true });
     if (data) fs.writeFileSync(f, JSON.stringify(data, null, 1));
   }
-  const moved = recheckRepeatMarkets(retimeProgramme(prog, newHourStart), srcSegments, srcPack, { now });
+  const moved = cutRepeatCrypto(recheckRepeatMarkets(retimeProgramme(prog, newHourStart), srcSegments, srcPack, { now }), { now });
   const pf = path.join(dstDir, "programme.json");
   fs.writeFileSync(pf + ".tmp", JSON.stringify(moved, null, 1));
   fs.renameSync(pf + ".tmp", pf);

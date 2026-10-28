@@ -151,8 +151,74 @@ export function parseCrypto(m) {
       pct: Number.isFinite(c.changePct) ? Math.round(c.changePct * 100) / 100 : null, time: null }))
     .sort((a, b) => CRYPTO_KEEP.indexOf(a.sym) - CRYPTO_KEEP.indexOf(b.sym));
 }
+/**
+ * #283: one retry. /api/market answered in about 1 s from its cache but timed out at 45 s on a cold cache in a dry run
+ * (28 Oct 2026); the first miss usually warms it. Two failures throw (the caller records why).
+ */
 export async function fetchCrypto(base, opts = {}) {
-  return parseCrypto(await getJson(`${base}/api/market`, { ...opts, timeoutMs: 45_000 }));
+  try { return parseCrypto(await getJson(`${base}/api/market`, { ...opts, timeoutMs: 45_000 })); }
+  catch (e) {
+    opts.log?.(`crypto: /api/market failed (${e.message}); retrying once`);
+    await new Promise((r) => setTimeout(r, opts.retryMs ?? 5_000));
+    return parseCrypto(await getJson(`${base}/api/market`, { ...opts, timeoutMs: 45_000 }));
+  }
+}
+
+/** The Crypto segment needs at least this many rows; with fewer it turns into headlines and music (produce.mjs). */
+export const CRYPTO_MIN_ROWS = 2;
+
+/**
+ * #283: why the hour has no Crypto segment, or null when it can air. `pack.cryptoError` is the fetch error, if any.
+ * The text is what the produce log and the air-check report say: "crypto: feed unavailable (...)".
+ */
+export function cryptoUnavailable(pack) {
+  const n = (pack?.crypto || []).length;
+  if (n >= CRYPTO_MIN_ROWS) return null;
+  return `feed unavailable (${pack?.cryptoError ? `/api/market: ${pack.cryptoError}` : `only ${n} crypto row${n === 1 ? "" : "s"} from /api/market`})`;
+}
+
+/**
+ * #283: what a producer run does about Crypto, as produce.mjs applies it. A Crypto slot in the run whose feed is down
+ * turns into headlines and music (in place, as before); the note is what programme.json records under `crypto`.
+ * A full run (from the top) with no Crypto slot records why; a partial run without one changes nothing (null).
+ * @param {object[]} slots  the run's slots (mutated: a Crypto slot without rows becomes music)
+ * @param {object} pack
+ * @param {{ useGrid: boolean, special?: boolean, fullRun: boolean }} o
+ * @returns {{ status: string, why?: string, rows?: number } | null}
+ */
+export function cryptoForRun(slots, pack, { useGrid, special = false, fullRun }) {
+  if (slots.some((s) => s.segment === "crypto")) {
+    const why = cryptoUnavailable(pack);
+    if (!why) return { status: "on air", rows: pack.crypto.length };
+    for (const s of slots) if (s.segment === "crypto") { s.kind = "music"; s.segment = null; s.title = null; }
+    return { status: "feed unavailable", why: `crypto: ${why}` };
+  }
+  if (!fullRun) return null;
+  if (special) return { status: "not in the special", why: "crypto: the election night special has no Crypto segment" };
+  if (!useGrid) return { status: "grid off", why: "crypto: the grid is off (RADIO_GRID_ENABLED is not 1), so the hour has no Crypto segment" };
+  return { status: "no slot", why: "crypto: no music break long enough for the Crypto segment this hour" };
+}
+
+/** Rows the right rail's markets block shows (the programme screen's slice; more pushes the weather block off screen). */
+export const RAIL_MARKET_ROWS = 5;
+/** Crypto rows in that block at most: Bitcoin, Ether and the biggest mover among the other coins. */
+export const RAIL_CRYPTO_ROWS = 3;
+
+/**
+ * #283: the right rail's markets block for a grid hour, RAIL_MARKET_ROWS rows at most, verbatim from the pack: market
+ * rows first (the exchanges in session lead), then Bitcoin, Ether and the biggest 24-hour mover among the other coins.
+ * Without crypto rows (feed down) it is the market rows alone: no placeholder. Pure.
+ * @param {{ markets?: object[], crypto?: object[] }} pack
+ * @param {{ lead?: string[] }} [o]  market groups in session (grid.applyPlan's marketsLead)
+ */
+export function railMarkets(pack, { lead = [] } = {}) {
+  const mk = (pack?.markets || []).filter((r) => r.group !== "Crypto");
+  const led = [...mk.filter((r) => lead.includes(r.group)), ...mk.filter((r) => !lead.includes(r.group))];
+  const coins = pack?.crypto?.length ? pack.crypto : (pack?.markets || []).filter((r) => r.group === "Crypto");   // the markets fetch's own Bitcoin row
+  const core = ["BTC", "ETH"].map((sym) => coins.find((c) => c.sym === sym)).filter(Boolean);
+  const movers = coins.filter((c) => !core.includes(c) && Number.isFinite(c.pct)).sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
+  const crypto = [...core, ...movers].slice(0, RAIL_CRYPTO_ROWS);
+  return [...led.slice(0, RAIL_MARKET_ROWS - crypto.length), ...crypto].slice(0, RAIL_MARKET_ROWS);
 }
 
 export const WEATHER_CITIES = ["New York", "Washington D.C.", "London", "Paris", "Dubai", "Riyadh", "Doha", "Karachi", "Delhi", "Tokyo"];
@@ -170,7 +236,7 @@ export async function fetchWeather(base, opts = {}) {
  * @returns {Promise<{ builtAt, state, top: story[], desks: {[desk]: story[]}, markets, weather, dropped, crypto? }>}
  *   story = { id, headline, outlets: [{source, title, description, published}], count }
  */
-export async function buildFactPack({ base = "https://scoopfeeds.com", fetchImpl = fetch, now = Date.now(), log = () => {}, crypto = false } = {}) {
+export async function buildFactPack({ base = "https://scoopfeeds.com", fetchImpl = fetch, now = Date.now(), log = () => {}, crypto = false, cryptoRetryMs } = {}) {
   const opts = { fetchImpl, log };
   const dropped = [];
   const news = async (q) => {
@@ -220,7 +286,8 @@ export async function buildFactPack({ base = "https://scoopfeeds.com", fetchImpl
 
   const out = { builtAt: now, state, top, desks, markets, weather, dropped };
   // the grid's Crypto segment (#200) only: without `crypto` the pack is exactly what it was
-  if (crypto) { try { out.crypto = await fetchCrypto(base, opts); } catch (e) { log(`crypto failed: ${e.message}`); out.crypto = []; } }
+  // #283: the reason is kept, so the produce log and the air check can say why the hour has no Crypto segment
+  if (crypto) { try { out.crypto = await fetchCrypto(base, { ...opts, retryMs: cryptoRetryMs }); } catch (e) { log(`crypto failed: ${e.message}`); out.crypto = []; out.cryptoError = String(e.message).slice(0, 200); } }
   return out;
 }
 

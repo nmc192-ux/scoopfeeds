@@ -12,6 +12,8 @@
  *                   audio part that the playout switches to at that slot's start. Pick a music slot.
  * --to <slot id>    with --from: stop before that slot and switch back to the audio that was there (the 24/7
  *                   overnight repeat: a fresh The Hour over a repeated hour, --from the-hour --to markets-1).
+ *                   `--to next` stops at the slot after --from (#283: a fresh Crypto for a repeat, --from crypto --to next).
+ *                   A splice run merges its segments into the ones already in --out (earlier splices of the same hour).
  * --weather 0|1     0: no weather this hour, the half-hour headlines take its time (the 24/7 day, dayClock.js). Default 1.
  * --developing <file>  #201: the developing desk's followups.json; those stories lead the headlines while they grow.
  * --election-night special|day-after  #198: the election night special's clock (electionNight.js), or a day-after hour
@@ -27,7 +29,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { buildClock, buildGridClock, checkClock } from "./clock.js";
-import { buildFactPack } from "./factPack.js";
+import { buildFactPack, cryptoForRun, railMarkets } from "./factPack.js";
 import { writeSegments, claudeWriter, isLimitError } from "./writer.js";
 import { sessionsAt } from "./dayClock.js";
 import { labelMarkets, marketsShutAt } from "./marketsClock.js";
@@ -100,10 +102,15 @@ const counting = night === "day-after" ? addCountingDesk(clock, hourStart) : nul
 if (night === "day-after" && !counting) log("day after: no music-1 slot long enough for the counting desk this hour");
 if (counting && checkClock(clock).length) die(`clock is broken after adding the counting desk: ${checkClock(clock).join("; ")}`);
 if (midterms && checkClock(clock).length) die(`clock is broken after adding the Midterms desk: ${checkClock(clock).join("; ")}`);
+// #283: a repeat asks for a fresh Crypto in every hour; an hour whose clock has none (grid off) has nothing to splice
+if (v.from === "crypto" && !clock.some((s) => s.id === "crypto")) {
+  log(`crypto: this hour's clock has no Crypto slot (${night === "special" ? "the election night special" : useGrid ? "no music break long enough" : "the grid is off: RADIO_GRID_ENABLED is not 1"}); nothing to splice`);
+  process.exit(0);
+}
 const fromIdx = v.from ? clock.findIndex((s) => s.id === v.from) : 0;
 if (fromIdx < 0) die(`--from: no slot "${v.from}" (slots: ${clock.map((s) => s.id).join(", ")})`);
-const toIdx = v.to ? clock.findIndex((s) => s.id === v.to) : clock.length;
-if (toIdx < 0) die(`--to: no slot "${v.to}"`);
+const toIdx = v.to === "next" ? fromIdx + 1 : v.to ? clock.findIndex((s) => s.id === v.to) : clock.length;
+if (v.to && (toIdx < 0 || toIdx >= clock.length)) die(`--to: no slot "${v.to}"`);
 if (v.to && (!v.from || toIdx <= fromIdx)) die("--to needs --from, and must come after it");
 const slots = clock.slice(fromIdx, toIdx);
 const t0 = Date.now();
@@ -138,10 +145,11 @@ if (pack.markets.length < 3) {
   for (const s of slots) if (s.segment === "markets") { s.kind = "music"; s.segment = null; s.title = null; }
   log(`WARNING: only ${pack.markets.length} market rows; Markets Now slots turned into headlines and music`);
 }
-if (slots.some((s) => s.segment === "crypto") && (pack.crypto || []).length < 2) {
-  for (const s of slots) if (s.segment === "crypto") { s.kind = "music"; s.segment = null; s.title = null; }
-  log(`WARNING: only ${(pack.crypto || []).length} crypto rows; the Crypto slot turned into headlines and music`);
-}
+// #283: the Crypto segment's state is recorded in programme.json (`crypto`) and reported by airCheck; never silent
+const cryptoNote = cryptoForRun(slots, pack, { useGrid, special: night === "special", fullRun: !v.to && fromIdx === 0 });
+if (cryptoNote?.status === "on air") log(`crypto: ${pack.crypto.length} rows (${pack.crypto.map((c) => c.sym).join(" ")}) for the Crypto segment`);
+else if (cryptoNote?.status === "feed unavailable") log(`WARNING: ${cryptoNote.why}; the Crypto slot turned into headlines and music`);
+else if (cryptoNote) log(cryptoNote.why);
 if (pack.weather.length < 5) {
   for (const s of slots) if (s.segment === "weather") { s.kind = "music"; s.segment = null; s.title = null; }
   log(`WARNING: only ${pack.weather.length} cities; the weather slot turned into headlines and music`);
@@ -192,7 +200,8 @@ const saveWriterLog = () => {
 };
 let raw;
 // #198: the update slots of the special are mechanical placeholders here (update.mjs re-produces each before it airs)
-try { raw = await writeSegments(pack, spoken.filter((s) => !s.mechanical), when, { write: counted, log }); }
+// nothing to write (a Crypto splice whose feed is down is music only): no Claude call
+try { raw = spoken.some((s) => !s.mechanical) ? await writeSegments(pack, spoken.filter((s) => !s.mechanical), when, { write: counted, log }) : {}; }
 finally { saveWriterLog(); }
 if (night === "special") {
   for (const s of spoken.filter((x) => UPDATE_ID.test(x.id))) {
@@ -201,11 +210,15 @@ if (night === "special") {
     if (g.length) log(`${s.id}: poll closings ${g.map((x) => `${new Date(x.at).toISOString().slice(11, 16)} UTC (${x.states.join(" ")})`).join("; ")}`);
   }
 }
-fs.writeFileSync(path.join(out, "segments.raw.json"), JSON.stringify(raw, null, 1));
+// #283: a splice run (--to) adds its segments to those of earlier splices of the same hour (a repeat's fresh The Hour,
+// then its fresh Crypto); prepareRepeat leaves the repeated hour's own segments out, as repeat-source-segments.json
+const earlier = (f, empty) => { if (!v.to) return empty; try { return JSON.parse(fs.readFileSync(path.join(out, f), "utf8")) ?? empty; } catch { return empty; } };
+const merged = (f, now) => (Array.isArray(now) ? [...[earlier(f, [])].flat(), ...now] : { ...earlier(f, {}), ...now });
+fs.writeFileSync(path.join(out, "segments.raw.json"), JSON.stringify(merged("segments.raw.json", raw), null, 1));
 if (midterms) addBallotLines(raw, hourStart);   // mechanical "what's on the ballot" lines, checked like the rest
 const { segments, report } = checkSegments(raw, spoken, pack, { log });
-fs.writeFileSync(path.join(out, "segments.json"), JSON.stringify(segments, null, 1));
-fs.writeFileSync(path.join(out, "checks.json"), JSON.stringify(report, null, 1));
+fs.writeFileSync(path.join(out, "segments.json"), JSON.stringify(merged("segments.json", segments), null, 1));
+fs.writeFileSync(path.join(out, "checks.json"), JSON.stringify(merged("checks.json", report), null, 1));
 log(`checks: ${report.length} line(s) dropped`);
 
 // ── voice, mix, cues ──
@@ -250,7 +263,8 @@ withProgrammeLock(out, () => {
   if (v.to) {
     // Splice [cut, resumeAt) into the existing programme. At resumeAt the playout switches back to whichever part was
     // playing there, seeking from that part's own origin (`origin`), so the rest of the hour plays as before.
-    prog = spliceProgramme(prog, { cut, resumeAt: clock[toIdx].start, partFile, cues, lines });
+    prog = spliceProgramme(prog, { cut, resumeAt: clock[toIdx].start, partFile, cues, lines,
+      slots: slots.map(({ id, kind, start, end, title, elements }) => ({ id, kind, start, end, title: title || null, ...(elements ? { elements } : {}) })) });
   } else {
     prog.audio = prog.audio.filter((a) => a.from < cut).concat([{ file: partFile, from: cut }]);
     prog.cues = prog.cues.filter((c) => c.at < cut).concat(cues);
@@ -262,8 +276,11 @@ withProgrammeLock(out, () => {
   }
   if (gridPlan) prog.grid = gridPlan;
   if (night) prog.election = night;   // #198: "special" | "day-after" (airCheck, the update desk, the rehearsal report)
+  if (cryptoNote) prog.crypto = { ...cryptoNote, at: pack.builtAt };   // #283: read by airCheck
   // the screen's right rail (#200): markets and weather, verbatim from the pack; each block renders only with data
-  prog.rail = { markets: pack.markets, weather: pack.weather };
+  // #283: in a grid hour the markets block carries Bitcoin, Ether and the top crypto mover too (factPack.railMarkets);
+  // without the grid it is the five rows the screen always showed
+  prog.rail = { markets: useGrid ? railMarkets(pack, { lead: [...new Set(sessionsAt(hourStart + 60_000).flatMap((x) => x.groups))] }) : pack.markets.slice(0, 5), weather: pack.weather };
   prog.headlines = [...pack.top.map((s) => ({ h: s.headline, src: s.outlets.slice(0, 2).map((o) => o.source).join(" and ") })),
     ...Object.values(pack.desks).flat().map((s) => ({ h: s.headline, src: s.outlets.slice(0, 2).map((o) => o.source).join(" and ") }))]
     .filter((x, i, all) => all.findIndex((o) => o.h === x.h) === i).slice(0, 24);

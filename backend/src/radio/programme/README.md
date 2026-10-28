@@ -47,7 +47,12 @@ hour N at :30 when the top story changed, and hands over at :59. The day clock (
 overnight repeat; `repeat.js` retimes the strongest recent hour and `produce.mjs --from the-hour --to markets-1` splices
 a fresh top of the hour into it. The repeated hour's own Markets Now is re-checked at the repeat's air time (#249): a slot
 with a line that would read a closed market as today's move, or whose lines cannot be read, is cut to that hour's own
-music bed, and `airCheck` re-checks every Markets slot left on air from `repeat-source-*.json`. A failed hour airs the 24/7 headline screen; `PAUSE` takes the stream off air within
+music bed, and `airCheck` re-checks every Markets slot left on air from `repeat-source-*.json`. Crypto (#283): the
+repeated hour's Crypto is cut to music (its prices are old), then `produce.mjs --from crypto --to next` splices a Crypto
+written fresh at the repeat's air time over it (grid hours only; with the grid off that run exits 0 and says so). Every
+hour records its Crypto state in `programme.json` (`crypto`: on air, feed unavailable, grid off, cut, ...) and `airCheck`
+reports it in `stats.crypto` and `notes` ("crypto: feed unavailable (...)"); a missing Crypto never refuses an hour,
+except a repeat's stale one that could not be cut. A failed hour airs the 24/7 headline screen; `PAUSE` takes the stream off air within
 30 s (#208), never onto the headline screen. Films go through `pickClearedFilm()`, the title through `factualTitle()`,
 and the broadcast description and `~/scoopfeeds-radio/x-broadcast.txt` carry the music credits, as in autoair. Writer calls are counted in each hour's
 `writer.json` and `status.json` and in `~/scoopfeeds-radio/writer-calls/<date>.json`.

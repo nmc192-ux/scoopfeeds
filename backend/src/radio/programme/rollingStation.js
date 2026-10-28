@@ -403,13 +403,24 @@ export class RollingStation {
       this.status(H, { repeatMarkets: moved.repeatMarkets?.slots.map(({ id, action }) => ({ id, action })) || null });
       const code = await produceStep({ from: "the-hour", to: "markets-1", headlineWriter: !this.ledger.guard().ok }, "repeat-top");
       if (code !== 0) return fail(`fresh top of the hour for the repeat failed (exit ${code})`);
+      // #283: crypto trades around the clock, so a repeat gets a Crypto segment written fresh against its own air time.
+      // prepareRepeat cut the repeated one to music; if this run fails the hour still airs, with music there. An hour whose
+      // clock has no Crypto slot (the grid is off) exits 0 with nothing spliced, and says so in its produce.log.
+      if (plan.crypto !== false) {
+        const c = await produceStep({ from: "crypto", to: "next", headlineWriter: !this.ledger.guard().ok }, "repeat-crypto");
+        let note = null;
+        try { note = JSON.parse(fs.readFileSync(path.join(dir, "programme.json"), "utf8")).crypto || null; } catch { /* reported by the air check */ }
+        this.status(H, { crypto: { exit: c, status: note?.status || "unmeasured" } });
+        if (c !== 0) this.log(`hour ${hourStamp(H)}: fresh Crypto for the repeat failed (exit ${c}); ${note?.why || "crypto: unmeasured"}`);
+        else this.log(`hour ${hourStamp(H)}: repeat crypto: ${note?.status || "unmeasured"}${note?.why ? ` (${note.why})` : ""}`);
+      }
     }
     const check = this.check(dir, { hourStart: H });
     this.status(H, { check });
     if (!check.ok) return fail(`air check: ${check.problems.join("; ")}`);
     this.ready.set(H, { dir, decision, plan });
     this.status(H, { stage: "ready", decision, readyAt: this.now() });
-    this.log(`hour ${hourStamp(H)}: READY (${decision}) ${JSON.stringify(check.stats)}`);
+    this.log(`hour ${hourStamp(H)}: READY (${decision}) ${JSON.stringify(check.stats)}${check.notes?.length ? ` notes: ${check.notes.join("; ")}` : ""}`);
   }
 
   /** :30 breaking-news refresh of the hour on air. */
