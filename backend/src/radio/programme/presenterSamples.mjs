@@ -4,7 +4,7 @@
  * Runs on the Mac against the local Kokoro (VIDEO_TTS_PROVIDER=kokoro, VIDEO_TTS_KOKORO_URL=http://127.0.0.1:8880):
  *
  *   node src/radio/programme/presenterSamples.mjs --out ~/scoopfeeds-radio/duo-samples \
- *        [--pairs bm_george+bf_emma,am_michael+af_heart,bm_george+af_heart,am_michael+bf_emma]
+ *        [--pairs am_michael+af_heart,bm_george+bf_emma,bm_george+af_heart,am_michael+bf_emma]
  *
  * Writes <out>/<A>+<B>.wav per pair: the same short bulletin, cast exactly as an hour is (castLines), so the
  * handover and the alternation are what DrJ will hear on air. Nothing is published.
@@ -20,7 +20,7 @@ const { values: v } = parseArgs({ options: { out: { type: "string" }, pairs: { t
 if (!v.out) { console.error("--out is required"); process.exit(2); }
 const out = path.resolve(v.out.replace(/^~/, process.env.HOME));
 fs.mkdirSync(out, { recursive: true });
-const pairs = (v.pairs || "bm_george+bf_emma,am_michael+af_heart,bm_george+af_heart,am_michael+bf_emma").split(",").map((p) => p.split("+"));
+const pairs = (v.pairs || "am_michael+af_heart,bm_george+bf_emma,bm_george+af_heart,am_michael+bf_emma").split(",").map((p) => p.split("+"));
 const names = JSON.parse(fs.readFileSync(new URL("./presenters.json", import.meta.url), "utf8"));
 const LINES = [
   { id: "open", text: "It's nine in the evening in New York. This is ScoopFeeds Radio, the news, compared." },

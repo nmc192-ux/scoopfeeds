@@ -164,7 +164,7 @@ of the Midterms desk. The dress rehearsal is `rolling.mjs --election-rehearsal` 
 
 `RADIO_DUO=1` (Mac, dark by default) casts every checked line before it is voiced (`presenters.js`): each segment
 opens with the lead presenter (A), stories alternate A, B, A…, one mechanical handover ("Over to you, <B>.") at most
-once per segment, and the sign-off names both. Names: `presenters.json`. Voices: `RADIO_VOICE_A` (default `bm_george`)
-and `RADIO_VOICE_B` (default `bf_emma`), both through the same Kokoro path, so pronunciation overrides apply to both.
+once per segment, and the sign-off names both. Names: `presenters.json`. Voices: `RADIO_VOICE_A` (default `am_michael`)
+and `RADIO_VOICE_B` (default `af_heart`), both through the same Kokoro path, so pronunciation overrides apply to both.
 The screen shows the presenter's name tag while that voice speaks. Off: every line on `VIDEO_TTS_KOKORO_VOICE`, as before.
 Pick the pair by ear: `node src/radio/programme/presenterSamples.mjs --out ~/scoopfeeds-radio/duo-samples`.

@@ -33,8 +33,10 @@ test("the cast: names from presenters.json, voices from RADIO_VOICE_A/B with mal
   const c = loadPresenters({ RADIO_DUO: "1" });
   assert.equal(c.A.voice, DEFAULT_VOICE_A); assert.equal(c.B.voice, DEFAULT_VOICE_B);
   assert.match(DEFAULT_VOICE_A, /^[ab]m_/); assert.match(DEFAULT_VOICE_B, /^[ab]f_/);
+  // #290: DrJ's pick by ear, 2026-10-29.
+  assert.equal(DEFAULT_VOICE_A, "am_michael"); assert.equal(DEFAULT_VOICE_B, "af_heart");
   assert.ok(c.A.name && c.B.name && c.A.name !== c.B.name);
-  assert.equal(loadPresenters({ RADIO_DUO: "1", RADIO_VOICE_A: "am_michael", RADIO_VOICE_B: "af_heart" }).B.voice, "af_heart");
+  assert.equal(loadPresenters({ RADIO_DUO: "1", RADIO_VOICE_A: "bm_george", RADIO_VOICE_B: "bf_emma" }).B.voice, "bf_emma");
   assert.throws(() => loadPresenters({ RADIO_DUO: "1", RADIO_VOICE_A: "bf_emma", RADIO_VOICE_B: "bf_emma" }), /same voice/);
 });
 
