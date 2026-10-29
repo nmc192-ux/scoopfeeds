@@ -15,9 +15,9 @@
  * Each cast line carries `speaker` ("A" | "B"), `presenter` (the name) and `voice` (the Kokoro voice id);
  * assemble.js passes `voice` to the voicer and the name to programme.json `lines` for the on-screen name tag.
  *
- * Names live in presenters.json (one config file). Voices: RADIO_VOICE_A (default bm_george, the voice the radio
- * has used since October) and RADIO_VOICE_B (default bf_emma). The defaults are UNVERIFIED by ear from the cloud
- * build: pick them on the Mac with presenterSamples.mjs.
+ * Names live in presenters.json (one config file). Voices: RADIO_VOICE_A (default am_michael) and RADIO_VOICE_B
+ * (default af_heart): DrJ's pick by ear on the Mac, 2026-10-29 (#290), from the presenterSamples.mjs pairs. The env
+ * vars still override them. The single-voice radio (duo off) keeps VIDEO_TTS_KOKORO_VOICE (bm_george).
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -25,8 +25,8 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PRESENTERS_FILE = path.join(HERE, "presenters.json");
-export const DEFAULT_VOICE_A = "bm_george";
-export const DEFAULT_VOICE_B = "bf_emma";
+export const DEFAULT_VOICE_A = "am_michael";
+export const DEFAULT_VOICE_B = "af_heart";
 export const HANDOVER_ID = "handover";
 
 /** RADIO_DUO is on only when it is literally "1". */
