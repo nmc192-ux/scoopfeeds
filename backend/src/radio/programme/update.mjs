@@ -19,6 +19,7 @@ import { assemble, fakeVoice, kokoroVoice } from "./assemble.js";
 import { claudeWriter, isLimitError, writeSegments } from "./writer.js";
 import { loadBeds } from "./beds.js";
 import { checkSegments } from "./checks.js";
+import { loadPresenters, castSegments } from "./presenters.js";
 import { screenCredit } from "../musicManifest.js";
 import { buildElectionPack, extractElectionPack } from "./electionPack.js";
 import { addPollCloseLines, mechanicalUpdate, insertUpdate, nightWindow, fixtureArticles, UPDATE_ID } from "./electionNight.js";
@@ -73,7 +74,8 @@ if (useClaude) {
 }
 if (!raw?.[slot.id]) { raw = { [slot.id]: mechanicalUpdate(election, slot, night) }; run.writer = useClaude ? "claude-failed-mechanical" : "mechanical"; }
 const closings = addPollCloseLines(raw, slot, night);
-const { segments, report } = checkSegments(raw, [slot], pack, { log });
+const { segments: checked, report } = checkSegments(raw, [slot], pack, { log });
+const segments = castSegments(checked, [slot], loadPresenters(), { log });   // #284: RADIO_DUO, else unchanged
 const kept = segments[slot.id]?.lines || [];
 const record = { slot, at: now, writer: run.writer, closings, pack: { election }, raw: raw[slot.id], checked: segments[slot.id] || null, drops: report };
 fs.writeFileSync(path.join(dir, `update-${tag}.json`), JSON.stringify(record, null, 1));

@@ -214,6 +214,12 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 .rb .w i.f{font-style:normal; color:var(--muted);}   /* #247: °C first, °F beside it (26 px is the floor, so muted, not smaller) */
 
 /* ── bottom strip ── */
+/* #284: presenter name tag (RADIO_DUO), in the top bar: only while a named presenter's line is being read (programme.json lines),
+   never a face; earn-render: an hour with one unnamed voice never shows it */
+#ptag{position:absolute; left:624px; top:23px; z-index:6; display:none; align-items:center; gap:12px; padding:5px 16px 4px;
+  border-left:4px solid var(--red2); font-size:30px; font-weight:600; color:var(--paper); white-space:nowrap;}   /* in the top bar, after LIVE */
+#ptag.on{display:flex;}
+#ptag i{display:inline-block; width:12px; height:12px; border-radius:50%; background:var(--red2);}
 #strip{position:absolute; left:0; right:0; bottom:0; height:76px; display:grid; grid-template-columns:auto 1fr; background:var(--ink2); border-top:1px solid var(--line); z-index:5;}
 #seg{display:flex; align-items:center; padding:0 28px 0 56px; background:var(--red); color:#fff; font-size:26px; white-space:nowrap;}
 #tickwrap{overflow:hidden; display:flex; align-items:center;}
@@ -285,6 +291,7 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
       <div class="w">ScoopFeeds <i>Radio</i></div><div class="rule"></div><div class="l caps">Every newsroom. One stream.</div></div></section>
   </div>
 
+  <div id="ptag"><i></i><span id="ptagName"></span></div>
   <div id="strip"><div id="seg" class="caps">ScoopFeeds Radio</div><div id="tickwrap"><div id="track"></div></div></div>
 
   <div id="feat"><video id="featv" muted playsinline preload="auto"></video>
@@ -632,6 +639,10 @@ function tick(){
   if (overlay && t - overlay.at < 3000) ov = { mode: 'sting', t0: overlay.at };
   if (ov){ $('ov').classList.add('on'); drawOverlay(ov.mode, (t - ov.t0) / 1000, ov.t0); } else { $('ov').classList.remove('on'); ovMode = null; }
   if (!cue || cue.scene !== 'feature') $('feat').classList.remove('on');
+  // #284: the name of the presenter whose line is on air now; hidden under idents, the film and the feature
+  const pl = ov || (cue && (cue.scene === 'film' || cue.scene === 'feature')) ? null : (PROG.lines || []).find((l) => l.presenter && l.at <= t && t < l.end);
+  $('ptag').classList.toggle('on', !!pl);
+  if (pl && $('ptagName').textContent !== pl.presenter) $('ptagName').textContent = pl.presenter;
   // keep a playing film or feature on the clock: re-seek if it drifts more than 0.35 s
   if (!ENCODER_MEDIA && cue && (cue.scene === 'film' || cue.scene === 'feature') && FROZEN == null){
     const v = cue.scene === 'film' ? $('film') : $('featv'), want = (t - cue.data.t0) / 1000;

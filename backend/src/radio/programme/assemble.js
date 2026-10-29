@@ -36,18 +36,29 @@ const dbToGain = (db) => Math.pow(10, db / 20);
 export function fakeVoice(dir) {
   fs.mkdirSync(dir, { recursive: true });
   let n = 0;
-  return async (text) => {
+  // #284: a female Kokoro voice id (af_*, bf_*) sounds higher, so a duo is audible in a dry run; no voice: as before
+  return async (text, opts) => {
     const secs = Math.max(1.2, String(text).split(/\s+/).length / 2.45);
     const f = path.join(dir, `fake-${++n}.wav`);
-    run(["-f", "lavfi", "-i", `sine=frequency=${180 + (n % 7) * 30}:duration=${secs.toFixed(2)}`, "-af", "volume=-12dB,tremolo=f=4:d=0.7", "-ac", "2", "-ar", String(RATE), f]);
+    const base = /^[a-z]f_/.test(String(opts?.voice || "")) ? 330 : 180;
+    run(["-f", "lavfi", "-i", `sine=frequency=${base + (n % 7) * 30}:duration=${secs.toFixed(2)}`, "-af", "volume=-12dB,tremolo=f=4:d=0.7", "-ac", "2", "-ar", String(RATE), f]);
     return { path: f, durationSecs: secs };
   };
 }
 
-/** Real voice: the prod Kokoro path (videoVoice.voiceCaption), so pronunciation overrides apply. */
+/**
+ * Real voice: the prod Kokoro path (videoVoice.voiceCaption), so pronunciation overrides apply to every voice.
+ * #284: `opts.voice` (a presenter's Kokoro voice, presenters.js) picks the voice for that line; without it, the
+ * env voice (VIDEO_TTS_KOKORO_VOICE) as before.
+ */
 export async function kokoroVoice() {
   const { voiceCaption } = await import("../../services/videoVoice.js");
-  return async (text) => { const r = await voiceCaption(text); return { path: r.path, durationSecs: r.durationSecs }; };
+  return async (text, opts) => { const r = await voiceCaption(text, opts?.voice ? { voice: opts.voice } : {}); return { path: r.path, durationSecs: r.durationSecs }; };
+}
+
+/** #284: a handover left with no line of the second presenter right after it (cut for time) is cut too. */
+function dropDanglingHandover(use) {
+  for (let i = use.length - 1; i >= 0; i--) if (use[i].id === "handover" && use[i + 1]?.speaker !== "B") use.splice(i, 1);
 }
 
 // ─── layout ─────────────────────────────────────────────────────────────────
@@ -66,6 +77,7 @@ export function layoutSlot(slot, lines) {
     const cut = [...use.keys()].reverse().find((i) => i !== closeIdx && i > 0);
     if (cut == null) return { placed: [], dropped: lines.length };
     use.splice(cut, 1);
+    if (use.some((l) => l.speaker)) dropDanglingHandover(use);
   }
 }
 
@@ -167,7 +179,8 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
   for (const s of slots.filter((x) => x.kind === "spoken")) {
     const lines = [];
     for (const l of segments[s.id]?.lines || []) {
-      try { const v = await voice(l.text); lines.push({ ...l, file: v.path, secs: v.durationSecs }); }
+      // #284: a cast line (RADIO_DUO) names its presenter's voice; an uncast line is voiced exactly as before
+      try { const v = l.voice ? await voice(l.text, { voice: l.voice }) : await voice(l.text); lines.push({ ...l, file: v.path, secs: v.durationSecs }); }
       catch (e) { log(`voice failed for ${s.id}/${l.id}: ${e.message}`); }
     }
     const { placed, dropped } = layoutSlot(s, lines);
@@ -302,5 +315,6 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
 export function placedLines(voiced, hourStart) {
   return Object.entries(voiced || {}).flatMap(([slot, placed]) => (placed || []).map((l) => ({
     slot, id: l.id ?? null, at: Math.round(hourStart + l.atSec * 1000), end: Math.round(hourStart + l.endSec * 1000),
+    ...(l.presenter ? { presenter: l.presenter } : {}),   // #284: the on-screen name tag while that voice speaks
   })));
 }

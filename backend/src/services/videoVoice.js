@@ -155,10 +155,11 @@ export function voiceProvider() {
 }
 
 /** Everything the Kokoro call needs. Read per call, so a recreate is all a change takes. */
-export function kokoroConfig() {
+export function kokoroConfig({ voice = null } = {}) {
   return {
     url: String(process.env.VIDEO_TTS_KOKORO_URL || "http://tts:8880").trim().replace(/\/+$/, ""),
-    voice: String(process.env.VIDEO_TTS_KOKORO_VOICE || "").trim() || "bm_george",
+    // #284: the radio's two presenters pass their own Kokoro voice per line; without one, the env voice as before
+    voice: String(voice || "").trim() || String(process.env.VIDEO_TTS_KOKORO_VOICE || "").trim() || "bm_george",
     speed: envNumber("VIDEO_TTS_KOKORO_SPEED", 1.0, { min: 0.5, max: 2 }),
     // Longer than ElevenLabs' 30s: this runs on the same 2-vCPU box as the
     // render, and one core synthesising a long caption while ffmpeg holds the
@@ -263,9 +264,9 @@ const KOKORO_MODEL = "kokoro-82m-v1.0";
  * ElevenLabs finds its 7-day cache intact. Kokoro digests its own material, led
  * by the literal "kokoro", so the two can never collide on the same caption.
  */
-export function cacheKeyFor(caption, provider = voiceProvider()) {
+export function cacheKeyFor(caption, provider = voiceProvider(), { voice = null } = {}) {
   if (provider === "kokoro") {
-    const k = kokoroConfig();
+    const k = kokoroConfig({ voice });
     const h = createHash("sha1")
       .update(String(caption))
       .update("|kokoro|").update(KOKORO_MODEL)
@@ -588,8 +589,8 @@ async function elevenLabs(caption) {
  *
  * @returns {Promise<{buf: Buffer, words: Array|null}>}
  */
-async function kokoro(caption) {
-  const k = kokoroConfig();
+async function kokoro(caption, { voice = null } = {}) {
+  const k = kokoroConfig({ voice });
   const text = String(caption).slice(0, 5000);
   // Kokoro hears the respelled text; the caption keeps its own spelling.
   const spoken = applyPronunciations(text);
@@ -641,10 +642,10 @@ async function kokoro(caption) {
  * The selected provider, and the only fallback there is: the opt-in one.
  * Every failure is named in the log before anything else happens.
  */
-async function synthesise(text) {
+async function synthesise(text, { voice = null } = {}) {
   if (voiceProvider() !== "kokoro") return { ...(await elevenLabs(text)), provider: "elevenlabs" };
   try {
-    return { ...(await kokoro(text)), provider: "kokoro" };
+    return { ...(await kokoro(text, { voice })), provider: "kokoro" };
   } catch (err) {
     const reason = String(err?.message || err).slice(0, 240);
     logger.warn(`🔊 kokoro failed: ${reason}`);
@@ -716,14 +717,16 @@ export async function logTtsReachability({ log = logger } = {}) {
  * Voice one caption. Returns { path, durationSecs, cached, key, words, provider }.
  * Throws VoiceError on any failure — never returns silence.
  */
-export async function voiceCaption(caption, { slideIndex = -1 } = {}) {
+export async function voiceCaption(caption, { slideIndex = -1, voice = null } = {}) {
   const text = String(caption || "").trim();
   if (!text) throw new VoiceError(`slide ${slideIndex}: empty caption — every card must carry its narration line`);
   if (!isVoiceConfigured()) throw new VoiceError(`voice not configured: ${voiceConfigProblem()}`);
 
   if (!existsSync(TTS_CACHE_DIR)) mkdirSync(TTS_CACHE_DIR, { recursive: true });
   const provider = voiceProvider();
-  let key = cacheKeyFor(text, provider);
+  // #284: `voice` picks a Kokoro voice for this caption (the radio's second presenter); ElevenLabs ignores it
+  if (voice && provider !== "kokoro") logger.warn(`🔊 voice "${voice}" requested but the provider is ${provider}: its own voice is used`);
+  let key = cacheKeyFor(text, provider, { voice });
   let file = path.join(TTS_CACHE_DIR, `${key}.mp3`);
   let wordsFile = wordsPathFor(key);
 
@@ -744,7 +747,7 @@ export async function voiceCaption(caption, { slideIndex = -1 } = {}) {
   }
 
   const t0 = Date.now();
-  const { buf, words, provider: spoke } = await synthesise(text);
+  const { buf, words, provider: spoke } = await synthesise(text, { voice });
   // Cached under the key of the provider that ACTUALLY spoke. With the opt-in
   // fallback, an ElevenLabs clip filed under the Kokoro key would be served as
   // Kokoro forever after — the old/new mixing the separate key spaces prevent.
