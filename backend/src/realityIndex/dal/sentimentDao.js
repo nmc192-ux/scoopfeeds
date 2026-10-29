@@ -14,24 +14,22 @@
 import { getDb } from "../../models/database.js";
 import { shouldWrite, noteDecision, writeOnChangeEnabled } from "./writeOnChange.js";
 
-export function upsertSentimentSnapshot({
-  scope, scope_id, ts, source, polarity, intensity, volume = 0, raw_meta = null,
-}) {
-  // WRITE-ON-CHANGE. Measured 100.0% of consecutive pairs identical here —
-  // INCLUDING `volume`, which was the one field that might plausibly move every
-  // run. It is tracked rather than assumed: a mention count going 4 → 5 is a
-  // real change and must produce a row.
-  if (writeOnChangeEnabled()) {
-    const prev = getDb().prepare(
-      `SELECT ts, polarity, intensity, volume FROM sentiment_snapshots
-       WHERE scope = ? AND scope_id = ? AND source = ? ORDER BY ts DESC LIMIT 1`
-    ).get(scope, scope_id, source);
-    const d = shouldWrite(prev, { polarity, intensity, volume }, ts);
-    noteDecision("sentiment_snapshots", d.reason);
-    if (!d.write) return { changes: 0, suppressed: true };
-  }
+// STATEMENT CACHE (#292). The two statements the writer runs on every call are
+// prepared once per DB HANDLE, not once per call. Keyed by the handle in a
+// WeakMap — never a module-level statement — because a process can hold more
+// than one connection (makeTestDb() makes many), and a statement belongs to the
+// connection that prepared it. SQL text is unchanged.
+const stmtCache = new WeakMap();
 
-  return getDb().prepare(`
+export function sentimentWriteStmtsFor(db) {
+  let s = stmtCache.get(db);
+  if (!s) {
+    s = {
+      prev: db.prepare(
+        `SELECT ts, polarity, intensity, volume FROM sentiment_snapshots
+       WHERE scope = ? AND scope_id = ? AND source = ? ORDER BY ts DESC LIMIT 1`
+      ),
+      upsert: db.prepare(`
     INSERT INTO sentiment_snapshots
       (scope, scope_id, ts, source, polarity, intensity, volume, raw_meta)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -40,7 +38,29 @@ export function upsertSentimentSnapshot({
       intensity  = excluded.intensity,
       volume     = excluded.volume,
       raw_meta   = excluded.raw_meta
-  `).run(
+  `),
+    };
+    stmtCache.set(db, s);
+  }
+  return s;
+}
+
+export function upsertSentimentSnapshot({
+  scope, scope_id, ts, source, polarity, intensity, volume = 0, raw_meta = null,
+}) {
+  const stmts = sentimentWriteStmtsFor(getDb());
+  // WRITE-ON-CHANGE. Measured 100.0% of consecutive pairs identical here —
+  // INCLUDING `volume`, which was the one field that might plausibly move every
+  // run. It is tracked rather than assumed: a mention count going 4 → 5 is a
+  // real change and must produce a row.
+  if (writeOnChangeEnabled()) {
+    const prev = stmts.prev.get(scope, scope_id, source);
+    const d = shouldWrite(prev, { polarity, intensity, volume }, ts);
+    noteDecision("sentiment_snapshots", d.reason);
+    if (!d.write) return { changes: 0, suppressed: true };
+  }
+
+  return stmts.upsert.run(
     scope, scope_id, ts, source,
     polarity, intensity, volume,
     raw_meta ? JSON.stringify(raw_meta) : null,

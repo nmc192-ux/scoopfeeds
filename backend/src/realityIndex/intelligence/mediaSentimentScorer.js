@@ -15,6 +15,7 @@
 
 import { getDb } from "../../models/database.js";
 import { upsertSentimentSnapshot } from "../dal/sentimentDao.js";
+import { runInSnapshotBatches } from "../dal/snapshotBatch.js";
 import { scoreText } from "./simpleSentiment.js";
 import { logger } from "../../services/logger.js";
 
@@ -119,10 +120,12 @@ export function runMediaSentimentForActiveEvents() {
   const ts   = Date.now();
   const ids  = db.prepare("SELECT id FROM events WHERE status='active'").all();
   let scored = 0;
-  for (const { id } of ids) {
+  // Chunked transactions (#292): one commit per SNAPSHOT_WRITE_BATCH events
+  // instead of one per event. The per-event catch stays inside the chunk.
+  runInSnapshotBatches(db, ids, ({ id }) => {
     try { recordEventMediaSnapshot(id, ts); scored++; }
     catch (err) { logger.warn(`mediaSentiment ${id}: ${err.message}`); }
-  }
+  }, { cycle: "media-sentiment" });
   if (scored) logger.info(`📰 media-sentiment recorded for ${scored} events`);
   return { scored, totalActive: ids.length };
 }

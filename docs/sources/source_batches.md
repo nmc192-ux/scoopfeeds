@@ -135,3 +135,24 @@ Probe pass, by region: global 10, us 8, uk 6, eu 6, ca 3, in 2, us-east 1, us-mi
 Dead feeds already in `config/sources.js`: none found by this batch (the probe checks candidates
 only). Load check (step 6 of the spec): not measured, because nothing was added. It belongs to the
 batch that adds sources.
+
+## Source step 2 readiness (#292)
+
+Growing to 400 sources waits on two preconditions. The first is shipped in #292: the RI compose
+cycle's per-event snapshot writes are batched (`SNAPSHOT_WRITE_BATCH`, default 200 events per
+transaction). The second is this read-only readout, which says whether the event promoter and the
+RI compose cycle keep up today:
+
+```bash
+cd backend && node scripts/sources/load-readiness.mjs --db <a COPY of news.db> [--days 7]
+```
+
+It opens the copy read-only and prints JSON: `events.promote` and `reality-index.compose` runs,
+completed / failed, p50 / p95 / max `duration_ms` from `background_job_runs`; eligible clusters
+now (the promoter's step-1 predicate without its `LIMIT 300`); active events; active RSS sources;
+and a verdict. **READY** only if promoter p95 ≤ 1,200,000 ms, failure rate < 5%, runs ≥ 90% of the
+48/day expected, and eligible clusters < 300. **UNVERIFIED** with fewer than 24 promoter runs in
+the window or no `background_job_runs` table. Otherwise **NOT READY**, naming the failed tests.
+
+**Readout: UNVERIFIED.** The cloud build engine has no prod DB copy, so it has not been run on
+real data. The VPS run script is in the #292 PR.
