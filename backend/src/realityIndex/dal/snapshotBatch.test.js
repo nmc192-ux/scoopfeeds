@@ -183,3 +183,35 @@ test("runInSnapshotBatches handles an empty list and reports zero chunks", () =>
   const out = withEnv("SNAPSHOT_WRITE_BATCH", "5", () => runInSnapshotBatches(db, [], () => { throw new Error("never"); }, { cycle: "t" }));
   assert.deepEqual({ ...out, ms: 0 }, { cycle: "t", events: 0, chunks: 0, batchSize: 5, ms: 0 });
 });
+
+test("a chunk takes the write lock up front, so another process's commit cannot void its writes", async () => {
+  // WAL hazard: a DEFERRED transaction that reads first and writes later fails
+  // every write with SQLITE_BUSY_SNAPSHOT if another connection commits in
+  // between — busy_timeout cannot help, each write is caught as a "bad event",
+  // and the (now empty) transaction commits cleanly. The whole chunk is lost
+  // silently. BEGIN IMMEDIATE makes the other writer wait instead.
+  const { default: Database } = await import("better-sqlite3");
+  const other = new Database(db.name);
+  other.pragma("busy_timeout = 0"); // same thread: it must not block on our lock
+  db.exec("CREATE TABLE IF NOT EXISTS t_lock (id TEXT PRIMARY KEY, v INTEGER); DELETE FROM t_lock;");
+  const errors = [];
+  let otherResult = null;
+  try {
+    withEnv("SNAPSHOT_WRITE_BATCH", "10", () => runInSnapshotBatches(db, [0, 1, 2, 3, 4], (i) => {
+      try {
+        db.prepare("SELECT COUNT(*) FROM t_lock").get();
+        if (i === 0) {
+          try { other.prepare("INSERT OR REPLACE INTO t_lock VALUES ('other', 1)").run(); otherResult = "committed"; }
+          catch (err) { otherResult = err.code; }
+        }
+        db.prepare("INSERT OR REPLACE INTO t_lock VALUES (?, ?)").run(`k${i}`, i);
+      } catch (err) { errors.push(err.code); }
+    }, { cycle: "lock-test" }));
+    assert.deepEqual(errors, [], "no write in the chunk failed");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM t_lock WHERE id LIKE 'k%'").get().n, 5);
+    assert.equal(otherResult, "SQLITE_BUSY", "the other writer waits on the chunk's lock (busy_timeout in prod)");
+  } finally {
+    other.close();
+    db.exec("DROP TABLE IF EXISTS t_lock;");
+  }
+});

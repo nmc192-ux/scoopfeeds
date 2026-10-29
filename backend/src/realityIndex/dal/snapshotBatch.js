@@ -12,7 +12,7 @@
  * per row exactly as before: reads inside a transaction see that transaction's
  * own earlier writes, so a chunk behaves like the same writes made one by one.
  *
- * THE TRADE. A chunk holds SQLite's write lock from its first write to its
+ * THE TRADE. A chunk holds SQLite's write lock (BEGIN IMMEDIATE) from its start to its
  * commit. Other processes wait on busy_timeout rather than fail. A smaller
  * batch shortens that hold; 0 restores today's per-event autocommit exactly.
  *
@@ -39,7 +39,7 @@ export function snapshotWriteBatch() {
  * their existing per-event catch and log line), so one bad event skips only
  * itself. Synchronous, like the callers.
  *
- * If a chunk's transaction itself fails (BEGIN/COMMIT, or an error SQLite answers
+ * If a chunk's transaction itself fails (BEGIN IMMEDIATE timing out, COMMIT, or an error SQLite answers
  * by rolling the transaction back), the chunk is logged and re-run per item in
  * autocommit. The upserts are idempotent at the same ts, so the re-run stores the
  * same rows; the caller's counters and the write-on-change counters include that
@@ -61,7 +61,14 @@ export function runInSnapshotBatches(db, items, fn, { cycle = "unknown" } = {}) 
       const chunk = items.slice(i, i + batchSize);
       chunks++;
       try {
-        db.transaction(() => { for (const item of chunk) fn(item); })();
+        // IMMEDIATE, not deferred: the callers read before they write, and in WAL
+        // a deferred transaction whose snapshot goes stale (another process
+        // commits after our first read) fails EVERY later write with
+        // SQLITE_BUSY_SNAPSHOT — busy_timeout cannot help, the per-event catch
+        // swallows each one, and the empty transaction commits cleanly: the
+        // chunk is lost silently. BEGIN IMMEDIATE takes the write lock first
+        // (waiting on busy_timeout), so other writers wait for us instead.
+        db.transaction(() => { for (const item of chunk) fn(item); }).immediate();
       } catch (err) {
         logger.warn(
           `🧮 snapshot-batch ${cycle}: chunk ${chunks} (${chunk.length} events) failed as a ` +
