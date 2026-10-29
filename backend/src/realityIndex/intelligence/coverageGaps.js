@@ -74,8 +74,8 @@ export function gapConfig(env = process.env) {
   };
 }
 
-/** The weekly cron is off unless COVERAGE_GAPS_ENABLED is literally "1" (read at call time). */
-export const coverageGapsEnabled = (env = process.env) => String(env.COVERAGE_GAPS_ENABLED ?? "") === "1";
+/** The weekly cron is ON by default (flag flip, 24 h dark after #268); COVERAGE_GAPS_ENABLED=0 switches it off (read at call time). */
+export const coverageGapsEnabled = (env = process.env) => String(env.COVERAGE_GAPS_ENABLED ?? "1") === "1";
 
 const CANDIDATE_CAP = 3000;
 

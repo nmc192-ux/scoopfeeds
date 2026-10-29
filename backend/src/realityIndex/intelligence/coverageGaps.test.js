@@ -173,8 +173,9 @@ test("buckets: fixed fold of outletCountry; new single-country tags resolve, lat
   assert.equal(outletCountry("Some Wire", "global"), null);
 });
 
-test("cron gate: off unless COVERAGE_GAPS_ENABLED is literally 1; thresholds read from env", () => {
-  assert.equal(gaps.coverageGapsEnabled({}), false);
+test("cron gate: on by default, off for any value other than 1; thresholds read from env", () => {
+  assert.equal(gaps.coverageGapsEnabled({}), true);
+  assert.equal(gaps.coverageGapsEnabled({ COVERAGE_GAPS_ENABLED: "0" }), false);
   assert.equal(gaps.coverageGapsEnabled({ COVERAGE_GAPS_ENABLED: "true" }), false);
   assert.equal(gaps.coverageGapsEnabled({ COVERAGE_GAPS_ENABLED: "1" }), true);
   assert.deepEqual(gaps.gapConfig({ GAP_MIN_PRESENT: "6", GAP_MIN_BASE: "x", GAP_DAILY_MAX: "3" }),
