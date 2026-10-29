@@ -66,12 +66,13 @@ async function captured(fn) {
 
 const rows = (db) => db.prepare("SELECT * FROM weekly_quizzes").all();
 
-test("flag unset → no call, no row", async () => {
+test("flag off (ORIGINALS_QUIZ_ENABLED=0) → no call, no row", async () => {
   const { db } = makeTestDb();
   for (const x of "ABCDEF") seed(db, x);
   const llm = stub({ questions: [] });
-  const r = await Q.runWeeklyQuiz({ db, now: NOW, llm, env: {} });
+  const r = await Q.runWeeklyQuiz({ db, now: NOW, llm, env: { ORIGINALS_QUIZ_ENABLED: "0" } });
   assert.deepEqual(r, { enabled: false });
+  assert.equal(Q.weeklyQuizEnabled({}), true, "unset is on after the flip");
   assert.equal(llm.calls.length, 0);
   assert.equal(rows(db).length, 0);
 });
