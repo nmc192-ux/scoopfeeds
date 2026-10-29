@@ -52,7 +52,7 @@ Specced directly as issues on 14 Oct; see the GitHub backlog (label `phase:0`).
 - [queued] lane:website — Markets door with tabs (overview, economy, world map; odds tabs stay off until re-enabled)
 - [queued] lane:website — My Scoop: saved, followed stories, alerts, sign-in; Follow button on dossiers
 - [queued] lane:website — Remove dead code: the unused components and the redirected pages
-- [queued] lane:sources — Source step 2: grow to 400 once the promoter keeps up and snapshot writes are batched
+- [spec #292] lane:sources — Source step 2: grow to 400 once the promoter keeps up and snapshot writes are batched (#292 covers the two preconditions only; the growth is specced after step 1 reaches 200, see #257)
 - [queued] lane:website — Switch the new site on for all readers (flag flip) on 9 Dec
 
 ## Phase 3 — unique features (10 Dec 2026–6 Jan 2027)
