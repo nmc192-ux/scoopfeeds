@@ -142,8 +142,33 @@ export function continuousBroadcast({ yt, goLive, title = (ms) => `ScoopFeeds Ra
       log(`youtube: broadcast ${r.id} created and bound to stream ${b.streamId}`);
       return r.id;
     },
+    /**
+     * Start-up. An earlier run may have left broadcasts bound to the stream (a restart that was killed before it could
+     * complete its broadcast, 30 Oct 2026). A live one is ADOPTED: it already carries the stream, viewers are on it,
+     * and a second broadcast could not go live beside it anyway. Never-aired leftovers ("created"/"ready") are
+     * deleted, because with auto-start on they grab the stream as soon as it is active. Anything else (e.g.
+     * "testing") is left alone and logged. If the clean-up cannot be read, the loop creates a broadcast as before.
+     */
     async open(at) {
-      try { await yt.checkScope(); b.current = await b.create(at); b.startedAt = at; }
+      try {
+        await yt.checkScope();
+        if (!b.streamId) b.streamId = (await yt.findStream()).id;
+        let left = [];
+        if (yt.boundBroadcasts) {
+          try { left = await yt.boundBroadcasts(b.streamId); }
+          catch (e) { log(`youtube: could not list broadcasts bound to the stream (${e.message}); creating a new one`); }
+        }
+        const live = left.find((x) => x.lifeCycleStatus === "live" || x.lifeCycleStatus === "liveStarting");
+        for (const x of left) {
+          if (x === live) continue;
+          if (["created", "ready"].includes(x.lifeCycleStatus) && yt.deleteBroadcast) {
+            await yt.deleteBroadcast(x.id).then(() => log(`youtube: deleted leftover broadcast ${x.id} (${x.lifeCycleStatus}, never aired)`))
+              .catch((e) => log(`youtube: could not delete leftover broadcast ${x.id}: ${e.message}`));
+          } else log(`youtube: leftover broadcast ${x.id} (${x.lifeCycleStatus}) left alone`);
+        }
+        if (live) { b.current = live.id; b.startedAt = at; log(`youtube: adopted broadcast ${live.id}, already live on the stream`); }
+        else { b.current = await b.create(at); b.startedAt = at; }
+      }
       catch (e) { b.current = null; await alert(`YouTube setup failed (${e.message}). The stream still goes out: go live by hand in YouTube Studio.`); }
     },
     /** Before the hand-over that rolls: the next broadcast exists and is bound, so the switch costs no extra seconds. */
@@ -297,6 +322,23 @@ export class RollingStation {
     this.onAir = null;
     if (this.broadcast) await this.broadcast.end("PAUSE");
   }
+  /**
+   * A stop signal (launchctl bootout, Ctrl-C): off air NOW and complete the broadcast. The run loop only notices
+   * `stopping` after its current sleep (up to 30 s), and launchd kills the process before that, so without this the
+   * broadcast was left live and blocked the next run's broadcast (30 Oct 2026). Unlike PAUSE nothing holds afterwards.
+   */
+  async shutdown(why = "stopping") {
+    if (this.shutDown) return this.shutDown;
+    this.stopping = true;
+    this.shutDown = (async () => {
+      const air = this.onAir;
+      if (air) { air.retired = true; await air.handle?.stop()?.catch?.(() => {}); }
+      this.onAir = null;
+      if (this.broadcast) await this.broadcast.end(why);
+    })();
+    return this.shutDown;
+  }
+
   dirFor(h) { return path.join(this.airDir, hourStamp(h)); }
 
   status(h, patch) {

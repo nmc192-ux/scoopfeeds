@@ -455,3 +455,64 @@ test("#208 copy: the continuous broadcast sends the credits it was given, as a l
   await b2.create(utc("2026-10-27T14:00:00Z"));
   assert.match(bodies[1].snippet.description, /Music:\nTrack A by X$/);
 });
+
+// ── restarts (30 Oct 2026): a killed run left its broadcast live, and the next run's broadcast could not go live ──
+test("start-up: a broadcast already live on the stream is adopted; never-aired leftovers are deleted", async () => {
+  const calls = [];
+  const yt = {
+    checkScope: async () => {}, findStream: async () => ({ id: "S" }),
+    boundBroadcasts: async () => [{ id: "OLD_LIVE", lifeCycleStatus: "live" }, { id: "SPARE", lifeCycleStatus: "ready" }, { id: "T", lifeCycleStatus: "testing" }],
+    deleteBroadcast: async (id) => { calls.push(["delete", id]); },
+    createBroadcast: async () => { calls.push(["create"]); return { id: "NEW" }; }, bind: async (id) => { calls.push(["bind", id]); },
+  };
+  const logs = [];
+  const b = continuousBroadcast({ yt, goLive: async () => {}, log: (m) => logs.push(m) });
+  await b.open(utc("2026-10-30T19:07:00Z"));
+  assert.equal(b.current, "OLD_LIVE", "the live one carries the stream: adopt it, create nothing");
+  assert.deepEqual(calls, [["delete", "SPARE"]], "only the never-aired spare is deleted; testing is left alone");
+  assert.ok(logs.some((l) => /adopted broadcast OLD_LIVE/.test(l)));
+  assert.ok(logs.some((l) => /T \(testing\) left alone/.test(l)));
+});
+
+test("start-up: with only never-aired leftovers, they are deleted and a fresh broadcast is created", async () => {
+  const calls = [];
+  const yt = {
+    checkScope: async () => {}, findStream: async () => ({ id: "S" }),
+    boundBroadcasts: async () => [{ id: "SPARE1", lifeCycleStatus: "ready" }, { id: "SPARE2", lifeCycleStatus: "created" }],
+    deleteBroadcast: async (id) => { calls.push(["delete", id]); },
+    createBroadcast: async () => { calls.push(["create"]); return { id: "NEW" }; }, bind: async (id) => { calls.push(["bind", id]); },
+  };
+  const b = continuousBroadcast({ yt, goLive: async () => {} });
+  await b.open(utc("2026-10-30T19:07:00Z"));
+  assert.equal(b.current, "NEW");
+  assert.deepEqual(calls, [["delete", "SPARE1"], ["delete", "SPARE2"], ["create"], ["bind", "NEW"]], "clean up first, then create");
+});
+
+test("start-up: if the bound broadcasts cannot be listed, it creates a broadcast as before", async () => {
+  const yt = {
+    checkScope: async () => {}, findStream: async () => ({ id: "S" }),
+    boundBroadcasts: async () => { throw new Error("HTTP 500"); },
+    createBroadcast: async () => ({ id: "NEW" }), bind: async () => {},
+  };
+  const logs = [];
+  const b = continuousBroadcast({ yt, goLive: async () => {}, log: (m) => logs.push(m) });
+  await b.open(utc("2026-10-30T19:07:00Z"));
+  assert.equal(b.current, "NEW");
+  assert.ok(logs.some((l) => /could not list broadcasts/.test(l)));
+});
+
+test("stop signal: shutdown() stops the playout and completes the broadcast at once, and only once", async () => {
+  const r = rig({ start: utc("2026-10-30T19:00:00Z") });
+  const calls = [];
+  const yt = { checkScope: async () => {}, findStream: async () => ({ id: "S" }), createBroadcast: async () => ({ id: "B1" }), bind: async () => {},
+    transition: async (id, to) => { calls.push([to, id]); } };
+  r.station.broadcast = continuousBroadcast({ yt, goLive: async () => {} });
+  await r.station.broadcast.open(utc("2026-10-30T19:00:00Z"));
+  let stopped = 0;
+  r.station.onAir = { kind: "247", handle: { stop: async () => { stopped++; } } };
+  await Promise.all([r.station.shutdown("SIGTERM"), r.station.shutdown("SIGTERM")]);
+  assert.equal(stopped, 1);
+  assert.deepEqual(calls, [["complete", "B1"]]);
+  assert.equal(r.station.onAir, null);
+  assert.equal(r.station.stopping, true);
+});

@@ -316,7 +316,15 @@ async function main() {
   const pruneTimer = setInterval(prune, 3_600_000);
 
   const ac = new AbortController();
-  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { log(`${sig}: stopping after the current step`); ac.abort(); });
+  // A stop signal takes the stream off air and completes the YouTube broadcast straight away, then exits. Waiting
+  // for the loop's current step let launchd kill the process first and left the broadcast live (30 Oct 2026).
+  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => {
+    log(`${sig}: off air now, completing the YouTube broadcast`);
+    ac.abort();
+    const hard = setTimeout(() => { log(`${sig}: shutdown took over 15 s; exiting`); process.exit(0); }, 15_000);
+    Promise.resolve(station?.shutdown(`${sig}`)).catch((e) => log(`${sig}: shutdown failed: ${e.message}`))
+      .finally(() => { clearTimeout(hard); log(`${sig}: stopped`); process.exit(0); });
+  });
   station = new RollingStation({
     airDir, produce, check: airCheck, topStory, playout, broadcast, log, alert, developing, updates,
     grid: (H) => stationPlan(H, { env, night, force: rehearsal }),
