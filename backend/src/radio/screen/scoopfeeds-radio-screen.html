@@ -60,8 +60,8 @@ body.broadcast{background:#111111;}
 .brand{display:flex; align-items:center; gap:18px;}
 .brand .word{font-family:'Bodoni Moda',Georgia,serif; font-weight:500; font-size:38px; letter-spacing:-.005em;}
 .brand .word i{color:var(--red2);}
-.live{display:flex; align-items:center; gap:10px; margin-left:12px; font-size:26px; font-weight:700; text-transform:uppercase; letter-spacing:.16em; padding:5px 14px 4px; border:1px solid rgba(255,74,61,.6);}
-.live i{width:11px; height:11px; border-radius:50%; background:var(--red2); animation:pulse 1.6s ease-in-out infinite;}
+.brand .live{display:flex; align-items:center; gap:10px; margin-left:12px; font-size:26px; font-weight:700; text-transform:uppercase; letter-spacing:.16em; padding:5px 14px 4px; border:1px solid rgba(255,74,61,.6);}
+.brand .live i{width:11px; height:11px; border-radius:50%; background:var(--red2); animation:pulse 1.6s ease-in-out infinite;}
 .sample{margin-left:8px; font-size:26px; color:var(--muted); border:1px solid var(--faint); padding:2px 12px;}
 .clocks{display:flex; gap:38px;}
 .clock{display:flex; flex-direction:column; align-items:flex-end; line-height:1.02;}
@@ -214,7 +214,7 @@ body.live .ph{display:none;}
 @keyframes bar{0%,100%{transform:scaleY(.25)} 50%{transform:scaleY(1)}}
 @keyframes pulse{0%,100%{opacity:1} 50%{opacity:.3}}
 @media (prefers-reduced-motion: reduce){
-  .track.run, .wave i, .eq i, .live i{animation:none;}
+  .track.run, .wave i, .eq i, .brand .live i{animation:none;}
   .wave i, .eq i{transform:scaleY(.6);}
 }
 </style>
@@ -459,6 +459,18 @@ function sampleText(){
   return '';
 }
 
+/* "Also this hour" must never run into the lower third. Long headlines wrap to two lines, and five two-line
+   items are taller than the news scene, so trailing items that would cross its foot (or the wave bars, when
+   they sit under the list) are left off the screen. At least one item always stays. */
+function fitAlso(){
+  const news = document.querySelector('.s-news'), wave = $('wave'), items = [...$('also').children];
+  items.forEach(el => { el.style.display = ''; });
+  const waveBelow = wave.parentElement === news;
+  const foot = (waveBelow ? wave.getBoundingClientRect().top - 8 : news.getBoundingClientRect().bottom);
+  for (let i = items.length - 1; i > 0 && items[i].getBoundingClientRect().bottom > foot; i--) items[i].style.display = 'none';
+}
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => fitAlso());
+
 function renderStatic(){
   const st = sampleText();
   $('sampleTag').textContent = st;
@@ -473,6 +485,7 @@ function renderStatic(){
   plate.style.backgroundSize = hasPhoto() ? 'cover' : '';
   plate.style.backgroundPosition = hasPhoto() ? 'center' : '';
   $('also').innerHTML = STATE.alsoThisHour.map(a => `<div class="item"><p>${esc(a.h)}</p><span>${esc(a.src)}</span></div>`).join('');
+  fitAlso();
 
   // SCHEDULE (R2): hidden when there is no schedule data, the same as markets.
   $('nowNext').style.display = hasNowNext() ? '' : 'none';
