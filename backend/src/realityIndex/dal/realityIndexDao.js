@@ -21,34 +21,20 @@ const RI_TRACKED = [
   "economic_signal", "truth_gap", "reality_score", "confidence",
 ];
 
-export function upsertRealityIndexSnapshot({
-  scope, scope_id, ts,
-  market_probability,
-  media_sentiment,
-  social_sentiment,
-  economic_signal,
-  truth_gap,
-  reality_score,
-  confidence,
-  components = null,
-}) {
-  // WRITE-ON-CHANGE. 99.96% of consecutive rows were byte-identical; this is the
-  // gate that stops writing them. See writeOnChange.js for the measurement.
-  if (writeOnChangeEnabled()) {
-    const next = {
-      market_probability, media_sentiment, social_sentiment,
-      economic_signal, truth_gap, reality_score, confidence,
-    };
-    const prev = getDb().prepare(
-      `SELECT ts, ${RI_TRACKED.join(", ")} FROM reality_index_snapshots
-       WHERE scope = ? AND scope_id = ? ORDER BY ts DESC LIMIT 1`
-    ).get(scope, scope_id);
-    const d = shouldWrite(prev, next, ts);
-    noteDecision("reality_index_snapshots", d.reason);
-    if (!d.write) return { changes: 0, suppressed: true };
-  }
+// STATEMENT CACHE (#292). Prepared once per DB HANDLE (WeakMap keyed by the
+// connection; a statement belongs to the connection that prepared it, and a
+// process can hold several). SQL text is unchanged.
+const stmtCache = new WeakMap();
 
-  return getDb().prepare(`
+export function realityIndexWriteStmtsFor(db) {
+  let s = stmtCache.get(db);
+  if (!s) {
+    s = {
+      prev: db.prepare(
+        `SELECT ts, ${RI_TRACKED.join(", ")} FROM reality_index_snapshots
+       WHERE scope = ? AND scope_id = ? ORDER BY ts DESC LIMIT 1`
+      ),
+      upsert: db.prepare(`
     INSERT INTO reality_index_snapshots
       (scope, scope_id, ts, market_probability, media_sentiment, social_sentiment,
        economic_signal, truth_gap, reality_score, confidence, components)
@@ -62,7 +48,39 @@ export function upsertRealityIndexSnapshot({
       reality_score      = excluded.reality_score,
       confidence         = excluded.confidence,
       components         = excluded.components
-  `).run(
+  `),
+    };
+    stmtCache.set(db, s);
+  }
+  return s;
+}
+
+export function upsertRealityIndexSnapshot({
+  scope, scope_id, ts,
+  market_probability,
+  media_sentiment,
+  social_sentiment,
+  economic_signal,
+  truth_gap,
+  reality_score,
+  confidence,
+  components = null,
+}) {
+  const stmts = realityIndexWriteStmtsFor(getDb());
+  // WRITE-ON-CHANGE. 99.96% of consecutive rows were byte-identical; this is the
+  // gate that stops writing them. See writeOnChange.js for the measurement.
+  if (writeOnChangeEnabled()) {
+    const next = {
+      market_probability, media_sentiment, social_sentiment,
+      economic_signal, truth_gap, reality_score, confidence,
+    };
+    const prev = stmts.prev.get(scope, scope_id);
+    const d = shouldWrite(prev, next, ts);
+    noteDecision("reality_index_snapshots", d.reason);
+    if (!d.write) return { changes: 0, suppressed: true };
+  }
+
+  return stmts.upsert.run(
     scope, scope_id, ts,
     market_probability, media_sentiment, social_sentiment,
     economic_signal, truth_gap, reality_score, confidence,

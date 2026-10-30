@@ -21,6 +21,7 @@ import { eligibleMarketSql } from "../dal/marketsDao.js";
 import { latestSnapshotsByScope } from "../dal/sentimentDao.js";
 import { formatSnapshotWriteStats } from "../dal/writeOnChange.js";
 import { upsertRealityIndexSnapshot } from "../dal/realityIndexDao.js";
+import { runInSnapshotBatches } from "../dal/snapshotBatch.js";
 import { scoreMarketConfidence } from "./confidenceScorer.js";
 import { logger } from "../../services/logger.js";
 
@@ -165,7 +166,9 @@ export function runRealityIndexCycle() {
   const db = getDb();
   const events = db.prepare("SELECT id FROM events WHERE status='active'").all();
   let written = 0, skipped = 0;
-  for (const e of events) {
+  // Chunked transactions (#292): one commit per SNAPSHOT_WRITE_BATCH events.
+  // composeForEvent still stamps its own ts per event, as before.
+  runInSnapshotBatches(db, events, (e) => {
     try {
       const out = composeForEvent(e.id);
       if (out?.reality_score != null) written++;
@@ -174,7 +177,7 @@ export function runRealityIndexCycle() {
       logger.warn(`realityIndex compose ${e.id}: ${err.message}`);
       skipped++;
     }
-  }
+  }, { cycle: "reality-index" });
   if (written) logger.info(`📊 reality-index recomposed for ${written}/${events.length} events`);
   // WHAT THE CHANGE GATE SUPPRESSED. `written` above counts events COMPOSED, not
   // rows stored — those diverged the moment write-on-change landed, and the
