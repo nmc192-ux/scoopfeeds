@@ -159,6 +159,29 @@ export function makeYouTubeLive({ env = process.env, fetchImpl = fetch, now = Da
       return null;
     },
 
+    /**
+     * Every broadcast bound to this stream that has not ended (live ones first, then upcoming), deduplicated.
+     * The 24/7 loop reads it at start-up: a broadcast left behind by an earlier run holds the stream, and YouTube
+     * then refuses to put a new one live (invalidTransition, 30 Oct 2026).
+     * @returns {Promise<{ id: string, lifeCycleStatus: string|null }[]>}
+     */
+    async boundBroadcasts(streamId) {
+      const out = [];
+      for (const status of ["active", "upcoming"]) {
+        const b = await call("GET", `${API}/liveBroadcasts?part=id,status,contentDetails&broadcastStatus=${status}&broadcastType=all&maxResults=50`);
+        for (const x of b.items || []) {
+          const hit = pickBound([x], streamId);
+          if (hit && !out.some((o) => o.id === hit.id)) out.push(hit);
+        }
+      }
+      return out;
+    },
+
+    /** Delete a broadcast. Used only for never-aired leftovers bound to the radio's own stream. */
+    async deleteBroadcast(id) {
+      return call("DELETE", `${API}/liveBroadcasts?id=${encodeURIComponent(id)}`);
+    },
+
     // ── #208 read-only standing checks (no writes; the youtube.force-ssl scope covers them) ──
 
     /** The channel's own status block, or { found:false }. Errors propagate with .status/.reason. */
