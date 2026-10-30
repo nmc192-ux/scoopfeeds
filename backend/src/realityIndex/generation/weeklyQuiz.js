@@ -6,7 +6,7 @@
  * against that dossier's own reports, and store the survivors. If the week's
  * quiz fails its checks, a 'refused' row is stored and nothing is published.
  *
- * Off unless ORIGINALS_QUIZ_ENABLED is literally "1" (read at call time).
+ * On by default (flag flip after 24 h dark); ORIGINALS_QUIZ_ENABLED=0 switches it off (read at call time).
  *
  * Dossier selection (an event that fails any rule is never in the bundle):
  *   - has at least one event_articles row (machine-event gotcha) with article
@@ -48,7 +48,7 @@ const DAY_MS = 24 * 3600e3;
 
 /** Read at call time, so a flip needs no restart. */
 export function weeklyQuizEnabled(env = process.env) {
-  return String(env.ORIGINALS_QUIZ_ENABLED ?? "") === "1";
+  return String(env.ORIGINALS_QUIZ_ENABLED ?? "1") === "1";
 }
 
 const compass = (kind, fields) => logger.info(`🧭 ${kind} ${JSON.stringify(fields)}`);
