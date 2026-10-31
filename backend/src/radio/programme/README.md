@@ -33,6 +33,11 @@ segment on air for breaking news or a live event and resumes at the next segment
 The Hour did not read (`checks.js freshHalf`), music blocks of 90 s at most, "Coming up" on the music scene. A partial
 run keeps the clock its hour was built with (`programme.json` `clock`). See `docs/radio/channel-grid.md`.
 
+**The Long Read (#304, `RADIO_LONGREAD_ENABLED=1`, dark by default):** `../longread/`. A ~7-minute piece ScoopFeeds
+writes once a day from one major story's coverage (`cli.mjs make`, checked with `checkSegments()` plus its own rules,
+a draft until `cli.mjs approve`) takes The News, Compared #2 and the music after it in the v1.5 clock's long-read hours
+(7, 12, 20 ET). No eligible piece: the hour is unchanged. See `docs/radio/long-read.md`.
+
 ## Unattended hours (auto-air)
 
 `autoair.mjs` runs a whole hour with nobody at the desk: produce, air check (`airCheck.js`), YouTube broadcast
