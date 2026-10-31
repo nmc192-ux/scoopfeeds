@@ -24,6 +24,7 @@ import { getDb, recordHeartbeat } from "../models/database.js";
 import { logger } from "../services/logger.js";
 import { cleanHeadline } from "../services/socialComposer.js";
 import { looksLikeProgrammingBlock } from "../services/socialPublisher.js";
+import { looksLikePromo } from "./notAHeadline.js";
 import { HEARTBEAT_PING_URLS, pingHeartbeat } from "../services/heartbeatPing.js";
 import { callJson } from "../realityIndex/llmQueue.js";
 import { loadArticleVectors } from "../realityIndex/intelligence/eventPromoter.js";
@@ -102,7 +103,7 @@ export function loadCandidates(db, now = Date.now()) {
     WHERE fetched_at >= ? AND COALESCE(is_duplicate, 0) = 0 AND COALESCE(credibility, 0) >= ?
     ORDER BY fetched_at DESC
     LIMIT 2000
-  `).all(now - GROUP_WINDOW_MS, MIN_CREDIBILITY).filter((a) => !looksLikeProgrammingBlock(a.title));
+  `).all(now - GROUP_WINDOW_MS, MIN_CREDIBILITY).filter((a) => !looksLikeProgrammingBlock(a.title) && !looksLikePromo(a.title));
 }
 
 // ─── wording ────────────────────────────────────────────────────────────────
