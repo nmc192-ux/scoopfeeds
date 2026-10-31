@@ -5,7 +5,7 @@
  * so a board that fits here fits on election night.
  */
 import { SENATE_UP, GOVERNOR_UP, STATE_NAMES, SENATE_SEATS, SENATE_MAJORITY, HOUSE_SEATS, HOUSE_MAJORITY } from "../../election/races2026.js";
-import { boardPages } from "../../programme/electionDesk.js";
+import { boardPages, boardData, beforePage, windowData } from "../../programme/electionDesk.js";
 
 const AT = Date.parse("2026-11-04T04:00:00Z");
 const OUTLETS = ["The Associated Press", "Decision Desk HQ", "NBC News", "Fox News", "CBS News"];
@@ -44,12 +44,27 @@ export function partialBoard() {
   return { ...b, senate: { ...b.senate, rows: b.senate.rows.map(open) }, governor: { ...b.governor, rows: b.governor.rows.map(open) } };
 }
 
-/** The board's pages as programme scenes, `gap` ms apart from `from`. */
+/** Poll closings for the samples: what electionContext() gives on the night, from 7 pm ET on 3 Nov. */
+export const SAMPLE_CLOSINGS = [[19, ["GA", "IN", "KY", "SC", "VT", "VA"]], [19.5, ["NC", "OH", "WV"]], [20, ["AL", "CT", "DE", "FL", "IL", "ME", "MD", "MA", "MS", "MO", "NH", "NJ", "OK", "PA", "RI", "TN"]],
+  [20.5, ["AR"]], [21, ["AZ", "CO", "KS", "LA", "MI", "MN", "NE", "NM", "NY", "SD", "TX", "WI", "WY"]]].map(([h, states]) => ({ at: Date.parse("2026-11-03T05:00:00Z") + h * 3600_000, states }));
+const pollClose = (st) => SAMPLE_CLOSINGS.find((c) => c.states.includes(st))?.at ?? null;
+
+/** The rail's election window over a full board, with the newest projection "just in" at `justIn`. */
+export function sampleWindow(justIn = null) {
+  const w = windowData(fullBoard(), { nextClose: { at: Date.parse("2026-11-04T06:00:00Z"), states: ["AK"] } });
+  if (justIn != null && w.latest) w.latest = { ...w.latest, at: new Date(justIn).toISOString() };
+  return w;
+}
+
+/** The board's pages as programme scenes, `gap` ms apart from `from`; plus the countdown page before any projection. */
 export function electionScenes(from, gap = 3000) {
   const scenes = {};
-  [...boardPages(fullBoard()).map((p) => ["full", p]), ...boardPages(partialBoard()).filter((p) => p.kind === "races").map((p) => ["early", p])].forEach(([tag, page], i) => {
+  const nextClose = { at: Date.parse("2026-11-04T06:00:00Z"), states: ["AK"] };
+  [...boardPages(fullBoard(), { pollClose, nextClose }).map((p) => ["full", p]), ...boardPages(partialBoard(), { pollClose, nextClose }).filter((p) => ["races", "board", "map"].includes(p.kind)).map((p) => ["early", p])].forEach(([tag, page], i) => {
     const key = `election-${tag}-${page.kind}${page.view ? "-" + page.view : ""}${page.of > 1 ? "-" + page.n : ""}`;
     scenes[key] = { at: from + i * gap, scene: "election", data: { page, builtAt: AT } };
   });
+  const n = Object.keys(scenes).length;
+  scenes["election-before"] = { at: from + n * gap, scene: "election", data: { page: beforePage({ closings: SAMPLE_CLOSINGS }), builtAt: AT } };
   return scenes;
 }

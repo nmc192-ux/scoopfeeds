@@ -54,6 +54,31 @@ organisations disagree, both calls are read and the disagreement is named. A wit
 never a result. If the writer goes over its daily budget, the special is read by the headline writer. It is never
 replaced by a repeat.
 
+## The screens (DrJ approved the mock-ups, 1 Nov)
+
+The election desk and the special's race-by-race blocks show, in order: the **results board**, the **Senate map**,
+the latest projections in the outlets' words, then the race pages. Before any projection, the slot ends on the
+**countdown** instead. Code: `programme/electionDesk.js` (`summary`, `timeline`, `hotCards`, `mapStates`,
+`beforePage`, `windowData`), drawn by `screen/scoopfeeds-radio-programme.html`; state outlines in `screen/usStates.js`
+(US Census cartographic boundaries via us-atlas, public domain), served by the playout at `/radio/usStates.js`.
+
+- **Results board.** Senate balance of power: totals are the 65 seats not up this year (32 D and 2 independents who
+  caucus with them, 31 R; checked against the 2026 class lists) plus races projected this year where every
+  organisation that called it agrees. A disputed race stays "to go". **Flip** = projected winner from the other party
+  than the one holding the seat (`SENATE_UP`). Under it: the House as one named organisation's own seat count (we never
+  add up districts), governors, and the next poll closing with a countdown. Then six **hot races** (`RADIO_HOT_SENATE`,
+  an editorial pick) and **projections as they come in**, newest first, each with its time and who projected it.
+  Candidate names appear only once a projection names them; there is no candidate list and no headshots.
+- **Senate map.** Real geography. Blue / red only once a named organisation projects the state; grey = not yet
+  projected; blue-red hatching = organisations disagree; dark = no Senate race this year.
+- **Countdown.** Before the first projection: time to the first poll closing, every closing tonight, the races to
+  watch with the party holding each seat, and the Senate going in (47 D with independents, 53 R).
+- **The election window.** From 24 hours before the special to the end of the counting days, every hour carries
+  `electionWindow` in programme.json: on the headline and music scenes it replaces the rail's markets and weather; beside
+  a film it replaces "Watch more"; over a full-frame episode it is a one-line bug. Senate and House totals, the newest
+  projection (gold **Just in** for 90 s after its time), the next poll closing. The 15-minute updates refresh it.
+  Every word on all of these is at the 26 px floor; `screen/fontFloor.test.js` renders them all.
+
 ## The day after: Wed 4 to Fri 6 Nov
 
 From 3 am New York on 4 Nov to the end of Friday 6 Nov, every produced hour has a 3-minute **"Counting continues"**

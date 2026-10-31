@@ -275,11 +275,22 @@ export function insertUpdate(dir, ins, { now = Date.now, marginMs = 1500 } = {})
     if ((prog.inserts || []).some((x) => x.id !== ins.id && ins.cut < x.resumeAt && x.cut < ins.resumeAt)) throw new Error("another insert already holds that slot");
     const out = spliceProgramme(prog, { cut: ins.cut, resumeAt: ins.resumeAt, partFile: ins.partFile, cues: ins.cues, lines: ins.lines || [] });
     out.slots = prog.slots.map((s) => (s.id === ins.id ? { ...s, insert: true, update: ins.at } : s));
-    out.inserts = [...(prog.inserts || []).filter((x) => x.id !== ins.id), ins];
+    out.inserts = [...(prog.inserts || []).filter((x) => x.id !== ins.id), { ...ins, window: undefined }];
+    if (ins.window) out.electionWindow = ins.window;   // 1 Nov: the rail's election window, from the update's fresh pack
     fs.writeFileSync(`${pf}.tmp`, JSON.stringify(out, null, 1));
     fs.renameSync(`${pf}.tmp`, pf);
     return out;
   });
+}
+
+/**
+ * What the election screens need from the clock (1 Nov): every poll closing still ahead tonight, the next one, and
+ * each state's closing time (the hot-race cards say "Polls close 8:00 PM" until a call). Empty outside the night.
+ */
+export function electionContext(nowMs, night = nightWindow()) {
+  const closings = pollClosings(nowMs, night.until, night);
+  const pollClose = Object.fromEntries(Object.keys(LAST_POLLS_CLOSE_ET).filter((st) => st !== "DC").map((st) => [st, pollCloseAt(st, night)]));
+  return { closings, nextClose: closings[0] || null, pollClose };
 }
 
 // ── fixtures (the rehearsal's projections) ──────────────────────────────────────────────────────────────────

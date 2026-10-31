@@ -41,8 +41,8 @@ import { withProgrammeLock, reapplyInserts, addDevelopingStories } from "./devel
 import { checkSegments } from "./checks.js";
 import { loadPresenters, castSegments } from "./presenters.js";
 import { buildElectionPack, extractElectionPack } from "./electionPack.js";
-import { buildSpecialClock, addCountingDesk, addPollCloseLines, mechanicalUpdate, mechanicalCounting, projectionLines, nightWindow, fixtureArticles, UPDATE_ID } from "./electionNight.js";
-import { deskOn, addDeskToClock, addBallotLines } from "./electionDesk.js";
+import { buildSpecialClock, addCountingDesk, addPollCloseLines, mechanicalUpdate, mechanicalCounting, projectionLines, nightWindow, fixtureArticles, UPDATE_ID, electionContext } from "./electionNight.js";
+import { deskOn, addDeskToClock, addBallotLines, boardData, windowData } from "./electionDesk.js";
 import { assemble, fakeVoice, kokoroVoice, durationSecs } from "./assemble.js";
 import { screenCredit } from "../musicManifest.js";
 import { loadBeds } from "./beds.js";
@@ -295,8 +295,12 @@ if (feature && slots.some((s) => s.kind === "feature") && !fresh("feature.webm")
   if (r.status !== 0) die(`feature transcode failed: ${String(r.stderr).slice(-300)}`);
   log("feature transcoded");
 }
+// 1 Nov (DrJ): the election screens' clock (poll closings ahead) and the election window on the rail. The window runs
+// on election day (from 24 h before the special), through the special and the counting days; never before.
+const electionCtx = pack.election ? electionContext(Math.max(hourStart, pack.builtAt || 0), nightWin) : null;
+const windowOn = !!pack.election && (night || hourStart >= nightWin.from - 24 * 3600_000) && hourStart < nightWin.dayAfterUntil;
 const { cues, report: mixReport, lines } = await assemble({
-  slots, segments, pack, hourStart, bedFor, film, filmUrl: "/programme/film.webm", feature, voice, outWav: path.join(out, partFile + ".tmp"), log, seriesCards: SERIES,
+  slots, segments, pack, hourStart, bedFor, film, filmUrl: "/programme/film.webm", feature, voice, outWav: path.join(out, partFile + ".tmp"), log, seriesCards: SERIES, electionCtx,
   creditFor: (file) => screenCredit(Object.values(beds).find((b) => b.file === file)?.entry || null),
 });
 // atomic: a part is never rewritten in place (the playout may be reading it, and a repeat hour may hard-link it)
@@ -328,6 +332,8 @@ withProgrammeLock(out, () => {
   if (gridPlan) prog.grid = gridPlan;
   if (v15) prog.clock = "v15";   // #285: read by the screen (music shows "Coming up", not headline cards), airCheck and later partial runs
   if (night) prog.election = night;   // #198: "special" | "day-after" (airCheck, the update desk, the rehearsal report)
+  // 1 Nov: the election window on the rail (totals, newest projection, next poll closing); absent = not drawn
+  if (windowOn) prog.electionWindow = windowData(boardData(pack.election), { nextClose: electionCtx?.nextClose || null }); else delete prog.electionWindow;
   if (cryptoNote) prog.crypto = { ...cryptoNote, at: pack.builtAt };   // #283: read by airCheck
   if (longRead && slots.some((s) => s.id === LONGREAD_SLOT)) {   // #304
     const kept = (segments[LONGREAD_SLOT]?.lines || []).filter((l) => !l.mechanical).length;

@@ -191,8 +191,8 @@ test("rehearsal: a desk hour on fixture data has the desk and the board, with at
   const title = cues.find((c) => c.scene === "title");
   assert.equal(title.data.title, "The Midterms");
   const board = cues.filter((c) => c.scene === "election");
-  assert.deepEqual(board.map((c) => `${c.data.page.kind}${c.data.page.view ? ":" + c.data.page.view : ""}`), ["overview", "latest", "races:senate", "races:governor"]);
-  const nc = board[2].data.page.cols.flat().find((r) => r.state === "NC");
+  assert.deepEqual(board.map((c) => `${c.data.page.kind}${c.data.page.view ? ":" + c.data.page.view : ""}`), ["board", "map", "latest", "races:senate", "races:governor"]);
+  const nc = board[3].data.page.cols.flat().find((r) => r.state === "NC");
   assert.equal(nc.calls.map((c) => c.outlet).sort().join(","), "AP,Fox News");
   assert.equal(nc.lines[0], "Outlets disagree");
   assert.ok(board[0].at >= H + 840_000 && board.at(-1).at < H + 1020_000);
@@ -209,7 +209,7 @@ import { fullBoard, partialBoard } from "../screen/fixtures/sampleElection.mjs";
 test("board pages: every race appears exactly once, every called race names who projected it", () => {
   for (const b of [fullBoard(), partialBoard(), boardData(ep())]) {
     const pages = boardPages(b);
-    assert.equal(pages[0].kind, "overview");
+    assert.deepEqual(pages.slice(0, 2).map((p) => p.kind), ["board", "map"]);
     for (const view of ["senate", "governor"]) {
       const ps = pages.filter((p) => p.kind === "races" && p.view === view);
       const gov = b.governor.rows.some((r) => r.status !== "open");
@@ -240,4 +240,63 @@ test("board pages: a full night still fits the desk with every page up at least 
   const pages = boardPages(fullBoard());
   assert.ok(pages.length * 8 <= 180 - 20, `${pages.length} pages`);
   assert.deepEqual(racePages([], "senate"), []);
+});
+
+// ── 1 Nov (DrJ approved the mock-ups): the results board, the Senate map, the countdown and the election window ──
+import { summary, timeline, hotCards, mapStates, beforePage, windowData, hotSenate, HOT_SENATE_DEFAULT } from "./electionDesk.js";
+import { SENATE_UP, SENATE_NOT_UP } from "../election/races2026.js";
+
+test("results board: Senate totals are the seats not up plus agreed projections; flips against the seat holder", () => {
+  const b = fullBoard(), s = summary(b);
+  const agreed = b.senate.rows.filter((r) => r.status === "called");
+  const by = (p) => agreed.filter((r) => r.calls[0].party === p);
+  assert.equal(s.senate.D, SENATE_NOT_UP.D + SENATE_NOT_UP.I + by("D").length);
+  assert.equal(s.senate.R, SENATE_NOT_UP.R + by("R").length);
+  assert.equal(s.senate.toGo, Object.keys(SENATE_UP).length - agreed.length, "a disputed race is still to go");
+  assert.equal(s.senate.flips.D, by("D").filter((r) => SENATE_UP[r.state] === "R").length);
+  assert.equal(s.senate.flips.R, by("R").filter((r) => SENATE_UP[r.state] === "D").length);
+  // the House number is one organisation's own count, named, never our sum
+  assert.ok(s.house.outlet && b.house.reports.some((h) => h.outlet === s.house.outlet && h.seats.D === s.house.D && h.seats.R === s.house.R));
+  // no board at all: going-in seats only, nothing projected
+  const e = summary(null);
+  assert.deepEqual([e.senate.D, e.senate.R, e.senate.toGo, e.house.outlet], [34, 31, 35, null]);
+});
+
+test("results board: timeline newest first with who projected it; map colours only from projections", () => {
+  const b = partialBoard(), tl = timeline(b, { max: 50 });
+  for (let i = 1; i < tl.length; i++) assert.ok(Date.parse(tl[i - 1].at) >= Date.parse(tl[i].at));
+  for (const i of tl) { assert.ok(i.outlets.length >= 1); assert.ok(["senate", "governor"].includes(i.race)); }
+  const m = mapStates(b);
+  assert.equal(Object.keys(m).length, Object.keys(SENATE_UP).length);
+  for (const r of b.senate.rows) assert.equal(m[r.state], r.status === "open" ? "open" : r.status === "conflict" ? "X" : r.calls[0].party);
+  assert.ok(Object.values(mapStates(null)).every((v) => v === "open"), "no projection, no colour");
+});
+
+test("hot races: an editorial pick (overridable), six at most; open races carry no candidate names", () => {
+  assert.deepEqual(hotSenate({}), [...HOT_SENATE_DEFAULT]);
+  assert.deepEqual(hotSenate({ RADIO_HOT_SENATE: "ia, ZZ, ME,IA" }), ["IA", "ME"]);
+  assert.equal(hotSenate({ RADIO_HOT_SENATE: Object.keys(SENATE_UP).join(",") }).length, 6);
+  const cards = hotCards(partialBoard(), Object.keys(SENATE_UP), { pollClose: () => 123 });
+  for (const c of cards.filter((x) => x.status === "open")) { assert.equal(c.candidate, undefined); assert.equal(c.pollsClose, 123); }
+  for (const c of cards.filter((x) => x.status === "called")) assert.ok(c.outlets.length >= 1);
+});
+
+test("before results: countdown to the first closing, every closing, races to watch with the seat holder", () => {
+  assert.equal(beforePage({ closings: [] }), null);
+  const closings = [{ at: 1000, states: ["GA", "VA"] }, { at: 2000, states: ["NC"] }];
+  const pg = beforePage({ closings, env: {} });
+  assert.equal(pg.target, 1000); assert.deepEqual(pg.firstNames, ["Georgia", "Virginia"]);
+  assert.equal(pg.closings.length, 2);
+  for (const w of pg.watch) assert.equal(w.holder, SENATE_UP[w.state]);
+  assert.deepEqual(pg.goingIn, { D: 47, R: 53 });
+});
+
+test("election window: totals, the newest projection, the next closing; nothing without a board or a closing", () => {
+  assert.equal(windowData(null), null);
+  const nc = { at: 5, states: ["AK"] };
+  const w0 = windowData(null, { nextClose: nc });
+  assert.equal(w0.latest, null); assert.deepEqual(w0.nextClose, nc);
+  const b = fullBoard(), w = windowData(b, { nextClose: nc });
+  assert.deepEqual(w.summary, summary(b));
+  assert.equal(w.latest.at, timeline(b, { max: 1 })[0].at);
 });
