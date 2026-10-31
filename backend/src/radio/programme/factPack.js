@@ -303,5 +303,6 @@ export function storyIndex(pack) {
   const m = new Map();
   for (const s of pack.top) m.set(s.id, s);
   for (const list of Object.values(pack.desks)) for (const s of list) m.set(s.id, s);
+  if (pack.longread?.story) m.set(pack.longread.story.id, pack.longread.story);   // #304: The Long Read's own fact base
   return m;
 }

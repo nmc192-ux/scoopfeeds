@@ -47,6 +47,8 @@ import { assemble, fakeVoice, kokoroVoice, durationSecs } from "./assemble.js";
 import { screenCredit } from "../musicManifest.js";
 import { loadBeds } from "./beds.js";
 import { resolveHourShort } from "../filmLibrary.js";
+import { longReadOn, isLongReadHour, pickForAir, addLongReadToClock, SLOT_ID as LONGREAD_SLOT } from "../longread/longread.js";
+import { listPieces, recordAiring } from "../longread/store.js";
 
 const { values: v } = parseArgs({ options: {
   hour: { type: "string" }, out: { type: "string" }, "music-dir": { type: "string" }, film: { type: "string" },
@@ -111,6 +113,24 @@ const counting = night === "day-after" ? addCountingDesk(clock, hourStart) : nul
 if (night === "day-after" && !counting) log("day after: no music-1 slot long enough for the counting desk this hour");
 if (counting && checkClock(clock).length) die(`clock is broken after adding the counting desk: ${checkClock(clock).join("; ")}`);
 if (midterms && checkClock(clock).length) die(`clock is broken after adding the Midterms desk: ${checkClock(clock).join("; ")}`);
+// #304: The Long Read (RADIO_LONGREAD_ENABLED=1, dark by default). In a long-read hour of the v1.5 clock, The News,
+// Compared #2 and the music block after it become one piece ScoopFeeds wrote and checked earlier (longread/cli.mjs
+// make). No piece that may air, or no such slots (a feature hour): the hour is unchanged. Never in a repeat splice.
+let longRead = null;
+if (longReadOn() && v15 && night !== "special" && !v.to && isLongReadHour(hourStart)) {
+  const pieces = listPieces();
+  const piece = pickForAir(pieces, { hourStart });
+  if (!piece) log(`long read: no piece may air this hour (${pieces.length} on file; longread/cli.mjs list says why); The News, Compared as usual`);
+  else {
+    const slot = addLongReadToClock(clock);
+    if (!slot) log("long read: this hour has no News, Compared #2 + music pair to give it (a feature hour?); The News, Compared as usual");
+    else {
+      longRead = { piece, slot };
+      log(`long read: ${piece.id} (${piece.verdict?.words ?? "?"} words, ${piece.status}) at ${Math.floor(slot.startSec / 60)}:${String(slot.startSec % 60).padStart(2, "0")}`);
+      if (checkClock(clock).length) die(`clock is broken after adding the Long Read: ${checkClock(clock).join("; ")}`);
+    }
+  }
+}
 // #283: a repeat asks for a fresh Crypto in every hour; an hour whose clock has none (grid off) has nothing to splice
 if (v.from === "crypto" && !clock.some((s) => s.id === "crypto")) {
   log(`crypto: this hour's clock has no Crypto slot (${night === "special" ? "the election night special" : useGrid ? "no music break long enough" : "the grid is off: RADIO_GRID_ENABLED is not 1"}); nothing to splice`);
@@ -157,6 +177,8 @@ if (v.developing) {
 // #245: mark every market row whose last trade is not from the day the first Markets Now airs (weekend, holiday,
 // before the open). The writer is told, checkSegments drops a closed row read as today's, airCheck re-checks.
 labelMarkets(pack, (slots.find((s) => s.segment === "markets")?.start ?? hourStart) + 60_000);
+// #304: the Long Read's own fact base, so the hour's checks and the screen read its story (factPack.storyIndex)
+if (longRead) pack.longread = { id: longRead.piece.id, story: longRead.piece.story };
 fs.writeFileSync(path.join(out, "pack.json"), JSON.stringify(pack, null, 1));
 log(`fact pack: ${pack.top.length} top stories, desks ${Object.entries(pack.desks).map(([k, l]) => `${k}:${l.length}`).join(" ")}, ${pack.markets.length} market rows, ${pack.weather.length} cities, ${pack.dropped.length} articles dropped by Rule 0`);
 if (pack.top.length < 5) log(`WARNING: only ${pack.top.length} top stories`);
@@ -234,6 +256,8 @@ if (night === "special") {
     if (g.length) log(`${s.id}: poll closings ${g.map((x) => `${new Date(x.at).toISOString().slice(11, 16)} UTC (${x.states.join(" ")})`).join("; ")}`);
   }
 }
+// #304: the Long Read was written and checked when it was made; it is checked again below, with the rest of the hour
+if (longRead && spoken.some((s) => s.id === LONGREAD_SLOT)) raw[LONGREAD_SLOT] = longRead.piece.segment;
 // #283: a splice run (--to) adds its segments to those of earlier splices of the same hour (a repeat's fresh The Hour,
 // then its fresh Crypto); prepareRepeat leaves the repeated hour's own segments out, as repeat-source-segments.json
 const earlier = (f, empty) => { if (!v.to) return empty; try { return JSON.parse(fs.readFileSync(path.join(out, f), "utf8")) ?? empty; } catch { return empty; } };
@@ -305,6 +329,10 @@ withProgrammeLock(out, () => {
   if (v15) prog.clock = "v15";   // #285: read by the screen (music shows "Coming up", not headline cards), airCheck and later partial runs
   if (night) prog.election = night;   // #198: "special" | "day-after" (airCheck, the update desk, the rehearsal report)
   if (cryptoNote) prog.crypto = { ...cryptoNote, at: pack.builtAt };   // #283: read by airCheck
+  if (longRead && slots.some((s) => s.id === LONGREAD_SLOT)) {   // #304
+    const kept = (segments[LONGREAD_SLOT]?.lines || []).filter((l) => !l.mechanical).length;
+    prog.longread = { id: longRead.piece.id, headline: longRead.piece.story.headline, status: longRead.piece.status, lines: kept, of: (longRead.piece.segment.lines || []).filter((l) => !l.mechanical).length };
+  }
   // the screen's right rail (#200): markets and weather, verbatim from the pack; each block renders only with data
   // #283: in a grid hour the markets block carries Bitcoin, Ether and the top crypto mover too (factPack.railMarkets);
   // without the grid it is the five rows the screen always showed
@@ -331,6 +359,10 @@ withProgrammeLock(out, () => {
   fs.writeFileSync(pf + ".tmp", JSON.stringify(prog, null, 1));
   fs.renameSync(pf + ".tmp", pf);   // atomic: the screen and playout never read half a file
 });
+// #304: a produced hour that carries the piece counts as one of its airings (a refresh of the same hour does not)
+if (longRead && slots.some((s) => s.id === LONGREAD_SLOT)) {
+  try { recordAiring(longRead.piece.id, hourStart); } catch (e) { log(`long read: could not record the airing (${e.message})`); }
+}
 log(`done in ${Math.round((Date.now() - t0) / 1000)} s: ${cues.length} cues, ${Math.round(mixReport.voicedSecs)} s of speech, dropped for time ${JSON.stringify(mixReport.dropped)}; audio ${partFile} from ${new Date(cut).toISOString()}`);
 
 /** Mechanical writer for dry runs: reads headlines, no Claude. */

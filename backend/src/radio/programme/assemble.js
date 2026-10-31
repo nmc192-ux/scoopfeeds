@@ -18,6 +18,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { storyIndex } from "./factPack.js";
+import { sectionCards } from "../longread/longread.js";
+
+/** #304: the Long Read's story card holds the screen at least this long before the first section card. */
+const LONGREAD_CARD_SEC = 12;
 import { boardData, boardPages } from "./electionDesk.js";
 import { ELECTION_SEGMENTS } from "./checks.js";
 
@@ -244,6 +248,16 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
           const lastEnd = lines.at(-1).endSec;
           const nextSlot = slots.slice(slots.indexOf(s) + 1).find((x) => x.title);
           if (!board && s.endSec - lastEnd > 12) cues.push({ at: at(lastEnd + 2), scene: "music", data: nextSlot ? { next: { title: nextSlot.title, at: at(nextSlot.startSec) } } : {} });
+          break;
+        }
+        if (s.segment === "longread") {   // #304: the outlets' own headline and lede, then one card per section (mechanical text)
+          const id = seg.story || lines.find((l) => l.story)?.story;
+          const outlets = [...new Set(outletsOf(id))];
+          cues.push({ at: at(t0), scene: "story", data: { kicker: s.title, n: 1, of: 1, headline: headline(id), outlets: outlets.slice(0, 4), lede: ledeOf(id) } });
+          for (const c of sectionCards(lines)) cues.push({ at: at(Math.max(c.line.atSec, t0 + LONGREAD_CARD_SEC)), scene: "known", data: { title: s.title, headline: headline(id), label: c.label, text: c.text } });
+          const nextSlot = slots.slice(slots.indexOf(s) + 1).find((x) => x.title);
+          const lastEnd = lines.at(-1).endSec;
+          if (s.endSec - lastEnd > 12) cues.push({ at: at(lastEnd + 2), scene: "music", data: md(s, nextSlot ? { next: { title: nextSlot.title, at: at(nextSlot.startSec) } } : {}) });
           break;
         }
         if (s.segment === "developing") {   // #201: one card, the BREAKING banner, the outlets' own headline and lede
