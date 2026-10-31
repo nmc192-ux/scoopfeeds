@@ -19,11 +19,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { storyIndex } from "./factPack.js";
 import { sectionCards } from "../longread/longread.js";
+import { boardData, boardPages } from "./electionDesk.js";
+import { ELECTION_SEGMENTS } from "./checks.js";
 
 /** #304: the Long Read's story card holds the screen at least this long before the first section card. */
 const LONGREAD_CARD_SEC = 12;
-import { boardData, boardPages } from "./electionDesk.js";
-import { ELECTION_SEGMENTS } from "./checks.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const BOARD_PAGE_MIN_SEC = 8;   // #197: shortest time one election-board page stays up
