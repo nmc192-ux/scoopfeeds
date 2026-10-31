@@ -10,7 +10,7 @@
  * stays contiguous and every other slot keeps its time. In the v1.5 clock (#285, music blocks of 90 s at most) it
  * takes the US desk's slot instead (45:00-48:00): the Midterms desk is the US politics desk while it runs.
  */
-import { STATE_NAMES, SENATE_UP, GOVERNOR_UP, SENATE_SEATS, SENATE_MAJORITY, HOUSE_SEATS, HOUSE_MAJORITY } from "../election/races2026.js";
+import { STATE_NAMES, SENATE_UP, SENATE_NOT_UP, GOVERNOR_UP, SENATE_SEATS, SENATE_MAJORITY, HOUSE_SEATS, HOUSE_MAJORITY } from "../election/races2026.js";
 
 export const DESK_FROM = Date.parse("2026-10-26T04:00:00Z");      // 26 Oct, midnight in New York (EDT)
 export const DESK_UNTIL = Date.parse("2026-11-07T05:00:00Z");     // end of 6 Nov in New York (EST)
@@ -82,7 +82,8 @@ export function addBallotLines(raw, hourStart) {
 /**
  * The election board (programme screen). null unless at least one attributed item exists (earn-render).
  * Control bars count ONLY races an organisation projected and every organisation that called it agrees on;
- * seats not up this year are not added (that list is unverified). Every called race says who projected it.
+ * seats not up this year are not added here (the 1 Nov board adds them in summary(): SENATE_NOT_UP, checked against
+ * the 2026 class lists). Every called race says who projected it.
  */
 export function boardData(ep) {
   const calls = (ep?.races || []).filter((r) => r.calls.length);
@@ -172,11 +173,108 @@ export function latestPages(latest) {
   return pages.map((quotes, i) => ({ kind: "latest", n: i + 1, of: pages.length, quotes }));
 }
 
+/*
+ * The election-night look (DrJ approved the mock-ups, 1 Nov 2026): a results board (balance of power, hot races,
+ * projections as they come in), a Senate map, and, before any projection, a countdown to the first poll closing.
+ * Plus the compact "election window" that rides on the rail of every other scene. All of it reads the same board,
+ * so every figure on it is either a static fact (seats not up, who holds a seat) or an attributed projection.
+ */
+
+/** Hot races on the board: an editorial pick, overridable with RADIO_HOT_SENATE="NC,ME,GA,...". Six fit at the 26 px floor. */
+export const HOT_SENATE_DEFAULT = Object.freeze(["NC", "ME", "GA", "MI", "OH", "TX"]);
+export function hotSenate(env = process.env) {
+  const pick = String(env.RADIO_HOT_SENATE || "").split(",").map((x) => x.trim().toUpperCase()).filter((x) => x in SENATE_UP);
+  return (pick.length ? [...new Set(pick)] : [...HOT_SENATE_DEFAULT]).slice(0, 6);
+}
+
+const newestAt = (r) => Math.max(...(r.calls || []).map((c) => Date.parse(c.at) || 0));
+const winner = (r) => (r.status === "called" ? r.calls[0].party || null : null);
+
+/**
+ * The night's numbers. Senate totals = seats not up this year (SENATE_NOT_UP; independents counted with the
+ * Democrats they caucus with, and said so on screen) + races projected this year with every caller agreeing.
+ * A flip is a projected winner from the other party than the one holding the seat (SENATE_UP).
+ * House: the newest seat count an organisation reported, named; we never add up districts ourselves.
+ */
+export function summary(board) {
+  const rows = board?.senate?.rows || [];
+  const won = { D: SENATE_NOT_UP.D + SENATE_NOT_UP.I, R: SENATE_NOT_UP.R };
+  const flips = { D: 0, R: 0 };
+  for (const r of rows) {
+    const p = winner(r); if (p !== "D" && p !== "R") continue;
+    won[p]++; if (SENATE_UP[r.state] && SENATE_UP[r.state] !== p) flips[p]++;
+  }
+  const decided = rows.filter((r) => winner(r) === "D" || winner(r) === "R").length;
+  const hr = [...(board?.house?.reports || [])].sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))[0] || null;
+  const gp = board?.governor?.projected || {};
+  return {
+    senate: { D: won.D, R: won.R, toGo: Object.keys(SENATE_UP).length - decided, majority: SENATE_MAJORITY, seats: SENATE_SEATS, flips, notUp: { D: SENATE_NOT_UP.D + SENATE_NOT_UP.I, R: SENATE_NOT_UP.R } },
+    house: hr ? { D: hr.seats?.D || 0, R: hr.seats?.R || 0, toGo: Math.max(0, HOUSE_SEATS - (hr.seats?.D || 0) - (hr.seats?.R || 0) - (hr.seats?.I || 0)), majority: HOUSE_MAJORITY, seats: HOUSE_SEATS, outlet: hr.outlet }
+      : { D: 0, R: 0, toGo: HOUSE_SEATS, majority: HOUSE_MAJORITY, seats: HOUSE_SEATS, outlet: null },
+    governor: { D: gp.D || 0, R: gp.R || 0, toGo: GOVERNOR_UP.length - (gp.D || 0) - (gp.R || 0) - (gp.I || 0) },
+  };
+}
+
+/** Every called or disputed race, newest call first: the "projections as they come in" column. */
+export function timeline(board, { max = 6 } = {}) {
+  const rows = [...(board?.senate?.rows || []).map((r) => ({ ...r, race: "senate" })), ...(board?.governor?.rows || []).map((r) => ({ ...r, race: "governor" }))];
+  return rows.filter((r) => r.status !== "open").sort((a, b) => newestAt(b) - newestAt(a)).slice(0, max).map((r) => ({
+    at: new Date(newestAt(r)).toISOString(), state: r.state, name: STATE_NAMES[r.state], race: r.race, status: r.status, party: winner(r),
+    candidate: r.status === "called" ? r.calls[0].candidate || null : null,
+    flip: r.race === "senate" && winner(r) && SENATE_UP[r.state] && SENATE_UP[r.state] !== winner(r) ? true : false,
+    outlets: [...new Set(r.calls.map((c) => c.outlet))],
+    calls: r.status === "conflict" ? r.calls.map((c) => ({ outlet: c.outlet, party: c.party || null, candidate: c.candidate || null })) : [],
+  }));
+}
+
+/** One hot-race card. Candidate names appear only once a call names them; we keep no candidate list. */
+export function hotCards(board, states, { pollClose = () => null } = {}) {
+  return states.map((st) => {
+    const r = (board?.senate?.rows || []).find((x) => x.state === st) || { state: st, status: "open", calls: [] };
+    const base = { state: st, name: STATE_NAMES[st], holder: SENATE_UP[st] || null, status: r.status, pollsClose: pollClose(st) };
+    if (r.status === "open") return base;
+    if (r.status === "conflict") return { ...base, calls: r.calls.map((c) => ({ outlet: c.outlet, party: c.party || null, candidate: c.candidate || null })) };
+    const p = winner(r);
+    return { ...base, party: p, candidate: r.calls[0].candidate || null, at: new Date(newestAt(r)).toISOString(), outlets: [...new Set(r.calls.map((c) => c.outlet))], flip: !!(p && SENATE_UP[st] && SENATE_UP[st] !== p) };
+  });
+}
+
+/** The Senate map: every state with a race this year, coloured from projections only (D / R / X = outlets disagree / open). */
+export function mapStates(board) {
+  const out = {};
+  for (const st of Object.keys(SENATE_UP)) {
+    const r = (board?.senate?.rows || []).find((x) => x.state === st);
+    out[st] = !r || r.status === "open" ? "open" : r.status === "conflict" ? "X" : winner(r) || "open";
+  }
+  return out;
+}
+
 /** Every page of the board, in airing order. [] when there is no board (earn-render). */
-export function boardPages(board) {
+export function boardPages(board, { env = process.env, pollClose = () => null, nextClose = null } = {}) {
   if (!board) return [];
-  const overview = { kind: "overview", senate: { seats: board.senate.seats, majority: board.senate.majority, projected: board.senate.projected, control: board.senate.control },
-    house: { seats: board.house.seats, majority: board.house.majority, reports: board.house.reports, control: board.house.control } };
+  const sum = summary(board);
+  const results = { kind: "board", summary: sum, hot: hotCards(board, hotSenate(env), { pollClose }), timeline: timeline(board), nextClose };
+  const map = { kind: "map", summary: sum, states: mapStates(board), nextClose };
   const gov = board.governor.rows.some((r) => r.status !== "open");
-  return [overview, ...latestPages(board.latest), ...racePages(board.senate.rows, "senate"), ...(gov ? racePages(board.governor.rows, "governor") : [])];
+  return [results, map, ...latestPages(board.latest), ...racePages(board.senate.rows, "senate"), ...(gov ? racePages(board.governor.rows, "governor") : [])];
+}
+
+/** Before any projection: the countdown to the first poll closing, every closing time, and the races to watch. */
+export function beforePage({ closings = [], env = process.env } = {}) {
+  if (!closings.length) return null;
+  return { kind: "before", target: closings[0].at, first: closings[0].states, firstNames: closings[0].states.map((st) => STATE_NAMES[st] || st), closings: closings.map((c) => ({ at: c.at, states: c.states })),
+    watch: hotSenate(env).map((st) => ({ state: st, name: STATE_NAMES[st], holder: SENATE_UP[st] })),
+    goingIn: { D: 45 + 2, R: 53 }, seatsUp: { senate: Object.keys(SENATE_UP).length, house: HOUSE_SEATS, governor: GOVERNOR_UP.length } };
+}
+
+/**
+ * The election window on the rail of every other scene (headlines, music, films): the running totals, the newest
+ * projection (flagged "just in" for JUST_IN_MS after its time) and the next poll closing. null without a board
+ * and without closings to come (earn-render).
+ */
+export const JUST_IN_MS = 90_000;
+export function windowData(board, { nextClose = null } = {}) {
+  if (!board && !nextClose) return null;
+  const tl = board ? timeline(board, { max: 1 }) : [];
+  return { summary: summary(board), latest: tl[0] || null, nextClose, builtAt: board?.builtAt || null };
 }

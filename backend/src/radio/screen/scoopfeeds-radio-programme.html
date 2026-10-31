@@ -228,6 +228,78 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
 .ti{font-size:26px; padding:0 34px; border-left:1px solid var(--line);}
 .ti em{font-style:normal; color:var(--muted); font-size:26px; margin-left:12px;}
 
+
+/* ── election night (1 Nov, DrJ approved the mock-ups): results board, Senate map, countdown, and the election window
+   on the rail. Blue = projected Democrat, red = projected Republican, gold = flip / outlets disagree. Nothing turns a
+   colour until a named organisation projected it; every text at the 26 px floor. ── */
+:root{ --D:#2F6FE0; --Dl:#6F9DFF; --R:#E0362C; --Rl:#FF6B61; --gold:#F2C14E; }
+.s-elec.big .pad{inset:24px 56px 22px 56px;}
+.ebop{display:grid; grid-template-columns:300px 1fr 300px; gap:28px; align-items:center;}
+.ebop .side .n{font-size:92px; font-weight:700; line-height:.9;}
+.ebop .side .l{font-size:26px; margin-top:6px;} .ebop .side .f{font-size:26px; color:var(--muted); margin-top:4px;}
+.ebop .D .n,.ebop .D .l{color:var(--Dl);} .ebop .R{text-align:right;} .ebop .R .n,.ebop .R .l{color:var(--Rl);}
+.etrack{position:relative; height:46px; background:#232831; border-radius:5px;}
+.etrack .d{position:absolute; left:0; top:0; bottom:0; background:linear-gradient(90deg,#1D4FAE,var(--D)); border-radius:5px 0 0 5px;}
+.etrack .r{position:absolute; right:0; top:0; bottom:0; background:linear-gradient(270deg,#A8241D,var(--R)); border-radius:0 5px 5px 0;}
+.etrack .m{position:absolute; left:50%; top:-14px; bottom:-14px; width:3px; background:var(--paper); transform:translateX(-50%);}
+.ebop .mid .t{text-align:center; font-size:26px; margin-bottom:12px; color:var(--gold);}
+.ebop .mid .s{display:flex; justify-content:space-between; font-size:26px; color:var(--muted); margin-top:12px; gap:20px;}
+.erow{display:flex; gap:26px; font-size:26px; color:var(--muted); margin-top:8px; padding:6px 0; overflow:hidden; border-top:1px solid var(--line); border-bottom:1px solid var(--line); white-space:nowrap;}
+.erow b{color:var(--paper); font-weight:700;} .erow .bd{color:var(--Dl);} .erow .br{color:var(--Rl);} .erow .cd{color:var(--gold);}
+.ebody{display:grid; grid-template-columns:1fr 540px; gap:28px; margin-top:10px;}
+.ebody h4,.emap h4{margin:0 0 10px; font-size:26px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.16em;}
+.ehot{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px;}
+.ehot .c{background:var(--ink2); border-top:6px solid #555B66; padding:10px 18px 0; min-height:240px; display:flex; flex-direction:column;}
+.ehot .c.D{border-top-color:var(--D);} .ehot .c.R{border-top-color:var(--R);} .ehot .c.X{border-top-color:var(--gold);}
+.ehot .c .st{font-family:'Bodoni Moda',serif; font-size:38px; line-height:1.05; white-space:nowrap;}
+.ehot .c .h{font-size:26px; color:var(--muted); margin-top:2px;}
+.ehot .c .w{font-size:26px; line-height:1.15; margin-top:6px;}
+.ehot .c .o{margin:auto -18px 0; padding:8px 18px; font-size:26px; line-height:1.18; background:rgba(255,255,255,.05); color:var(--muted);}
+.ehot .c.D .o{background:rgba(47,111,224,.16); color:var(--paper);} .ehot .c.R .o{background:rgba(224,54,44,.15); color:var(--paper);}
+.ehot .c.X .o{background:repeating-linear-gradient(135deg,rgba(242,193,78,.18) 0 10px,rgba(242,193,78,.06) 10px 20px); color:var(--paper);}
+.eflip{display:inline-block; font-size:26px; font-weight:800; letter-spacing:.1em; color:#1A1A1A; background:var(--gold); padding:0 8px; margin-left:10px; line-height:1.25;}
+.etl{background:var(--ink2); padding:2px 20px;}
+.etl .i{display:grid; grid-template-columns:64px 1fr; gap:14px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line);}
+.etl .i:last-child{border:0;}
+.ebadge{height:40px; display:grid; place-items:center; font-weight:800; font-size:26px; color:#fff; background:#3A404B;}
+.ebadge.D{background:var(--D);} .ebadge.R{background:var(--R);} .ebadge.X{background:var(--gold); color:#1A1A1A;}
+.etl .w{font-size:26px; line-height:1.18;} .etl .b{font-size:26px; line-height:1.18; color:var(--muted);}
+.emap{display:grid; grid-template-columns:1fr 470px; gap:30px; margin-top:16px;}
+.emap svg{width:100%; height:560px;}
+.emap .lg{display:flex; align-items:center; gap:16px; padding:12px 0; border-bottom:1px solid var(--line); font-size:26px;}
+.emap .lg i{width:38px; height:38px; flex:none;} .emap .lg b{margin-left:auto; font-size:34px;}
+.emap p{font-size:26px; line-height:1.25; color:var(--muted); margin:18px 0 0;}
+.ebefore{display:grid; grid-template-columns:1fr 600px; gap:56px;}
+.ebefore .k{font-size:26px; color:var(--gold);}
+.ebefore .cd{font-size:190px; font-weight:700; line-height:1; letter-spacing:-.02em; margin-top:6px;}
+.ebefore .f{font-family:'Bodoni Moda',serif; font-size:42px; line-height:1.15; margin-top:8px;}
+.ebefore .pc{display:flex; gap:16px; align-items:center; padding:7px 0; border-bottom:1px solid var(--line);}
+.ebefore .pc b{flex:0 0 150px; font-size:26px;} .ebefore .pc div{display:flex; flex-wrap:wrap; gap:6px;}
+.ebefore .pc .ebadge{width:58px; height:36px;}
+.ebefore .wt{display:flex; align-items:center; background:var(--ink2); border-left:8px solid #555B66; padding:12px 20px; margin-bottom:10px;}
+.ebefore .wt.D{border-left-color:var(--D);} .ebefore .wt.R{border-left-color:var(--R);}
+.ebefore .wt .n{font-family:'Bodoni Moda',serif; font-size:40px;} .ebefore .wt .h{margin-left:auto; text-align:right; font-size:26px; color:var(--muted);}
+/* the election window: rail block, beside a film, and a one-line bug over a full-frame episode */
+.rb.rel{border-top:6px solid var(--gold); padding:14px 22px 0; background:#12161D;}
+.rb.rel.just{box-shadow:0 0 0 3px rgba(242,193,78,.55);}
+.rel .hd{display:flex; justify-content:space-between; font-size:26px; color:var(--gold);} .rel .hd span:last-child{color:var(--Rl);}
+.rel .ch{margin-top:10px;} .rel .ch .row{display:flex; align-items:baseline; justify-content:space-between; font-size:26px;}
+.rel .ch .row b{font-size:56px; font-weight:700; line-height:1;} .rel .ch .row .l{color:var(--muted);}
+.rel .bar{position:relative; height:16px; background:#232831; margin-top:8px;}
+.rel .bar .d{position:absolute; left:0; top:0; bottom:0; background:var(--D);} .rel .bar .r{position:absolute; right:0; top:0; bottom:0; background:var(--R);}
+.rel .bar .m{position:absolute; left:50%; top:-6px; bottom:-6px; width:3px; background:var(--paper);}
+.rel .sub{display:flex; justify-content:space-between; font-size:26px; color:var(--muted); margin-top:4px;}
+.rel .lt{margin:12px -22px 0; padding:10px 22px; background:#1B2028; border-top:1px solid var(--line);}
+.rel.just .lt{background:linear-gradient(90deg,rgba(242,193,78,.22),rgba(242,193,78,.05));}
+.rel .lt .k{font-size:26px; color:var(--muted);} .rel .lt .k .ji{color:#1A1A1A; background:var(--gold); padding:0 8px; font-weight:800; margin-right:6px;}
+.rel .lt .w{display:flex; align-items:center; gap:12px; margin-top:6px;} .rel .lt .w .ebadge{flex:0 0 58px;}
+.rel .lt .w .x{font-family:'Bodoni Moda',serif; font-size:30px; line-height:1.1;} .rel .lt .by{font-size:26px; color:#C9CDD3; margin-top:4px;}
+.rel .nx{display:flex; justify-content:space-between; white-space:nowrap; margin:0 -22px; padding:10px 22px; font-size:26px; border-top:1px solid var(--line); background:#0E1117;}
+.rel .nx .cd{color:var(--gold); font-weight:700;}
+.s-film .side.r.el{top:24px; bottom:24px; transform:none; width:480px; text-align:left;}
+.s-film .side.r.el > *:not(.rel){display:none;}
+#featEl{position:absolute; right:40px; bottom:28px; display:none; align-items:center; gap:18px; background:rgba(14,17,23,.86); border-top:4px solid var(--gold); padding:10px 18px; font-size:26px; white-space:nowrap;}
+#featEl.on{display:flex;} #featEl b.d{color:var(--Dl);} #featEl b.r{color:var(--Rl);} #featEl .k{color:var(--gold);}
 /* ── full-screen overlays: idents and the sting ── */
 .ov{position:absolute; inset:0; z-index:20; display:none;}
 .ov.on{display:block;}
@@ -244,7 +316,7 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
   </div>
 
   <div id="main">
-    <aside id="rail"><div class="rb rb-up" id="rUp" hidden></div><div class="rb" id="rMk" hidden></div><div class="rb" id="rWx" hidden></div></aside>
+    <aside id="rail"><div class="rb rb-up" id="rUp" hidden></div><div class="rb" id="rMk" hidden></div><div class="rb" id="rWx" hidden></div><div class="rb rel" id="rEl" hidden></div></aside>
     <section class="scene" data-scene="countdown"><div class="slate">
       <svg width="220" height="220" viewBox="-100 -100 200 200"><circle r="96" fill="#F4EFE6"/><circle r="54" fill="none" stroke="#0F2238" stroke-width="9"/><circle r="22" fill="#D7261E"/></svg>
       <div class="w">ScoopFeeds <i>Radio</i></div><div class="rule"></div>
@@ -278,7 +350,7 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
     <section class="scene s-film" data-scene="film">
       <div class="side l"><div class="caps" style="font-size:26px;color:var(--red2)">From the films</div><div class="serif" id="filmTitle" style="font-size:44px;line-height:1.1;margin-top:14px"></div></div>
       <video id="film" muted playsinline preload="auto"></video>
-      <div class="side r"><div class="caps" style="font-size:26px;color:var(--red2)">Watch more</div><div class="serif" style="font-size:34px;margin-top:12px">YouTube</div><div style="font-size:26px;margin-top:8px">@scoopfeedsnews</div></div></section>
+      <div class="side r" id="filmR"><div class="caps" style="font-size:26px;color:var(--red2)">Watch more</div><div class="serif" style="font-size:34px;margin-top:12px">YouTube</div><div style="font-size:26px;margin-top:8px">@scoopfeedsnews</div></div></section>
 
     <section class="scene" data-scene="series"><div class="pad"><div class="kicker caps">This week on ScoopFeeds</div><h1 class="st">Our weekly films</h1><div class="ser" id="serGrid"></div></div></section>
 
@@ -295,7 +367,7 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
   <div id="strip"><div id="seg" class="caps">ScoopFeeds Radio</div><div id="tickwrap"><div id="track"></div></div></div>
 
   <div id="feat"><video id="featv" muted playsinline preload="auto"></video>
-    <div class="bug"><svg width="30" height="30" viewBox="-100 -100 200 200"><circle r="96" fill="#0F2238"/><circle r="54" fill="none" stroke="#F4EFE6" stroke-width="9"/><circle r="22" fill="#D7261E"/></svg><span>ScoopFeeds <i>Radio</i></span></div></div>
+    <div id="featEl"></div><div class="bug"><svg width="30" height="30" viewBox="-100 -100 200 200"><circle r="96" fill="#0F2238"/><circle r="54" fill="none" stroke="#F4EFE6" stroke-width="9"/><circle r="22" fill="#D7261E"/></svg><span>ScoopFeeds <i>Radio</i></span></div></div>
 
   <!-- Signal ident / sting overlay: the approved idents (brand/idents/signal-idents.html), drawn live -->
   <div class="ov" id="ov">
@@ -317,6 +389,7 @@ h1.st{font-family:'Bodoni Moda',serif; font-weight:500; font-size:84px; line-hei
   </div>
 </div>
 
+<script src="usStates.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
@@ -377,9 +450,88 @@ function marketsHeading(rows, asOf, nyT){
   return asOf ? `Markets, live at ${nyT(asOf)}` : 'Markets';
 }
 
+
+/* ── election night (1 Nov): the results board, the Senate map, the countdown, and the election window ── */
+const ET = (ms) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(new Date(ms)) + ' ET';
+const cdTxt = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map((n) => String(n).padStart(2, '0')).join(':'); };
+const andList = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+const ePct = (n, of) => `${(100 * (n || 0) / of).toFixed(2)}%`;
+const eTrack = (D, R, seats) => `<div class="etrack"><div class="d" style="width:${ePct(D, seats)}"></div><div class="r" style="width:${ePct(R, seats)}"></div><div class="m"></div></div>`;
+function eBop(sum){ const S = sum.senate;
+  return `<div class="ebop"><div class="side D"><div class="n num">${S.D}</div><div class="l caps">Democrats</div><div class="f">${S.flips.D} seat${S.flips.D === 1 ? '' : 's'} flipped</div></div>
+    <div class="mid"><div class="t caps">Senate · ${S.majority} for control</div>${eTrack(S.D, S.R, S.seats)}<div class="s"><span>With ${S.notUp.D} D and ${S.notUp.R} R seats not up</span><span>${S.toGo} to go</span></div></div>
+    <div class="side R"><div class="n num">${S.R}</div><div class="l caps">Republicans</div><div class="f">${S.flips.R} seat${S.flips.R === 1 ? '' : 's'} flipped</div></div></div>`; }
+function eRow(sum, nc){ const H = sum.house, G = sum.governor;
+  return `<div class="erow"><span class="caps">House</span>${H.outlet ? `<b class="bd num">${H.D}</b><b class="br num">${H.R}</b><span>per ${esc(H.outlet)} · ${H.majority} to win</span>` : `<span>Not yet called · ${H.majority} to win</span>`}
+    <span class="caps">Governors</span><b class="bd num">${G.D}</b><b class="br num">${G.R}</b>
+    ${nc ? `<span class="caps">Next polls close</span><b>${esc(ET(nc.at))}</b><b class="cd num" data-cd="${nc.at}"></b>` : ''}</div>`; }
+function eHot(c){
+  const cls = c.status === 'conflict' ? 'X' : c.status === 'called' ? (c.party || '') : '';
+  const held = c.holder ? ` · held by ${c.holder}` : '';
+  let w = '', o = '';
+  if (c.status === 'called') { w = `${esc(c.candidate || PN[c.party] || 'Projected')}${c.candidate && c.party ? ` (${c.party})` : ''}${c.flip ? '<span class="eflip">Flip</span>' : ''}`; o = `Projected ${esc(ET(Date.parse(c.at)))} by ${esc(andList(c.outlets || []))}`; }
+  else if (c.status === 'conflict') { w = 'Outlets disagree'; o = (c.calls || []).map((x) => `${esc(x.outlet)}: ${esc(x.candidate || x.party || '?')}`).join(' · '); }
+  else o = c.pollsClose ? `Polls ${c.pollsClose <= now() ? 'closed' : 'close'} ${esc(ET(c.pollsClose))}${c.pollsClose <= now() ? ' · not yet projected' : ''}` : 'Not yet projected';
+  return `<div class="c ${cls}"><div class="st">${esc(c.name)}</div><div class="h caps">Senate${held}</div><div class="w">${w}</div><div class="o">${o}</div></div>`; }
+function eTl(i){
+  const cls = i.status === 'conflict' ? 'X' : (i.party || '');
+  const who = i.status === 'conflict' ? 'Outlets disagree' : `${esc(i.candidate || PN[i.party] || 'Projected')}${i.candidate && i.party ? ` (${i.party})` : ''}`;
+  return `<div class="i"><div class="ebadge ${cls}">${esc(i.state)}</div><div><div class="w">${who}${i.flip ? '<span class="eflip">Flip</span>' : ''}</div><div class="b">${esc(ET(Date.parse(i.at)))} · ${i.race === 'governor' ? 'Governor' : 'Senate'} · ${esc((i.outlets || [])[0] || '')}${(i.outlets || []).length > 1 ? ` +${i.outlets.length - 1}` : ''}</div></div></div>`; }
+function eMapSvg(states){
+  const US = window.US_STATES || {};
+  const fill = (v) => v === 'D' ? 'var(--D)' : v === 'R' ? 'var(--R)' : v === 'X' ? 'url(#ehatch)' : v === 'open' ? '#5B616C' : '#232831';
+  const small = new Set(['RI', 'DE', 'NJ', 'NH', 'MA', 'CT', 'VT', 'MD', 'DC', 'HI']);
+  return `<svg viewBox="0 0 975 610" preserveAspectRatio="xMidYMid meet"><defs><pattern id="ehatch" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="7" height="14" fill="#2F6FE0"/><rect x="7" width="7" height="14" fill="#E0362C"/></pattern></defs>`
+    + Object.entries(US).map(([st, g]) => `<path d="${g.d}" fill="${fill(states[st])}" stroke="#111111" stroke-width="1.2"/>`).join('')
+    + Object.entries(US).filter(([st]) => st in states && !small.has(st)).map(([st, g]) => `<text x="${g.c[0]}" y="${g.c[1] + 6}" text-anchor="middle" font-size="26" font-weight="800" fill="#fff" style="paint-order:stroke;stroke:rgba(0,0,0,.5);stroke-width:3px">${st}</text>`).join('') + '</svg>'; }
+function eLegend(states){
+  const n = (v) => Object.values(states).filter((x) => x === v).length;
+  const row = (sw, l, k) => `<div class="lg"><i style="background:${sw}"></i><span>${l}</span><b class="num">${k}</b></div>`;
+  return row('var(--D)', 'Projected Democrat', n('D')) + row('var(--R)', 'Projected Republican', n('R')) + row('#5B616C', 'Not yet projected', n('open'))
+    + row('repeating-linear-gradient(135deg,var(--D) 0 7px,var(--R) 7px 14px)', 'Outlets disagree', n('X')) + row('#232831', 'No race this year', '')
+    + '<p>A state changes colour only when a named news organisation projects it. Where they disagree, both calls are read.</p>'; }
+function eBefore(pg){
+  const pc = (pg.closings || []).map((c) => `<div class="pc"><b>${esc(ET(c.at))}</b><div>${c.states.map((s) => `<span class="ebadge">${esc(s)}</span>`).join('')}</div></div>`).join('');
+  const wt = (pg.watch || []).map((w) => `<div class="wt ${esc(w.holder || '')}"><span class="n">${esc(w.name)}</span><span class="h">Seat held by<br><b style="color:var(--paper)">${PN[w.holder] || ''}</b></span></div>`).join('');
+  return `<div class="ebefore"><div><div class="k caps">First polls close in</div><div class="cd num" data-cd="${pg.target}"></div><div class="f">${esc(ET(pg.target))} · ${esc(andList(pg.firstNames || pg.first || []))}</div>
+    <h4 class="caps" style="margin:26px 0 6px;font-size:26px;color:var(--muted);letter-spacing:.16em">Poll closings tonight</h4>${pc}</div>
+    <div><h4 class="caps" style="margin:0 0 12px;font-size:26px;color:var(--muted);letter-spacing:.16em">Senate races to watch</h4>${wt}
+    <div style="font-size:26px;color:var(--muted);margin-top:14px">Senate going in: <b style="color:var(--Dl)">${pg.goingIn.D} D</b> · <b style="color:var(--Rl)">${pg.goingIn.R} R</b> · 51 for control</div></div></div>`; }
+function eBig(pg){
+  if (pg.kind === 'board') return { kick: 'The Midterms · results', title: '', body: `${eBop(pg.summary)}${eRow(pg.summary, pg.nextClose)}<div class="ebody"><div><h4>Hot races · Senate</h4><div class="ehot">${(pg.hot || []).map(eHot).join('')}</div></div>
+      <div><h4>Projections as they come in</h4><div class="etl">${(pg.timeline || []).length ? pg.timeline.map(eTl).join('') : '<div class="i"><div></div><div class="b">No projection yet</div></div>'}</div></div></div>` };
+  if (pg.kind === 'map') return { kick: 'The Midterms · Senate', title: 'The Senate map: 35 races this year', body: `${eRow(pg.summary, pg.nextClose)}<div class="emap">${eMapSvg(pg.states || {})}<div>${eLegend(pg.states || {})}</div></div>` };
+  if (pg.kind === 'before') return { kick: 'The Midterms · election day', title: '', body: eBefore(pg) };
+  return null; }
+/* the election window (rail, beside a film, over a full-frame episode); "just in" for 90 s after a projection's time */
+function elWinHtml(w, t){
+  const S = w.summary.senate, H = w.summary.house, L = w.latest, just = !!(L && t >= Date.parse(L.at) && t - Date.parse(L.at) < 90000);
+  const ch = (D, R, label, seats, maj, toGo) => `<div class="ch"><div class="row"><b class="num" style="color:var(--Dl)">${D}</b><span class="l caps">${label}</span><b class="num" style="color:var(--Rl)">${R}</b></div>
+    <div class="bar"><div class="d" style="width:${ePct(D, seats)}"></div><div class="r" style="width:${ePct(R, seats)}"></div><div class="m"></div></div><div class="sub"><span>${maj} to win</span><span>${toGo} to go</span></div></div>`;
+  const latest = L ? `<div class="lt"><div class="k caps">${just ? '<span class="ji">Just in</span>' : 'Latest · '}${esc(ET(Date.parse(L.at)))}</div>
+    <div class="w"><span class="ebadge ${L.status === 'conflict' ? 'X' : (L.party || '')}">${esc(L.state)}</span><span class="x">${L.status === 'conflict' ? 'Outlets disagree' : `${esc(L.candidate || PN[L.party] || '')}${L.candidate && L.party ? ` (${L.party})` : ''} wins`}${L.flip ? '<span class="eflip">Flip</span>' : ''}</span></div>
+    <div class="by">Projected by ${esc(andList(L.outlets || []))}</div></div>` : '';
+  const nx = w.nextClose && w.nextClose.at > t ? `<div class="nx"><span>Polls close ${esc(ET(w.nextClose.at))}</span><span class="cd num" data-cd="${w.nextClose.at}"></span></div>` : '';
+  return { just, html: `<div class="hd caps"><span>The Midterms</span><span>● Results</span></div>${ch(S.D, S.R, 'Senate', S.seats, S.majority, S.toGo)}${H.outlet ? ch(H.D, H.R, 'House', H.seats, H.majority, H.toGo) : ''}${latest}${nx}` }; }
+let elKey = null;
+function renderElWin(t, scene){
+  const w = PROG.electionWindow;
+  const key = w ? `${scene}|${Math.floor(t / 4000)}|${progBuilt}|${JSON.stringify(w).length}` : 'off';
+  if (key === elKey) return; elKey = key;
+  const fr = $('filmR');
+  if (!w){ fr.classList.remove('el'); fr.querySelector('.rel')?.remove(); $('featEl').classList.remove('on'); return; }
+  const { just, html } = elWinHtml(w, t);
+  if (scene === 'film'){ fr.classList.add('el'); let box = fr.querySelector('.rel'); if (!box){ box = document.createElement('div'); box.className = 'rb rel'; fr.appendChild(box); } box.classList.toggle('just', just); box.innerHTML = html; }
+  else { fr.classList.remove('el'); fr.querySelector('.rel')?.remove(); }
+  const S = w.summary.senate, H = w.summary.house, L = w.latest;
+  $('featEl').classList.toggle('on', scene === 'feature');
+  if (scene === 'feature') $('featEl').innerHTML = `<span class="k caps">Midterms</span><span>Senate <b class="d num">${S.D}</b> <b class="r num">${S.R}</b></span>${H.outlet ? `<span>House <b class="d num">${H.D}</b> <b class="r num">${H.R}</b></span>` : ''}${just ? `<span class="k caps">Just in</span><span>${esc(L.state)} · ${L.status === 'conflict' ? 'outlets disagree' : esc(`${L.candidate || PN[L.party] || ''}${L.party ? ` (${L.party})` : ''}`)}</span>` : ''}`;
+}
+function tickCountdowns(t){ document.querySelectorAll('[data-cd]').forEach((el) => { const v = cdTxt(Number(el.dataset.cd) - t); if (el.textContent !== v) el.textContent = v; }); }
 /* scenes */
 let lastKey = null, current = null;
 function show(name){ document.querySelectorAll('.scene').forEach((s) => s.classList.toggle('on', s.dataset.scene === name)); }
+const PN = { D: 'Democrats', R: 'Republicans', I: 'Independents' };
 const R = {
   countdown(d){ const ny = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(new Date(d.target)).replace(':00', '').replace(' PM', ' pm').replace(' AM', ' am');
     const pk = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Karachi', hour: 'numeric', minute: '2-digit' }).format(new Date(d.target)).replace(':00', '').replace(' PM', ' pm').replace(' AM', ' am');
@@ -402,6 +554,13 @@ const R = {
   known(d){ $('kKick').textContent = d.kicker || 'The News, Compared'; $('kHead').textContent = d.headline || ''; $('kLab').textContent = d.label || ''; $('kTxt').textContent = d.text || '';
     $('kTxt').style.fontSize = (d.text || '').length > 260 ? '38px' : (d.text || '').length > 160 ? '48px' : ''; show('known'); },
   election(d){ const pg = d.page || {}, PARTY = { D: 'Democrats', R: 'Republicans', I: 'Independents' };
+    const big = eBig(pg); document.querySelector('.s-elec').classList.toggle('big', !!big);
+    if (big){ $('eKick').textContent = big.kick; $('eTitle').textContent = big.title; $('eTitle').style.display = big.title ? '' : 'none'; $('ePg').textContent = ''; $('eBody').innerHTML = big.body; tickCountdowns(now()); show('election');
+      // the newest projections first: entries that would run past the frame are left off the column (all are on the race pages)
+      const tl = $('eBody').querySelector('.etl'), bottom = $('main').getBoundingClientRect().bottom - 6;
+      while (tl && tl.children.length > 1 && tl.getBoundingClientRect().bottom > bottom) tl.lastElementChild.remove();
+      return; }
+    $('eKick').textContent = 'The Midterms'; $('eTitle').style.display = '';
     const bar = (label, seats, majority, counts, src) => { const w = (n) => `${(100 * (n || 0) / seats).toFixed(2)}%`;
       return `<div class="ebar"><div class="h caps"><span>${esc(label)}</span><span>${majority} for a majority</span></div><div class="track">${['D', 'I'].map((p) => counts[p] ? `<i class="${p}" style="width:${w(counts[p])}"></i>` : '').join('')}<span style="flex:1"></span>${counts.R ? `<i class="R" style="width:${w(counts.R)}"></i>` : ''}<b class="maj" style="left:${(100 * majority / seats).toFixed(2)}%"></b></div>
         <div class="n num">${['D', 'R', 'I'].filter((p) => counts[p]).map((p) => `${PARTY[p]} ${counts[p]}`).join(' · ') || 'No seats projected yet'}</div>${src ? `<div class="src">${esc(src)}</div>` : ''}</div>`; };
@@ -548,7 +707,7 @@ function renderRail(t, scene){
   if (!on){ $('main').classList.remove('railed'); return; }
   const ny = (ms) => hm(ms, 'America/New_York');
   const up = (PROG.slots || []).filter((s) => s.start > t && s.title && !['ident', 'countdown', 'endcard'].includes(s.kind))
-    .filter((s, i, all) => all.findIndex((o) => o.title === s.title) === i).slice(0, 3);
+    .filter((s, i, all) => all.findIndex((o) => o.title === s.title) === i).slice(0, PROG.electionWindow ? 1 : 3);   // 1 Nov: one line beside the election window
   $('rUp').hidden = !up.length;
   $('rUp').innerHTML = up.length ? `<h4>Coming up</h4>` + up.map((s) => `<div class="r"><span class="k num">${ny(s.start)}</span><span>${esc(s.title)}</span></div>`).join('') : '';
   const mk = (PROG.rail?.markets || []).filter((r) => Number.isFinite(r.price)).slice(0, 5);
@@ -561,7 +720,11 @@ function renderRail(t, scene){
   const three = wx.length ? [0, 1, 2].map((i) => wx[(start + i) % wx.length]).filter((w, i, all) => all.indexOf(w) === i) : [];
   $('rWx').hidden = !three.length;
   $('rWx').innerHTML = three.length ? `<h4>Weather</h4>` + three.map((w) => `<div class="w"><b>${esc(w.city)}</b><span class="num">${w.c}°C <i class="f">${w.f}°F</i></span></div>`).join('') : '';
-  $('main').classList.toggle('railed', !$('rUp').hidden || !$('rMk').hidden || !$('rWx').hidden);
+  // 1 Nov: on election day, night and the counting days the election window takes the markets' and weather's place
+  const ew = PROG.electionWindow;
+  if (ew){ const { just, html } = elWinHtml(ew, t); $('rEl').innerHTML = html; $('rEl').classList.toggle('just', just); $('rMk').hidden = true; $('rWx').hidden = true; }
+  $('rEl').hidden = !ew;
+  $('main').classList.toggle('railed', !$('rUp').hidden || !$('rMk').hidden || !$('rWx').hidden || !$('rEl').hidden);
 }
 
 /* music scene: rotate headline cards every 12 s by the clock (no timers to drift).
@@ -658,6 +821,8 @@ function tick(){
   } else if (lastKey !== 'none'){ lastKey = 'none'; show('music'); }
   if (!cue || cue.scene === 'music') musicCards(t);
   renderRail(t, cue ? (cue.scene === 'weather' && !WX ? 'music' : cue.scene) : 'music');
+  renderElWin(t, cue ? cue.scene : 'music');
+  tickCountdowns(t);
 }
 function loop(){ if (FROZEN == null) tick(); requestAnimationFrame(loop); }
 loadProgramme(); setInterval(loadProgramme, 5000);

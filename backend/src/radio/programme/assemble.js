@@ -19,7 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { storyIndex } from "./factPack.js";
 import { sectionCards } from "../longread/longread.js";
-import { boardData, boardPages } from "./electionDesk.js";
+import { boardData, boardPages, beforePage } from "./electionDesk.js";
 import { ELECTION_SEGMENTS } from "./checks.js";
 
 /** #304: the Long Read's story card holds the screen at least this long before the first section card. */
@@ -170,7 +170,7 @@ export function weatherFocus(lines, cities) {
   return out;
 }
 
-export async function assemble({ slots, segments, pack, hourStart, bedFor, defaultDaypart = "markets", film = null, filmUrl = "/media/film.mp4", feature = null, featureUrl = "/programme/feature.webm", voice, outWav, log = () => {}, seriesCards = [], creditFor = () => null }) {
+export async function assemble({ slots, segments, pack, hourStart, bedFor, defaultDaypart = "markets", film = null, filmUrl = "/media/film.mp4", feature = null, featureUrl = "/programme/feature.webm", voice, outWav, log = () => {}, seriesCards = [], creditFor = () => null, electionCtx = null }) {
   const idx = storyIndex(pack);
   // #208: a music scene carries the airing bed's "Music: Artist – Track" credit (none for the procedural bed)
   const md = (s, extra = {}) => { const c = creditFor(bedFor(s.daypart || defaultDaypart)?.file); return c ? { ...extra, credit: c } : extra; };
@@ -237,7 +237,7 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
           storyLines.forEach((l, i) => cues.push({ at: at(l.atSec), scene: "story", data: { kicker: s.title, n: i + 1, of: storyLines.length, headline: headline(l.story), outlets: outletsOf(l.story).slice(0, 4), lede: ledeOf(l.story) } }));
           if (board) {   // the board is paged (26 px floor): every page gets an equal share from the first projection line to the slot's end
             const first = lines.find((l) => /^p\d+$/.test(l.id || "")) || lines.find((l) => l.id === "close") || lines.at(-1);
-            const pages = boardPages(board), end = s.endSec - 1;
+            const pages = boardPages(board, { pollClose: (st) => electionCtx?.pollClose?.[st] ?? null, nextClose: electionCtx?.nextClose ?? null }), end = s.endSec - 1;
             const start = Math.max(t0 + 6, Math.min(first.atSec, end - pages.length * BOARD_PAGE_MIN_SEC));
             const step = (end - start) / pages.length;
             if (step < BOARD_PAGE_MIN_SEC) console.warn(`⚠ election board: ${pages.length} pages get ${step.toFixed(1)} s each (under ${BOARD_PAGE_MIN_SEC} s)`);
@@ -245,9 +245,12 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
             for (let k = cues.length - 1; k >= mark; k--) if (cues[k].at >= at(start)) cues.splice(k, 1);
             pages.forEach((pg, i) => cues.push({ at: at(start + i * step), scene: "election", data: { page: pg, builtAt: board.builtAt } }));
           }
+          // before any projection (1 Nov, DrJ): the countdown to the first poll closing holds the end of the slot
+          const before = !board && electionCtx?.closings?.length && electionCtx.closings[0].at > at(s.startSec) ? beforePage({ closings: electionCtx.closings }) : null;
+          if (before) cues.push({ at: at(Math.min(lines.at(-1).endSec + 2, s.endSec - BOARD_PAGE_MIN_SEC)), scene: "election", data: { page: before, builtAt: pack.builtAt || null } });
           const lastEnd = lines.at(-1).endSec;
           const nextSlot = slots.slice(slots.indexOf(s) + 1).find((x) => x.title);
-          if (!board && s.endSec - lastEnd > 12) cues.push({ at: at(lastEnd + 2), scene: "music", data: nextSlot ? { next: { title: nextSlot.title, at: at(nextSlot.startSec) } } : {} });
+          if (!board && !before && s.endSec - lastEnd > 12) cues.push({ at: at(lastEnd + 2), scene: "music", data: nextSlot ? { next: { title: nextSlot.title, at: at(nextSlot.startSec) } } : {} });
           break;
         }
         if (s.segment === "longread") {   // #304: the outlets' own headline and lede, then one card per section (mechanical text)

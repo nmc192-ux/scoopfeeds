@@ -9,6 +9,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { sampleProgramme } from "./fixtures/sampleProgramme.mjs";
+import { sampleWindow } from "./fixtures/sampleElection.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const FLOOR_PX = 26;
@@ -75,6 +76,24 @@ export async function measureAll(browser, { shots = null } = {}) {
     const m = await measure(page, "#stage", "#main");
     results.push(summary("programme", name, m));
     if (shots) await page.screenshot({ path: path.join(shots, `programme-${name}.jpg`), quality: 85 });
+  }
+  // 1 Nov: the election window on the rail (story, music), beside a film, and the one-line bug over a full-frame episode
+  {
+    const t0 = scenes.story.at;
+    const filmAt = scenes.signoff.at - 60_000, featAt = filmAt + 20_000;
+    const p2 = { ...programme, builtAt: 2, electionWindow: sampleWindow(filmAt - 10_000),
+      cues: [...programme.cues, { at: filmAt, scene: "film", data: { title: "From The Invisible Hand", src: "film.webm", t0: filmAt } },
+        { at: featAt, scene: "feature", data: { src: "feature.webm", t0: featAt } }, { at: featAt + 20_000, scene: "music", data: {} }].sort((a, b) => a.at - b.at) };
+    await page.evaluate((p) => window.ScoopProgramme.set(p), p2);
+    for (const [name, at] of [["window-story", t0], ["window-music", scenes.music.at], ["window-film", filmAt + 2000], ["window-feature", featAt + 2000]]) {
+      await page.evaluate((t) => window.ScoopProgramme.renderAt(t), at);
+      await page.waitForTimeout(900);
+      await page.evaluate((t) => window.ScoopProgramme.renderAt(t), at + 1);
+      const m = await measure(page, "#stage", "#main");
+      results.push(summary("programme", name, m));
+      if (shots) await page.screenshot({ path: path.join(shots, `programme-${name}.jpg`), quality: 85 });
+    }
+    await page.evaluate((p) => window.ScoopProgramme.set(p), programme);
   }
   if (shots) {   // phone width: 390 css px wide, the 16:9 frame scaled to fit
     await page.setViewportSize({ width: 390, height: 219 });

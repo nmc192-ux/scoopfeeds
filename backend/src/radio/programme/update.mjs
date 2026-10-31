@@ -22,7 +22,8 @@ import { checkSegments } from "./checks.js";
 import { loadPresenters, castSegments } from "./presenters.js";
 import { screenCredit } from "../musicManifest.js";
 import { buildElectionPack, extractElectionPack } from "./electionPack.js";
-import { addPollCloseLines, mechanicalUpdate, insertUpdate, nightWindow, fixtureArticles, UPDATE_ID } from "./electionNight.js";
+import { addPollCloseLines, mechanicalUpdate, insertUpdate, nightWindow, fixtureArticles, UPDATE_ID, electionContext } from "./electionNight.js";
+import { boardData, windowData } from "./electionDesk.js";
 
 const { values: v } = parseArgs({ options: {
   dir: { type: "string" }, slot: { type: "string" }, "music-dir": { type: "string" }, writer: { type: "string", default: "claude" },
@@ -89,13 +90,15 @@ try { ({ beds, bedFor } = await loadBeds(home(v["music-dir"] || "~/scoopfeeds-ra
 const voice = v["fake-voice"] ? fakeVoice(path.join(dir, "fake-voice")) : await kokoroVoice();
 const partFile = `part-${tag}.wav`;
 const { cues, report: mix, lines } = await assemble({
-  slots: [slot], segments, pack, hourStart: H, bedFor, defaultDaypart: "evening", voice, outWav: path.join(dir, `${partFile}.tmp`), log,
+  slots: [slot], segments, pack, hourStart: H, bedFor, defaultDaypart: "evening", voice, outWav: path.join(dir, `${partFile}.tmp`), log, electionCtx: electionContext(slot.start, night),
   creditFor: (file) => screenCredit(Object.values(beds).find((b) => b.file === file)?.entry || null),
 });
 if (!(mix.voicedSecs > 0)) die("no line could be voiced: skipped (the placeholder airs)", 3);
 fs.renameSync(path.join(dir, `${partFile}.tmp`), path.join(dir, partFile));
 
 // ── splice ──
-try { insertUpdate(dir, { id: slot.id, cut: slot.start, end: slot.end, resumeAt: slot.end, partFile, cues, lines, at: Date.now(), writer: run.writer, kept: kept.length, dropped: report.length }); }
+try { insertUpdate(dir, { id: slot.id, cut: slot.start, end: slot.end, resumeAt: slot.end, partFile, cues, lines, at: Date.now(), writer: run.writer, kept: kept.length, dropped: report.length,
+  // 1 Nov: the rail's election window follows the fresh pack (only where the hour already shows one)
+  window: prog0.electionWindow ? windowData(boardData(election), { nextClose: electionContext(slot.start, night).nextClose }) : undefined }); }
 catch (e) { die(`not spliced: ${e.message}`, 4); }
 log(`spliced ${slot.id} at ${new Date(slot.start).toISOString()} (${Math.round(mix.voicedSecs)} s of speech, ${kept.length} lines, ${report.length} dropped, ${closings.length} poll closing(s), ${run.writer} writer) in ${Math.round((Date.now() - now) / 1000)} s`);

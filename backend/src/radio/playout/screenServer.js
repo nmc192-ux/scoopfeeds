@@ -14,6 +14,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SCREEN_FILE = path.join(HERE, "../screen/scoopfeeds-radio-screen.html");
 
 export const PROGRAMME_FILE = path.join(HERE, "../screen/scoopfeeds-radio-programme.html");
+export const US_STATES_FILE = path.join(HERE, "../screen/usStates.js");   // 1 Nov: the election map's state outlines
 const TYPES = { ".json": "application/json", ".webm": "video/webm", ".mp4": "video/mp4", ".png": "image/png", ".jpg": "image/jpeg" };
 
 /** A file from the programme folder, with byte ranges (the film's <video> seeks). Only plain names: no paths. */
@@ -41,6 +42,10 @@ export function startScreenServer({ stateFile, programmeDir = null }) {
     if (url.pathname === "/radio/programme") {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return fs.createReadStream(PROGRAMME_FILE).on("error", () => { res.statusCode = 503; res.end("programme screen missing"); }).pipe(res);
+    }
+    if (url.pathname === "/radio/usStates.js") {
+      res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+      return fs.createReadStream(US_STATES_FILE).on("error", () => { res.statusCode = 404; res.end(); }).pipe(res);
     }
     if (url.pathname.startsWith("/programme/")) return serveProgrammeFile(programmeDir, url.pathname.slice("/programme/".length), req, res);
     if (url.pathname === "/radio/screen") {
