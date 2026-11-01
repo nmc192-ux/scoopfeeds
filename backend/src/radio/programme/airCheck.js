@@ -78,8 +78,13 @@ export function airCheck(dir, { hourStart, rules = AIR_RULES, listenRules = LIST
     // #273: listen to what was mixed, but only once every part is there (otherwise it is already a failure)
     if (problems.length > before) problems.push("listen-back: not run, the audio parts failed the checks above (unmeasured)");
     else {
-      try { const lb = listenBack(dir, prog, listenRules); problems.push(...lb.problems); stats.listenBack = lb.stats; }
-      catch (e) { problems.push(`listen-back: failed: ${e.message} (unmeasured)`); }
+      // 1 Nov 2026 (DrJ: "the radio should be up and running"): a sound finding (a quiet patch, a loud peak, a voice
+      // close to the bed) is reported on every hour but no longer refuses it; an 8 s quiet patch in the music took a
+      // whole hour of news off air, 15 hours running. Facts, safety and the content rules still refuse.
+      // RADIO_LISTENBACK_BLOCKS=1 makes the listen-back refuse again.
+      const sound = String(process.env.RADIO_LISTENBACK_BLOCKS || "").trim() === "1" ? problems : notes;
+      try { const lb = listenBack(dir, prog, listenRules); sound.push(...lb.problems); stats.listenBack = lb.stats; }
+      catch (e) { sound.push(`listen-back: failed: ${e.message} (unmeasured)`); }
     }
     stats.headlines = prog.headlines?.length || 0;
     if (prog.feature && prog.featurePath && !fs.existsSync(prog.featurePath)) problems.push(`feature file ${prog.featurePath} missing`);
