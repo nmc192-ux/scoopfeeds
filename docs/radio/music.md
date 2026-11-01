@@ -80,6 +80,12 @@ One entry per **downloaded** file (not per `.norm.mp3`):
   music breaks the screen shows a small "Music: Artist – Track" credit. This is a standard music credit, not
   an AI label. For the 24/7 stream (whose description is set by hand), run
   `node backend/src/radio/safety/broadcastText.mjs` after any library change and paste the two files it writes.
+- **Looping a bed (1 Nov 2026).** A produced hour loops one bed per daypart under the whole hour. The loop runs
+  on a copy with the near-silent start and end removed (below -40 dB) and a 0.3 s fade at each end, kept in
+  `<music dir>/.loop-cache/` (outside the daypart folders, so it is never listed as a track). Atlantean Twilight
+  ends in 7.3 s of silence; looped as it was, that tail came round every ~3 minutes as dead air from 25 Oct, and
+  the listen-back (#273) refused every hour from 31 Oct. The credit, the loudness and the manifest entry are the
+  original file's. The mix also runs through a peak limiter at -1 dBFS (`assemble.js` `makeLimiter`).
 - **A credit is never cut.** When the credits do not fit a platform's limit, whole credits give way to a link
   to the full credits page (`RADIO_MUSIC_CREDITS_URL`); with no page, nothing is published. Setup steps:
   `docs/radio/safety.md` §1.
