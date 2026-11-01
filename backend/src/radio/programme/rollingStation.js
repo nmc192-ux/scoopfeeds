@@ -143,7 +143,21 @@ export function continuousBroadcast({ yt, goLive, title = (ms) => `ScoopFeeds Ra
       return r.id;
     },
     async open(at) {
-      try { await yt.checkScope(); b.current = await b.create(at); b.startedAt = at; }
+      try {
+        await yt.checkScope();
+        // 1 Nov 2026: a restart while a broadcast is still live on our stream made a SECOND broadcast, which YouTube
+        // refuses to start (403 invalidTransition, every 7 s for 4 minutes) and leaves behind as "Upcoming". A broadcast
+        // already bound to the stream and not ended is the one we are on: carry on with it. Live ones are looked at
+        // first (boundBroadcast), so a leftover "Upcoming" one is only taken when nothing is live.
+        if (!b.streamId) b.streamId = (await yt.findStream()).id;
+        const bound = typeof yt.boundBroadcast === "function" ? await yt.boundBroadcast(b.streamId).catch((e) => { log(`youtube: could not look for a broadcast already on stream ${b.streamId} (${e.message}); creating one`); return null; }) : null;
+        if (bound?.id) {
+          b.current = bound.id; b.startedAt = at;
+          log(`youtube: carrying on with broadcast ${bound.id} (${bound.lifeCycleStatus || "state unknown"}), already bound to stream ${b.streamId}; no new broadcast`);
+          return;
+        }
+        b.current = await b.create(at); b.startedAt = at;
+      }
       catch (e) { b.current = null; await alert(`YouTube setup failed (${e.message}). The stream still goes out: go live by hand in YouTube Studio.`); }
     },
     /** Before the hand-over that rolls: the next broadcast exists and is bound, so the switch costs no extra seconds. */
