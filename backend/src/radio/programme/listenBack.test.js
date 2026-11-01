@@ -169,9 +169,15 @@ test("airCheck runs the listen-back once the parts exist, and reports its stats"
   assert.deepEqual(Object.keys(ok.stats.listenBack).sort(), ["clipped", "longestSilenceSec", "ms", "peakDbfs", "slots", "speechOverBedDbMin"]);
   assert.equal(ok.stats.listenBack.slots, a.slots.length);
 
-  // dead air in the hour's audio fails the hour
+  // dead air in the hour's audio is reported on the hour but (1 Nov 2026) does not refuse it...
   writeHourAudio(dir, H, { fx: (t, a0, s) => (s.id === "music-2" && t >= s.start + 10_000 && t < s.start + 20_000 ? 0 : a0) });
-  assert.match(airCheck(dir, { hourStart: H }).problems.join(), /listen-back: music-2: 10(\.\d)? s of dead air/);
+  const soft = airCheck(dir, { hourStart: H });
+  assert.equal(soft.ok, true);
+  assert.match(soft.notes.join(), /listen-back: music-2: 10(\.\d)? s of dead air/);
+  // ...unless RADIO_LISTENBACK_BLOCKS=1
+  process.env.RADIO_LISTENBACK_BLOCKS = "1";
+  try { assert.match(airCheck(dir, { hourStart: H }).problems.join(), /listen-back: music-2: 10(\.\d)? s of dead air/); }
+  finally { delete process.env.RADIO_LISTENBACK_BLOCKS; }
 
   // a part too small for the size check: the listen-back is not run, and says so
   fs.writeFileSync(path.join(dir, a.audio[0].file), Buffer.alloc(10));
