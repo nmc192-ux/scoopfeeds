@@ -93,6 +93,28 @@ function run(args, { input } = {}) {
   return r.stdout;
 }
 
+/**
+ * 1 Nov 2026: a peak limiter on the finished mix. Voices are normalised to a true peak of -2 dBFS, but a line over a
+ * loud bed summed past full scale (listen-back: "peak 0 dBFS"). Any frame that would pass LIMIT_CEILING is turned down
+ * at once (no overshoot), and the gain recovers over LIMIT_RELEASE_SEC. Stateful across slots, so a slot boundary
+ * never jumps back to full gain mid-peak. Below the ceiling nothing changes: an ordinary hour is bit-identical.
+ */
+export const LIMIT_CEILING = 0.89125;   // -1 dBFS
+export const LIMIT_RELEASE_SEC = 0.15;
+export function makeLimiter({ ceiling = LIMIT_CEILING, releaseSec = LIMIT_RELEASE_SEC, rate = RATE } = {}) {
+  let env = 1;
+  const rel = 1 - Math.exp(-1 / (releaseSec * rate));
+  return (buf) => {
+    for (let i = 0; i + 1 < buf.length; i += 2) {
+      const pk = Math.max(Math.abs(buf[i]), Math.abs(buf[i + 1]));
+      const need = pk > ceiling ? ceiling / pk : 1;
+      env = Math.min(need, env + (1 - env) * rel);
+      if (env < 1) { buf[i] *= env; buf[i + 1] *= env; }
+    }
+    return buf;
+  };
+}
+
 /** Decode any audio to interleaved stereo Float32 at RATE. */
 export function decode(file, { ss = 0, t = null, loop = false, af = null } = {}) {
   const args = [];
@@ -286,6 +308,7 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
   const w = new WavWriter(outWav);
   const bedPos = new Map();
   let prevLevel = 0;
+  const limiter = makeLimiter();
   const sonic = (name) => path.join(SONIC_DIR, name);
   const filmAudio = film ? decode(film, { af: "loudnorm=I=-16:TP=-3:LRA=11" }) : null;
   const featureSlot = slots.find((x) => x.kind === "feature");
@@ -298,7 +321,7 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
     const level = s.noBed ? 0 : s.kind === "spoken" ? full * dbToGain(DUCK_DB) : (s.kind === "ident" || (s.kind === "film" && film) || (s.kind === "feature" && feature)) ? 0 : full;
     const pos = bedPos.get(bed.file) || 0;
     if (level > 0 || prevLevel > 0) {
-      const b = decode(bed.file, { ss: pos % Math.max(1, bed.len - 1), t: s.lenSec, loop: true });
+      const b = decode(bed.loopFile || bed.file, { ss: pos % Math.max(1, bed.len - 1), t: s.lenSec, loop: true });
       const ramp = Math.round(0.8 * RATE);
       for (let i = 0; i < n; i++) {
         let g = i < ramp ? prevLevel + (level - prevLevel) * (i / ramp) : level;
@@ -317,6 +340,7 @@ export async function assemble({ slots, segments, pack, hourStart, bedFor, defau
     // the feature starts 2.6 s in, after the sting; its sound is decoded for this slot only (a 12-minute episode is ~250 MB as float)
     if (s === featureSlot && feature) addInto(buf, decode(feature, { t: s.lenSec - 2.6, af: "loudnorm=I=-16:TP=-3:LRA=11" }), Math.round(2.6 * RATE), 1);
     for (const l of voiced[s.id] || []) addInto(buf, decode(l.file, { af: "loudnorm=I=-16:TP=-2:LRA=7" }), Math.round((l.atSec - s.startSec) * RATE), 1);
+    limiter(buf);
     w.write(buf);
     log(`mixed ${s.id} (${s.kind}, ${s.lenSec} s)`);
   }

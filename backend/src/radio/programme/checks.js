@@ -106,6 +106,9 @@ export function electionReason(text, election) {
   return match ? null : "election: no matching attributed projection in the election pack";
 }
 
+/** 1 Nov 2026: every crypto change in the pack is a 24-hour change, so "over the past 24 hours" is backed by the data. */
+export const CRYPTO_WINDOW_H = 24;
+
 export function checkSegments(segments, slots, pack, { log = () => {} } = {}) {
   const idx = storyIndex(pack);
   const marketNums = pack.markets.flatMap((m) => [m.price, m.pct, Math.round(m.price), m.pct == null ? null : Math.round(m.pct * 10) / 10].filter((x) => x != null));
@@ -140,7 +143,7 @@ export function checkSegments(segments, slots, pack, { log = () => {} } = {}) {
         if (slot.segment === "markets") { const m = staleMarketLine(text, pack.markets); if (m) return m; }
         if (slot.segment === "weather") { const w = weatherUnitReason(text); if (w) return w; }
         const src = (story ? storyText(story) : "") + (electoral && elText ? ` \n ${elText}` : "");
-        const pool = slot.segment === "markets" ? marketNums : slot.segment === "weather" ? weatherNums : slot.segment === "crypto" ? cryptoNums : numsIn(src, { all: true }).concat(marketNums);
+        const pool = slot.segment === "markets" ? marketNums : slot.segment === "weather" ? weatherNums : slot.segment === "crypto" ? cryptoNums.concat(CRYPTO_WINDOW_H) : numsIn(src, { all: true }).concat(marketNums);
         const bad = numsIn(slot.segment === "markets" ? stripCloseDates(text, pack.markets) : text).filter((n) => !backed(n, pool) && !src.includes(String(n)));
         if (bad.length) return `unbacked figure(s) ${bad.join(", ")}`;
         for (const q of text.match(/[“"]([^”"]{4,})[”"]/g) || []) {
