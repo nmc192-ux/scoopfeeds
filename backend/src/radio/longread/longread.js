@@ -179,6 +179,46 @@ export function buildPrompt(pk, { budget = slotWords() } = {}) {
   ].join("\n");
 }
 
+/**
+ * 1 Nov 2026: one repair round instead of refusing a whole piece over a few paragraphs. The paragraphs the checks
+ * dropped go back to the writer with the exact reason, and it rewrites only those. The whole revised piece is then
+ * checked again from scratch with checkLongread(): nothing is waved through, and the refusal rules are unchanged.
+ * @returns {string|null} the revision prompt, or null when nothing was dropped
+ */
+export function revisionPrompt(written, report) {
+  const failed = new Map();
+  for (const r of report || []) if (r?.line && /^p\d+$/.test(r.line) && !failed.has(r.line)) failed.set(r.line, r.drop);
+  if (!failed.size) return null;
+  const items = [...failed].map(([id, why]) => {
+    const l = written.lines[Number(id.slice(1)) - 1] || {};
+    return `- ${id} (section "${l.section}"): FAILED because ${why}\n  TEXT: ${String(l.text || "").replace(/\s+/g, " ")}`;
+  });
+  return [
+    "Some paragraphs of your Long Read failed the ScoopFeeds checks. Rewrite ONLY these paragraphs so they pass, keeping",
+    "their place, section and length. Every rule from before still applies. In particular: a quote must be copied",
+    "verbatim from an article title or summary in the material (otherwise paraphrase and attribute it); at most",
+    `${QUOTES_PER_OUTLET} quotes from any one outlet across the whole piece; a past election result is background, so give`,
+    "its year (e.g. 'the 2022 election') and never present it as a new result.",
+    "",
+    ...items,
+    "",
+    'JSON: {"lines": [{"id": "p3", "section": "...", "sources": ["Outlet", ...], "text": "..."}, ...]} with the SAME ids.',
+  ].join("\n");
+}
+
+/** The writer's revised paragraphs put back in place (same ids); anything else in the reply is ignored. */
+export function applyRevision(written, revised) {
+  const lines = written.lines.map((l) => ({ ...l }));
+  let n = 0;
+  for (const r of revised?.lines || []) {
+    const i = /^p(\d+)$/.test(String(r?.id)) ? Number(String(r.id).slice(1)) - 1 : -1;
+    if (i < 0 || i >= lines.length || typeof r?.text !== "string" || !r.text.trim()) continue;
+    lines[i] = { section: r.section || lines[i].section, sources: Array.isArray(r.sources) ? r.sources : lines[i].sources, text: r.text };
+    n++;
+  }
+  return { written: { ...written, lines }, replaced: n };
+}
+
 /** The mechanical open and close (not model text): the outlets' own headline, and every outlet credited. */
 export function frameLines(story, credited) {
   return {

@@ -14,7 +14,7 @@
  * (produce.mjs). Exit codes: 0 done, 1 nothing made (no story, or the piece was refused), 2 usage or failure.
  */
 import { parseArgs } from "node:util";
-import { fetchLongreadPack, buildPrompt, SYSTEM, checkLongread, airVerdict, reviewOn, SECTION_LABEL, PICK, STORY_ID } from "./longread.js";
+import { fetchLongreadPack, buildPrompt, SYSTEM, checkLongread, airVerdict, reviewOn, SECTION_LABEL, PICK, STORY_ID, revisionPrompt, applyRevision } from "./longread.js";
 import { savePiece, listPieces, loadPiece, setReview, recentSlugs, longReadDir } from "./store.js";
 import { claudeWriter } from "../programme/writer.js";
 
@@ -51,11 +51,28 @@ if (cmd === "make") {
       }
     }
   } catch (e) { die(`writer failed: ${e.message}`); }
-  const verdict = checkLongread(written, pk.story, { log });
+  let verdict = checkLongread(written, pk.story, { log });
+  // 1 Nov 2026: one repair round. Dropped paragraphs go back to the writer with the reason; the revised piece is checked
+  // again in full (the refusal rules are unchanged). The first draft and its report are kept on the piece.
+  let firstDraft = null;
+  const fix = !v["fake-writer"] && verdict.report.length ? revisionPrompt(written, verdict.report) : null;
+  if (fix) {
+    log(`revision: sending ${fix.split("\n").filter((l) => /^- p\d+/.test(l)).length} failed paragraph(s) back to the writer`);
+    try {
+      const r = await claudeWriter({ model: v.model, log })(SYSTEM, `${buildPrompt(pk)}\n\nYOUR DRAFT:\n${JSON.stringify(written)}\n\n${fix}`);
+      const { written: revised, replaced } = applyRevision(written, r);
+      if (replaced) {
+        firstDraft = { raw: written, report: verdict.report, verdict: { ok: verdict.ok, reasons: verdict.reasons, words: verdict.words, written: verdict.written } };
+        written = revised;
+        verdict = checkLongread(written, pk.story, { log });
+        log(`revision: ${replaced} paragraph(s) rewritten and the whole piece checked again`);
+      } else log("revision: the writer returned no usable paragraphs; the first draft stands");
+    } catch (e) { log(`revision failed (${e.message}); the first draft stands`); }
+  }
   const status = !verdict.ok ? "refused" : reviewOn() ? "draft" : "ready";
   const piece = {
     version: 1, createdAt: now, status, writer, event: pk.event, story: pk.story,
-    segment: verdict.segment, raw: written, report: verdict.report,
+    segment: verdict.segment, raw: written, report: verdict.report, ...(firstDraft ? { firstDraft } : {}),
     verdict: { ok: verdict.ok, reasons: verdict.reasons, words: verdict.words, written: verdict.written, credited: verdict.credited },
     airings: [],
   };

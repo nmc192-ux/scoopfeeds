@@ -109,6 +109,12 @@ export function electionReason(text, election) {
 /** 1 Nov 2026: every crypto change in the pack is a 24-hour change, so "over the past 24 hours" is backed by the data. */
 export const CRYPTO_WINDOW_H = 24;
 
+/**
+ * 1 Nov 2026 (DrJ): a line that tells listeners what an outlet PUBLISHED ("BBC World has also published a piece in which
+ * its correspondent explains how the ceasefire has been unfolding") carries no news. Dropped, whatever segment.
+ */
+export const ABOUT_PUBLISHING = /\b(has|have|had)( also)? (published|posted|released|put out|run) (a|an|its|their) (piece|article|story|report|video|explainer|analysis|live (page|blog)|feature|podcast|interview|guide)\b|\b(in|on) (a|an|its|their) (piece|article|video|explainer|live (page|blog)|podcast)( in which| where)?\b|\b(correspondent|reporter|editor|analyst)s? [A-Z]?[\w'’.-]*( [A-Z][\w'’.-]*)? (explains?|explained|walks? (us|you|listeners) through|breaks? down|looks? at|unpacks?)\b|\b(read|watch|listen to) (the|our|their|its) (full )?(story|piece|article|report|video|coverage)\b|\b(live (page|blog)|live updates page)\b/i;
+
 export function checkSegments(segments, slots, pack, { log = () => {} } = {}) {
   const idx = storyIndex(pack);
   const marketNums = pack.markets.flatMap((m) => [m.price, m.pct, Math.round(m.price), m.pct == null ? null : Math.round(m.pct * 10) / 10].filter((x) => x != null));
@@ -129,6 +135,7 @@ export function checkSegments(segments, slots, pack, { log = () => {} } = {}) {
       const text = dropBackstage(toSpoken(line?.text));
       const why = (() => {
         if (!text) return "empty";
+        if (ABOUT_PUBLISHING.test(text)) return "about what an outlet published, not what happened";
         const judged = text.replace(OWN_PHRASES, " ");
         const v = radioRulesVerdict({ title: judged, description: "", source_name: line.outlet || "" });
         if (!v.allowed && (String(v.rule || "").startsWith("radio:") || hasPakistanSignal({ title: judged }))) return `rule0 ${v.rule}`;
