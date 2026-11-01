@@ -455,3 +455,30 @@ test("#208 copy: the continuous broadcast sends the credits it was given, as a l
   await b2.create(utc("2026-10-27T14:00:00Z"));
   assert.match(bodies[1].snippet.description, /Music:\nTrack A by X$/);
 });
+
+test("1 Nov: a restart while our broadcast is live carries on with it; no second broadcast, no transition storm", async () => {
+  const calls = [];
+  const yt = {
+    checkScope: async () => {}, findStream: async () => ({ id: "S" }),
+    boundBroadcast: async (sid) => { calls.push(["bound", sid]); return { id: "LIVE1", lifeCycleStatus: "live" }; },
+    createBroadcast: async () => { calls.push(["create"]); return { id: "NEW" }; }, bind: async () => { calls.push(["bind"]); },
+    transition: async () => {},
+  };
+  const logs = [];
+  const b = continuousBroadcast({ yt, goLive: async ({ broadcastId }) => { calls.push(["live", broadcastId]); }, log: (m) => logs.push(m) });
+  await b.open(Date.parse("2026-11-01T08:10:00Z"));
+  assert.equal(b.current, "LIVE1");
+  await b.goLive();
+  assert.deepEqual(calls, [["bound", "S"], ["live", "LIVE1"]], "no create, no bind");
+  assert.ok(logs.some((m) => /carrying on with broadcast LIVE1/.test(m)));
+
+  // nothing bound (or the lookup fails): a new broadcast, as before
+  for (const bound of [async () => null, async () => { throw new Error("quota"); }]) {
+    const c2 = [];
+    const yt2 = { ...yt, boundBroadcast: bound, createBroadcast: async () => { c2.push("create"); return { id: "B9" }; }, bind: async () => { c2.push("bind"); } };
+    const b2 = continuousBroadcast({ yt: yt2, goLive: async () => {} });
+    await b2.open(Date.parse("2026-11-01T08:10:00Z"));
+    assert.equal(b2.current, "B9");
+    assert.deepEqual(c2, ["create", "bind"]);
+  }
+});
