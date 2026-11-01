@@ -188,7 +188,7 @@ const HARD = [
 ];
 /** A headline call that answers every id: verdict from `judge(title)`, h = title. */
 const answering = (judge) => async (p) => ({
-  items: [...p.matchAll(/id=(\S+) \| (.*)/g)].map(([, id, t]) => ({ id, h: t.slice(0, 90), opinion: false, soft: false, sensitive: false, ...judge(t) })),
+  items: [...p.matchAll(/id=(\S+) \| (.*?) \| summary:/g)].map(([, id, t]) => ({ id, h: t.slice(0, 90), story: true, opinion: false, soft: false, sensitive: false, ...judge(t) })),
 });
 
 test("LIVE LEAKS 10 Oct 2026: neither leaked headline can reach music — rules floor, even if Claude calls them safe", async () => {
@@ -226,7 +226,7 @@ test("FAIL SAFE: no verdict means sensitive — a failed, null, malformed or par
     throws: async () => { throw new Error("529 overloaded"); },
     null: async () => null,
     malformed: async () => ({ nope: true }),
-    "no flags": async (p) => ({ items: [...p.matchAll(/id=(\S+) \| (.*)/g)].map(([, id, t]) => ({ id, h: t.slice(0, 90) })) }),
+    "no flags": async (p) => ({ items: [...p.matchAll(/id=(\S+) \| (.*?) \| summary:/g)].map(([, id, t]) => ({ id, h: t.slice(0, 90) })) }),
     "string flags": async (p) => ({ items: [...p.matchAll(/id=(\S+)/g)].map((m) => ({ id: m[1], opinion: "false", soft: "false", sensitive: "false" })) }),
   };
   for (const [name, wordLlm] of Object.entries(cases)) {
@@ -241,7 +241,7 @@ test("FAIL SAFE: no verdict means sensitive — a failed, null, malformed or par
   // Partial answer: only the stories WITH a verdict may reach music.
   const { db, cleanup } = makeTestDb({ prefix: "radio-partial-" });
   seed(db, HARD);
-  const onlyOil = async (p) => ({ items: [...p.matchAll(/id=(\S+) \| (.*)/g)].filter(([, , t]) => /Oil/.test(t)).map(([, id, t]) => ({ id, h: t, opinion: false, soft: false, sensitive: false })) });
+  const onlyOil = async (p) => ({ items: [...p.matchAll(/id=(\S+) \| (.*?) \| summary:/g)].filter(([, , t]) => /Oil/.test(t)).map(([, id, t]) => ({ id, h: t, story: true, opinion: false, soft: false, sensitive: false })) });
   const { state } = await buildRadioState({ db, now: NOW, gateLlm: keepAll, wordLlm: onlyOil });
   assert.ok(state.music.every((m) => /Oil/.test(m.h)), "a story without a verdict reached music");
   cleanup();
@@ -266,7 +266,7 @@ const FUEL_A = "Kremlin and Washington reach accord on fuel exports";
 const FUEL_B = "Oil products shipments cleared under Moscow-US pact";
 const unitVec = (cos) => { const v = new Float64Array(768); v[0] = cos; v[1] = Math.sqrt(1 - cos * cos); return v; };
 const gateKeep = async (p) => ({ verdicts: [...p.matchAll(/id=(\S+)/g)].map((m) => ({ id: m[1], verdict: "keep" })) });
-const wordEach = async (p) => ({ items: [...p.matchAll(/id=(\S+) \| (.*)/g)].map((m) => ({ id: m[1], h: m[2].slice(0, 80), opinion: false, soft: false, sensitive: false })) });
+const wordEach = async (p) => ({ items: [...p.matchAll(/id=(\S+) \| (.*?) \| summary:/g)].map((m) => ({ id: m[1], h: m[2].slice(0, 80), story: true, opinion: false, soft: false, sensitive: false })) });
 
 test("GROUPING end to end: embedded candidates group by cosine, and mode + coverage are reported", async () => {
   const { db, cleanup } = makeTestDb({ prefix: "radio-cos-" });
@@ -324,5 +324,47 @@ test("DEFAULT WIRING: with no injected loader, stored sqlite-vec article vectors
   assert.equal(stats.groupMode, "cosine");
   assert.equal(stats.coverage, 1);
   assert.equal(stats.multiOutlet, 1);
+  cleanup();
+});
+
+// ─── 1 Nov 2026 (DrJ): stories, not publishers' article lists ───────────────
+const FEATURE = "Evacuees from a Ukrainian city describe their survival after fleeing the fighting";
+
+test("1 Nov: a feature with no news event (story: false) never airs; the reason is logged", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-story-" });
+  seed(db, [...HARD, { title: FEATURE, source: "NY Times", category: "international" }]);
+  const { state, stats } = await buildRadioState({ db, now: NOW, gateLlm: keepAll, wordLlm: answering((t) => (t === FEATURE ? { story: false } : {})) });
+  assert.equal(JSON.stringify(state).includes("Evacuees"), false, "a feature aired");
+  assert.ok(stats.drops["radio:llm-not-a-story"] >= 1, JSON.stringify(stats.drops));
+  cleanup();
+});
+
+test("1 Nov: a verdict without `story` is not a story (fail closed)", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-story2-" });
+  seed(db, HARD);
+  const noStory = async (p) => ({ items: [...p.matchAll(/id=(\S+) \| (.*?) \| summary:/g)].map(([, id, t]) => ({ id, h: t, opinion: false, soft: false, sensitive: false })) });
+  const { state } = await buildRadioState({ db, now: NOW, gateLlm: keepAll, wordLlm: noStory });
+  assert.equal(state.alsoThisHour.length + state.music.length + (state.headline ? 1 : 0), 0);
+  cleanup();
+});
+
+test("1 Nov: each 'Also this hour' story carries what happened (w), from the title and summary the call was given", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-what-" });
+  seed(db, HARD.map((r) => ({ ...r, description: `Summary of ${r.title}.` })));
+  let prompt = "";
+  const withWhat = async (p) => { prompt = p; return { items: [...p.matchAll(/id=(\S+) \| (.*?) \| summary:/g)].map(([, id, t]) => ({ id, h: t, w: `The key fact behind: ${t.slice(0, 60)}`, story: true, opinion: false, soft: false, sensitive: false })) }; };
+  const { state } = await buildRadioState({ db, now: NOW, gateLlm: keepAll, wordLlm: withWhat });
+  assert.match(prompt, /summary: Summary of Senate passes stopgap bill/);
+  assert.ok(state.alsoThisHour.length > 0);
+  assert.ok(state.alsoThisHour.every((a) => /^The key fact behind: /.test(a.w || "")), JSON.stringify(state.alsoThisHour));
+  cleanup();
+});
+
+test("1 Nov: an over-long 'what happened' line is dropped, never cut", async () => {
+  const { db, cleanup } = makeTestDb({ prefix: "radio-what2-" });
+  seed(db, HARD);
+  const longWhat = async (p) => ({ items: [...p.matchAll(/id=(\S+) \| (.*?) \| summary:/g)].map(([, id, t]) => ({ id, h: t, w: "x".repeat(300), story: true, opinion: false, soft: false, sensitive: false })) });
+  const { state } = await buildRadioState({ db, now: NOW, gateLlm: keepAll, wordLlm: longWhat });
+  assert.ok(state.alsoThisHour.every((a) => !("w" in a)));
   cleanup();
 });

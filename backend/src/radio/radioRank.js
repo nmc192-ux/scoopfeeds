@@ -320,7 +320,11 @@ export function pickSlots(ranked, { alsoCount = ALSO_THIS_HOUR, musicMin = 4, mu
 
   const headline = ranked.find(fits) ? take(ranked.find(fits)) : null;
   const also = [];
-  for (const s of ranked) { if (also.length >= alsoCount) break; if (fits(s)) also.push(take(s)); }
+  // 1 Nov 2026 (DrJ): "Also this hour" is the world's news, not one publisher's article list. Stories two or more
+  // outlets report come first; a single-outlet story fills a slot only when there are not enough of them.
+  for (const pass of [(s) => (s.outlets?.length || 0) >= 2, () => true]) {
+    for (const s of ranked) { if (also.length >= alsoCount) break; if (pass(s) && fits(s)) also.push(take(s)); }
+  }
 
   // Music: never a sensitive story (no light music under a death toll), and hard news first.
   // Two passes: stories reported by ≥ 2 outlets, then single-source stories that are not
