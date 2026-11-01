@@ -134,6 +134,7 @@ body.live .ph{display:none;}
 .also .item{border-top:1px solid var(--line); padding:20px 0;}
 .also .item p{margin:0; font-family:'Bodoni Moda',Georgia,serif; font-size:34px; line-height:1.18;}
 .also .item span{display:block; margin-top:8px; font-size:26px; color:var(--muted);}
+.also .item .w{display:block; margin-top:8px; font-size:28px; line-height:1.3; color:var(--ink);}
 
 /* markets */
 .s-markets{display:grid; grid-template-columns:1.3fr 1fr; gap:40px;}
@@ -484,7 +485,7 @@ function renderStatic(){
   plate.style.backgroundImage = hasPhoto() ? `url("${encodeURI(STATE.photo)}")` : '';
   plate.style.backgroundSize = hasPhoto() ? 'cover' : '';
   plate.style.backgroundPosition = hasPhoto() ? 'center' : '';
-  $('also').innerHTML = STATE.alsoThisHour.map(a => `<div class="item"><p>${esc(a.h)}</p><span>${esc(a.src)}</span></div>`).join('');
+  $('also').innerHTML = STATE.alsoThisHour.map(a => `<div class="item"><p>${esc(a.h)}</p>${a.w ? `<span class="w">${esc(a.w)}</span>` : ''}<span>${esc(a.src)}</span></div>`).join('');
   fitAlso();
 
   // SCHEDULE (R2): hidden when there is no schedule data, the same as markets.

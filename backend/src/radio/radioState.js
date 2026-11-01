@@ -33,6 +33,8 @@ import { developingEnabled, buildDeveloping, developingPath } from "./developing
 import { groupArticles, rankStories, pickSlots, attribution, displayCategory, chooseGroupMode, groupModeSetting, GROUP_WINDOW_MS } from "./radioRank.js";
 
 export const HEADLINE_MAX = 90;
+/** 1 Nov 2026: the one-sentence "what happened" line under each story on the 24/7 screen. */
+export const WHAT_MAX = 140;
 export const DROP_RETENTION_MS = 14 * 24 * 60 * 60_000;
 const MIN_CREDIBILITY = 7;
 const MAX_JUDGE_ROUNDS = 3;
@@ -109,11 +111,19 @@ export function loadCandidates(db, now = Date.now()) {
 // ─── wording ────────────────────────────────────────────────────────────────
 
 const WORDING_PROMPT = (items) => [
-  "You prepare headlines for a calm, factual 24/7 US news radio screen (ScoopFeeds). For EVERY item return:",
+  "You prepare the news for a calm, factual 24/7 news radio screen (ScoopFeeds). Listeners come to learn what is",
+  "happening in the world, not what publishers have published. For EVERY item return:",
   `- h: the headline rewritten in at most ${HEADLINE_MAX} characters, plain English, present tense, no clickbait,`,
-  "  no emoji, no outlet names, adding no fact that is not in the original. Never return a bare",
-  "  quotation: say who or what the news is about. Lead with the event itself rather than a third",
-  "  party's reaction to it, as long as the original supports it.",
+  "  no emoji, no outlet names, adding no fact that is not in the original. Say what HAPPENED: who did what,",
+  "  where. Never return a bare quotation or a teaser. Lead with the event itself rather than a third party's",
+  "  reaction to it, as long as the original supports it.",
+  `- w: ONE sentence of at most ${WHAT_MAX} characters with the key fact the headline leaves out (a number, a`,
+  "  place, a decision, a consequence), taken ONLY from the title and summary given. No outlet names, no",
+  "  opinion, no fact that is not in them. Empty string if the summary adds nothing.",
+  "- story: true ONLY if it reports a specific, recent event of public significance: something happened, was",
+  "  decided, announced, found or changed. false for features, personal accounts and survivor stories,",
+  "  profiles, explainers, histories, maps and visual stories, 'what X looked like', local colour, trend",
+  "  pieces, reviews, Q&As, teasers and anything that only makes sense after reading the article.",
   "- opinion: true if it is an opinion piece, op-ed, editorial, column, commentary or an argument, not reporting.",
   "- soft: true if it is not hard news: shopping/deals, product reviews, how-to/advice, listicles, quizzes,",
   "  celebrity gossip, horoscopes, recipes, podcasts/newsletters/roundups, or first-person lifestyle pieces.",
@@ -122,9 +132,9 @@ const WORDING_PROMPT = (items) => [
   "  terrorism, mass casualties, war atrocities, or graphic violence; natural disasters or accidents",
   "  that destroy homes, injure, displace or endanger people (floods, earthquakes, landslides, storms,",
   "  wildfires); people injured or missing. When unsure, answer true.",
-  'Reply ONLY with JSON: {"items":[{"id":"<id>","h":"<headline>","opinion":false,"soft":false,"sensitive":false}]}',
+  'Reply ONLY with JSON: {"items":[{"id":"<id>","h":"<headline>","w":"<one sentence>","story":true,"opinion":false,"soft":false,"sensitive":false}]}',
   "",
-  ...items.map((s) => `id=${s.lead.id} | ${String(s.lead.title || "").slice(0, 220)}`),
+  ...items.map((s) => `id=${s.lead.id} | ${String(s.lead.title || "").slice(0, 220)} | summary: ${String(s.lead.description || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 400)}`),
 ].join("\n");
 
 const fitOf = (a) => fitHeadline(cleanHeadline(a.title) || a.title);
@@ -159,27 +169,31 @@ export const HEADLINE_MAX_TOKENS = 8000;   // ~4× the measured need; output is 
 async function headlineCall(stories, llm) {
   const lines = new Map(stories.map((s) => [String(s.lead.id), fitOf(s.lead)]));
   const verdicts = new Map();
-  if (!stories.length) return { lines, verdicts, source: "none" };
+  const whats = new Map();
+  if (!stories.length) return { lines, verdicts, whats, source: "none" };
   try {
     const res = await llm(WORDING_PROMPT(stories));
-    if (res == null) return { lines, verdicts, source: "fallback:no answer" };   // llmQueue returns null when disabled / over budget / breaker open
+    if (res == null) return { lines, verdicts, whats, source: "fallback:no answer" };   // llmQueue returns null when disabled / over budget / breaker open
     const got = Array.isArray(res?.items) ? res.items : null;
-    if (!got) return { lines, verdicts, source: "fallback:malformed" };
+    if (!got) return { lines, verdicts, whats, source: "fallback:malformed" };
     let used = 0;
     for (const it of got) {
       const id = String(it?.id);
       if (!lines.has(id)) continue;
       // A verdict counts only when all three flags are real booleans; anything else = no verdict.
       if ([it.opinion, it.soft, it.sensitive].every((x) => typeof x === "boolean")) {
-        verdicts.set(id, { opinion: it.opinion, soft: it.soft, sensitive: it.sensitive });
+        // 1 Nov: `story` (a real news event, not a feature) is part of the verdict; a missing one is not "a story"
+        verdicts.set(id, { opinion: it.opinion, soft: it.soft, sensitive: it.sensitive, story: it.story === true });
       }
+      const w = String(it?.w || "").replace(/\s+/g, " ").trim();
+      if (w && w.length >= 20 && w.length <= WHAT_MAX && !/…|\.\.\.$/.test(w)) whats.set(id, w);   // over-long: dropped, not cut
       const raw = String(it?.h || "").replace(/\s+/g, " ").trim();
       const h = raw.length <= HEADLINE_MAX && !/…|\.\.\.$/.test(raw) ? raw : "";   // over-long LLM lines are rejected, not cut
       if (h && h.length >= 12) { lines.set(id, h); used++; }
     }
-    return { lines, verdicts, source: used ? `llm:${used}/${stories.length}` : "fallback:empty", verdictCount: verdicts.size };
+    return { lines, verdicts, whats, source: used ? `llm:${used}/${stories.length}` : "fallback:empty", verdictCount: verdicts.size };
   } catch (err) {
-    return { lines, verdicts, source: `fallback:error ${String(err?.message || err).slice(0, 80)}` };
+    return { lines, verdicts, whats, source: `fallback:error ${String(err?.message || err).slice(0, 80)}` };
   }
 }
 
@@ -233,13 +247,14 @@ export async function buildRadioState({
   // 2b · the headline call (task "radio-headline") over the top of the ranking: headline + verdict.
   // Keyword rules are the floor; the verdict only adds. No verdict = sensitive (fail safe).
   const top = ranked.slice(0, HEADLINE_TOP);
-  const { lines, verdicts, source: wording } = await headlineCall(top, wordLlm);
+  const { lines, verdicts, whats, source: wording } = await headlineCall(top, wordLlm);
   ranked = ranked.filter((s) => {
     const v = verdicts.get(String(s.lead.id));
     if (!v) { s.sensitive = true; return true; }                       // no verdict → never under music
     if (v.sensitive) s.sensitive = true;                                // may raise, never lower
     if (v.opinion) { drop(s.lead, "radio:llm-opinion", "headline call verdict: opinion"); return false; }
     if (v.soft) { drop(s.lead, "radio:llm-soft", "headline call verdict: not hard news"); return false; }
+    if (!v.story) { drop(s.lead, "radio:llm-not-a-story", "headline call verdict: no news event (feature, account, explainer, teaser)"); return false; }
     return true;
   });
   const noVerdict = top.filter((s) => !verdicts.has(String(s.lead.id))).length;
@@ -279,7 +294,7 @@ export async function buildRadioState({
     sample: false,
     updatedAt: now,
     headline: slots.headline ? line(slots.headline) : "",
-    alsoThisHour: slots.also.map((s) => ({ h: line(s), src: attribution(s.outlets), ...(s.sensitive ? { sensitive: true } : {}) })),
+    alsoThisHour: slots.also.map((s) => ({ h: line(s), ...(whats.get(String(s.lead.id)) ? { w: whats.get(String(s.lead.id)) } : {}), src: attribution(s.outlets), ...(s.sensitive ? { sensitive: true } : {}) })),
     music: slots.music.map((s) => ({ cat: displayCategory(s.lead.category), h: line(s), src: attribution(s.outlets) })),
   };
   const stats = {

@@ -119,3 +119,15 @@ test("TOPIC CAP: at most one crypto item across headline + also + music", () => 
   const aired = [headline, ...also, ...music].filter(Boolean);
   assert.equal(aired.filter((s) => topicOf(s) === "crypto").length, 1);
 });
+
+test("1 Nov: 'Also this hour' takes stories two or more outlets report before single-outlet ones", async () => {
+  const { pickSlots } = await import("./radioRank.js");
+  const T = ["", "Copper miners strike in northern Chile", "Typhoon nears Okinawa coast", "Dutch parliament approves housing law",
+    "Kenya cuts interest rate to spur lending", "Brazil opens Amazon logging probe", "Norway funds hydrogen ferry fleet", "Canada recalls baby formula batch"];
+  const mk = (id, outlets) => ({ lead: { id, title: T[id], source_name: `Pub ${id}` }, outlets, articles: [], sport: false });
+  const ranked = [mk(1, ["A"]), mk(2, ["B"]), mk(3, ["C"]), mk(4, ["D", "E"]), mk(5, ["F", "G"]), mk(6, ["H"]), mk(7, ["I"])];
+  const { also } = pickSlots(ranked, { alsoCount: 4 });
+  const ids = also.map((s) => s.lead.id);
+  assert.ok(ids.includes(4) && ids.includes(5), `multi-outlet stories left out: ${ids}`);
+  assert.equal(also.length, 4, "single-outlet stories still fill the remaining slots");
+});
