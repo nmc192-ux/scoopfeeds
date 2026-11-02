@@ -25,11 +25,13 @@ import { wordBudget } from "../programme/clock.js";
 export const longReadOn = (env = process.env) => env.RADIO_LONGREAD_ENABLED === "1";
 /** RADIO_LONGREAD_REVIEW: on unless literally "0". On, a piece waits as a draft until `cli.mjs approve`. */
 export const reviewOn = (env = process.env) => String(env.RADIO_LONGREAD_REVIEW ?? "").trim() !== "0";
-/** RADIO_LONGREAD_HOURS_ET: the New York hours a long read airs in; default 7, 12 and 20. */
+/** RADIO_LONGREAD_HOURS_ET: the New York hours a long read airs in; default 7, 12 and 20. "all" is every hour (DrJ, 2 Nov). */
 export const DEFAULT_HOURS_ET = [7, 12, 20];
+export const ALL_HOURS = Array.from({ length: 24 }, (_, h) => h);
 export function longReadHours(env = process.env) {
   const raw = String(env.RADIO_LONGREAD_HOURS_ET ?? "").trim();
   if (!raw) return DEFAULT_HOURS_ET;
+  if (/^(all|\*)$/i.test(raw)) return ALL_HOURS;
   const hs = raw.split(",").map((x) => Number(x.trim())).filter((h) => Number.isInteger(h) && h >= 0 && h <= 23);
   return hs.length ? [...new Set(hs)] : DEFAULT_HOURS_ET;
 }
@@ -295,6 +297,12 @@ export function checkLongread(written, story, { log = () => {}, budget = slotWor
   const droppedShare = writtenWords ? 1 - words / writtenWords : 1;
   if (droppedShare > DROP_MAX_SHARE) reasons.push(`${Math.round(droppedShare * 100)}% of the words were dropped (at most ${Math.round(DROP_MAX_SHARE * 100)}%)`);
   return { ok: reasons.length === 0, reasons, segment: { story: STORY_ID, lines: [frame.open, ...kept, frame.close] }, report, words, written: writtenWords, credited };
+}
+
+/** The phone alert for a draft: what it is, how long, and how to answer. Pure (tested). */
+export function draftAlert(id, piece, verdict) {
+  return `${piece.story?.headline || id} — ${verdict.words} words, ${verdict.credited.length} outlets. It airs only once you approve it. ` +
+    `On the Mac: node src/radio/longread/cli.mjs show ${id}  (then approve or refuse).`;
 }
 
 // ─── air ───────────────────────────────────────────────────────────────────────
