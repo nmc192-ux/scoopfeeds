@@ -129,7 +129,7 @@ test("checkLongread: a whole, attributed piece passes, with a mechanical open an
 
 test("checkLongread: an unbacked figure drops the line; too many drops refuse the piece", () => {
   const p = goodPiece();
-  p.lines[0].text = p.lines[0].text.replace("4.5 percent", "7.9 percent");
+  p.lines[1].text = p.lines[1].text.replace("4.5 percent", "7.9 percent");   // not the opener (that one refuses: see below)
   const r = checkLongread(p, story());
   assert.ok(r.report.some((x) => /unbacked figure/.test(x.drop)));
   assert.equal(r.ok, true);   // one paragraph of ten: under 15 %
@@ -384,4 +384,29 @@ test("the draft alert says what it is, that it airs only once approved, and how 
   assert.match(msg, /912 words, 3 outlets/);
   assert.match(msg, /only once you approve/);
   assert.match(msg, /cli\.mjs show 2026-11-03-x/);
+});
+
+// ── DrJ refused the 2 Nov draft: it never said what happened, and its headline was a question ──
+test("checkLongread: if the opening What happened paragraph is dropped, the piece is refused", () => {
+  const p = goodPiece();
+  p.lines[0].text = p.lines[0].text.replace("4.5 percent", "7.9 percent");   // one paragraph of ten, but the opener
+  const r = checkLongread(p, story());
+  assert.equal(r.ok, false);
+  assert.ok(r.reasons.some((x) => /opening paragraph of What happened was dropped/.test(x)), r.reasons.join("; "));
+});
+
+test("buildStory: a question is never the headline, even when the event is titled after it; all questions refuse", () => {
+  const q = ARTICLES.map((a, i) => (i === 3 ? { ...a, title: "Who Is Jason Turkish, Haley Stevens's Fiance?" } : a));
+  const r = buildStory({ ...EVENT, title: "Who Is Jason Turkish, Haley Stevens's Fiance?" }, q, OCC);
+  assert.ok(r.story && !r.story.headline.includes("?"), r.story?.headline);
+  const all = ARTICLES.map((a, i) => ({ ...a, title: `Will rates rise again? (${i})` }));
+  assert.match(buildStory(EVENT, all, OCC).refused, /no straight headline/);
+});
+
+test("Rule: a person's own video ('in a video posted to X') is what happened, not what an outlet published", async () => {
+  const { ABOUT_PUBLISHING } = await import("../programme/checks.js");
+  assert.equal(ABOUT_PUBLISHING.test("The Guardian says she announced her support in a video posted to X, after an event in Detroit."), false);
+  assert.equal(ABOUT_PUBLISHING.test("He made the claim in a video shared on Instagram."), false);
+  assert.equal(ABOUT_PUBLISHING.test("In a video, Reuters shows the damage."), true);
+  assert.equal(ABOUT_PUBLISHING.test("In its video, the BBC walks through the vote."), true);
 });
