@@ -95,6 +95,17 @@ export function partAt(p, t) {
   return { file: part.file, from: part.from, origin, key: `${part.file}@${origin}` };
 }
 
+/**
+ * Must the feeder switch to `feed`? Compared by key (file AND origin), never by file alone: a repeat hour plays one
+ * file throughout, and a Markets slot cut to music borrows another stretch of that same file. When the slot ends the
+ * programme resumes the same file at a different origin; comparing file names alone kept playing the borrowed
+ * stretch on into another slot while the screen moved on (1 Nov 2026, 09 UTC: News, Compared on screen, the
+ * business desk in the air).
+ */
+export function feedChanged(feed, onAirKey) {
+  return !!feed && feed.key !== onAirKey;
+}
+
 /** Start one Chromium + ffmpeg unit. Resolves once both are running. */
 export async function startUnit(opts) {
   const { target, bed, bedLufs, seconds, pageUrl, log = () => {}, demoCycleSec = 0, env = process.env, stats } = opts;
@@ -373,7 +384,7 @@ export async function runPlayout(o = {}) {
   const partNow = (t = Date.now()) => {
     const p = progDir && readProgramme();
     const part = partAt(p, t);
-    return part ? { file: path.join(progDir, part.file), lufs: AUDIO_TARGET, from: part.origin } : null;
+    return part ? { file: path.join(progDir, part.file), lufs: AUDIO_TARGET, from: part.origin, key: part.key } : null;
   };
   const dir = o.musicDir || musicDir();
   let current = { daypart: null };
@@ -419,7 +430,7 @@ export async function runPlayout(o = {}) {
     const bedLufs = await measureIntegrated(bed, { ffmpeg: o.ffmpeg });
     log(`daypart=${daypart}${procedural ? ` (NO CLEARED BED: procedural fallback; ${refused} file(s) refused for want of a manifest entry, see docs/radio/music.md)` : fallback ? " (EMPTY - fell back to another daypart's bed)" : ""} bed=${path.basename(bed)} bedLufs=${bedLufs ?? "unmeasured (loudnorm fallback)"} target=${target.kind}`);
     const feed = partNow();
-    current = { daypart, feedFile: feed?.file || null };
+    current = { daypart, feedFile: feed?.file || null, feedKey: feed?.key || null };
     if (feed) log(`programme audio on air: ${path.basename(feed.file)} from ${((Date.now() - feed.from) / 1000).toFixed(1)} s`);
     return startUnit({ target, bed, bedLufs, feed, seconds: o.seconds, pageUrl, log, demoCycleSec: o.demoCycleSec, env, stats, ffmpeg: o.ffmpeg, statusFile: o.statusFile, onPrimaryDown, pictureHub });
   };
@@ -448,11 +459,12 @@ export async function runPlayout(o = {}) {
       } else if (!want && current.unit.mediaTag) { current.unit.clearMedia(); log("media off air; back to the screen"); }
     }
     const feed = partNow();
-    if (!feed || progSwapping || !current.unit?.swapBed || feed.file === current.feedFile) return;
+    if (progSwapping || !current.unit?.swapBed || !feedChanged(feed, current.feedKey)) return;
     progSwapping = true;
     try {
       await current.unit.swapBed(feed.file, feed.lufs, feed.from);
       current.feedFile = feed.file;
+      current.feedKey = feed.key;
       current.unit.boundary?.();   // a part boundary: the only place a capped destination is restarted (never mid-part)
       log(`programme audio switched to ${path.basename(feed.file)} (part started ${((Date.now() - feed.from) / 1000).toFixed(1)} s ago)`);
     } catch (err) { log(`programme audio swap failed (${redact(err.message, env)}); retrying`); }

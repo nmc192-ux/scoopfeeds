@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { chooseBed, runPlayout, isFatalMuxError, pauseFile } from "./playout.js";
+import { chooseBed, runPlayout, isFatalMuxError, pauseFile, partAt, feedChanged } from "./playout.js";
+import { cutSlotToMusic, spliceProgramme } from "../programme/repeat.js";
 import { makeMusicLibrary } from "../musicTestLibrary.js";
 import { resolveTarget, rtmpAllowed, rtmpBase, redact, RTMP_BASE } from "./outputTarget.js";
 import { buildFfmpegArgs, buildFeederArgs, loudnessFilter, VIDEO, AUDIO, RTMP } from "./ffmpegArgs.js";
@@ -303,4 +304,51 @@ test("#196/#208: the stream watch reads the same PAUSE file as autoair and the s
   assert.equal(pauseFile({}), path.join(os.homedir(), "scoopfeeds-radio", "PAUSE"));
   assert.equal(pauseFile({ RADIO_BASE_DIR: "~/radio-test" }), path.join(os.homedir(), "radio-test", "PAUSE"));
   assert.equal(pauseFile({ RADIO_BASE_DIR: "/srv/radio" }), "/srv/radio/PAUSE");
+});
+
+// ── programme audio: the feeder follows file AND origin (1 Nov 2026, hour 09 UTC, an overnight repeat) ──
+
+/** Walk an hour second by second the way the playout's 250 ms loop does; return what the feeder actually plays. */
+function playHour(prog, compare) {
+  let onAir = null; const heard = [];
+  for (let t = prog.audio[0].from; t < prog.endsAt; t += 1000) {
+    const part = partAt(prog, t);
+    if (part && compare(part, onAir)) onAir = part;            // swapBed(file, lufs, origin): seek to t - origin
+    heard.push({ t, file: onAir.file, at: t - onAir.origin, want: part ? `${part.file}@${t - part.origin}` : null });
+  }
+  return heard;
+}
+
+test("repeat hour: after a Markets slot cut to music, the feeder returns to the hour's own audio (by origin, not file)", () => {
+  const H = Date.UTC(2026, 10, 1, 9), S = (s) => H + s * 1000;
+  // the repeated hour on the old clock: one part file from the countdown, as prepareRepeat leaves it
+  const slots = [["the-hour", 6, 360, "spoken"], ["markets-1", 360, 480, "spoken"], ["compared-1", 480, 840, "spoken"],
+    ["crypto", 840, 930, "spoken"], ["music-1", 930, 1200, "music"], ["desk-me", 1200, 2250, "spoken"],
+    ["music-3", 2250, 2640, "music"], ["desk-biz", 2640, 3480, "spoken"]].map(([id, a, b, kind]) => ({ id, kind, start: S(a), end: S(b), title: id }));
+  let prog = { hourStart: H, endsAt: S(3480), audio: [{ file: "part-countdown.wav", from: S(-900) }], slots,
+    cues: slots.map((s) => ({ at: s.start, scene: s.kind === "music" ? "music" : s.id })) };
+  const cut = cutSlotToMusic(prog, "markets-1", { why: "#249 stale" });   // #249: borrows music from the same file
+  assert.ok(cut.ok);
+  prog = cut.prog;
+  prog = spliceProgramme(prog, { cut: S(6), resumeAt: S(360), partFile: "part-the-hour.wav", cues: [], slots: null });
+  prog = spliceProgramme(prog, { cut: S(840), resumeAt: S(930), partFile: "part-crypto.wav", cues: [], slots: null });
+
+  // the old comparison (file name only) reproduces the fault: at 12:30 the borrowed stretch has run on past music-3
+  const old = playHour(prog, (p, on) => !on || p.file !== on.file);
+  const at = (h, s) => h.find((x) => x.t === S(s));
+  assert.notEqual(`${at(old, 750).file}@${at(old, 750).at}`, at(old, 750).want, "the old loop should have drifted");
+
+  // the fix: every second of the hour plays exactly what programme.json says, matching the screen's cues
+  const fixed = playHour(prog, (p, on) => feedChanged(p, on?.key ?? null));
+  for (const x of fixed) assert.equal(`${x.file}@${x.at}`, x.want, `at ${(x.t - H) / 1000} s`);
+  // compared-1 (8:00 to 14:00) is the hour's own audio from its own position in the file
+  assert.equal(at(fixed, 600).file, "part-countdown.wav");
+  assert.equal(at(fixed, 600).at, S(600) - S(-900));
+});
+
+test("feedChanged: same file at a new origin is a change; the same part is not; no part is not", () => {
+  assert.equal(feedChanged({ file: "a.wav", key: "a.wav@100" }, "a.wav@0"), true);
+  assert.equal(feedChanged({ file: "a.wav", key: "a.wav@0" }, "a.wav@0"), false);
+  assert.equal(feedChanged(null, "a.wav@0"), false);
+  assert.equal(feedChanged({ file: "a.wav", key: "a.wav@0" }, null), true);
 });
