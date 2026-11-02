@@ -151,6 +151,10 @@ test("writer ledger: counts per day and hour; the budget and a usage limit both 
   assert.equal(isLimitError("Claude AI usage limit reached|1761300000"), true);
   assert.equal(isLimitError("claude error: 429 rate_limit_error"), true);
   assert.equal(isLimitError("unbalanced JSON in the reply"), false);
+  // the wording that went unrecognised on 1 Nov 2026
+  assert.equal(isLimitError("claude error: You've hit your weekly limit · resets 2pm (Asia/Karachi)"), true);
+  assert.equal(isLimitError("claude error: You've hit your session limit · resets 7pm"), true);
+  assert.equal(isLimitError("claude timed out after 900 s"), false);
 });
 
 test("helpers: first hour, top-story change, refresh slot, gates", () => {
@@ -198,7 +202,7 @@ function virtualClock(start) {
   return { now: () => now, sleep, drive };
 }
 
-function rig({ start, forceFail = [], failFrom = [], paused = false, ledgerMax = 96, top = { id: "t9", headline: "Earthquake strikes northern Japan", outlets: [{ title: "Strong earthquake hits Japan" }] } } = {}) {
+function rig({ start, forceFail = [], failFrom = [], limitFrom = Infinity, paused = false, ledgerMax = 96, top = { id: "t9", headline: "Earthquake strikes northern Japan", outlets: [{ title: "Strong earthquake hits Japan" }] } } = {}) {
   const clock = virtualClock(start);
   const airDir = tmp("rolling-air-");
   const calls = [], plays = [], alerts = [], logs = [];
@@ -208,7 +212,9 @@ function rig({ start, forceFail = [], failFrom = [], paused = false, ledgerMax =
     fs.mkdirSync(a.out, { recursive: true });
     const wf = path.join(a.out, "writer.json");
     let w = { runs: [] }; try { w = JSON.parse(fs.readFileSync(wf, "utf8")); } catch { /* */ }
-    w.runs.push({ calls: a.headlineWriter ? 0 : 1, failures: 0 }); fs.writeFileSync(wf, JSON.stringify(w));
+    const limited = !a.headlineWriter && clock.now() >= limitFrom;
+    w.runs.push(limited ? { calls: 1, failures: 1, limitHit: true } : { calls: a.headlineWriter ? 0 : 1, failures: 0 }); fs.writeFileSync(wf, JSON.stringify(w));
+    if (limited) return 1;
     if (failFrom.includes(a.from)) return 1;
     if (a.from === "crypto") {   // #283: what produce.mjs records after a fresh Crypto splice
       const pf = path.join(a.out, "programme.json");
@@ -329,6 +335,19 @@ test("station: over the day's writer budget, a prime hour becomes a repeat read 
   const st = JSON.parse(fs.readFileSync(path.join(r.airDir, "2026-10-27T14", "status.json"), "utf8"));
   assert.match(st.costGuard, /day budget spent/);
   assert.equal(st.writer.calls, 0);
+});
+
+test("station: the weekly usage limit turns produced hours into repeats read from headlines, not the 24/7 screen", async () => {
+  const H1 = utc("2026-10-27T14:00:00Z");
+  const r = rig({ start: utc("2026-10-27T13:20:00Z"), limitFrom: utc("2026-10-27T14:15:00Z") });
+  seedProduced(r.airDir, utc("2026-10-27T12:00:00Z"));
+  const hours = await r.clock.drive(r.station.run({ hours: 3 }));
+  assert.deepEqual(hours.map((h) => [h.aired, h.decision]), [["programme", "produced"], ["programme", "repeat"], ["programme", "repeat"]]);
+  assert.ok(r.logs.some((l) => /usage limit hit/.test(l)), r.logs.join("\n"));
+  // the next hour's top is read from headlines (cool-down on). The 60 min cool-down can run out before its Crypto
+  // splice; that one call fails at once and the Crypto slot stays music: the hour still airs.
+  const next = r.calls.filter((c) => c.hourStart === H1 + 2 * HOUR);
+  assert.deepEqual(next.find((c) => c.from === "the-hour")?.headlineWriter, true);
 });
 
 test("station: with nothing to repeat and no budget, the hour falls back rather than failing air", async () => {
