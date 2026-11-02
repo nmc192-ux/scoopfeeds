@@ -79,3 +79,16 @@ test("checks: a crypto line's '24 hours' is backed (every change in the pack is 
   assert.ok(kept.includes("c1"), JSON.stringify(report));
   assert.ok(!kept.includes("c2"), "an unbacked figure is still dropped");
 });
+
+test("1 Nov: a line about what an outlet published (not what happened) is dropped; reporting is kept", async () => {
+  const { ABOUT_PUBLISHING } = await import("./checks.js");
+  for (const t of ["BBC World has also published a piece in which Ukraine correspondent Dan Johnson explains how the temporary ceasefire in Oleshky has been unfolding.",
+    "In a video, Reuters shows the damage.", "CNN has a live page on the strikes.", "Read the full story on our website.", "The Guardian has published an explainer on the vote."]) assert.ok(ABOUT_PUBLISHING.test(t), t);
+  for (const t of ["The BBC reports the ceasefire in Oleshky held for six hours, allowing residents to leave.", "Reuters reports the report was published on Tuesday by the UN.",
+    "Al Jazeera says the correspondent was detained.", "The ministry published its budget on Friday.", "The New York Times reports officials looked at three options."]) assert.ok(!ABOUT_PUBLISHING.test(t), t);
+  const slots = [{ id: "compared-1", segment: "compared", kind: "spoken" }];
+  const pack = { top: [{ id: "s1", headline: "Residents leave Oleshky", outlets: [{ source: "BBC World", title: "Residents leave Oleshky", description: "" }] }], desks: {}, markets: [], weather: [], crypto: [] };
+  const segments = { "compared-1": { story: "s1", lines: [{ id: "watch", text: "BBC World has also published a piece in which its correspondent explains how the ceasefire has been unfolding." }] } };
+  const { report } = checkSegments(segments, slots, pack);
+  assert.ok(report.some((r) => /what an outlet published/.test(r.drop)), JSON.stringify(report));
+});

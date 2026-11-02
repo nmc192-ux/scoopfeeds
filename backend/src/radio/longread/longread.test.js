@@ -333,3 +333,23 @@ test("buildStory: the headline is the article the event is titled after, else a 
   const r = buildStory({ ...EVENT, title: "no article has this title" }, q, OCC);
   assert.ok(!r.story.headline.includes("?"));
 });
+
+test("1 Nov: one repair round — dropped paragraphs go back with their reason, come back in place, and are checked again", async () => {
+  const { revisionPrompt, applyRevision } = await import("./longread.js");
+  const written = { lines: [
+    { section: "happened", sources: ["A"], text: "A reports one." },
+    { section: "background", sources: ["B"], text: 'B says "made up words".' },
+    { section: "who", sources: ["C"], text: "C reports three." },
+  ] };
+  const report = [{ slot: "longread", line: "p2", drop: 'quote not in pack: "made up words"' }];
+  const p = revisionPrompt(written, report);
+  assert.match(p, /- p2 \(section "background"\): FAILED because quote not in pack/);
+  assert.match(p, /TEXT: B says "made up words"\./);
+  assert.ok(!/- p1|- p3/.test(p), "only the failed paragraph is sent back");
+  assert.equal(revisionPrompt(written, []), null);
+  const { written: w2, replaced } = applyRevision(written, { lines: [{ id: "p2", section: "background", sources: ["B"], text: "B reports the deal was signed." }, { id: "p9", text: "out of range" }, { id: "p1", text: "" }] });
+  assert.equal(replaced, 1);
+  assert.equal(w2.lines[1].text, "B reports the deal was signed.");
+  assert.equal(w2.lines[0].text, "A reports one.", "untouched paragraphs stay as written");
+  assert.equal(written.lines[1].text, 'B says "made up words".', "the first draft is not mutated");
+});
