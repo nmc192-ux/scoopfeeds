@@ -412,9 +412,18 @@ export class RollingStation {
         } else return fail(`producer failed (exit ${code})`);
       }
     }
+    if (decision === "repeat" && !pickStrongest(this.airDir, H)) {
+      // DrJ, 2 Nov 2026: nothing to repeat (e.g. a long usage limit) airs an hour read from headlines, not the 24/7
+      // screen. The headline writer makes no Claude call, so it costs nothing and cannot hit a limit.
+      if (this.now() >= deadline - this.opts.minRepeatTimeMin * MIN) return fail("no produced hour in the last 18 h to repeat, and no time left to read one from headlines");
+      this.log(`hour ${hourStamp(H)}: no produced hour in the last 18 h to repeat; making the hour from headlines (no Claude)`);
+      decision = "headlines";
+      this.status(H, { stage: "producing", decision });
+      const code = await produceStep({ headlineWriter: true }, "produce-headlines");
+      if (code !== 0) return fail(`no produced hour to repeat, and the headline hour failed (exit ${code})`);
+    }
     if (decision === "repeat") {
       const src = pickStrongest(this.airDir, H);
-      if (!src) return fail("no produced hour in the last 18 h to repeat");
       this.status(H, { stage: "repeating", decision, repeatOf: path.basename(src.dir) });
       let moved;
       try { moved = prepareRepeat(src.dir, dir, H, { now: this.now() }); } catch (e) { return fail(`repeat copy failed: ${e.message}`); }
