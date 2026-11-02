@@ -189,7 +189,7 @@ function virtualClock(start) {
   return { now: () => now, sleep, drive };
 }
 
-function nightRig({ start, failUpdates = [], night = nightWindow(), force = false, env = ON }) {
+function nightRig({ start, failUpdates = [], night = nightWindow(), force = false, env = ON, limitFrom = Infinity }) {
   const clock = virtualClock(start);
   const airDir = tmp("night-air-");
   const calls = [], upd = [], logs = [];
@@ -197,7 +197,11 @@ function nightRig({ start, failUpdates = [], night = nightWindow(), force = fals
     calls.push({ hourStart: a.hourStart, election: a.plan?.election || null, format: a.plan?.format, headlineWriter: !!a.headlineWriter, at: clock.now() });
     await clock.sleep(10 * MIN);
     fs.mkdirSync(a.out, { recursive: true });
-    fs.writeFileSync(path.join(a.out, "writer.json"), JSON.stringify({ runs: [{ calls: 1, failures: 0 }] }));
+    if (!a.headlineWriter && clock.now() >= limitFrom) {   // the subscription's weekly limit: Claude refuses, produce.mjs exits 1
+      fs.writeFileSync(path.join(a.out, "writer.json"), JSON.stringify({ runs: [{ calls: 1, failures: 1, limitHit: true }] }));
+      return 1;
+    }
+    fs.writeFileSync(path.join(a.out, "writer.json"), JSON.stringify({ runs: [{ calls: a.headlineWriter ? 0 : 1, failures: 0 }] }));
     const slots = (a.plan?.election === "special" ? buildSpecialClock(a.hourStart) : buildClock(a.hourStart)).map(({ id, kind, start: s, end, title }) => ({ id, kind, start: s, end, title }));
     fs.writeFileSync(path.join(a.out, "programme.json"), JSON.stringify({ hourStart: a.hourStart, endsAt: a.hourStart + 3630e3, election: a.plan?.election, audio: [{ file: "p.wav", from: a.hourStart - 900e3 }], cues: [], slots }));
     return 0;
@@ -257,6 +261,18 @@ test("station: with the night off nothing changes; over the cost guard the speci
   const hours = await r.clock.drive(r.station.run({ hours: 2 }));
   assert.ok(hours.every((x) => x.decision === "election-special"));
   assert.ok(r.calls.every((c) => c.headlineWriter));
+});
+
+test("station: the writer's usage limit hit mid-night: that hour is made again by the headline writer, the next ones start there", async () => {
+  // 1 Nov rehearsal: "You've hit your weekly limit" took 5 of 6 hours to the 24/7 screen
+  const r = nightRig({ start: utc("2026-11-03T22:20:00Z"), limitFrom: utc("2026-11-04T00:00:00Z") });
+  const hours = await r.clock.drive(r.station.run({ hours: 4 }));
+  assert.deepEqual(hours.map((x) => [x.decision, x.aired]), Array(4).fill(["election-special", "programme"]));
+  const H2 = utc("2026-11-04T01:00:00Z");
+  assert.deepEqual(r.calls.filter((c) => c.hourStart === H2).map((c) => c.headlineWriter), [false, true], "Claude first, then the headline writer");
+  assert.ok(r.logs.some((l) => /usage limit; the special is made again by the headline writer/.test(l)), r.logs.join("\n"));
+  // the cool-down: the hour after starts with the headline writer and never calls Claude
+  assert.deepEqual(r.calls.filter((c) => c.hourStart === H2 + HOUR).map((c) => c.headlineWriter), [true]);
 });
 
 test("dress rehearsal: the special at the rehearsal's own hour, report PASS only when everything is measured and clean", async () => {

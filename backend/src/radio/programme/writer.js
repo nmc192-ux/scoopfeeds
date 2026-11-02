@@ -135,7 +135,9 @@ export function extractJson(text) {
 
 /** A writer error that means the subscription's usage limit (or a rate limit) was hit: the cost guard backs off. */
 export function isLimitError(msg) {
-  return /usage limit|rate.?limit|limit (reached|exceeded)|reached your .*limit|out of (credits|usage)|\b429\b|quota/i.test(String(msg || ""));
+  // "You've hit your weekly limit · resets 2pm" (1 Nov 2026) was missed, so the cost guard never backed off: 28 hours of
+  // news were dropped, and 5 of the 6 election rehearsal hours, instead of falling back to the headline writer
+  return /usage limit|rate.?limit|limit (reached|exceeded)|reached your .*limit|hit your .*limit|(weekly|daily|session|monthly) limit|limit\b.{0,8}resets|out of (credits|usage)|\b429\b|quota/i.test(String(msg || ""));
 }
 
 /** Run `claude -p` with the prompt on stdin; resolves to the parsed JSON object. */

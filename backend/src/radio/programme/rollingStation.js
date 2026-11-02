@@ -392,7 +392,13 @@ export class RollingStation {
     if (decision === "election-special") {
       // #198: the special is never replaced by a repeat; over the cost guard it is read by the headline writer
       this.status(H, { stage: "producing", decision });
-      const code = await produceStep(guard.ok ? {} : { headlineWriter: true }, "produce");
+      let code = await produceStep(guard.ok ? {} : { headlineWriter: true }, "produce");
+      // The writer ran out mid-hour (a usage limit): the same special again, read by the headline writer, while there is
+      // time. The rehearsal of 1 Nov lost 5 of 6 hours to exactly this.
+      if (code !== 0 && guard.ok && st.writer.limitHit && this.now() < deadline - this.opts.minRepeatTimeMin * MIN) {
+        this.log(`hour ${hourStamp(H)}: the writer hit its usage limit; the special is made again by the headline writer`);
+        code = await produceStep({ headlineWriter: true }, "produce-headlines");
+      }
       if (code !== 0) return fail(`election special producer failed (exit ${code})`);
     }
     if (decision === "produced") {
