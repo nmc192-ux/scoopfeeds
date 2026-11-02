@@ -66,7 +66,7 @@ name, and quotes stay short.
 |---|---|---|
 | `RADIO_LONGREAD_ENABLED` | off (anything but literally `1`) | Airs the Long Read in long-read hours. Off: every hour is exactly what it was. |
 | `RADIO_LONGREAD_REVIEW` | on (anything but literally `0`) | On: a piece waits as a draft until `approve`. `0`: a piece that passes the checks may air. |
-| `RADIO_LONGREAD_HOURS_ET` | `7,12,20` | The New York hours a long read airs in (comma-separated, 0–23). |
+| `RADIO_LONGREAD_HOURS_ET` | `7,12,20` | The New York hours a long read airs in (comma-separated, 0–23), or `all` for every hour (DrJ, 2 Nov 2026: his setting). |
 | `RADIO_LONGREAD_DIR` | `<RADIO_BASE_DIR or ~/scoopfeeds-radio>/longreads` | Where pieces are kept. |
 
 ## On the Mac (once)
@@ -76,8 +76,23 @@ cd ~/work/scoopfeeds/backend
 node src/radio/longread/cli.mjs make --dry-run        # pick + write + check, saves nothing
 node src/radio/longread/cli.mjs make                  # saves a draft
 node src/radio/longread/cli.mjs show <id>             # read it; then approve or refuse
-backend/src/radio/playout/deploy/macos/install-longread.sh 05:40   # one draft a day at 5:40 am Mac time
+backend/src/radio/playout/deploy/macos/install-longread.sh every3h 40   # a draft every 3 hours at :40 (DrJ, 2 Nov)
 ```
+
+**Every hour (DrJ, 2 Nov 2026).** DrJ wants a long read in every hour. With `RADIO_LONGREAD_HOURS_ET=all` and a draft
+made every 3 hours (`install-longread.sh every3h 40`, about 8 a day), each approved piece fills exactly three hours
+(`MAX_AIRINGS` = 3), so approved pieces cover the day with none left over. Each draft pushes an alert to DrJ's phone
+(`RADIO_ALERT_PUSH_URL`, ntfy): the headline, its length, and that it airs only once he approves it. Review stays on
+for the first two weeks.
+
+Two limits on "every hour":
+- **Overnight repeat hours carry none.** A repeat splices only a fresh The Hour and Crypto into an older hour, and the
+  Long Read is never added in a repeat splice. Between about 00:00 and 06:00 New York (the overnight repeats) the
+  hour is the repeated one.
+- **A draft not approved within its window leaves gaps.** An hour with no approved piece under 36 hours old that has
+  aired in fewer than 3 hours runs The News, Compared as usual (earn-render).
+- **Stories may run short.** A story with a long read is skipped for 7 days, and a piece needs 6 articles from 4
+  outlets. Eight stories a day is 56 a week; on slow news days `make` finds nothing new and says so.
 Then set `RADIO_LONGREAD_ENABLED=1` in `~/.scoopfeeds-radio.env` (with `RADIO_CLOCK_V15=1`) and re-run
 `install-rolling.sh`.
 

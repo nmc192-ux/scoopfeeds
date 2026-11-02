@@ -14,9 +14,10 @@
  * (produce.mjs). Exit codes: 0 done, 1 nothing made (no story, or the piece was refused), 2 usage or failure.
  */
 import { parseArgs } from "node:util";
-import { fetchLongreadPack, buildPrompt, SYSTEM, checkLongread, airVerdict, reviewOn, SECTION_LABEL, PICK, STORY_ID, revisionPrompt, applyRevision } from "./longread.js";
+import { fetchLongreadPack, buildPrompt, SYSTEM, checkLongread, airVerdict, reviewOn, SECTION_LABEL, PICK, STORY_ID, revisionPrompt, applyRevision, draftAlert } from "./longread.js";
 import { savePiece, listPieces, loadPiece, setReview, recentSlugs, longReadDir } from "./store.js";
 import { claudeWriter } from "../programme/writer.js";
+import { makeRadioAlert } from "../safety/alert.js";
 
 const { values: v, positionals: [cmd, id] } = parseArgs({ allowPositionals: true, options: {
   base: { type: "string", default: "https://scoopfeeds.com" }, model: { type: "string", default: "sonnet" },
@@ -81,6 +82,8 @@ if (cmd === "make") {
   if (v["dry-run"]) { log(`dry run: not saved (would be ${status})`); process.exit(verdict.ok ? 0 : 1); }
   const saved = savePiece(piece, { articles: pk.articles, timeline: pk.timeline, sources: pk.sources, dropped: pk.dropped, tried: pk.tried, builtAt: pk.builtAt }, { dir });
   log(`saved ${saved.id} as ${status}${status === "draft" ? ` (review is on: node src/radio/longread/cli.mjs show ${saved.id}, then approve or refuse)` : ""}`);
+  // DrJ, 2 Nov: a push to his phone (RADIO_ALERT_PUSH_URL, ntfy) whenever a draft is waiting for him
+  if (status === "draft") await makeRadioAlert({ log })(draftAlert(saved.id, piece, verdict), { quiet: true, title: "Long Read waiting for your OK" });
   process.exit(verdict.ok ? 0 : 1);
 }
 

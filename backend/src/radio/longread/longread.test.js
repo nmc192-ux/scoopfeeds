@@ -6,7 +6,7 @@ import path from "node:path";
 import {
   longReadOn, reviewOn, longReadHours, DEFAULT_HOURS_ET, candidateEvents, buildStory, checkLongread, frameLines,
   addLongReadToClock, pickForAir, airVerdict, isLongReadHour, sectionCards, slotWords, wordCount, SECTIONS, SLOT_ID, SLOT_SEC,
-  STORY_ID, MAX_AGE_MS, buildPrompt, fetchLongreadPack,
+  STORY_ID, MAX_AGE_MS, buildPrompt, fetchLongreadPack, ALL_HOURS, draftAlert,
 } from "./longread.js";
 import { savePiece, listPieces, loadPiece, setReview, recordAiring, recentSlugs, longReadDir } from "./store.js";
 import { buildClock, checkClock, musicSecs, V15_MUSIC_HOUR_MAX_SEC } from "../programme/clock.js";
@@ -352,4 +352,36 @@ test("1 Nov: one repair round — dropped paragraphs go back with their reason, 
   assert.equal(w2.lines[1].text, "B reports the deal was signed.");
   assert.equal(w2.lines[0].text, "A reports one.", "untouched paragraphs stay as written");
   assert.equal(written.lines[1].text, 'B says "made up words".', "the first draft is not mutated");
+});
+
+// ── DrJ, 2 Nov 2026: a long read in every hour, a piece made every 3 hours, a phone alert for each draft ──
+
+test("RADIO_LONGREAD_HOURS_ET=all is every New York hour; the default stays 7, 12, 20", () => {
+  assert.deepEqual(longReadHours({ RADIO_LONGREAD_HOURS_ET: "all" }), ALL_HOURS);
+  assert.equal(ALL_HOURS.length, 24);
+  assert.deepEqual(longReadHours({}), [7, 12, 20]);
+  for (let h = 0; h < 24; h++) assert.ok(isLongReadHour(Date.UTC(2026, 10, 2, h), ALL_HOURS));
+});
+
+test("a piece every 3 hours, each aired in at most 3 hours: every hour of the day has one (approved pieces)", () => {
+  const H0 = Date.UTC(2026, 10, 3, 0), HOUR = 3600_000;
+  const pieces = [];
+  let missing = 0;
+  for (let h = 0; h < 48; h++) {
+    const H = H0 + h * HOUR;
+    if (h % 3 === 0) pieces.push({ id: `p${h}`, createdAt: H - 20 * 60_000, status: "approved", segment: [{}], story: {}, airings: [] });
+    const p = pickForAir(pieces, { now: H - 15 * 60_000, review: true, hourStart: H });
+    if (!p) { missing++; continue; }
+    p.airings.push(H);
+  }
+  assert.equal(missing, 0);
+  assert.ok(pieces.every((p) => p.airings.length === 3), "each piece fills exactly its three hours");
+});
+
+test("the draft alert says what it is, that it airs only once approved, and how to read it", () => {
+  const msg = draftAlert("2026-11-03-x", { story: { headline: "Senate passes the budget" } }, { words: 912, credited: ["BBC", "Reuters", "AP"] });
+  assert.match(msg, /Senate passes the budget/);
+  assert.match(msg, /912 words, 3 outlets/);
+  assert.match(msg, /only once you approve/);
+  assert.match(msg, /cli\.mjs show 2026-11-03-x/);
 });
