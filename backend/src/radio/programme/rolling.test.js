@@ -350,11 +350,29 @@ test("station: the weekly usage limit turns produced hours into repeats read fro
   assert.deepEqual(next.find((c) => c.from === "the-hour")?.headlineWriter, true);
 });
 
-test("station: with nothing to repeat and no budget, the hour falls back rather than failing air", async () => {
+test("station: with nothing to repeat and no budget, the hour is read from headlines, not the 24/7 screen (DrJ, 2 Nov)", async () => {
   const r = rig({ start: utc("2026-10-27T13:20:00Z"), ledgerMax: 1 });
   r.ledger.add(utc("2026-10-27T13:00:00Z"), { calls: 1, failures: 0 });
   const hours = await r.clock.drive(r.station.run({ hours: 1 }));
-  assert.deepEqual(hours.map((h) => [h.aired, h.reason]), [["247", "no produced hour in the last 18 h to repeat"]]);
+  assert.deepEqual(hours.map((h) => [h.aired, h.decision]), [["programme", "headlines"]]);
+  assert.deepEqual(r.calls.map((c) => [c.from || "full", c.headlineWriter]), [["full", true]], "one full hour, no Claude");
+  assert.ok(r.logs.some((l) => /making the hour from headlines/.test(l)));
+});
+
+test("station: an overnight hour with nothing to repeat is read from headlines; a headline hour is never itself repeated", async () => {
+  const r = rig({ start: utc("2026-10-27T03:20:00Z") });   // 00:00 and 01:00 ET are repeats; nothing produced on file
+  const hours = await r.clock.drive(r.station.run({ hours: 2 }));
+  assert.deepEqual(hours.map((h) => [h.aired, h.decision]), [["programme", "headlines"], ["programme", "headlines"]]);
+  assert.ok(r.calls.every((c) => c.headlineWriter && !c.from));
+});
+
+test("station: no time left to read a headline hour: the 24/7 screen, with the reason", async () => {
+  const r = rig({ start: utc("2026-10-27T13:20:00Z"), ledgerMax: 1 });
+  r.ledger.add(utc("2026-10-27T13:00:00Z"), { calls: 1, failures: 0 });
+  r.station.opts.minRepeatTimeMin = 60;   // a headline hour needs more time than is left before the :45 deadline
+  const hours = await r.clock.drive(r.station.run({ hours: 1 }));
+  assert.equal(hours[0].aired, "247");
+  assert.match(hours[0].reason, /no time left to read one from headlines/);
 });
 
 test("station: PAUSE at start-up puts nothing on air, not even the headline screen (#208)", async () => {
