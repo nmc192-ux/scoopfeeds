@@ -118,7 +118,11 @@ export function buildStory(event, articles, occurrences = []) {
   const leadSource = [...bySource.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
   const newest = (xs) => [...xs].sort((a, b) => (b.published || 0) - (a.published || 0))[0];
   const fromLead = arts.filter((a) => a.source === leadSource);
-  const lead = arts.find((a) => event?.title && a.title === String(event.title).trim()) || newest(fromLead.filter((a) => !a.title.includes("?"))) || newest(fromLead);
+  // DrJ refused a piece read out as "Who Is Jason Turkish, Haley Stevens's Fiancé?" (2 Nov): a question is never the
+  // headline, not even the event's own title. No straight headline anywhere: the story is refused.
+  const straight = (a) => !a.title.includes("?");
+  const lead = arts.find((a) => event?.title && a.title === String(event.title).trim() && straight(a)) || newest(fromLead.filter(straight)) || newest(arts.filter(straight));
+  if (!lead) return { refused: "no straight headline: every title is a question", dropped };
   const outlets = [
     ...arts.map(({ source, title, description, published, url }) => ({ source, title, description, published, url })),
     ...timeline.map((t) => ({ source: t.source, title: t.headline, description: `On ${DATE(t.ts)}: ${t.headline}${t.outlets.length ? ` (reported by ${list(t.outlets)})` : ""}.`, published: t.ts, url: null, timeline: true })),
@@ -289,6 +293,9 @@ export function checkLongread(written, story, { log = () => {}, budget = slotWor
   const reasons = [];
   const missing = SECTIONS.filter(([id]) => !kept.some((l) => l.section === id)).map(([, label]) => label);
   if (missing.length) reasons.push(`section(s) lost: ${missing.join(", ")}`);
+  // the piece must open by saying what happened: its first "What happened" paragraph has to survive (DrJ, 2 Nov)
+  const opener = lines.find((l) => l.section === SECTIONS[0][0]);
+  if (opener && !kept.some((l) => l.id === opener.id)) reasons.push(`the opening paragraph of ${SECTIONS[0][1]} was dropped, so the piece would never say what happened`);
   if (credited.length < OUTLETS_MIN) reasons.push(`only ${credited.length} outlet(s) credited (needs ${OUTLETS_MIN})`);
   const frame = frameLines(story, credited);
   const total = words + wordCount(frame.open.text) + wordCount(frame.close.text);
