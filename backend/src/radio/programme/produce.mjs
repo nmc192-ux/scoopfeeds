@@ -41,7 +41,7 @@ import { withProgrammeLock, reapplyInserts, addDevelopingStories } from "./devel
 import { checkSegments } from "./checks.js";
 import { loadPresenters, castSegments } from "./presenters.js";
 import { buildElectionPack, extractElectionPack } from "./electionPack.js";
-import { buildSpecialClock, addCountingDesk, addPollCloseLines, mechanicalUpdate, mechanicalCounting, projectionLines, nightWindow, fixtureArticles, UPDATE_ID, electionContext } from "./electionNight.js";
+import { buildSpecialClock, addCountingDesk, addPollCloseLines, mechanicalUpdate, mechanicalCounting, projectionLines, nightWindow, fixtureArticles, UPDATE_ID, electionContext, inElectionWindow } from "./electionNight.js";
 import { deskOn, addDeskToClock, addBallotLines, boardData, windowData } from "./electionDesk.js";
 import { assemble, fakeVoice, kokoroVoice, durationSecs } from "./assemble.js";
 import { screenCredit } from "../musicManifest.js";
@@ -162,7 +162,9 @@ if (v15 && slots.some((s) => s.id === "sport") && (pack.desks.sport || []).lengt
   }
 }
 if (v15) log(`clock: ${musicSecs(clock)} s of music blocks this hour`);
-if (midterms || night) {
+// 3 Nov: also in the election window, so the board is on every hour from 24 h before the special (not only in it)
+const electionWindowHour = inElectionWindow(hourStart, { night: nightWin, nightHour: night });
+if (midterms || night || electionWindowHour) {
   pack.election = elFixture ? extractElectionPack(fixtureArticles(elFixture, nightWin), { now: pack.builtAt })
     : await buildElectionPack({ base: v.base || "https://scoopfeeds.com", log, now: pack.builtAt });
   if (elFixture) log(`election pack from the fixture ${path.basename(elFixture)} (rehearsal)`);
@@ -298,7 +300,7 @@ if (feature && slots.some((s) => s.kind === "feature") && !fresh("feature.webm")
 // 1 Nov (DrJ): the election screens' clock (poll closings ahead) and the election window on the rail. The window runs
 // on election day (from 24 h before the special), through the special and the counting days; never before.
 const electionCtx = pack.election ? electionContext(Math.max(hourStart, pack.builtAt || 0), nightWin) : null;
-const windowOn = !!pack.election && (night || hourStart >= nightWin.from - 24 * 3600_000) && hourStart < nightWin.dayAfterUntil;
+const windowOn = !!pack.election && (night || electionWindowHour);
 const { cues, report: mixReport, lines } = await assemble({
   slots, segments, pack, hourStart, bedFor, film, filmUrl: "/programme/film.webm", feature, voice, outWav: path.join(out, partFile + ".tmp"), log, seriesCards: SERIES, electionCtx,
   creditFor: (file) => screenCredit(Object.values(beds).find((b) => b.file === file)?.entry || null),

@@ -345,3 +345,15 @@ test("3 Nov: the YouTube broadcast never rolls during the special; the held roll
   assert.deepEqual(hours.filter((h) => h.rolled).map((h) => h.hour), ["2026-11-04T08"], "the held roll, right after 3 am ET");
   assert.ok(r.logs.some((l) => /YouTube roll held: the election night special is on air/.test(l)));
 });
+
+test("3 Nov: the election window (the board on every hour) starts 24 h before the special, with the night on", async () => {
+  const { inElectionWindow, nightWindow: nw } = await import("./electionNight.js");
+  const night = nw(), ON1 = { RADIO_ELECTION_NIGHT: "1" };
+  const at = (iso) => utc(iso);
+  assert.equal(inElectionWindow(at("2026-11-03T06:00:00Z"), { night, env: ON1 }), true, "11 am PKT on 3 Nov: inside the 24 h before");
+  assert.equal(inElectionWindow(at("2026-11-02T22:00:00Z"), { night, env: ON1 }), false, "more than 24 h before");
+  assert.equal(inElectionWindow(at("2026-11-04T02:00:00Z"), { night, env: ON1 }), true, "the special itself");
+  assert.equal(inElectionWindow(at("2026-11-05T12:00:00Z"), { night, env: ON1 }), true, "the counting days");
+  assert.equal(inElectionWindow(at("2026-11-03T06:00:00Z"), { night, env: {} }), false, "night off: never");
+  assert.equal(inElectionWindow(at("2026-11-04T02:00:00Z"), { night, env: {}, nightHour: "special" }), true, "a rehearsal hour of the night");
+});
