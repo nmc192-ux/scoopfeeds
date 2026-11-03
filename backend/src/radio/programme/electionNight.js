@@ -45,6 +45,17 @@ export const FRESH_AFTER_H = 3;   // hours after the special that are produced e
 export const nightEnabled = (env = process.env) => env.RADIO_ELECTION_NIGHT === "1";
 
 /**
+ * The election window (1 Nov design): from 24 hours before the special to the end of the counting days, every hour
+ * carries the election board. True for hour H when the night is on (or the hour is itself part of the night, e.g. a
+ * rehearsal). 3 Nov: produce.mjs fetched the election coverage only in the special or with the Midterms desk on, so
+ * in the 24 hours before the special the board was silently missing.
+ */
+export function inElectionWindow(hourStart, { night = nightWindow(), env = process.env, nightHour = null } = {}) {
+  if (!(nightEnabled(env) || nightHour)) return false;
+  return hourStart >= night.from - 24 * HOUR && hourStart < night.dayAfterUntil;
+}
+
+/**
  * The night, real or moved for a rehearsal. `startAt` (rehearsal): the special starts at that hour, and every
  * scheduled time of the night (poll closings, fixture projections) moves by the same `shift`. A rehearsal has no
  * day-after window.
