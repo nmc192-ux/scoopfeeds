@@ -109,6 +109,20 @@ async function yahooQuote(sym, opts) {
 // HTTP 429 (rate limited) and the markets slots went out as music.
 const CNBC_SYMS = { "^GSPC": ".SPX", "^DJI": ".DJI", "^IXIC": ".IXIC", "^FTSE": ".FTSE", "^GDAXI": ".GDAXI", "BZ=F": "@LCO.1", "GC=F": "@GC.1" };
 const num = (v) => { const n = Number(String(v ?? "").replace(/[,%+\s]/g, "")); return Number.isFinite(n) ? n : null; };
+/**
+ * CNBC's last_time as epoch ms, or null. 3 Nov 2026: for a US index outside its session CNBC can give the last
+ * close as a bare date ("2026-11-02"), which Date.parse reads as midnight UTC - 7 pm the day BEFORE in New York - so
+ * Monday's close went out as "closed: at Sunday's close". A bare date (or an exact UTC midnight) is that calendar
+ * day: it is placed at 12:00 UTC, which is the same date in New York, London, Frankfurt and Tokyo.
+ */
+export function cnbcTime(v) {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const day = /^(\d{4}-\d{2}-\d{2})(?:T00:00(?::00(?:\.0+)?)?(?:Z|[+-]00:?00)?)?$/.exec(s);
+  if (day) return Date.parse(`${day[1]}T12:00:00Z`);
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : null;
+}
 /** Parse CNBC's restQuote JSON into { [yahooSym]: { price, pct, time } }. "UNCH" is 0 %. No usable last_time is null (#245). */
 export function parseCnbc(d) {
   const back = Object.fromEntries(Object.entries(CNBC_SYMS).map(([y, c]) => [c, y]));
@@ -119,7 +133,7 @@ export function parseCnbc(d) {
     const y = back[q?.symbol]; const price = num(q?.last);
     if (!y || price == null || price <= 0) continue;
     const pct = /^unch/i.test(String(q.change_pct || "")) ? 0 : num(q.change_pct);
-    const t = Date.parse(q.last_time || ""); out[y] = { price, pct, time: Number.isFinite(t) ? t : null };
+    out[y] = { price, pct, time: cnbcTime(q.last_time) };
   }
   return out;
 }
