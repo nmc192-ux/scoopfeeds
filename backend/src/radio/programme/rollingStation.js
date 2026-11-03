@@ -169,6 +169,14 @@ export function continuousBroadcast({ yt, goLive, title = (ms) => `ScoopFeeds Ra
       if (!b.next) return;
       const old = b.current;
       if (old) await yt.transition(old, "complete").then(() => log(`youtube: broadcast ${old} complete (rolled at 12 h)`)).catch((e) => log(`youtube: completing ${old} failed: ${e.message}`));
+      // 3 Nov 2026: a broadcast that once failed to complete stayed live on our stream, and YouTube then refused every new
+      // broadcast on it (403 invalidTransition) at every roll. Complete anything else still live on the stream too.
+      if (typeof yt.liveOnStream === "function" && b.streamId) {
+        const left = await yt.liveOnStream(b.streamId).catch((e) => { log(`youtube: could not list broadcasts live on stream ${b.streamId} (${e.message})`); return []; });
+        for (const z of left.filter((x) => x.id !== b.next && x.id !== old)) {
+          await yt.transition(z.id, "complete").then(() => log(`youtube: leftover broadcast ${z.id} (${z.lifeCycleStatus}) on our stream complete`)).catch((e) => log(`youtube: completing leftover ${z.id} failed: ${e.message}`));
+        }
+      }
       b.current = b.next; b.next = null; b.startedAt = at;
     },
     /** Off air (PAUSE, or the loop stopping): complete the broadcast; auto-stop is off, so nothing else would. */
@@ -183,7 +191,17 @@ export function continuousBroadcast({ yt, goLive, title = (ms) => `ScoopFeeds Ra
       const id = b.current;
       return goLive({ broadcastId: id, streamId: b.streamId, log })
         .then(() => { log(`youtube: ${id} is live; the channel's /live URL points at it`); return id; })
-        .catch((e) => alert(`the broadcast did not go live by itself (${e.message}). Click Go live in YouTube Studio.`));
+        .catch(async (e) => {
+          // the new one would not start: if another broadcast is live on our stream, the audience is there; carry on
+          // with it (the next roll completes it) rather than lose track of it
+          const other = typeof yt.liveOnStream === "function" && b.streamId ? (await yt.liveOnStream(b.streamId).catch(() => [])).find((x) => x.id !== id && x.lifeCycleStatus === "live") : null;
+          if (other && b.current === id) {
+            b.current = other.id;
+            log(`youtube: ${id} would not go live; carrying on with ${other.id}, which is live on our stream`);
+            return alert(`the new YouTube broadcast ${id} would not go live (${e.message}); the radio carries on with ${other.id}, which is live. ${id} is left as Upcoming: delete it in YouTube Studio when convenient.`);
+          }
+          return alert(`the broadcast did not go live by itself (${e.message}). Click Go live in YouTube Studio.`);
+        });
     },
   };
   return b;
@@ -495,7 +513,11 @@ export class RollingStation {
       }
     }
 
-    const roll = H !== null && this.broadcast?.current && broadcastRollDue({ startedAt: this.broadcast.startedAt, at: this.now(), rollEtHours: this.opts.rollEtHours })
+    // 3 Nov 2026: never roll the broadcast during the election night special (the roll is the riskiest moment for the
+    // stream); a broadcast that runs past 12 h keeps streaming, only its archive is cut
+    const special = r?.plan?.election === "special";
+    if (special && H !== null && this.broadcast?.current && broadcastRollDue({ startedAt: this.broadcast.startedAt, at: this.now(), rollEtHours: this.opts.rollEtHours })) this.log(`hour ${hourStamp(H)}: YouTube roll held: the election night special is on air`);
+    const roll = H !== null && !special && this.broadcast?.current && broadcastRollDue({ startedAt: this.broadcast.startedAt, at: this.now(), rollEtHours: this.opts.rollEtHours })
       ? await this.broadcast.prepareRoll(this.now()) : false;
 
     const keep = this.onAir?.kind === "247" && want.kind === "247" && !roll;

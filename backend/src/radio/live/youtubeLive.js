@@ -159,6 +159,17 @@ export function makeYouTubeLive({ env = process.env, fetchImpl = fetch, now = Da
       return null;
     },
 
+    /**
+     * Every broadcast bound to this stream that is live or testing right now (3 Nov 2026: a broadcast that once failed
+     * to complete stayed live on the stream, and YouTube refused every later broadcast on it with invalidTransition).
+     * @returns {Promise<Array<{ id: string, lifeCycleStatus: string|null }>>}
+     */
+    async liveOnStream(streamId) {
+      const b = await call("GET", `${API}/liveBroadcasts?part=id,status,contentDetails&broadcastStatus=active&broadcastType=all&maxResults=50`);
+      return (b.items || []).filter((x) => x?.id && x.contentDetails?.boundStreamId === streamId && ["live", "testing"].includes(x.status?.lifeCycleStatus))
+        .map((x) => ({ id: x.id, lifeCycleStatus: x.status.lifeCycleStatus }));
+    },
+
     // ── #208 read-only standing checks (no writes; the youtube.force-ssl scope covers them) ──
 
     /** The channel's own status block, or { found:false }. Errors propagate with .status/.reason. */
