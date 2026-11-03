@@ -228,7 +228,7 @@ export function applyRevision(written, revised) {
 /** The mechanical open and close (not model text): the outlets' own headline, and every outlet credited. */
 export function frameLines(story, credited) {
   return {
-    open: { id: "open", story: STORY_ID, mechanical: true, text: `This is ${TITLE}, on ScoopFeeds Radio. ${toSpoken(story.headline).replace(/[.!?]?$/, ".")}` },
+    open: { id: "open", story: STORY_ID, mechanical: true, text: `${toSpoken(story.headline).replace(/[.!?]?$/, ".")}` },   // DrJ, 3 Nov: no "This is The Long Read"; straight to the headline
     close: { id: "close", story: STORY_ID, mechanical: true, text: `That was ${TITLE}, put together by ScoopFeeds from the reporting of ${list(credited)}.` },
   };
 }
