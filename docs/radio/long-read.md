@@ -24,7 +24,7 @@ name, and quotes stay short.
    - **Write.** One Claude call (`claude -p`, the same subscription writer as the hour) asks for 850–1,000 words in
      paragraphs, in five sections: *What happened*, *How we got here*, *Who is involved*, *How the coverage differs*
      and *What to watch*. Each paragraph names at least one outlet in its text and lists every outlet it draws on.
-     The open ("This is The Long Read…" plus the headline) and the close (crediting every outlet the piece used) are
+     The open (the headline alone; DrJ dropped "This is The Long Read" on 3 Nov) and the close (crediting every outlet the piece used) are
      mechanical, not model text.
    - **Check.** Every paragraph goes through the hour's own `checkSegments()` against the piece's fact base: Rule 0,
      every figure backed, quotes verbatim, the election rules (#197), and no talk about our own sourcing. Then come

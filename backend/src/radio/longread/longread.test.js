@@ -195,7 +195,8 @@ test("checkLongread: length, outlets credited, and an empty or broken reply", ()
 test("frameLines credits every outlet in plain speech", () => {
   const f = frameLines(story(), ["Reuters", "BBC News", "AP News"]);
   assert.equal(f.close.text, "That was The Long Read, put together by ScoopFeeds from the reporting of Reuters, BBC News and AP News.");
-  assert.match(f.open.text, /^This is The Long Read, on ScoopFeeds Radio\. Central bank/);
+  assert.match(f.open.text, /^Central bank/);   // DrJ, 3 Nov: the piece opens on its headline
+  assert.doesNotMatch(f.open.text, /This is The Long Read/);
 });
 
 // ─── clock ─────────────────────────────────────────────────────────────────────
