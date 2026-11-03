@@ -165,6 +165,8 @@ export const SYSTEM = [
   "5. No opinion of your own, no prediction, no speculation. 'What to watch' is only what the material says is due or expected.",
   "6. Never talk about your sources as material, a pack or data ('in the articles we have'); talk about the outlets.",
   "7. Written to be heard: short sentences, numbers as a listener hears them, no lists, no headings read out, no URLs.",
+  // DrJ, 3 Nov 2026: a news story, not a narration of who reported what
+  "8. Write it as a news story, the way a BBC or Reuters correspondent would file it, not as a list of who reported what. Open 'What happened' with the hardest news in one plain sentence (who did what), then why it matters. Put the attribution at the end of the sentence or clause ('..., Reuters reports'; 'according to the BBC'), vary it (reports, says, notes, according to), and never start two sentences in a row with an outlet's name. Join the sections with a short line that carries the listener on ('It began with...', 'Within days...', 'What comes next is still open.').",
   "Reply with JSON only.",
 ].join("\n");
 
