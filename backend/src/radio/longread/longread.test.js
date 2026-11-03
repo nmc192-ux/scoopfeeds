@@ -411,3 +411,10 @@ test("Rule: a person's own video ('in a video posted to X') is what happened, no
   assert.equal(ABOUT_PUBLISHING.test("In a video, Reuters shows the damage."), true);
   assert.equal(ABOUT_PUBLISHING.test("In its video, the BBC walks through the vote."), true);
 });
+
+test("DrJ, 3 Nov: the writer is told to file a news story, attribution at the end, never two outlet-led sentences in a row", async () => {
+  const { SYSTEM } = await import("./longread.js");
+  assert.match(SYSTEM, /Write it as a news story/);
+  assert.match(SYSTEM, /attribution at the end of the sentence/);
+  assert.match(SYSTEM, /never start two sentences in a row with an outlet's name/);
+});
