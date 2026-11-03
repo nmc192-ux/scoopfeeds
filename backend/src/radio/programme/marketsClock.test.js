@@ -147,3 +147,22 @@ test("airCheck: Markets lines without a checked pack are unmeasured, so a failur
   assert.match(airCheck(d, { hourStart: H }).problems.join(), /never checked for closed markets/);
   assert.deepEqual(marketsProblems({ "the-hour": { lines: [{ id: "s1" }] } }, () => { throw new Error("not read"); }), []);
 });
+
+test("3 Nov: CNBC's bare-date last_time is that day's close, not the evening before in New York", async () => {
+  const { cnbcTime } = await import("./factPack.js");
+  const { closedFor } = await import("./marketsClock.js");
+  const at = Date.parse("2026-11-03T14:15:00Z");   // Tuesday 9:15 am New York, before the open
+  for (const v of ["2026-11-02", "2026-11-02T00:00:00Z", "2026-11-02T00:00:00.000+0000"]) {
+    const row = { key: "S&P 500", sym: "^GSPC", group: "US", price: 7541.4, pct: -0.51, time: cnbcTime(v) };
+    const c = closedFor(row, at);
+    assert.equal(c.weekday, "Monday", v);
+    assert.equal(c.label, "closed: at Monday's close, 2 Nov");
+  }
+  // a real timestamp is unchanged
+  assert.equal(cnbcTime("2026-11-03T09:03:00-0500"), Date.parse("2026-11-03T09:03:00-0500"));
+  assert.equal(cnbcTime(""), null);
+  assert.equal(cnbcTime("not a date"), null);
+  // through parseCnbc too
+  const q = parseCnbc({ FormattedQuoteResult: { FormattedQuote: [{ symbol: ".SPX", last: "7,541.40", change_pct: "-0.51%", last_time: "2026-11-02" }] } });
+  assert.equal(closedFor({ sym: "^GSPC", group: "US", ...q["^GSPC"] }, at).weekday, "Monday");
+});
