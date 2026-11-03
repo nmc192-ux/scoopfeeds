@@ -519,3 +519,37 @@ test("1 Nov: a restart while our broadcast is live carries on with it; no second
     assert.deepEqual(c2, ["create", "bind"]);
   }
 });
+
+test("3 Nov: the 12-hour roll completes every broadcast still live on our stream, not only the one it remembers", async () => {
+  const calls = [], logs = [];
+  const yt = {
+    checkScope: async () => {}, findStream: async () => ({ id: "S" }), boundBroadcast: async () => null,
+    createBroadcast: async () => { calls.push(["create"]); return { id: `B${calls.filter((c) => c[0] === "create").length}` }; }, bind: async () => {},
+    transition: async (id, to) => { calls.push([to, id]); },
+    // ZOMBIE failed to complete on an earlier roll and is still live on S (74tn1eA7oa4 on 3 Nov)
+    liveOnStream: async (sid) => { calls.push(["list", sid]); return [{ id: "B1", lifeCycleStatus: "live" }, { id: "ZOMBIE", lifeCycleStatus: "live" }]; },
+  };
+  const b = continuousBroadcast({ yt, goLive: async () => {}, log: (m) => logs.push(m) });
+  await b.open(Date.parse("2026-11-03T05:00:00Z"));
+  assert.equal(b.current, "B1");
+  await b.prepareRoll(Date.parse("2026-11-03T16:59:00Z"));
+  await b.swap(Date.parse("2026-11-03T16:59:00Z"));
+  assert.deepEqual(calls.filter((c) => c[0] === "complete"), [["complete", "B1"], ["complete", "ZOMBIE"]]);
+  assert.equal(b.current, "B2");
+  assert.ok(logs.some((m) => /leftover broadcast ZOMBIE \(live\) on our stream complete/.test(m)));
+});
+
+test("3 Nov: a new broadcast that will not go live hands back to the one live on our stream, and says so", async () => {
+  const alerts = [], logs = [];
+  const yt = {
+    checkScope: async () => {}, findStream: async () => ({ id: "S" }), boundBroadcast: async () => null,
+    createBroadcast: async () => ({ id: "NEW" }), bind: async () => {}, transition: async () => {},
+    liveOnStream: async () => [{ id: "OLD", lifeCycleStatus: "live" }],
+  };
+  const b = continuousBroadcast({ yt, goLive: async () => { throw new Error("did not go live within 180 s"); }, log: (m) => logs.push(m), alert: async (m) => { alerts.push(m); } });
+  await b.open(Date.parse("2026-11-03T05:00:00Z"));
+  assert.equal(b.current, "NEW");
+  await b.goLive();
+  assert.equal(b.current, "OLD", "the station follows the broadcast the audience is on");
+  assert.match(alerts[0], /carries on with OLD, which is live/);
+});

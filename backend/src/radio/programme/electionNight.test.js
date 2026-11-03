@@ -1,5 +1,6 @@
 // #198: the election night special, its 15-minute updates, the day after and the dress rehearsal report.
 // The station runs on a virtual clock here: the whole night takes milliseconds.
+import { continuousBroadcast } from "./rollingStation.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -323,4 +324,24 @@ test("audio coverage and WAV length", () => {
   fs.writeFileSync(f, Buffer.concat([h, data]));
   assert.equal(wavSeconds(f), 3);
   assert.ok(Number.isNaN(wavSeconds(path.join(path.dirname(f), "missing.wav"))));
+});
+
+test("3 Nov: the YouTube broadcast never rolls during the special; the held roll happens at the first hour after it", async () => {
+  const r = nightRig({ start: utc("2026-11-03T22:20:00Z") });
+  const ytCalls = [];
+  let n = 0;
+  const yt = {
+    checkScope: async () => {}, findStream: async () => ({ id: "S" }), boundBroadcast: async () => null,
+    createBroadcast: async () => ({ id: `B${++n}` }), bind: async () => {}, transition: async (id, to) => { ytCalls.push([to, id]); },
+    liveOnStream: async () => [],
+  };
+  const b = continuousBroadcast({ yt, goLive: async () => {} });
+  b.open = async () => { b.current = "B0"; b.startedAt = utc("2026-11-03T11:30:00Z"); b.streamId = "S"; };   // 11.5 h old at the first hand-over: a roll is due
+  r.station.broadcast = b;
+  const hours = await r.clock.drive(r.station.run({ hours: 10 }));
+  const special = hours.filter((h) => h.decision === "election-special");
+  assert.equal(special.length, 9);
+  assert.ok(special.every((h) => !h.rolled), "no roll inside the special");
+  assert.deepEqual(hours.filter((h) => h.rolled).map((h) => h.hour), ["2026-11-04T08"], "the held roll, right after 3 am ET");
+  assert.ok(r.logs.some((l) => /YouTube roll held: the election night special is on air/.test(l)));
 });
