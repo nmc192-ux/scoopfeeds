@@ -124,6 +124,22 @@ export function makeYouTubeLive({ env = process.env, fetchImpl = fetch, now = Da
       return call("POST", `${API}/liveBroadcasts/bind?id=${encodeURIComponent(broadcastId)}&streamId=${encodeURIComponent(streamId)}&part=id,contentDetails`);
     },
 
+    /** Unbind a broadcast from its stream (bind with no streamId). Non-destructive: the broadcast stays, unhooked. */
+    async unbind(broadcastId) {
+      return call("POST", `${API}/liveBroadcasts/bind?id=${encodeURIComponent(broadcastId)}&part=id,contentDetails`);
+    },
+
+    /**
+     * Broadcasts bound to this stream that have NOT started (created / ready). 3 Nov 2026: enableAutoStart is on, so a
+     * leftover "Upcoming" broadcast on our stream starts by itself as soon as the stream's live broadcast completes,
+     * and YouTube then refuses the one the roll created (only one live broadcast per stream).
+     */
+    async idleOnStream(streamId) {
+      const b = await call("GET", `${API}/liveBroadcasts?part=id,status,contentDetails&broadcastStatus=upcoming&broadcastType=all&maxResults=50`);
+      return (b.items || []).filter((x) => x?.id && x.contentDetails?.boundStreamId === streamId && ["created", "ready"].includes(x.status?.lifeCycleStatus))
+        .map((x) => ({ id: x.id, lifeCycleStatus: x.status.lifeCycleStatus }));
+    },
+
     async setThumbnail(videoId, file) {
       const buf = fs.readFileSync(file);
       const type = /\.png$/i.test(file) ? "image/png" : "image/jpeg";

@@ -553,3 +553,37 @@ test("3 Nov: a new broadcast that will not go live hands back to the one live on
   assert.equal(b.current, "OLD", "the station follows the broadcast the audience is on");
   assert.match(alerts[0], /carries on with OLD, which is live/);
 });
+
+test("3 Nov: a leftover Upcoming broadcast on our stream is unhooked before the roll, so it cannot auto-start in place of the new one", async () => {
+  const calls = [], logs = [];
+  const yt = {
+    checkScope: async () => {}, findStream: async () => ({ id: "S" }), boundBroadcast: async () => null,
+    createBroadcast: async () => { calls.push(["create"]); return { id: `B${calls.filter((c) => c[0] === "create").length}` }; }, bind: async () => {},
+    transition: async (id, to) => { calls.push([to, id]); },
+    liveOnStream: async () => [],
+    idleOnStream: async () => [{ id: "B2", lifeCycleStatus: "ready" }, { id: "LEFT6zT7", lifeCycleStatus: "ready" }, { id: "LEFTbLG17", lifeCycleStatus: "ready" }],
+    unbind: async (id) => { calls.push(["unbind", id]); },
+  };
+  const b = continuousBroadcast({ yt, goLive: async () => {}, log: (m) => logs.push(m) });
+  await b.open(Date.parse("2026-11-03T05:00:00Z"));
+  await b.prepareRoll(Date.parse("2026-11-03T15:59:00Z"));
+  await b.swap(Date.parse("2026-11-03T15:59:00Z"));
+  const order = calls.filter((c) => c[0] !== "create").map((c) => c.join(" "));
+  assert.deepEqual(order, ["unbind LEFT6zT7", "unbind LEFTbLG17", "complete B1"], "leftovers unhooked first, never the new one, never deleted");
+  assert.equal(b.current, "B2");
+  assert.ok(logs.some((m) => /LEFT6zT7 unhooked from our stream \(left in YouTube Studio, not deleted\)/.test(m)));
+});
+
+test("3 Nov: a restart onto a live broadcast also unhooks the Upcoming leftovers on the stream", async () => {
+  const calls = [];
+  const yt = {
+    checkScope: async () => {}, findStream: async () => ({ id: "S" }),
+    boundBroadcast: async () => ({ id: "LIVE", lifeCycleStatus: "live" }),
+    idleOnStream: async () => [{ id: "OLD1", lifeCycleStatus: "ready" }], unbind: async (id) => { calls.push(id); },
+    createBroadcast: async () => ({ id: "X" }), bind: async () => {}, transition: async () => {},
+  };
+  const b = continuousBroadcast({ yt, goLive: async () => {} });
+  await b.open(Date.now());
+  assert.equal(b.current, "LIVE");
+  assert.deepEqual(calls, ["OLD1"]);
+});

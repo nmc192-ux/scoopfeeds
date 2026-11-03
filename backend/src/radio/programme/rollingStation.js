@@ -133,6 +133,15 @@ export function writerRunCount(dir) {
  * broadcastBody() throws rather than publish incomplete credits, and then no broadcast is created.
  */
 export function continuousBroadcast({ yt, goLive, title = (ms) => `ScoopFeeds Radio LIVE · The news, compared`, description = "", credits = [], creditsUrl = null, listAll = true, privacy = "public", log = () => {}, alert = async () => {} }) {
+  /** 3 Nov: unhook every not-started broadcast on our stream except `keep`, so none auto-starts and steals the stream. */
+  const unhookIdle = async (keep = []) => {
+    if (typeof yt.idleOnStream !== "function" || typeof yt.unbind !== "function" || !b.streamId) return;
+    const idle = await yt.idleOnStream(b.streamId).catch((e) => { log(`youtube: could not list upcoming broadcasts on stream ${b.streamId} (${e.message})`); return []; });
+    for (const z of idle.filter((x) => !keep.includes(x.id))) {
+      await yt.unbind(z.id).then(() => log(`youtube: leftover upcoming broadcast ${z.id} unhooked from our stream (left in YouTube Studio, not deleted)`))
+        .catch((e) => log(`youtube: unhooking ${z.id} failed: ${e.message}`));
+    }
+  };
   const b = {
     current: null, startedAt: NaN, next: null, streamId: null,
     async create(at) {
@@ -154,6 +163,7 @@ export function continuousBroadcast({ yt, goLive, title = (ms) => `ScoopFeeds Ra
         if (bound?.id) {
           b.current = bound.id; b.startedAt = at;
           log(`youtube: carrying on with broadcast ${bound.id} (${bound.lifeCycleStatus || "state unknown"}), already bound to stream ${b.streamId}; no new broadcast`);
+          if (bound.lifeCycleStatus === "live") await unhookIdle([bound.id]);
           return;
         }
         b.current = await b.create(at); b.startedAt = at;
@@ -168,6 +178,7 @@ export function continuousBroadcast({ yt, goLive, title = (ms) => `ScoopFeeds Ra
     async swap(at) {
       if (!b.next) return;
       const old = b.current;
+      await unhookIdle([b.next, old]);   // before the old one completes: nothing else may auto-start in its place
       if (old) await yt.transition(old, "complete").then(() => log(`youtube: broadcast ${old} complete (rolled at 12 h)`)).catch((e) => log(`youtube: completing ${old} failed: ${e.message}`));
       // 3 Nov 2026: a broadcast that once failed to complete stayed live on our stream, and YouTube then refused every new
       // broadcast on it (403 invalidTransition) at every roll. Complete anything else still live on the stream too.
