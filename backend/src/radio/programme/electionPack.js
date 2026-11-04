@@ -307,25 +307,47 @@ export function electionText(ep) {
   return out.join("\n");
 }
 
-/** Fetch tracked election articles from scoopfeeds.com, through the radio's Rule 0 layer. */
-export async function fetchElectionArticles({ base = "https://scoopfeeds.com", fetchImpl = fetch, log = () => {} } = {}) {
+export const PAGE_SIZE = 50;
+/** Hard stop per search, so a runaway query cannot stall an update. Hitting it is logged, never silent. */
+export const MAX_PAGES = 20;
+
+/**
+ * Fetch tracked election articles from scoopfeeds.com, through the radio's Rule 0 layer.
+ *
+ * 4 Nov: each search used to read only its newest 50 articles. On election night 8 of 9 searches were full,
+ * so the desk saw 210 of 479 articles and every early call (12 races at 04:51 UTC) dropped off the board as
+ * new coverage arrived. Each search now pages back until a page is short or reaches past the pack window.
+ * Searches run side by side; results are merged in query order, so the outcome does not depend on timing.
+ */
+export async function fetchElectionArticles({ base = "https://scoopfeeds.com", fetchImpl = fetch, log = () => {}, now = Date.now(), windowMs = WINDOW_MS, maxPages = MAX_PAGES } = {}) {
   const QUERIES = ["projects Senate", "projects governor", "projects House", "projected winner", "election results", "midterms", "midterm election", "Senate race", "governor race"];
-  const seen = new Set(), out = [];
-  for (const q of QUERIES) {
+  const oldest = now - windowMs;
+  const search = async (q) => {
+    const rows = [];
     try {
-      const res = await fetchImpl(`${base}/api/news?search=${encodeURIComponent(q)}&limit=50`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(25_000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      for (const a of (await res.json())?.data || []) {
-        const k = a.url || a.title;
-        if (seen.has(k) || Number(a.is_duplicate) === 1 || !airable(a)) continue;
-        seen.add(k);
-        out.push({ source: a.source_name || "?", title: String(a.title || "").trim(), description: String(a.description || "").trim().slice(0, 600), published: Number(a.published_at) || null, url: a.url || null });
+      for (let page = 0; ; page++) {
+        if (page >= maxPages) { log(`election search "${q}" stopped at ${maxPages} pages (${rows.length} articles); older articles in the window were not read`); break; }
+        const res = await fetchImpl(`${base}/api/news?search=${encodeURIComponent(q)}&limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(25_000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json())?.data || [];
+        rows.push(...data);
+        if (data.length < PAGE_SIZE || data.some((a) => Number(a.published_at) < oldest)) break;
       }
-    } catch (e) { log(`election search "${q}" failed: ${e.message}`); }
+    } catch (e) { log(`election search "${q}" failed: ${e.message}${rows.length ? ` (kept ${rows.length} articles read before the failure)` : ""}`); }
+    return rows;
+  };
+  const seen = new Set(), out = [];
+  for (const rows of await Promise.all(QUERIES.map(search))) {
+    for (const a of rows) {
+      const k = a.url || a.title;
+      if (seen.has(k) || Number(a.is_duplicate) === 1 || !airable(a)) continue;
+      seen.add(k);
+      out.push({ source: a.source_name || "?", title: String(a.title || "").trim(), description: String(a.description || "").trim().slice(0, 600), published: Number(a.published_at) || null, url: a.url || null });
+    }
   }
   return out;
 }
 
 export async function buildElectionPack({ now = Date.now(), ...opts } = {}) {
-  return extractElectionPack(await fetchElectionArticles(opts), { now });
+  return extractElectionPack(await fetchElectionArticles({ now, ...opts }), { now });
 }
