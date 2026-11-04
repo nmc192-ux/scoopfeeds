@@ -116,7 +116,7 @@ export function candidateOf(s) {
     new RegExp(`(?:^|[.;:]\\s+|,\\s+)(?:(?:Democrat(?:ic)?|Republican|GOP|independent|incumbent|Sen\\.|Gov\\.|Rep\\.|Senator|Governor) )*${NAME}(?: \\([DRI](?:-[A-Z][A-Za-z.]{1,6})?\\))? (?:is|has been|was) projected to (?:win|defeat|beat|flip|keep|hold|retain|roll|return|take|capture)`),
     new RegExp(`\\bcalled the (?:race|seat|contest)[^.;]*?\\bfor ${NAME}`),
     new RegExp(`\\b(?:projects?|projected|declares?|declared)(?: that)? (?:the )?(?:(?:Democrat(?:ic)?|Republican|GOP|independent|incumbent|Sen\\.|Gov\\.|Rep\\.|Senator|Governor) )*${NAME}(?: \\([DRI](?:-[A-Z]{2})?\\))? (?:wins?|won|has won|will win|is re-?elected|has been re-?elected|as the (?:winner|victor)|defeats?|beats?|flips?|holds?|keeps?)\\b`),
-    new RegExp(`(?:^|[.;:]\\s+|,\\s+)(?:(?:Democrat(?:ic)?|Republican|GOP|independent|incumbent|Sen\\.|Gov\\.|Rep\\.|Senator|Governor) )*${NAME}(?: \\([DRI](?:-[A-Z]{2})?\\))? (?:wins|won|has won|will win|is re-?elected|defeats|defeated|beat|beats|flips|flipped)\\b`),
+    new RegExp(`(?:^|[.;:]\\s+|,\\s+)(?:(?:Democrat(?:ic)?|Republican|GOP|independent|incumbent|Sen\\.|Gov\\.|Rep\\.|Senator|Governor) )*${NAME}(?: \\([DRI](?:-[A-Z]{2})?\\))? (?:wins|won|has won|will win|is re-?elected|defeats|defeated|has defeated|has beaten|has held|has kept|has flipped|has retained|beat|beats|flips|flipped)\\b`),
   ];
   for (const re of pats) {
     const m = t.match(re);
@@ -277,8 +277,9 @@ export function raceTable(items) {
     // 4 Nov: compare like with like. A call with no party agrees when it names the same winner as a call that has one
     // ("Roy Cooper" and "Roy Cooper (D)"); two parties, or two different names with no party, are a conflict.
     const nameParty = new Map(calls.filter((c) => c.party && c.candidate).map((c) => [c.candidate.toLowerCase(), c.party]));
-    const who = new Set(calls.map((c) => c.party || nameParty.get((c.candidate || "").toLowerCase()) || (c.candidate || "").toLowerCase() || "?"));
-    const status = !calls.length ? "open" : who.size === 1 ? "called" : "conflict";
+    // a call naming no winner and no party says nothing about who won: it never makes a conflict (4 Nov, FL governor)
+    const who = new Set(calls.map((c) => c.party || nameParty.get((c.candidate || "").toLowerCase()) || (c.candidate || "").toLowerCase() || null).filter(Boolean));
+    const status = !calls.length || !who.size ? "open" : who.size === 1 ? "called" : "conflict";
     // an agreed race: every call carries the one party some call stated (the board reads calls[0].party)
     const agreed = status === "called" ? [...who][0] : null;
     const party = ["D", "R", "I"].includes(agreed) ? agreed : null;
