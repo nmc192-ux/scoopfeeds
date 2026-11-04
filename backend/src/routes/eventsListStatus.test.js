@@ -1,22 +1,26 @@
 /**
  * #327: GET /api/events accepts `status` only from active | dormant.
  *
- * The route reads getDb(), whose path is fixed when models/database.js loads, so the temp
- * directory makeTestDb() creates is handed over through SCOOP_PERSISTENT_DATA_DIR before the
- * router is imported; getDb() then bootstraps the same real schema there.
+ * The route reads getDb(), whose path is fixed when models/database.js loads. A static import of
+ * anything that loads it (makeTestDb included) would run before the env var below is set and
+ * point this test at the real local DB, so the temp directory is made and handed over through
+ * SCOOP_PERSISTENT_DATA_DIR first, and everything that touches database.js is imported
+ * dynamically afterwards (same pattern as spaHead.test.js). getDb() runs bootstrapSchema(), so
+ * the real schema order is kept.
  */
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { makeTestDb } from "../testing/testDb.js";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
-const tmp = makeTestDb({ prefix: "scoop-events-status-" });
-tmp.cleanup();
-process.env.SCOOP_PERSISTENT_DATA_DIR = tmp.dir;
+const DATA_DIR = mkdtempSync(path.join(tmpdir(), "scoop-events-status-"));
+process.env.SCOOP_PERSISTENT_DATA_DIR = DATA_DIR;
 process.env.EVENT_READER_ELIGIBILITY = "true";
 
 const { default: express } = await import("express");
-const { getDb } = await import("../models/database.js");
+const { getDb, getDbPath } = await import("../models/database.js");
 const { default: eventsRouter } = await import("./events.js");
 
 let server;
@@ -37,6 +41,8 @@ function seedEvent(db, { id, status, outlets }) {
 }
 
 before(async () => {
+  // Never seed anything but the temp DB: a regression here would write into the real one.
+  assert.ok(getDbPath().startsWith(DATA_DIR), `test DB must live in ${DATA_DIR}, got ${getDbPath()}`);
   const db = getDb();
   const three = ["Reuters", "BBC", "AP"];
   seedEvent(db, { id: "ev-active", status: "active", outlets: three });
