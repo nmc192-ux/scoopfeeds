@@ -35,10 +35,10 @@ Specced directly as issues on 14 Oct; see the GitHub backlog (label `phase:0`).
 - [spec #188] lane:website — Shared design tokens and fonts (site + Radio), new header/footer look across all pages
 - [spec #189] lane:website — New Today page per the canvas: lead story, developing strip, today's stories, Radio card; earn-render throughout
 - [spec #190] lane:website — Location-aware feeds: country from the request (existing geo lookup), menu override, country-first ordering on Today and News, US/UK/Europe first
-- [queued] lane:website — News page (all tracked stories: developing, long-running, settled, trackers) replacing /events and the six category pages
-- [queued] lane:website — Dossier v2 layout per the canvas, including "Since your last visit" from the timeline
+- [spec #327] lane:website — News page (all tracked stories: developing, long-running, settled, trackers) replacing /events and the six category pages
+- [spec #328] lane:website — Dossier v2 layout per the canvas, including "Since your last visit" from the timeline
 - [spec #250] lane:graph — "What we know" AI block on dossiers with disclosure line, gated on the coherence gate verdict
-- [queued] lane:website — Pencil layer: three characters as SVG components, margin-note component, sensitivity switch reused from editorialSensitivity
+- [spec #329] lane:website — Pencil layer: three characters as SVG components, margin-note component, sensitivity switch reused from editorialSensitivity
 - [queued] lane:website — Server-render the first screen of Today and dossiers for crawlers; NewsArticle markup; sitemap-events.xml
 - [queued] lane:website — "How we group stories" methodology page and rewritten About (remove claims that are not true)
 - [spec #251] lane:sources — Source step 1: grow to 200 active English-language sources, batches of 50 above the quality floor, list each batch in the daily report
