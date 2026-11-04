@@ -336,3 +336,17 @@ test("4 Nov: the winner's party comes from next to the winner's name, never from
   ], { now: at });
   assert.equal(ep.races.find((x) => x.state === "GA").calls[0].party, "D");
 });
+
+test("4 Nov: 'X has defeated Y' names X; a call naming nobody never makes a conflict", async () => {
+  const { itemsFromSentence, raceTable } = await import("./electionPack.js");
+  const art = { source: "X", published: Date.parse("2026-11-04T03:00:00Z"), url: null };
+  const i = itemsFromSentence("Byron Donalds has defeated Democrat David Jolly in the race for Florida governor, NBC News projects.", art).items[0];
+  assert.equal(i.candidate, "Byron Donalds");
+  assert.notEqual(i.party, "D");
+  const r = raceTable([
+    { kind: "projection", race: "governor", state: "FL", outlet: "Decision Desk HQ", candidate: "Byron Donalds", party: "R", at: "2026-11-04T02:00:00Z" },
+    { kind: "projection", race: "governor", state: "FL", outlet: "NBC News", candidate: null, party: null, at: "2026-11-04T03:00:00Z" },
+  ])[0];
+  assert.equal(r.status, "called");
+  assert.ok(r.calls.every((c) => c.party === "R"));
+});
