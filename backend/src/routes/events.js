@@ -116,6 +116,7 @@ function publicActor(a) {
 // the AnomalyChip on cards/headers. Older anomalies live in the dedicated
 // /api/ri/anomalies feed.
 const ANOM_FRESH_MS = 6 * 60 * 60 * 1000;
+const LIST_STATUSES = ["active", "dormant"];
 // Prominence sort (Phase 5a): rank by (2·source_count + article_count), recency-decayed.
 // Prominence (and its half-life) has one definition, shared with the Morning Scoop (#263).
 
@@ -290,6 +291,11 @@ router.get("/", (req, res) => {
   try {
     const db = getDb();
     const status   = req.query.status   ?? "active";
+    // Only the two reader-facing lifecycle states. `merged` is absorbed duplicates and `closed`
+    // is retired; neither belongs on a list. The default stays "active".
+    if (!LIST_STATUSES.includes(status)) {
+      return res.status(400).json({ error: "status must be one of: active, dormant" });
+    }
     const category = req.query.category ?? null;
     const sort     = req.query.sort     ?? "recency"; // "recency" (default, existing callers) | "prominence"
     const limit    = Math.min(parseInt(req.query.limit  ?? "30", 10), 100);

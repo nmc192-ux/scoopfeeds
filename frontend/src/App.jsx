@@ -43,6 +43,7 @@ import AnalysisPage        from "./pages/AnalysisPage";
 import AnalysisExplainedPage from "./pages/AnalysisExplainedPage";
 import PredictionsPage      from "./pages/PredictionsPage";
 import EventsPage           from "./pages/EventsPage";
+import NewsPage             from "./pages/NewsPage";
 import EventPage            from "./pages/EventPage";
 import TrackerPage          from "./pages/TrackerPage";  // Layer 2 tracker detail (Sprint 1.5.3)
 import TimelinePage          from "./pages/TimelinePage";
@@ -83,7 +84,7 @@ const HIDE_TOPICNAV_ON = [
   "/markets", "/weather", "/newsletter",
   "/source", "/tag", "/search",
   "/privacy", "/terms", "/editorial-policy", "/contact", "/sponsor",
-  "/analysis", "/predictions", "/events", "/timeline", "/truth-gap", "/gaps", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/originals", "/world-map", "/finance", "/macro", "/synthetic", "/leaderboard",
+  "/analysis", "/predictions", "/events", "/news", "/timeline", "/truth-gap", "/gaps", "/dashboard", "/anomalies", "/scoop-ops", "/briefs", "/originals", "/world-map", "/finance", "/macro", "/synthetic", "/leaderboard",
   "/health", "/climate", "/sports", "/crypto", "/ai", "/space",
 ];
 
@@ -214,16 +215,17 @@ export default function App() {
           <Route path="/analysis"            element={<V2Redirect to="/briefs"><AnalysisPage /></V2Redirect>} />
           <Route path="/analysis/explained/:slug" element={<AnalysisExplainedPage />} />
           <Route path="/predictions"         element={<V2Redirect to="/markets?tab=predictions"><OddsOnly><PredictionsPage /></OddsOnly></V2Redirect>} />
-          <Route path="/events"             element={<EventsPage />} />
+          <Route path="/news"               element={<V2Only fallback="/events"><NewsPage /></V2Only>} />
+          <Route path="/events"             element={<V2Redirect to={() => `/news${location.search}`}><EventsPage /></V2Redirect>} />
           <Route path="/events/:slug"       element={<EventPage />} />
           <Route path="/trackers/:id"       element={<TrackerPage />} />
           <Route path="/timeline/:slug"     element={<V2Redirect to={({ slug }) => `/events/${slug}#timeline`}><TimelinePage /></V2Redirect>} />
-          <Route path="/health"             element={<V2Redirect to="/topic/health"><HealthEventsPage /></V2Redirect>} />
-          <Route path="/climate"            element={<V2Redirect to="/topic/environment"><ClimateEventsPage /></V2Redirect>} />
-          <Route path="/sports"             element={<V2Redirect to="/topic/sports"><SportsEventsPage /></V2Redirect>} />
-          <Route path="/crypto"             element={<CryptoEventsPage />} />
-          <Route path="/ai"                 element={<V2Redirect to="/topic/ai"><AIEventsPage /></V2Redirect>} />
-          <Route path="/space"              element={<V2Redirect to="/topic/science"><SpaceEventsPage /></V2Redirect>} />
+          <Route path="/health"             element={<V2Redirect to="/news?topic=health"><HealthEventsPage /></V2Redirect>} />
+          <Route path="/climate"            element={<V2Redirect to="/news?topic=climate"><ClimateEventsPage /></V2Redirect>} />
+          <Route path="/sports"             element={<V2Redirect to="/news?topic=sports"><SportsEventsPage /></V2Redirect>} />
+          <Route path="/crypto"             element={<V2Redirect to="/news?topic=crypto"><CryptoEventsPage /></V2Redirect>} />
+          <Route path="/ai"                 element={<V2Redirect to="/news?topic=ai"><AIEventsPage /></V2Redirect>} />
+          <Route path="/space"              element={<V2Redirect to="/news?topic=space"><SpaceEventsPage /></V2Redirect>} />
           <Route path="/truth-gap"          element={<V2Redirect to="/markets?tab=truth-gap"><OddsOnly><TruthGapPage /></OddsOnly></V2Redirect>} />
           <Route path="/dashboard"          element={<V2Redirect to="/saved"><DashboardPage /></V2Redirect>} />
           <Route path="/sources"            element={<V2Redirect to="/about#sources" />} />

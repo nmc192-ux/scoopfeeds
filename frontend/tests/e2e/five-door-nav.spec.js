@@ -11,7 +11,7 @@ async function mockApi(page, v2) {
 }
 
 const DOORS = [
-  ["Today", "/"], ["News", "/events"], ["Originals", "/originals"],
+  ["Today", "/"], ["News", "/news"], ["Originals", "/originals"],
   ["Markets", "/markets"], ["Watch & Listen", "/live-tv"],
 ];
 
@@ -59,8 +59,8 @@ test("flag on: ?v2=1 turns it on and is remembered for the session", async ({ pa
 });
 
 const REDIRECTS = [
-  ["/health", /\/topic\/health$/], ["/climate", /\/topic\/environment$/], ["/sports", /\/topic\/sports$/],
-  ["/ai", /\/topic\/ai$/], ["/space", /\/topic\/science$/],
+  ["/health", /\/news\?topic=health$/], ["/climate", /\/news\?topic=climate$/], ["/sports", /\/news\?topic=sports$/],
+  ["/ai", /\/news\?topic=ai$/], ["/space", /\/news\?topic=space$/], ["/crypto", /\/news\?topic=crypto$/],
   ["/finance", /\/markets\?tab=finance$/], ["/macro", /\/markets\?tab=macro$/],
   ["/predictions", /\/markets\?tab=predictions$/], ["/truth-gap", /\/markets\?tab=truth-gap$/],
   ["/world-map", /\/markets\?tab=world-map$/],
