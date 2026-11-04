@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { extractElectionPack, itemsFromSentence, electionText, candidateOf } from "./electionPack.js";
+import { extractElectionPack, itemsFromSentence, electionText, candidateOf, fetchElectionArticles, PAGE_SIZE } from "./electionPack.js";
 import { checkSegments, electionReason } from "./checks.js";
 import { buildClock, checkClock } from "./clock.js";
 import { deskOn, addDeskToClock, ballotLines, addBallotLines, boardData, boardPages, racePages, latestPages, QUOTE_MAX, DESK_FROM, DESK_UNTIL, EXPLAINER_UNTIL } from "./electionDesk.js";
@@ -349,4 +349,43 @@ test("4 Nov: 'X has defeated Y' names X; a call naming nobody never makes a conf
   ])[0];
   assert.equal(r.status, "called");
   assert.ok(r.calls.every((c) => c.party === "R"));
+});
+
+// 4 Nov: each search read only its newest 50 articles, so early calls fell off the board as coverage grew.
+const stubNews = (perQuery, { failAt = null } = {}) => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    const u = new URL(url); const q = u.searchParams.get("search"); const off = Number(u.searchParams.get("offset"));
+    calls.push({ q, off, limit: Number(u.searchParams.get("limit")) });
+    if (failAt !== null && off === failAt) return { ok: false, status: 503, json: async () => ({}) };
+    const all = Array.from({ length: perQuery }, (_, i) => ({ source_name: "NBC News", title: `${q} story ${i}`, description: "", published_at: NOW - i * 60_000, url: `https://example.com/${encodeURIComponent(q)}/${i}` }));
+    return { ok: true, json: async () => ({ data: all.slice(off, off + Number(u.searchParams.get("limit"))) }) };
+  };
+  return { fetchImpl, calls };
+};
+
+test("fetch: each search pages past 50 until a short page, so early calls stay in the pack", async () => {
+  const { fetchImpl, calls } = stubNews(120);
+  const out = await fetchElectionArticles({ fetchImpl, now: NOW, base: "http://stub" });
+  assert.equal(out.length, 9 * 120);
+  const one = calls.filter((c) => c.q === "midterms").map((c) => c.off);
+  assert.deepEqual(one, [0, PAGE_SIZE, 2 * PAGE_SIZE]);
+});
+
+test("fetch: stops paging once a page reaches past the 6-hour window", async () => {
+  const { fetchImpl, calls } = stubNews(1000); // one article a minute: 6 h = 360 articles
+  await fetchElectionArticles({ fetchImpl, now: NOW, base: "http://stub" });
+  const pages = calls.filter((c) => c.q === "midterms").length;
+  assert.equal(pages, Math.ceil(361 / PAGE_SIZE));
+});
+
+test("fetch: the page cap is logged, never silent, and a failed page keeps what was read", async () => {
+  const logs = [];
+  const capped = stubNews(1000);
+  await fetchElectionArticles({ fetchImpl: capped.fetchImpl, now: NOW, base: "http://stub", maxPages: 2, log: (m) => logs.push(m) });
+  assert.equal(logs.filter((m) => /stopped at 2 pages/.test(m)).length, 9);
+  const failing = stubNews(120, { failAt: PAGE_SIZE });
+  const out = await fetchElectionArticles({ fetchImpl: failing.fetchImpl, now: NOW, base: "http://stub", log: (m) => logs.push(m) });
+  assert.equal(out.length, 9 * PAGE_SIZE);
+  assert.ok(logs.some((m) => /failed: HTTP 503 \(kept 50 articles/.test(m)));
 });
