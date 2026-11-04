@@ -64,8 +64,20 @@ export function sentences(a) {
 }
 
 /** States named in a sentence, with organisation names removed first ("New York Times" is not New York). */
+/** 4 Nov: "the Senate race in the Tar Heel State". Nicknames read as the state's name. */
+export const STATE_NICKNAMES = {
+  "Tar Heel State": "North Carolina", "Peach State": "Georgia", "Sunshine State": "Florida", "Granite State": "New Hampshire",
+  "Lone Star State": "Texas", "Buckeye State": "Ohio", "Keystone State": "Pennsylvania", "Wolverine State": "Michigan",
+  "Great Lakes State": "Michigan", "Pine Tree State": "Maine", "Bluegrass State": "Kentucky", "Hawkeye State": "Iowa",
+  "Land of Lincoln": "Illinois", "Badger State": "Wisconsin", "Grand Canyon State": "Arizona", "Silver State": "Nevada",
+  "Centennial State": "Colorado", "Old Dominion": "Virginia", "Show-Me State": "Missouri", "Palmetto State": "South Carolina",
+  "Garden State": "New Jersey", "Empire State": "New York", "Golden State": "California", "Bay State": "Massachusetts",
+  "Mountain State": "West Virginia", "Volunteer State": "Tennessee", "Last Frontier": "Alaska", "Cornhusker State": "Nebraska",
+  "Sooner State": "Oklahoma", "Treasure State": "Montana", "North Star State": "Minnesota", "Land of Enchantment": "New Mexico",
+};
+const NICK_RE = new RegExp(`\\b(?:the\\s+)?(${Object.keys(STATE_NICKNAMES).map(reEsc).join("|")})\\b`, "g");
 export function statesIn(s) {
-  const t = String(s).replace(new RegExp(`\\b(${ORG_ALT})\\b`, "gi"), " ").replace(/\bWashington,? D\.?C\.?\b/g, " ");
+  const t = String(s).replace(NICK_RE, (_, n) => STATE_NICKNAMES[n]).replace(new RegExp(`\\b(${ORG_ALT})\\b`, "gi"), " ").replace(/\bWashington,? D\.?C\.?\b/g, " ");
   let rest = t; const out = [];
   for (const [c, re] of STATE_RE) { const next = rest.replace(re, " "); if (next !== rest) { out.push(c); rest = next; } }
   return out;
@@ -114,6 +126,34 @@ export function candidateOf(s) {
   return null;
 }
 
+/**
+ * 4 Nov: the party of a NAMED person, read only from words next to the name: "Roy Cooper (D)", "(D-NC)",
+ * "Democrat Chris Pappas", "Democratic Sen. Jon Ossoff". partyOf(sentence) is not used for a named winner:
+ * "Ashley Moody has defeated Democrat Angie Nixon" would read the loser's party.
+ */
+export function partyNextTo(s, name) {
+  if (!name) return null;
+  const n = reEsc(name).replace(/\s+/g, "\\s+");
+  const after = String(s).match(new RegExp(`${n}\\s*\\((D|R|I)(?:-[A-Z]{2})?\\)`));
+  if (after) return after[1];
+  const before = String(s).match(new RegExp(`\\b(Democrat(?:ic)?|Republican|GOP|independent)\\s+(?:(?:Sen\\.|Gov\\.|Rep\\.|Senator|Governor|Representative|incumbent|former|state)\\s+)*${n}\\b`, "i"));
+  if (before) return /^d/i.test(before[1]) ? "D" : /^i/i.test(before[1]) ? "I" : "R";
+  return null;
+}
+
+/** Names with a party stated next to them anywhere in the coverage. Ambiguous names are left out. */
+export function partyByName(articles) {
+  const seen = new Map();
+  const NAME_P = /\b((?:[A-Z][a-z'’.-]+)(?:\s+[A-Z][a-z'’.-]+){1,2})\s*\((D|R|I)(?:-[A-Z]{2})?\)/g;
+  const P_NAME = /\b(Democrat(?:ic)?|Republican|GOP|independent)\s+(?:(?:Sen\.|Gov\.|Rep\.|Senator|Governor|Representative|incumbent|former|state)\s+)*((?:[A-Z][a-z'’.-]+)(?:\s+[A-Z][a-z'’.-]+){1,2})/g;
+  const add = (name, p) => { const k = name.trim().toLowerCase(); const v = seen.get(k); seen.set(k, v === undefined || v === p ? p : null); };
+  for (const a of articles) for (const q of sentences(a)) {
+    for (const m of q.matchAll(NAME_P)) add(m[1], m[2]);
+    for (const m of q.matchAll(P_NAME)) add(m[2], /^d/i.test(m[1]) ? "D" : /^i/i.test(m[1]) ? "I" : "R");
+  }
+  return new Map([...seen].filter(([, p]) => p));
+}
+
 const iso = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
 
 /**
@@ -159,12 +199,16 @@ export function itemsFromSentence(q, art) {
         let state = states[0], district = null;
         const od = q.match(ORDINAL);
         if (race === "house") {
-          const st = od ? Object.entries(STATE_NAMES).find(([, n]) => n.toLowerCase() === od[1].toLowerCase()) : null;
+          const place = od ? od[1].toLowerCase() : "";
+          const st = od ? Object.entries(STATE_NAMES).find(([, n]) => n.toLowerCase() === place || place.endsWith(` ${n.toLowerCase()}`)) : null;
           if (!st) { refused.push({ reason: "no-district", quote: q }); return { items, refused }; }
           state = st[0]; district = Number(od[2]);
         }
         if (race !== "house" && !hasRace(race, state)) refused.push({ reason: "no-such-race", quote: q });
-        else items.push({ kind: "projection", race, state, ...(district ? { district } : {}), party: partyOf(q), candidate: candidateOf(q), outlet, ...base });
+        else {
+          const candidate = candidateOf(q);
+          items.push({ kind: "projection", race, state, ...(district ? { district } : {}), party: candidate ? partyNextTo(q, candidate) : partyOf(q), candidate, outlet, ...base });
+        }
       }
     }
     return { items, refused };
@@ -195,8 +239,11 @@ export function extractElectionPack(articles, { now = Date.now(), windowMs = WIN
     const r = itemsFromSentence(q, a);
     items.push(...r.items); refused.push(...r.refused);
   }
-  // one item per (kind, race, state, district, outlet, who): the latest article wins
+  // one item per (kind, race, state, district, outlet, who): the latest article wins (parties filled first, below)
   const keyOf = (i) => [i.kind, i.race, i.state, i.district, i.outlet, i.party || i.candidate || "", i.kind === "house-seats" ? JSON.stringify(i.seats) : ""].join("|");
+  // 4 Nov: a call that names only the winner takes the party stated next to that name elsewhere in the coverage
+  const pmap = partyByName(fresh);
+  for (const i of items) if (i.kind === "projection" && !i.party && i.candidate) { const p = pmap.get(i.candidate.toLowerCase()); if (p) { i.party = p; i.partyFrom = "coverage"; } }
   const byKey = new Map();
   for (const i of items.sort((x, y) => Date.parse(x.at) - Date.parse(y.at))) byKey.set(keyOf(i), i);
   const kept = [...byKey.values()].map((i, n) => ({ id: `p${n + 1}`, ...i }));
@@ -223,8 +270,16 @@ export function raceTable(items) {
   }
   return [...races.values()].map((r) => {
     const calls = [...r.byOutlet.values()];
-    const who = new Set(calls.map((c) => c.party || (c.candidate || "").toLowerCase() || "?"));
-    return { race: r.race, state: r.state, district: r.district, calls, withdrawn: r.withdrawn, status: !calls.length ? "open" : who.size === 1 ? "called" : "conflict" };
+    // 4 Nov: compare like with like. A call with no party agrees when it names the same winner as a call that has one
+    // ("Roy Cooper" and "Roy Cooper (D)"); two parties, or two different names with no party, are a conflict.
+    const nameParty = new Map(calls.filter((c) => c.party && c.candidate).map((c) => [c.candidate.toLowerCase(), c.party]));
+    const who = new Set(calls.map((c) => c.party || nameParty.get((c.candidate || "").toLowerCase()) || (c.candidate || "").toLowerCase() || "?"));
+    const status = !calls.length ? "open" : who.size === 1 ? "called" : "conflict";
+    // an agreed race: every call carries the one party some call stated (the board reads calls[0].party)
+    const agreed = status === "called" ? [...who][0] : null;
+    const party = ["D", "R", "I"].includes(agreed) ? agreed : null;
+    const out = party ? calls.map((c) => (c.party ? c : { ...c, party, partyFrom: c.partyFrom || "same winner, another outlet" })) : calls;
+    return { race: r.race, state: r.state, district: r.district, calls: out, withdrawn: r.withdrawn, status };
   });
 }
 
