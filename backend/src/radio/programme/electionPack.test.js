@@ -300,3 +300,39 @@ test("election window: totals, the newest projection, the next closing; nothing 
   assert.deepEqual(w.summary, summary(b));
   assert.equal(w.latest.at, timeline(b, { max: 1 })[0].at);
 });
+
+// ── 4 Nov 2026, election night: real sentences from the night's coverage ──
+test("4 Nov: the winner's party comes from next to the winner's name, never from the loser", async () => {
+  const { itemsFromSentence, raceTable, extractElectionPack } = await import("./electionPack.js");
+  const art = { source: "X", published: Date.parse("2026-11-04T02:00:00Z"), url: null };
+  const one = (q) => itemsFromSentence(q, art).items[0];
+  let i = one("Byron Donalds (R-Fla.) is projected to defeat Democrat David Jolly in the Florida gubernatorial race, according to Decision Desk HQ.");
+  assert.deepEqual([i.race, i.state, i.party, i.candidate], ["governor", "FL", "R", "Byron Donalds"]);
+  i = one("Debbie Wasserman Schultz (D-Fla.) is projected to defeat Republican Brent Andersen in the race to represent Florida’s 20th Congressional District, according to Decision Desk HQ (DDHQ).");
+  assert.deepEqual([i.race, i.state, i.district, i.party], ["house", "FL", 20, "D"]);
+  i = one("Emanuel Cleaver (D-Mo.) is projected to roll to victory Tuesday, securing a 12th term in Missouri’s 5th District comprising Kansas City, according to Decision Desk HQ.");
+  assert.deepEqual([i.race, i.state, i.district, i.party], ["house", "MO", 5, "D"]);
+  i = one("Roy Cooper (D) is projected to win the Senate race in the Tar Heel State, according to Decision Desk HQ (DDHQ).");
+  assert.deepEqual([i.race, i.state, i.party], ["senate", "NC", "D"]);
+  i = one("Ashley Moody has defeated Democrat Angie Nixon in the Florida Senate race, NBC News projects.");
+  assert.notEqual(i.party, "D", "never the loser's party");
+
+  // same winner from two outlets, one with a party: agreed, and every call carries it
+  const calls = [
+    { kind: "projection", race: "senate", state: "NC", outlet: "NBC News", candidate: "Roy Cooper", party: null, at: "2026-11-04T01:00:00Z" },
+    { kind: "projection", race: "senate", state: "NC", outlet: "Decision Desk HQ", candidate: "Roy Cooper", party: "D", at: "2026-11-04T01:01:00Z" },
+  ];
+  const r = raceTable(calls)[0];
+  assert.equal(r.status, "called");
+  assert.ok(r.calls.every((c) => c.party === "D"));
+  // two different parties are still a conflict
+  assert.equal(raceTable([{ ...calls[0], party: "R", candidate: "Somebody Else" }, calls[1]])[0].status, "conflict");
+
+  // a name-only call takes the party stated next to that name elsewhere in the coverage
+  const at = Date.parse("2026-11-04T02:00:00Z");
+  const ep = extractElectionPack([
+    { source: "CBS", title: "CBS News projects Jon Ossoff wins the Georgia Senate race.", published: at - 60_000 },
+    { source: "AJC", title: "Democratic Sen. Jon Ossoff thanked volunteers in Atlanta.", published: at - 120_000 },
+  ], { now: at });
+  assert.equal(ep.races.find((x) => x.state === "GA").calls[0].party, "D");
+});

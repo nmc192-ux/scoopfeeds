@@ -464,7 +464,7 @@ function eBop(sum){ const S = sum.senate;
 function eRow(sum, nc){ const H = sum.house, G = sum.governor;
   return `<div class="erow"><span class="caps">House</span>${H.outlet ? `<b class="bd num">${H.D}</b><b class="br num">${H.R}</b><span>per ${esc(H.outlet)} · ${H.majority} to win</span>` : `<span>Not yet called · ${H.majority} to win</span>`}
     <span class="caps">Governors</span><b class="bd num">${G.D}</b><b class="br num">${G.R}</b>
-    ${nc ? `<span class="caps">Next polls close</span><b>${esc(ET(nc.at))}</b><b class="cd num" data-cd="${nc.at}"></b>` : ''}</div>`; }
+    ${nc && nc.at > now() ? `<span class="caps">Next polls close</span><b>${esc(ET(nc.at))}</b><b class="cd num" data-cd="${nc.at}"></b>` : ''}</div>`; }
 function eHot(c){
   const cls = c.status === 'conflict' ? 'X' : c.status === 'called' ? (c.party || '') : '';
   const held = c.holder ? ` · held by ${c.holder}` : '';
@@ -527,7 +527,7 @@ function renderElWin(t, scene){
   $('featEl').classList.toggle('on', scene === 'feature');
   if (scene === 'feature') $('featEl').innerHTML = `<span class="k caps">Midterms</span><span>Senate <b class="d num">${S.D}</b> <b class="r num">${S.R}</b></span>${H.outlet ? `<span>House <b class="d num">${H.D}</b> <b class="r num">${H.R}</b></span>` : ''}${just ? `<span class="k caps">Just in</span><span>${esc(L.state)} · ${L.status === 'conflict' ? 'outlets disagree' : esc(`${L.candidate || PN[L.party] || ''}${L.party ? ` (${L.party})` : ''}`)}</span>` : ''}`;
 }
-function tickCountdowns(t){ document.querySelectorAll('[data-cd]').forEach((el) => { const v = cdTxt(Number(el.dataset.cd) - t); if (el.textContent !== v) el.textContent = v; }); }
+function tickCountdowns(t){ document.querySelectorAll('[data-cd]').forEach((el) => { const v = Number(el.dataset.cd) <= t ? 'closed' : cdTxt(Number(el.dataset.cd) - t); if (el.textContent !== v) el.textContent = v; }); }   // 4 Nov: a passed closing says so, never 00:00:00
 /* scenes */
 let lastKey = null, current = null;
 function show(name){ document.querySelectorAll('.scene').forEach((s) => s.classList.toggle('on', s.dataset.scene === name)); }
