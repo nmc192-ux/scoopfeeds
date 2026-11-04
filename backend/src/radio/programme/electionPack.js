@@ -99,7 +99,7 @@ export function raceOf(s, states) {
 
 /** D | R | I | null, from "(D)", "(R-NC)", "Democrat Jane Doe", "Republicans". Ambiguous -> null. */
 export function partyOf(s) {
-  const p = String(s).match(/\((D|R|I)(?:-[A-Z]{2})?\)/);
+  const p = String(s).match(/\((D|R|I)(?:-[A-Z][A-Za-z.]{1,6})?\)/);
   if (p) return p[1];
   const d = /\b(democrat(ic|s)?|dfl)\b/i.test(s), r = /\b(republican(s)?|gop)\b/i.test(s), i = /\bindependent\b/i.test(s);
   if ([d, r, i].filter(Boolean).length !== 1) return null;
@@ -112,6 +112,8 @@ const TITLES = /^(?:(?:the\s+)?(?:Democrat(?:ic)?|Republican|GOP|independent|inc
 export function candidateOf(s) {
   const t = String(s);
   const pats = [
+    // 4 Nov: "Byron Donalds (R-Fla.) is projected to defeat Democrat David Jolly", "Emanuel Cleaver (D-Mo.) is projected to roll to victory"
+    new RegExp(`(?:^|[.;:]\\s+|,\\s+)(?:(?:Democrat(?:ic)?|Republican|GOP|independent|incumbent|Sen\\.|Gov\\.|Rep\\.|Senator|Governor) )*${NAME}(?: \\([DRI](?:-[A-Z][A-Za-z.]{1,6})?\\))? (?:is|has been|was) projected to (?:win|defeat|beat|flip|keep|hold|retain|roll|return|take|capture)`),
     new RegExp(`\\bcalled the (?:race|seat|contest)[^.;]*?\\bfor ${NAME}`),
     new RegExp(`\\b(?:projects?|projected|declares?|declared)(?: that)? (?:the )?(?:(?:Democrat(?:ic)?|Republican|GOP|independent|incumbent|Sen\\.|Gov\\.|Rep\\.|Senator|Governor) )*${NAME}(?: \\([DRI](?:-[A-Z]{2})?\\))? (?:wins?|won|has won|will win|is re-?elected|has been re-?elected|as the (?:winner|victor)|defeats?|beats?|flips?|holds?|keeps?)\\b`),
     new RegExp(`(?:^|[.;:]\\s+|,\\s+)(?:(?:Democrat(?:ic)?|Republican|GOP|independent|incumbent|Sen\\.|Gov\\.|Rep\\.|Senator|Governor) )*${NAME}(?: \\([DRI](?:-[A-Z]{2})?\\))? (?:wins|won|has won|will win|is re-?elected|defeats|defeated|beat|beats|flips|flipped)\\b`),
@@ -134,7 +136,7 @@ export function candidateOf(s) {
 export function partyNextTo(s, name) {
   if (!name) return null;
   const n = reEsc(name).replace(/\s+/g, "\\s+");
-  const after = String(s).match(new RegExp(`${n}\\s*\\((D|R|I)(?:-[A-Z]{2})?\\)`));
+  const after = String(s).match(new RegExp(`${n}\\s*\\((D|R|I)(?:-[A-Z][A-Za-z.]{1,6})?\\)`));
   if (after) return after[1];
   const before = String(s).match(new RegExp(`\\b(Democrat(?:ic)?|Republican|GOP|independent)\\s+(?:(?:Sen\\.|Gov\\.|Rep\\.|Senator|Governor|Representative|incumbent|former|state)\\s+)*${n}\\b`, "i"));
   if (before) return /^d/i.test(before[1]) ? "D" : /^i/i.test(before[1]) ? "I" : "R";
@@ -144,10 +146,11 @@ export function partyNextTo(s, name) {
 /** Names with a party stated next to them anywhere in the coverage. Ambiguous names are left out. */
 export function partyByName(articles) {
   const seen = new Map();
-  const NAME_P = /\b((?:[A-Z][a-z'’.-]+)(?:\s+[A-Z][a-z'’.-]+){1,2})\s*\((D|R|I)(?:-[A-Z]{2})?\)/g;
+  const NAME_P = /\b((?:[A-Z][a-z'’.-]+)(?:\s+[A-Z][a-z'’.-]+){1,2})\s*\((D|R|I)(?:-[A-Z][A-Za-z.]{1,6})?\)/g;
   const P_NAME = /\b(Democrat(?:ic)?|Republican|GOP|independent)\s+(?:(?:Sen\.|Gov\.|Rep\.|Senator|Governor|Representative|incumbent|former|state)\s+)*((?:[A-Z][a-z'’.-]+)(?:\s+[A-Z][a-z'’.-]+){1,2})/g;
   const add = (name, p) => { const k = name.trim().toLowerCase(); const v = seen.get(k); seen.set(k, v === undefined || v === p ? p : null); };
-  for (const a of articles) for (const q of sentences(a)) {
+  // whole text, not sentences(): the splitter breaks after "Sen." ("Democratic Sen. | Jon Ossoff")
+  for (const a of articles) for (const q of [a.title, a.description].filter(Boolean).map((t) => String(t).replace(/\s+/g, " "))) {
     for (const m of q.matchAll(NAME_P)) add(m[1], m[2]);
     for (const m of q.matchAll(P_NAME)) add(m[2], /^d/i.test(m[1]) ? "D" : /^i/i.test(m[1]) ? "I" : "R");
   }
@@ -207,7 +210,8 @@ export function itemsFromSentence(q, art) {
         if (race !== "house" && !hasRace(race, state)) refused.push({ reason: "no-such-race", quote: q });
         else {
           const candidate = candidateOf(q);
-          items.push({ kind: "projection", race, state, ...(district ? { district } : {}), party: candidate ? partyNextTo(q, candidate) : partyOf(q), candidate, outlet, ...base });
+          const head = q.split(/\b(?:defeat(?:s|ed|ing)?|beat(?:s|en|ing)?|over|against)\b/i)[0];   // the loser comes after these
+          items.push({ kind: "projection", race, state, ...(district ? { district } : {}), party: candidate ? partyNextTo(q, candidate) : partyOf(head), candidate, outlet, ...base });
         }
       }
     }
