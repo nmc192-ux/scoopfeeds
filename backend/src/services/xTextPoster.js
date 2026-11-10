@@ -34,7 +34,26 @@ import { isXConfigured, postToX, fitPost, xSafePublisher } from "./xClient.js";
 import { hashtagsFor, withHashtags } from "./xHashtags.js";
 import { ensureCard, isCardRendererReady } from "./cardRenderer.js";
 
-export const xTextEnabled = () => process.env.X_TEXT_POST_ENABLED === "1";
+/**
+ * Automated headline cards to @scoop_feeds: category emoji, headline, a
+ * "Source: <outlet>" line, and the rendered photo.
+ *
+ * Dr J, 10 Nov 2026: these stop. Off unless X_HEADLINE_CARDS_ENABLED is
+ * exactly "1" or "true" — unset, "false", "0" and every other value stay off.
+ * X_TEXT_POST_ENABLED=1 used to be the only switch and is no longer enough, so
+ * a host file that still says 1 stays dark until this flag is set and the
+ * worker is restarted.
+ *
+ * Film clips (videoAutopost.videoToX / VIDEO_X_ENABLED), manualPost.mjs, the
+ * long-form publisher and the 09:00 email digest do not read this flag.
+ */
+export function xHeadlineCardsEnabled() {
+  const v = String(process.env.X_HEADLINE_CARDS_ENABLED ?? "").trim().toLowerCase();
+  return v === "1" || v === "true";
+}
+
+export const xTextEnabled = () =>
+  xHeadlineCardsEnabled() && process.env.X_TEXT_POST_ENABLED === "1";
 
 const MAX_PER_DAY = () => Math.max(0, Number.parseInt(process.env.X_TEXT_MAX_PER_DAY || "8", 10));
 const MAX_AGE_HOURS = () => Math.max(1, Number.parseFloat(process.env.X_TEXT_MAX_AGE_HOURS || "6"));
@@ -243,9 +262,18 @@ export async function runXTextCycle({ now = Date.now(), deps = {} } = {}) {
     _cardBytes = cardBytesFor,
   } = deps;
 
-  if (!xTextEnabled()) return { status: "off" };
+  if (!xTextEnabled()) {
+    // The cron still fires at :10 and :40. Say why, but only when the old
+    // switch is on — that is the host that was posting, and a silent return
+    // would look exactly like the job never ran.
+    if (process.env.X_TEXT_POST_ENABLED === "1") {
+      logger.info("𝕏 text: headline cards off — X_HEADLINE_CARDS_ENABLED is not 1 or true " +
+        "(X_TEXT_POST_ENABLED=1 no longer posts)");
+    }
+    return { status: "off" };
+  }
   if (!isXConfigured()) {
-    logger.warn("𝕏 text: X_TEXT_POST_ENABLED=1 but the client is not configured — nothing posted");
+    logger.warn("𝕏 text: headline cards are enabled but the client is not configured — nothing posted");
     return { status: "not-configured" };
   }
 

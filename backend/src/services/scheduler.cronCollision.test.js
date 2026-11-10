@@ -350,8 +350,9 @@ test("the X text cron is registered regardless of ENABLE_AUTO_SOCIAL", () => {
   // worker processor and the documented flag all existed.
   //
   // ENABLE_AUTO_SOCIAL governs the article-card publisher: a different system,
-  // different credentials, its own reasons for being off. X text posting has
-  // its own switch inside the cycle. One feature, one gate.
+  // different credentials, its own reasons for being off. Headline cards are
+  // gated inside the cycle (X_HEADLINE_CARDS_ENABLED and X_TEXT_POST_ENABLED),
+  // not by unregistering this cron.
   const src = readFileSync(new URL("./scheduler.js", import.meta.url), "utf8");
   const line = src.indexOf('dispatchXTextCycle(), "x text posts"');
   assert.ok(line > 0, "the X text cron must be registered somewhere");
