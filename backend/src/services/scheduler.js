@@ -672,8 +672,10 @@ export function startScheduler() {
   //
   // ENABLE_AUTO_SOCIAL governs the article-card social publisher, which is a
   // different system with different credentials and its own reasons for being
-  // off. X text posting has its own switch, X_TEXT_POST_ENABLED, checked inside
-  // the cycle. One feature, one gate.
+  // off. X headline cards are checked inside the cycle: X_HEADLINE_CARDS_ENABLED
+  // must be "1" or "true" AND X_TEXT_POST_ENABLED must be "1". The cron stays
+  // registered either way — a dark flag must not unregister the schedule, or
+  // turning it back on would also mean editing this file.
   //
   // :10 and :40 — two of the seven free minutes in the hour, chosen by
   // enumerating every registered cron. The first attempt was :05/:35, which the

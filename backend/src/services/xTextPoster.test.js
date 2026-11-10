@@ -8,7 +8,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stripOwnLink, groupPosts, isComplete, runXTextCycle, cardBytesFor } from "./xTextPoster.js";
+import { stripOwnLink, groupPosts, isComplete, runXTextCycle, cardBytesFor, xHeadlineCardsEnabled, xTextEnabled } from "./xTextPoster.js";
 
 const withEnv = async (vars, fn) => {
   const prev = {};
@@ -54,18 +54,43 @@ test("an incomplete thread is not started", () => {
 });
 
 test("off by default — the queue is not drained by accident", async () => {
-  await withEnv({ X_TEXT_POST_ENABLED: undefined }, async () => {
+  await withEnv({ X_TEXT_POST_ENABLED: undefined, X_HEADLINE_CARDS_ENABLED: undefined }, async () => {
+    assert.equal(xHeadlineCardsEnabled(), false);
+    assert.equal(xTextEnabled(), false);
     assert.equal((await runXTextCycle()).status, "off");
   });
-  for (const v of ["", "0", "true"]) {
-    await withEnv({ X_TEXT_POST_ENABLED: v }, async () => {
+  for (const v of ["", "0", "true", "false"]) {
+    await withEnv({ X_TEXT_POST_ENABLED: v, X_HEADLINE_CARDS_ENABLED: undefined }, async () => {
       assert.equal((await runXTextCycle()).status, "off");
     });
   }
 });
 
+test("X_TEXT_POST_ENABLED=1 no longer posts headline cards", async () => {
+  // Dr J, 10 Nov 2026. A host that still has the old switch on must stay dark
+  // until X_HEADLINE_CARDS_ENABLED is explicitly 1 or true.
+  const keys = { X_API_KEY: "k", X_API_SECRET: "s", X_ACCESS_TOKEN: "t", X_ACCESS_SECRET: "ts" };
+  for (const v of [undefined, "", "false", "0", "yes", "FALSE", "True-ish"]) {
+    await withEnv({ ...keys, X_TEXT_POST_ENABLED: "1", X_HEADLINE_CARDS_ENABLED: v }, async () => {
+      assert.equal(xTextEnabled(), false, `value ${JSON.stringify(v)} must stay off`);
+      const r = await runXTextCycle({ deps: { _list: () => { throw new Error("must not query"); } } });
+      assert.equal(r.status, "off");
+    });
+  }
+  for (const v of ["1", "true", "TRUE", " True "]) {
+    await withEnv({ ...keys, X_TEXT_POST_ENABLED: "1", X_HEADLINE_CARDS_ENABLED: v, X_TEXT_MAX_PER_DAY: "8" }, async () => {
+      assert.equal(xHeadlineCardsEnabled(), true);
+      assert.equal(xTextEnabled(), true);
+    });
+  }
+  await withEnv({ ...keys, X_TEXT_POST_ENABLED: undefined, X_HEADLINE_CARDS_ENABLED: "1" }, async () => {
+    assert.equal(xTextEnabled(), false, "the new flag alone does not post");
+    assert.equal((await runXTextCycle()).status, "off");
+  });
+});
+
 test("the daily cap stops the backlog becoming a bill", async () => {
-  await withEnv({ X_TEXT_POST_ENABLED: "1", X_TEXT_MAX_PER_DAY: "8",
+  await withEnv({ X_TEXT_POST_ENABLED: "1", X_HEADLINE_CARDS_ENABLED: "1", X_TEXT_MAX_PER_DAY: "8",
                   X_API_KEY: "k", X_API_SECRET: "s", X_ACCESS_TOKEN: "t", X_ACCESS_SECRET: "ts" }, async () => {
     const r = await runXTextCycle({ deps: { _count: () => 8, _list: () => { throw new Error("must not query"); } } });
     assert.equal(r.status, "capped");
@@ -73,7 +98,7 @@ test("the daily cap stops the backlog becoming a bill", async () => {
 });
 
 test("a thread that does not fit the remaining budget is not begun", async () => {
-  await withEnv({ X_TEXT_POST_ENABLED: "1", X_TEXT_MAX_PER_DAY: "3",
+  await withEnv({ X_TEXT_POST_ENABLED: "1", X_HEADLINE_CARDS_ENABLED: "1", X_TEXT_MAX_PER_DAY: "3",
                   X_API_KEY: "k", X_API_SECRET: "s", X_ACCESS_TOKEN: "t", X_ACCESS_SECRET: "ts" }, async () => {
     const parts = [1,2,3,4].map(p => ({ id: p, article_id: "a", post_text: "part " + p,
       thread_group_id: "g", thread_position: p, thread_total: 4, article_title: "T" }));
@@ -88,7 +113,7 @@ test("a thread that does not fit the remaining budget is not begun", async () =>
 });
 
 test("a thread chains, and only the first part carries tags", async () => {
-  await withEnv({ X_TEXT_POST_ENABLED: "1", X_TEXT_MAX_PER_DAY: "10",
+  await withEnv({ X_TEXT_POST_ENABLED: "1", X_HEADLINE_CARDS_ENABLED: "1", X_TEXT_MAX_PER_DAY: "10",
                   X_API_KEY: "k", X_API_SECRET: "s", X_ACCESS_TOKEN: "t", X_ACCESS_SECRET: "ts" }, async () => {
     const parts = [1,2].map(p => ({ id: p, article_id: "a", post_text: "part " + p,
       thread_group_id: "g", thread_position: p, thread_total: 2,
@@ -109,7 +134,7 @@ test("a thread chains, and only the first part carries tags", async () => {
 });
 
 test("a mid-thread failure marks what went out and stops", async () => {
-  await withEnv({ X_TEXT_POST_ENABLED: "1", X_TEXT_MAX_PER_DAY: "10",
+  await withEnv({ X_TEXT_POST_ENABLED: "1", X_HEADLINE_CARDS_ENABLED: "1", X_TEXT_MAX_PER_DAY: "10",
                   X_API_KEY: "k", X_API_SECRET: "s", X_ACCESS_TOKEN: "t", X_ACCESS_SECRET: "ts" }, async () => {
     const parts = [1,2,3].map(p => ({ id: p, article_id: "a", post_text: "p" + p,
       thread_group_id: "g", thread_position: p, thread_total: 3, article_title: "T" }));
@@ -265,7 +290,7 @@ test("a tag line among real text is removed without touching the text", () => {
 // is the visible difference the timeline shows. These pin the picture on, and
 // pin it to the OPENER only.
 
-const CARD_ENV = { X_TEXT_POST_ENABLED: "1", X_TEXT_MAX_PER_DAY: "20",
+const CARD_ENV = { X_TEXT_POST_ENABLED: "1", X_HEADLINE_CARDS_ENABLED: "1", X_TEXT_MAX_PER_DAY: "20",
   X_API_KEY: "k", X_API_SECRET: "s", X_ACCESS_TOKEN: "t", X_ACCESS_SECRET: "ts" };
 
 const threadRows = (n, articleId = "a1") => Array.from({ length: n }, (_, i) => ({
